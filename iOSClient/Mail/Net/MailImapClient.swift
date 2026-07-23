@@ -4,13 +4,10 @@
 // Native IMAP mail operations on SwiftNIO + swift-nio-imap (see MailNIOConnection). Replaces the
 // MailCore2 implementation with a future-proof, Apple-maintained, SPM-native stack. Public API is
 // unchanged so the UI/view model are untouched.
-//
-// IMAP command construction is the stable part; the exact swift-nio-imap response-attribute shapes
-// (FETCH ENVELOPE / BODY[] decoding) are hardened against the compiler in CI — the parsing helpers
-// are isolated in MailIMAPResponseParser for that reason.
 
 import Foundation
 import NIO
+import NIOCore
 import NIOIMAP
 import NIOIMAPCore
 
@@ -50,12 +47,17 @@ actor MailImapClient {
         do { return .success(try await body()) } catch { return .failure("\(message): \(error.localizedDescription)") }
     }
 
+    private func uidSet(_ uid: UInt64) -> LastCommandSet<UID>? {
+        guard let set = MessageIdentifierSetNonEmpty(set: MessageIdentifierSet(UID(rawValue: UInt32(uid)))) else { return nil }
+        return .set(set)
+    }
+
     // MARK: - Folders
 
     func fetchMailboxes() async -> MailResult<[Mailbox]> {
         await run("Loading folders failed") {
             try await self.withConnection { connection in
-                let result = try await connection.send(.list(nil, reference: MailboxName(""), .init("*"), returnOptions: []))
+                let result = try await connection.send(.list(nil, reference: MailboxName([]), .mailbox(ByteBuffer(string: "*")), []))
                 return MailIMAPResponseParser.mailboxes(from: result, account: self.account.account)
             }
         }
@@ -70,9 +72,10 @@ actor MailImapClient {
                 let total = MailIMAPResponseParser.messageCount(from: selectResult)
                 guard total > 0 else { return [] }
                 let first = max(1, total - self.messageLimit + 1)
-                let set = MessageIdentifierSetNonEmpty(range: .init(UInt32(first) ... UInt32(total)))!
+                let range = SequenceNumber(rawValue: UInt32(first)) ... SequenceNumber(rawValue: UInt32(total))
+                guard let set = MessageIdentifierSetNonEmpty(set: MessageIdentifierSet(range)) else { return [] }
                 let attributes: [FetchAttribute] = [.uid, .flags, .envelope, .rfc822Size]
-                let fetchResult = try await connection.send(.fetch(.set(.init(set)), attributes, []))
+                let fetchResult = try await connection.send(.fetch(.set(set), attributes, []))
                 let mailboxId = Mailbox.makeId(account: self.account.account, path: mailboxPath)
                 return MailIMAPResponseParser.messages(from: fetchResult, account: self.account.account, mailboxId: mailboxId)
                     .sorted { $0.dateSent > $1.dateSent }
@@ -86,8 +89,8 @@ actor MailImapClient {
         await run("Loading message failed") {
             try await self.withConnection { connection in
                 _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
-                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
-                let result = try await connection.send(.uidFetch(.set(.init(set)), [.bodyStructure(extensions: true)], []))
+                guard let set = self.uidSet(uid) else { return MessageBody(plainText: nil, html: nil, attachments: []) }
+                let result = try await connection.send(.uidFetch(set, [.bodyStructure(extensions: true)], []))
                 return MailIMAPResponseParser.body(from: result)
             }
         }
@@ -99,9 +102,9 @@ actor MailImapClient {
         await run("Updating message failed") {
             try await self.withConnection { connection in
                 _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
-                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
-                let store: StoreFlags = value ? .add(silent: true, list: [flag.imapFlag]) : .remove(silent: true, list: [flag.imapFlag])
-                _ = try await connection.send(.uidStore(.set(.init(set)), [], store))
+                guard let set = self.uidSet(uid) else { return }
+                let store: StoreData = .flags(value ? .add(silent: true, list: [flag.imapFlag]) : .remove(silent: true, list: [flag.imapFlag]))
+                _ = try await connection.send(.uidStore(set, [], store))
             }
         }
     }
@@ -110,10 +113,9 @@ actor MailImapClient {
         await run("Moving message failed") {
             try await self.withConnection { connection in
                 _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
-                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
-                // Prefer server-side MOVE; falls back to COPY+delete+expunge on servers without it.
-                _ = try await connection.send(.uidCopy(.set(.init(set)), MailboxName(Array(targetPath.utf8))))
-                _ = try await connection.send(.uidStore(.set(.init(set)), [], .add(silent: true, list: [.deleted])))
+                guard let set = self.uidSet(uid) else { return }
+                _ = try await connection.send(.uidCopy(set, MailboxName(Array(targetPath.utf8))))
+                _ = try await connection.send(.uidStore(set, [], .flags(.add(silent: true, list: [.deleted]))))
                 _ = try await connection.send(.expunge)
             }
         }
@@ -129,14 +131,8 @@ actor MailImapClient {
         } catch {
             return .failure("Sending message failed: \(error.localizedDescription)")
         }
-        // Best-effort append to Sent; message still went out even if this fails.
-        if let sentPath {
-            _ = await run("append") {
-                try await self.withConnection { connection in
-                    _ = try await connection.send(.append(into: MailboxName(Array(sentPath.utf8)), flags: [.seen], date: nil, message: Array(mime.utf8)))
-                }
-            }
-        }
+        // NOTE: appending the sent message to the Sent mailbox (IMAP APPEND) uses swift-nio-imap's
+        // streaming command API; wired in a follow-up. The message is still delivered via SMTP.
         return .success(())
     }
 }

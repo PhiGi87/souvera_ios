@@ -53,8 +53,8 @@ struct SouveraMailCredentialManager {
         guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
 
         // Reuse a previously minted combined password if present.
-        if let stored = try? keychain.get(Self.keyPassword + account), let stored, !stored.isEmpty {
-            let stalwartId = (try? keychain.get(Self.keyStalwartId + account)) ?? "" ?? ""
+        if let stored = try? keychain.get(Self.keyPassword + account), !stored.isEmpty {
+            let stalwartId = (try? keychain.get(Self.keyStalwartId + account)) ?? ""
             return MailAccount(account: account, baseUrl: baseUrl, username: username, mailPassword: stored, stalwartId: stalwartId)
         }
 
