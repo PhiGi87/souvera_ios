@@ -16,8 +16,11 @@ class NCPushNotification {
         let proxyServerUrl = NCBrandOptions.shared.pushNotificationServerProxy
         guard !proxyServerUrl.isEmpty,
               let pushTokenHash = NCEndToEndEncryption.shared().createSHA512(preferences.deviceTokenPushNotification) else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration skipped for \(urlBase): no push proxy URL configured or no APNs token available")
             return
         }
+
+        nkLog(tag: self.global.logTagPN, emoji: .start, message: "Registering push notifications for \(urlBase) using proxy \(proxyServerUrl)")
 
         var privateKey = preferences.getPushNotificationPrivateKey(account: account)
         var publicKey = preferences.getPushNotificationPublicKey(account: account)
@@ -56,9 +59,11 @@ class NCPushNotification {
               let signature = responsePN.signature,
               let subscribingPublicKey = responsePN.publicKey
         else {
-            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Subscribed to Push Notification Server \(urlBase) with error \(responsePN.error.errorDescription)")
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Nextcloud instance push registration FAILED for \(urlBase), status \(responsePN.error.errorCode): \(responsePN.error.errorDescription)")
             return
         }
+
+        nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
 
         let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
         let options = NKRequestOptions(customUserAgent: userAgent)
@@ -79,9 +84,11 @@ class NCPushNotification {
         })
 
         guard responsePushProxy.error == .success else {
-            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Subscribed to Push Notification Server Proxy \(proxyServerUrl) with error \(responsePushProxy.error.errorDescription)")
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration FAILED at \(proxyServerUrl), status \(responsePushProxy.error.errorCode): \(responsePushProxy.error.errorDescription)")
             return
         }
+
+        nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy registration OK at \(proxyServerUrl)")
 
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
         preferences.setPushNotificationDeviceIdentifierSignature(account: account, deviceIdentifierSignature: signature)
@@ -93,6 +100,7 @@ class NCPushNotification {
         guard let deviceIdentifier = preferences.getPushNotificationDeviceIdentifier(account: account),
               let signature = preferences.getPushNotificationDeviceIdentifierSignature(account: account),
               let subscribingPublicKey = preferences.getPushNotificationSubscribingPublicKey(account: account) else {
+            nkLog(tag: self.global.logTagPN, emoji: .debug, message: "Push deregistration skipped for \(urlBase): no active push subscription found")
             return
         }
 
@@ -123,8 +131,17 @@ class NCPushNotification {
             }
         }
 
-        nkLog(tag: self.global.logTagPN, emoji: .info, message: "Unsubscribed to Push Notification Server \(urlBase) with error \(responsePN.error.errorDescription)")
-        nkLog(tag: self.global.logTagPN, emoji: .info, message: "Unsubscribed to Push Notification Server Proxy \(proxyServerUrl) with error \(responseProxy.error.errorDescription)")
+        if responsePN.error == .success {
+            nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push deregistration OK for \(urlBase)")
+        } else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Nextcloud instance push deregistration FAILED for \(urlBase), status \(responsePN.error.errorCode): \(responsePN.error.errorDescription)")
+        }
+
+        if responseProxy.error == .success {
+            nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy deregistration OK at \(proxyServerUrl)")
+        } else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy deregistration FAILED at \(proxyServerUrl), status \(responseProxy.error.errorCode): \(responseProxy.error.errorDescription)")
+        }
     }
 
     func applicationdidReceiveRemoteNotification(userInfo: [AnyHashable: Any], completion: @escaping (_ result: UIBackgroundFetchResult) -> Void) {

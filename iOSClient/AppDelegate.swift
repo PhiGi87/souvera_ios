@@ -179,6 +179,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         if let deviceToken = NCPushNotificationEncryption.shared().string(withDeviceToken: deviceToken) {
             NCPreferences().deviceTokenPushNotification = deviceToken
+            nkLog(tag: global.logTagPN, emoji: .success, message: "APNs registration OK, token length \(deviceToken.count)")
             pushSubscriptionTask = Task.detached {
                 // Wait bounded time for maintenance to be OFF
                 let canProceed = await NCAppStateManager.shared.waitForMaintenanceOffAsync()
@@ -195,6 +196,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 }
             }
         }
+    }
+
+    func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
+        nkLog(tag: global.logTagPN, emoji: .error, message: "APNs registration FAILED: \(error.localizedDescription)")
     }
 
     func application(_ application: UIApplication, didReceiveRemoteNotification userInfo: [AnyHashable: Any], fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void) {

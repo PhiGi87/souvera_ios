@@ -34,7 +34,7 @@ final class NCGlobal: Sendable {
     // App
     //
     let appName                                     = "files"
-    let appScheme                                   = "nextcloud"
+    let appScheme                                   = "souvera"
     let talkName                                    = "talk-message"
     let spreedName                                  = "spreed"
     let twoFactorNotificatioName                    = "twofactor_nextcloud_notification"

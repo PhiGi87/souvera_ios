@@ -68,18 +68,17 @@
 
     BIO_read(publicKeyBIO, keyBytes, len);
     NSData *publicKey = [NSData dataWithBytes:keyBytes length:len];
-    NSLog(@"Push Notifications public Key generated: \n%@", [[NSString alloc] initWithData:publicKey encoding:NSUTF8StringEncoding]);
 
     // PrivateKey
     BIO *privateKeyBIO = BIO_new(BIO_s_mem());
     PEM_write_bio_PKCS8PrivateKey(privateKeyBIO, pkey, NULL, NULL, 0, NULL, NULL);
-    
+
     len = BIO_pending(privateKeyBIO);
     keyBytes = malloc(len);
-    
+
     BIO_read(privateKeyBIO, keyBytes, len);
     NSData *privateKey = [NSData dataWithBytes:keyBytes length:len];
-    NSLog(@"Push Notifications private Key generated: \n%@", [[NSString alloc] initWithData:privateKey encoding:NSUTF8StringEncoding]);
+    NSLog(@"Push Notifications key pair generated");
 
     EVP_PKEY_free(pkey);
     EVP_PKEY_CTX_free(ctx);

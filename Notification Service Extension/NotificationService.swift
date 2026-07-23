@@ -46,12 +46,9 @@ class NotificationService: UNNotificationServiceExtension {
                             continue
                         }
 
-                        let prefixData = Data(privateKey.prefix(8))
-                        let prefixBase64 = prefixData.base64EncodedString()
-                        nkLog(debug: "🔑 Loaded private key for \(tableAccount.account): prefix(Base64)=\(prefixBase64)")
-
                         guard let decryptedMessage = NCPushNotificationEncryption.shared().decryptPushNotification(message, withDevicePrivateKey: privateKey) else {
                             bestAttemptContent.body = "Error decryption for \(tableAccount.account)"
+                            nkLog(tag: NCGlobal.shared.logTagPN, emoji: .error, message: "Failed to decrypt push payload for \(tableAccount.account)")
                             continue
                         }
                         guard let data = decryptedMessage.data(using: .utf8) else {
