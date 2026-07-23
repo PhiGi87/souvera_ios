@@ -104,7 +104,6 @@ jobs:
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -configuration Release \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
@@ -112,8 +111,6 @@ jobs:
             -authenticationKeyID "$ASC_API_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
           | xcbeautify --quieter
 
       - name: Write ExportOptions.plist
@@ -124,7 +121,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>${{ github.event.inputs.export_method || 'app-store-connect' }}</string>
+            <string>${{ github.event.inputs.export_method || 'ad-hoc' }}</string>
             <key>teamID</key>
             <string>${{ env.TEAM_ID }}</string>
             <key>signingStyle</key>
