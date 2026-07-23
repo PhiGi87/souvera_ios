@@ -33,14 +33,24 @@ struct MailView: View {
         }
     }
 
+    private var isFolders: Bool {
+        if case .folders = viewModel.route { return true }
+        return false
+    }
+
+    private var isMessages: Bool {
+        if case .messages = viewModel.route { return true }
+        return false
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if case .folders = viewModel.route {} else {
+        if !isFolders {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: { Image(systemName: "chevron.backward") }
             }
         }
-        if case .messages = viewModel.route {
+        if isMessages {
             ToolbarItem(placement: .topBarTrailing) {
                 Button { showCompose = true } label: { Image(systemName: "square.and.pencil") }
             }
