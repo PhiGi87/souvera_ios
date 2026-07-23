@@ -81,7 +81,15 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
         run: |
           mkdir -p ~/private_keys
-          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+          KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+          # Strip any whitespace/newlines the secret may carry, then decode.
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | tr -d '[:space:]' | base64 --decode > "$KEYFILE"
+          # Fail fast with a clear message if the decoded key is not a valid PKCS#8 .p8.
+          if ! head -1 "$KEYFILE" | grep -q "BEGIN PRIVATE KEY"; then
+            echo "::error::ASC_API_KEY_P8_BASE64 did not decode to a valid .p8 (expected '-----BEGIN PRIVATE KEY-----'). Re-encode with: base64 -i AuthKey_XXXX.p8 | tr -d '\n'"
+            exit 1
+          fi
+          echo "API key decoded OK (Key ID ${ASC_API_KEY_ID})."
 
       # NOTE: unit tests are intentionally NOT run in the archive job — the test host crashes on a
       # pre-existing Realm configuration issue in CI, which is unrelated to producing an installable
@@ -96,6 +104,7 @@ jobs:
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
+            -configuration Release \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
             -allowProvisioningUpdates \
@@ -103,6 +112,8 @@ jobs:
             -authenticationKeyID "$ASC_API_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CODE_SIGN_IDENTITY="Apple Distribution" \
           | xcbeautify --quieter
 
       - name: Write ExportOptions.plist
@@ -113,7 +124,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>${{ github.event.inputs.export_method || 'ad-hoc' }}</string>
+            <string>${{ github.event.inputs.export_method || 'app-store-connect' }}</string>
             <key>teamID</key>
             <string>${{ env.TEAM_ID }}</string>
             <key>signingStyle</key>
