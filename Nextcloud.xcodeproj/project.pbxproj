@@ -1212,27 +1212,27 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		FEA11FCA1D3544B60B224CC8 /* MailNIOConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailNIOConnection.swift"; sourceTree = "<group>"; };
-		FEA1ADD802F125C3224605E0 /* MailMimeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailMimeBuilder.swift"; sourceTree = "<group>"; };
-		FEA1F092AAB81FDFAC0D3DAD /* MailSmtpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailSmtpClient.swift"; sourceTree = "<group>"; };
-		FEA11EF7F13DD7D568D84C62 /* MailIMAPResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailIMAPResponseParser.swift"; sourceTree = "<group>"; };
-		FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkAccount.swift"; sourceTree = "<group>"; };
-		FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsModels.swift"; sourceTree = "<group>"; };
-		FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsApi.swift"; sourceTree = "<group>"; };
-		FEA0B488AD5399A14F03F224 /* LinkViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkViewModel.swift"; sourceTree = "<group>"; };
-		FEA09DDC6C23187E8A37A72B /* LinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkView.swift"; sourceTree = "<group>"; };
-		FEA0229256BB09DDB94EFFB1 /* LinkSignaling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkSignaling.swift"; sourceTree = "<group>"; };
-		FEA0E10393E79F4CA257F511 /* HpbSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HpbSignalingClient.swift"; sourceTree = "<group>"; };
-		FEA0CD4556A6FA3CD1ED6E36 /* WebRtcClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebRtcClient.swift"; sourceTree = "<group>"; };
-		FEA00C7B621D23C828496936 /* CallSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallSession.swift"; sourceTree = "<group>"; };
-		FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkVoIPManager.swift"; sourceTree = "<group>"; };
-		FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkCallViewController.swift"; sourceTree = "<group>"; };
-		FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SouveraMailLoginFlow.swift"; sourceTree = "<group>"; };
-		FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SouveraMailCredentialManager.swift"; sourceTree = "<group>"; };
-		FEA002689B11873630AAE8FD /* MailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailModels.swift"; sourceTree = "<group>"; };
-		FEA03294AA751D27EF43E751 /* MailImapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailImapClient.swift"; sourceTree = "<group>"; };
-		FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailViewModel.swift"; sourceTree = "<group>"; };
-		FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailView.swift"; sourceTree = "<group>"; };
+		FEA11FCA1D3544B60B224CC8 /* MailNIOConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailNIOConnection.swift"; sourceTree = SOURCE_ROOT; };
+		FEA1ADD802F125C3224605E0 /* MailMimeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailMimeBuilder.swift"; sourceTree = SOURCE_ROOT; };
+		FEA1F092AAB81FDFAC0D3DAD /* MailSmtpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailSmtpClient.swift"; sourceTree = SOURCE_ROOT; };
+		FEA11EF7F13DD7D568D84C62 /* MailIMAPResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailIMAPResponseParser.swift"; sourceTree = SOURCE_ROOT; };
+		FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/LinkAccount.swift"; sourceTree = SOURCE_ROOT; };
+		FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkOcsModels.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkOcsApi.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0B488AD5399A14F03F224 /* LinkViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/LinkViewModel.swift"; sourceTree = SOURCE_ROOT; };
+		FEA09DDC6C23187E8A37A72B /* LinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/LinkView.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0229256BB09DDB94EFFB1 /* LinkSignaling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/LinkSignaling.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0E10393E79F4CA257F511 /* HpbSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/HpbSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0CD4556A6FA3CD1ED6E36 /* WebRtcClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/WebRtcClient.swift"; sourceTree = SOURCE_ROOT; };
+		FEA00C7B621D23C828496936 /* CallSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/CallSession.swift"; sourceTree = SOURCE_ROOT; };
+		FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/LinkVoIPManager.swift"; sourceTree = SOURCE_ROOT; };
+		FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/LinkCallViewController.swift"; sourceTree = SOURCE_ROOT; };
+		FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Auth/SouveraMailLoginFlow.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Auth/SouveraMailCredentialManager.swift"; sourceTree = SOURCE_ROOT; };
+		FEA002689B11873630AAE8FD /* MailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Model/MailModels.swift"; sourceTree = SOURCE_ROOT; };
+		FEA03294AA751D27EF43E751 /* MailImapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailImapClient.swift"; sourceTree = SOURCE_ROOT; };
+		FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/MailViewModel.swift"; sourceTree = SOURCE_ROOT; };
+		FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/MailView.swift"; sourceTree = SOURCE_ROOT; };
 		2C33C47F23E2C475005F963B /* Notification Service Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Notification Service Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2C33C48123E2C475005F963B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		2C33C48A23E2CC26005F963B /* Notification_Service_Extension-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Notification_Service_Extension-Bridging-Header.h"; sourceTree = "<group>"; };
