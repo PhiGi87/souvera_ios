@@ -7,6 +7,23 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */; };
+		FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */; };
+		FEB0558021FA16836E3E3B20 /* LinkOcsApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */; };
+		FEB003EB3C5926948AADB2CB /* LinkViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0B488AD5399A14F03F224 /* LinkViewModel.swift */; };
+		FEB0E372D45719E9A41E3776 /* LinkView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA09DDC6C23187E8A37A72B /* LinkView.swift */; };
+		FEB09B38C4C0C3C71655A501 /* LinkSignaling.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0229256BB09DDB94EFFB1 /* LinkSignaling.swift */; };
+		FEB05FAE2B7670EF7BD2E119 /* HpbSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0E10393E79F4CA257F511 /* HpbSignalingClient.swift */; };
+		FEB0546BB38A8367662C1E08 /* WebRtcClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0CD4556A6FA3CD1ED6E36 /* WebRtcClient.swift */; };
+		FEB09D89018CA96C57FAC13A /* CallSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA00C7B621D23C828496936 /* CallSession.swift */; };
+		FEB0F79E39E84208019CDD3F /* LinkVoIPManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */; };
+		FEB08B5E06C533CA7C965944 /* LinkCallViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */; };
+		FEB041DA7A66B73021B9294E /* SouveraMailLoginFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */; };
+		FEB09DFFB39C0BA230E87F86 /* SouveraMailCredentialManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */; };
+		FEB09C981F24A8F3A55C3CC6 /* MailModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA002689B11873630AAE8FD /* MailModels.swift */; };
+		FEB0577F513A8F6E5029C0CC /* MailImapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA03294AA751D27EF43E751 /* MailImapClient.swift */; };
+		FEB0841D6CE1FF0956A13590 /* MailViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */; };
+		FEB0BBC090C539965F384ECE /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */; };
 		2C1D5D7623E2DE3300334ABB /* NCManageDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7BAADB51ED5A87C00B7EAD4 /* NCManageDatabase.swift */; };
 		2C1D5D7923E2DE9100334ABB /* NCBrand.swift in Sources */ = {isa = PBXBuildFile; fileRef = F76B3CCD1EAE01BD00921AC9 /* NCBrand.swift */; };
 		2C33C48223E2C475005F963B /* NotificationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C33C48123E2C475005F963B /* NotificationService.swift */; };
@@ -1189,6 +1206,23 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkAccount.swift"; sourceTree = "<group>"; };
+		FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsModels.swift"; sourceTree = "<group>"; };
+		FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsApi.swift"; sourceTree = "<group>"; };
+		FEA0B488AD5399A14F03F224 /* LinkViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkViewModel.swift"; sourceTree = "<group>"; };
+		FEA09DDC6C23187E8A37A72B /* LinkView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkView.swift"; sourceTree = "<group>"; };
+		FEA0229256BB09DDB94EFFB1 /* LinkSignaling.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkSignaling.swift"; sourceTree = "<group>"; };
+		FEA0E10393E79F4CA257F511 /* HpbSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "HpbSignalingClient.swift"; sourceTree = "<group>"; };
+		FEA0CD4556A6FA3CD1ED6E36 /* WebRtcClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "WebRtcClient.swift"; sourceTree = "<group>"; };
+		FEA00C7B621D23C828496936 /* CallSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "CallSession.swift"; sourceTree = "<group>"; };
+		FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkVoIPManager.swift"; sourceTree = "<group>"; };
+		FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkCallViewController.swift"; sourceTree = "<group>"; };
+		FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SouveraMailLoginFlow.swift"; sourceTree = "<group>"; };
+		FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "SouveraMailCredentialManager.swift"; sourceTree = "<group>"; };
+		FEA002689B11873630AAE8FD /* MailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailModels.swift"; sourceTree = "<group>"; };
+		FEA03294AA751D27EF43E751 /* MailImapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailImapClient.swift"; sourceTree = "<group>"; };
+		FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailViewModel.swift"; sourceTree = "<group>"; };
+		FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailView.swift"; sourceTree = "<group>"; };
 		2C33C47F23E2C475005F963B /* Notification Service Extension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "Notification Service Extension.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
 		2C33C48123E2C475005F963B /* NotificationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotificationService.swift; sourceTree = "<group>"; };
 		2C33C48A23E2CC26005F963B /* Notification_Service_Extension-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "Notification_Service_Extension-Bridging-Header.h"; sourceTree = "<group>"; };
@@ -2114,6 +2148,37 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		FEC07026DB4AAC4630A25441 /* Link */ = {
+			isa = PBXGroup;
+			children = (
+				FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */,
+				FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */,
+				FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */,
+				FEA0B488AD5399A14F03F224 /* LinkViewModel.swift */,
+				FEA09DDC6C23187E8A37A72B /* LinkView.swift */,
+				FEA0229256BB09DDB94EFFB1 /* LinkSignaling.swift */,
+				FEA0E10393E79F4CA257F511 /* HpbSignalingClient.swift */,
+				FEA0CD4556A6FA3CD1ED6E36 /* WebRtcClient.swift */,
+				FEA00C7B621D23C828496936 /* CallSession.swift */,
+				FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */,
+				FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */,
+			);
+			name = Link;
+			sourceTree = "<group>";
+		};
+		FEC054347AE5A56FB6FF152C /* Mail */ = {
+			isa = PBXGroup;
+			children = (
+				FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */,
+				FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */,
+				FEA002689B11873630AAE8FD /* MailModels.swift */,
+				FEA03294AA751D27EF43E751 /* MailImapClient.swift */,
+				FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */,
+				FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */,
+			);
+			name = Mail;
+			sourceTree = "<group>";
+		};
 		2C33C48023E2C475005F963B /* Notification Service Extension */ = {
 			isa = PBXGroup;
 			children = (
@@ -3487,6 +3552,8 @@
 		F7F67B9F1A24D27800EE80DA = {
 			isa = PBXGroup;
 			children = (
+				FEC07026DB4AAC4630A25441 /* Link */,
+				FEC054347AE5A56FB6FF152C /* Mail */,
 				AA8E041E2D3114E200E7E89C /* README.md */,
 				F7B8B82F25681C3400967775 /* GoogleService-Info.plist */,
 				F7C1CDD91E6DFC6F005D92BE /* Brand */,
@@ -4750,6 +4817,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */,
+				FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */,
+				FEB0558021FA16836E3E3B20 /* LinkOcsApi.swift in Sources */,
+				FEB003EB3C5926948AADB2CB /* LinkViewModel.swift in Sources */,
+				FEB0E372D45719E9A41E3776 /* LinkView.swift in Sources */,
+				FEB09B38C4C0C3C71655A501 /* LinkSignaling.swift in Sources */,
+				FEB05FAE2B7670EF7BD2E119 /* HpbSignalingClient.swift in Sources */,
+				FEB0546BB38A8367662C1E08 /* WebRtcClient.swift in Sources */,
+				FEB09D89018CA96C57FAC13A /* CallSession.swift in Sources */,
+				FEB0F79E39E84208019CDD3F /* LinkVoIPManager.swift in Sources */,
+				FEB08B5E06C533CA7C965944 /* LinkCallViewController.swift in Sources */,
+				FEB041DA7A66B73021B9294E /* SouveraMailLoginFlow.swift in Sources */,
+				FEB09DFFB39C0BA230E87F86 /* SouveraMailCredentialManager.swift in Sources */,
+				FEB09C981F24A8F3A55C3CC6 /* MailModels.swift in Sources */,
+				FEB0577F513A8F6E5029C0CC /* MailImapClient.swift in Sources */,
+				FEB0841D6CE1FF0956A13590 /* MailViewModel.swift in Sources */,
+				FEB0BBC090C539965F384ECE /* MailView.swift in Sources */,
 				F77444F522281649000D5EB0 /* NCMediaCell.swift in Sources */,
 				F78C6FDE296D677300C952C3 /* NCContextMenuMain.swift in Sources */,
 				A5A87F9E4B0E4441A6A4BC20 /* NCContextMenuProfile.swift in Sources */,
