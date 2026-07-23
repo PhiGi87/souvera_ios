@@ -51,7 +51,8 @@ jobs:
   archive:
     name: Archive & Export IPA
     runs-on: macos-15
-    if: github.event_name == 'workflow_dispatch'
+    needs: build-check
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/')
 
     steps:
       - uses: actions/checkout@v5
@@ -119,7 +120,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>${{ inputs.export_method }}</string>
+            <string>${{ github.event.inputs.export_method || 'ad-hoc' }}</string>
             <key>teamID</key>
             <string>${{ env.TEAM_ID }}</string>
             <key>signingStyle</key>
