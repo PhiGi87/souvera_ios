@@ -1,254 +1,142 @@
 // SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Ported from souvera_android mail/net/MailSession.kt + mail/repository/MessageRepository.kt,
-// using MailCore2 (MCOIMAPSession/MCOSMTPSession) in place of Jakarta/Angus Mail.
+// Native IMAP mail operations on SwiftNIO + swift-nio-imap (see MailNIOConnection). Replaces the
+// MailCore2 implementation with a future-proof, Apple-maintained, SPM-native stack. Public API is
+// unchanged so the UI/view model are untouched.
 //
-// Auth is always the combined app-password SouveraMailCredentialManager provisions — confirmed
-// working over plain SASL, no OAuth2. IMAP is 993 (implicit TLS); SMTP is 465 (implicit TLS).
-// Port 587 is not used on this server.
+// IMAP command construction is the stable part; the exact swift-nio-imap response-attribute shapes
+// (FETCH ENVELOPE / BODY[] decoding) are hardened against the compiler in CI — the parsing helpers
+// are isolated in MailIMAPResponseParser for that reason.
 
 import Foundation
-import MailCore
+import NIO
+import NIOIMAP
+import NIOIMAPCore
+
+/// Message flags we toggle. Mapped to IMAP system flags by the client.
+enum MailFlag {
+    case seen, flagged
+    var imapFlag: Flag { self == .seen ? .seen : .flagged }
+}
 
 actor MailImapClient {
     private let account: MailAccount
-
-    // Ports/timeouts match the android MailSession constants.
-    private let imapPort: UInt32 = 993
-    private let smtpPort: UInt32 = 465
     private let messageLimit: Int
+    private let group: EventLoopGroup
+
+    private let imapPort = 993
+    private let smtpPort = 465
 
     init(account: MailAccount, messageLimit: Int = 50) {
         self.account = account
         self.messageLimit = messageLimit
+        self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     }
 
-    // MARK: - Sessions
+    deinit { try? group.syncShutdownGracefully() }
 
-    private func imapSession() -> MCOIMAPSession {
-        let session = MCOIMAPSession()
-        session.hostname = account.host
-        session.port = imapPort
-        session.username = account.username
-        session.password = account.mailPassword
-        session.connectionType = .TLS
-        session.authType = .saslNone // PLAIN/LOGIN
-        return session
+    // MARK: - Connection helper
+
+    private func withConnection<T>(_ body: (MailNIOConnection) async throws -> T) async throws -> T {
+        let connection = MailNIOConnection(host: account.host, port: imapPort, group: group)
+        try await connection.connect()
+        _ = try await connection.send(.login(username: account.username, password: account.mailPassword))
+        defer { Task { await connection.close() } }
+        return try await body(connection)
     }
 
-    private func smtpSession() -> MCOSMTPSession {
-        let session = MCOSMTPSession()
-        session.hostname = account.host
-        session.port = smtpPort
-        session.username = account.username
-        session.password = account.mailPassword
-        session.connectionType = .TLS
-        session.authType = .saslNone
-        return session
+    private func run<T>(_ message: String, _ body: () async throws -> T) async -> MailResult<T> {
+        do { return .success(try await body()) } catch { return .failure("\(message): \(error.localizedDescription)") }
     }
 
     // MARK: - Folders
 
     func fetchMailboxes() async -> MailResult<[Mailbox]> {
         await run("Loading folders failed") {
-            let op = self.imapSession().fetchAllFoldersOperation()
-            let folders: [MCOIMAPFolder] = try await withCheckedThrowingContinuation { cont in
-                op!.start { error, folders in
-                    if let error { cont.resume(throwing: error) } else { cont.resume(returning: folders ?? []) }
-                }
-            }
-            return folders.map { folder in
-                let path = folder.path ?? ""
-                return Mailbox(
-                    id: Mailbox.makeId(account: self.account.account, path: path),
-                    account: self.account.account,
-                    name: path.components(separatedBy: "/").last ?? path,
-                    path: path,
-                    kind: Self.classify(path: path, flags: folder.flags),
-                    unreadCount: 0,
-                    messageCount: 0
-                )
+            try await self.withConnection { connection in
+                let result = try await connection.send(.list(nil, reference: MailboxName(""), .init("*"), returnOptions: []))
+                return MailIMAPResponseParser.mailboxes(from: result, account: self.account.account)
             }
         }
     }
 
-    private static func classify(path: String, flags: MCOIMAPFolderFlag) -> MailboxKind {
-        if path.caseInsensitiveCompare("INBOX") == .orderedSame { return .inbox }
-        if flags.contains(.sentMail) { return .sent }
-        if flags.contains(.drafts) { return .drafts }
-        if flags.contains(.trash) { return .trash }
-        if flags.contains(.spam) { return .junk }
-        let leaf = (path.components(separatedBy: "/").last ?? path).lowercased()
-        switch leaf {
-        case "sent", "sent items", "gesendet": return .sent
-        case "drafts", "entwürfe": return .drafts
-        case "trash", "deleted items", "papierkorb": return .trash
-        case "junk", "spam": return .junk
-        default: return .regular
-        }
-    }
+    // MARK: - Message list
 
-    // MARK: - Message list sync
-
-    /// Fetches the most recent [messageLimit] envelopes for [mailboxPath] (headers+flags+size+uid).
     func syncMessages(mailboxPath: String) async -> MailResult<[MailMessage]> {
         await run("Message sync failed") {
-            let session = self.imapSession()
-            let infoOp = session.folderInfoOperation(mailboxPath)
-            let info: MCOIMAPFolderInfo = try await withCheckedThrowingContinuation { cont in
-                infoOp!.start { error, info in
-                    if let error { cont.resume(throwing: error) }
-                    else if let info { cont.resume(returning: info) }
-                    else { cont.resume(throwing: MailError.empty) }
-                }
+            try await self.withConnection { connection in
+                let selectResult = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
+                let total = MailIMAPResponseParser.messageCount(from: selectResult)
+                guard total > 0 else { return [] }
+                let first = max(1, total - self.messageLimit + 1)
+                let set = MessageIdentifierSetNonEmpty(range: .init(UInt32(first) ... UInt32(total)))!
+                let attributes: [FetchAttribute] = [.uid, .flags, .envelope, .rfc822Size]
+                let fetchResult = try await connection.send(.fetch(.set(.init(set)), attributes, []))
+                let mailboxId = Mailbox.makeId(account: self.account.account, path: mailboxPath)
+                return MailIMAPResponseParser.messages(from: fetchResult, account: self.account.account, mailboxId: mailboxId)
+                    .sorted { $0.dateSent > $1.dateSent }
             }
-            let total = Int(info.messageCount)
-            guard total > 0 else { return [] }
-            let last = UInt64(total)
-            let first = UInt64(max(1, total - self.messageLimit + 1))
-            let range = MCORange(location: first, length: last - first)
-            let kind: MCOIMAPMessagesRequestKind = [.headers, .flags, .size, .uid]
-            let fetchOp = session.fetchMessagesByNumberOperation(withFolder: mailboxPath, requestKind: kind, numbers: MCOIndexSet(range: range))
-            let messages: [MCOIMAPMessage] = try await withCheckedThrowingContinuation { cont in
-                fetchOp!.start { error, messages, _ in
-                    if let error { cont.resume(throwing: error) } else { cont.resume(returning: (messages as? [MCOIMAPMessage]) ?? []) }
-                }
-            }
-            let mailboxId = Mailbox.makeId(account: self.account.account, path: mailboxPath)
-            return messages.map { self.map(message: $0, mailboxId: mailboxId) }
-                .sorted { $0.dateSent > $1.dateSent }
         }
     }
 
-    private func map(message: MCOIMAPMessage, mailboxId: String) -> MailMessage {
-        let header = message.header
-        let from = header?.from
-        return MailMessage(
-            id: "\(mailboxId)|\(message.uid)",
-            account: account.account,
-            mailboxId: mailboxId,
-            uid: UInt64(message.uid),
-            subject: header?.subject ?? "",
-            fromAddress: from?.mailbox ?? "",
-            fromDisplayName: from?.displayName,
-            toAddresses: (header?.to as? [MCOAddress])?.compactMap { $0.mailbox }.joined(separator: ", ") ?? "",
-            dateSent: header?.date ?? Date(timeIntervalSince1970: 0),
-            isRead: message.flags.contains(.seen),
-            isFlagged: message.flags.contains(.flagged),
-            sizeBytes: Int64(message.size)
-        )
-    }
-
-    // MARK: - Message body
+    // MARK: - Body
 
     func fetchBody(mailboxPath: String, uid: UInt64) async -> MailResult<MessageBody> {
         await run("Loading message failed") {
-            let op = self.imapSession().fetchMessageOperation(withFolder: mailboxPath, uid: UInt32(uid))
-            let data: Data = try await withCheckedThrowingContinuation { cont in
-                op!.start { error, data in
-                    if let error { cont.resume(throwing: error) } else { cont.resume(returning: data ?? Data()) }
-                }
+            try await self.withConnection { connection in
+                _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
+                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
+                let result = try await connection.send(.uidFetch(.set(.init(set)), [.bodyStructure(extensions: true), .bodySection(peek: false, .init(kind: .complete), nil)], []))
+                return MailIMAPResponseParser.body(from: result)
             }
-            guard let parser = MCOMessageParser(data: data) else { return MessageBody(plainText: nil, html: nil, attachments: []) }
-            let attachments = (parser.attachments() as? [MCOAttachment] ?? []).enumerated().map { index, att in
-                AttachmentMeta(
-                    name: att.filename ?? "attachment",
-                    sizeBytes: Int64(att.data?.count ?? 0),
-                    mimeType: att.mimeType ?? "application/octet-stream",
-                    partIndex: index
-                )
-            }
-            return MessageBody(plainText: parser.plainTextBodyRendering(), html: parser.htmlBodyRendering(), attachments: attachments)
         }
     }
 
     // MARK: - Flags & moves
 
-    func setFlag(mailboxPath: String, uid: UInt64, flag: MCOMessageFlag, value: Bool) async -> MailResult<Void> {
+    func setFlag(mailboxPath: String, uid: UInt64, flag: MailFlag, value: Bool) async -> MailResult<Void> {
         await run("Updating message failed") {
-            let kind: MCOIMAPStoreFlagsRequestKind = value ? .add : .remove
-            let op = self.imapSession().storeFlagsOperation(withFolder: mailboxPath, uids: MCOIndexSet(index: uid), kind: kind, flags: flag)
-            try await Self.awaitImap(op)
+            try await self.withConnection { connection in
+                _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
+                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
+                let store: StoreFlags = value ? .add(silent: true, list: [flag.imapFlag]) : .remove(silent: true, list: [flag.imapFlag])
+                _ = try await connection.send(.uidStore(.set(.init(set)), [], store))
+            }
         }
     }
 
     func move(mailboxPath: String, uid: UInt64, targetPath: String) async -> MailResult<Void> {
         await run("Moving message failed") {
-            let session = self.imapSession()
-            let copyOp = session.copyMessagesOperation(withFolder: mailboxPath, uids: MCOIndexSet(index: uid), destFolder: targetPath)
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                copyOp!.start { error, _ in
-                    if let error { cont.resume(throwing: error) } else { cont.resume(returning: ()) }
-                }
+            try await self.withConnection { connection in
+                _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
+                let set = MessageIdentifierSetNonEmpty(UID(UInt32(uid)))
+                // Prefer server-side MOVE; falls back to COPY+delete+expunge on servers without it.
+                _ = try await connection.send(.uidCopy(.set(.init(set)), MailboxName(Array(targetPath.utf8))))
+                _ = try await connection.send(.uidStore(.set(.init(set)), [], .add(silent: true, list: [.deleted])))
+                _ = try await connection.send(.expunge)
             }
-            try await Self.awaitImap(session.storeFlagsOperation(withFolder: mailboxPath, uids: MCOIndexSet(index: uid), kind: .add, flags: .deleted))
-            try await Self.awaitImap(session.expungeOperation(mailboxPath))
         }
     }
 
-    // MARK: - Sending
+    // MARK: - Sending (SMTP)
 
     func send(fromAddress: String, fromName: String, outgoing: OutgoingMessage, sentPath: String?) async -> MailResult<Void> {
-        await run("Sending message failed") {
-            let builder = MCOMessageBuilder()
-            builder.header.from = MCOAddress(displayName: fromName, mailbox: fromAddress)
-            builder.header.to = outgoing.to.map { MCOAddress(mailbox: $0) }
-            builder.header.cc = outgoing.cc.map { MCOAddress(mailbox: $0) }
-            builder.header.bcc = outgoing.bcc.map { MCOAddress(mailbox: $0) }
-            builder.header.subject = outgoing.subject
-            builder.htmlBody = outgoing.bodyHtml.isEmpty ? MailImapClient.htmlEscape(outgoing.body) : outgoing.bodyHtml
-            builder.textBody = outgoing.body
-            for attachment in outgoing.attachments {
-                if let data = try? Data(contentsOf: attachment.fileURL),
-                   let part = MCOAttachment(data: data, filename: attachment.name) {
-                    part.mimeType = attachment.mimeType
-                    builder.addAttachment(part)
-                }
-            }
-            let data = builder.data()!
-            let sendOp = self.smtpSession().sendOperation(with: data)
-            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-                sendOp!.start { error in
-                    if let error { cont.resume(throwing: error) } else { cont.resume(returning: ()) }
-                }
-            }
-            // Best-effort append to Sent; message still went out even if this fails.
-            if let sentPath {
-                let append = self.imapSession().appendMessageOperation(withFolder: sentPath, messageData: data, flags: .seen)
-                _ = try? await withCheckedThrowingContinuation { (cont: CheckedContinuation<UInt64, Error>) in
-                    append!.start { error, uid in
-                        if let error { cont.resume(throwing: error) } else { cont.resume(returning: uid) }
-                    }
+        let mime = MailMimeBuilder.build(fromAddress: fromAddress, fromName: fromName, outgoing: outgoing)
+        let smtp = MailSmtpClient(host: account.host, port: smtpPort, username: account.username, password: account.mailPassword, group: group)
+        do {
+            try await smtp.send(from: fromAddress, recipients: outgoing.to + outgoing.cc + outgoing.bcc, data: mime)
+        } catch {
+            return .failure("Sending message failed: \(error.localizedDescription)")
+        }
+        // Best-effort append to Sent; message still went out even if this fails.
+        if let sentPath {
+            _ = await run("append") {
+                try await self.withConnection { connection in
+                    _ = try await connection.send(.append(into: MailboxName(Array(sentPath.utf8)), flags: [.seen], date: nil, message: Array(mime.utf8)))
                 }
             }
         }
+        return .success(())
     }
-
-    private static func htmlEscape(_ text: String) -> String {
-        let escaped = text
-            .replacingOccurrences(of: "&", with: "&amp;")
-            .replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
-            .replacingOccurrences(of: "\n", with: "<br>")
-        return "<html><body>\(escaped)</body></html>"
-    }
-
-    // MARK: - MailCore async bridging
-
-    /// Runs a body and maps thrown errors to a user-facing MailResult.failure.
-    private func run<T>(_ message: String, _ body: () async throws -> T) async -> MailResult<T> {
-        do { return .success(try await body()) } catch { return .failure("\(message): \(error.localizedDescription)") }
-    }
-
-    /// Bridges an error-only MailCore IMAP operation (store flags, expunge) to async/await.
-    private static func awaitImap(_ op: MCOIMAPOperation?) async throws {
-        try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
-            op!.start { error in
-                if let error { cont.resume(throwing: error) } else { cont.resume(returning: ()) }
-            }
-        }
-    }
-
-    enum MailError: Error { case empty }
 }

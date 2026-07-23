@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		FEB11DA1AAA34EC2F8C65DD7 /* MailNIOConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* MailNIOConnection.swift */; };
+		FEB1B862BA9BE6EE5E0D652E /* MailMimeBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* MailMimeBuilder.swift */; };
+		FEB1B09989B7508E74BCD53A /* MailSmtpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1F092AAB81FDFAC0D3DAD /* MailSmtpClient.swift */; };
+		FEB1DABC0098896F7EA78F22 /* MailIMAPResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11EF7F13DD7D568D84C62 /* MailIMAPResponseParser.swift */; };
+		FEF01135E4AA5A4F1D0163BC /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = FEE0D62C467FC6981B9A77FD /* WebRTC */; };
+		FEF07CBC255C789E2E3F7041 /* NIOIMAP in Frameworks */ = {isa = PBXBuildFile; productRef = FEE09EDE671B3746C33CE3EC /* NIOIMAP */; };
+		FEF0DEE940FF466CAF0FF908 /* NIOIMAPCore in Frameworks */ = {isa = PBXBuildFile; productRef = FEE03C98340B11613AA44261 /* NIOIMAPCore */; };
 		FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */; };
 		FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */; };
 		FEB0558021FA16836E3E3B20 /* LinkOcsApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */; };
@@ -1206,6 +1213,10 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		FEA11FCA1D3544B60B224CC8 /* MailNIOConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailNIOConnection.swift"; sourceTree = "<group>"; };
+		FEA1ADD802F125C3224605E0 /* MailMimeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailMimeBuilder.swift"; sourceTree = "<group>"; };
+		FEA1F092AAB81FDFAC0D3DAD /* MailSmtpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailSmtpClient.swift"; sourceTree = "<group>"; };
+		FEA11EF7F13DD7D568D84C62 /* MailIMAPResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "MailIMAPResponseParser.swift"; sourceTree = "<group>"; };
 		FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkAccount.swift"; sourceTree = "<group>"; };
 		FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsModels.swift"; sourceTree = "<group>"; };
 		FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "LinkOcsApi.swift"; sourceTree = "<group>"; };
@@ -2093,6 +2104,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FEF01135E4AA5A4F1D0163BC /* WebRTC in Frameworks */,
+				FEF07CBC255C789E2E3F7041 /* NIOIMAP in Frameworks */,
+				FEF0DEE940FF466CAF0FF908 /* NIOIMAPCore in Frameworks */,
 				F7D4BF542CA2ED9D00A5E746 /* VLCKitSPM in Frameworks */,
 				F7D56B1A2972405500FA46C4 /* Mantis in Frameworks */,
 				F7ED547C25EEA65400956C55 /* QRCodeReader in Frameworks */,
@@ -2169,6 +2183,10 @@
 		FEC054347AE5A56FB6FF152C /* Mail */ = {
 			isa = PBXGroup;
 			children = (
+				FEA11FCA1D3544B60B224CC8 /* MailNIOConnection.swift */,
+				FEA1ADD802F125C3224605E0 /* MailMimeBuilder.swift */,
+				FEA1F092AAB81FDFAC0D3DAD /* MailSmtpClient.swift */,
+				FEA11EF7F13DD7D568D84C62 /* MailIMAPResponseParser.swift */,
 				FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */,
 				FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */,
 				FEA002689B11873630AAE8FD /* MailModels.swift */,
@@ -3942,6 +3960,9 @@
 			);
 			name = Nextcloud;
 			packageProductDependencies = (
+				FEE0D62C467FC6981B9A77FD /* WebRTC */,
+				FEE09EDE671B3746C33CE3EC /* NIOIMAP */,
+				FEE03C98340B11613AA44261 /* NIOIMAPCore */,
 				F7ED547B25EEA65400956C55 /* QRCodeReader */,
 				F72DA9B325F53E4E00B87DB1 /* SwiftRichString */,
 				F788ECC6263AAAFA00ADC67F /* MarkdownKit */,
@@ -4147,6 +4168,8 @@
 			);
 			mainGroup = F7F67B9F1A24D27800EE80DA;
 			packageReferences = (
+				FED07C76ED36E00D707A3332 /* XCRemoteSwiftPackageReference "WebRTC" */,
+				FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */,
 				F7ED547A25EEA65400956C55 /* XCRemoteSwiftPackageReference "QRCodeReader" */,
 				F72DA9B225F53E4E00B87DB1 /* XCRemoteSwiftPackageReference "SwiftRichString" */,
 				F788ECC5263AAAF900ADC67F /* XCRemoteSwiftPackageReference "MarkdownKit" */,
@@ -4817,6 +4840,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FEB11DA1AAA34EC2F8C65DD7 /* MailNIOConnection.swift in Sources */,
+				FEB1B862BA9BE6EE5E0D652E /* MailMimeBuilder.swift in Sources */,
+				FEB1B09989B7508E74BCD53A /* MailSmtpClient.swift in Sources */,
+				FEB1DABC0098896F7EA78F22 /* MailIMAPResponseParser.swift in Sources */,
 				FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */,
 				FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */,
 				FEB0558021FA16836E3E3B20 /* LinkOcsApi.swift in Sources */,
@@ -6546,6 +6573,22 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
+		FED07C76ED36E00D707A3332 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/stasel/WebRTC";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 137.0.0;
+			};
+		};
+		FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-imap";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 0.6.0;
+			};
+		};
 		F3374AEE2D78B01B002A38F9 /* XCRemoteSwiftPackageReference "swift-collections" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-collections.git";
@@ -6741,6 +6784,21 @@
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		FEE0D62C467FC6981B9A77FD /* WebRTC */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FED07C76ED36E00D707A3332 /* XCRemoteSwiftPackageReference "WebRTC" */;
+			productName = WebRTC;
+		};
+		FEE09EDE671B3746C33CE3EC /* NIOIMAP */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */;
+			productName = NIOIMAP;
+		};
+		FEE03C98340B11613AA44261 /* NIOIMAPCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */;
+			productName = NIOIMAPCore;
+		};
 		F3374AEF2D78B01B002A38F9 /* BitCollections */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = F3374AEE2D78B01B002A38F9 /* XCRemoteSwiftPackageReference "swift-collections" */;
