@@ -8,6 +8,7 @@
 
 import Foundation
 import WebRTC
+import NextcloudKit
 
 struct SignalingSettings: Decodable {
     let signalingMode: String

@@ -37,7 +37,7 @@ actor MailSmtpClient {
             .channelInitializer { channel in
                 do {
                     let ssl = try NIOSSLClientHandler(context: sslContext, serverHostname: host)
-                    return channel.pipeline.addHandlers([ssl, ByteToMessageHandler(LineBasedFrameDecoder()), handler])
+                    return channel.pipeline.addHandlers([ssl, handler])
                 } catch {
                     return channel.eventLoop.makeFailedFuture(error)
                 }
@@ -78,6 +78,7 @@ private final class SmtpResponseHandler: ChannelInboundHandler {
 
     private var pending: [(Int, String)] = []
     private var waiters: [CheckedContinuation<(Int, String), Error>] = []
+    private var lineBuffer = ""
     private var accumulated = ""
 
     func next() async throws -> (Int, String) {
@@ -92,9 +93,19 @@ private final class SmtpResponseHandler: ChannelInboundHandler {
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         var buffer = unwrapInboundIn(data)
-        let line = buffer.readString(length: buffer.readableBytes) ?? ""
-        // Continuation lines have a '-' after the 3-digit code; the last one has a space.
+        lineBuffer += buffer.readString(length: buffer.readableBytes) ?? ""
+        // Process complete CRLF/LF-terminated lines; a reply spans several "250-" lines then "250 ".
+        while let range = lineBuffer.range(of: "\n") {
+            var line = String(lineBuffer[lineBuffer.startIndex..<range.lowerBound])
+            lineBuffer.removeSubrange(lineBuffer.startIndex..<range.upperBound)
+            if line.hasSuffix("\r") { line.removeLast() }
+            handleLine(line)
+        }
+    }
+
+    private func handleLine(_ line: String) {
         let code = Int(line.prefix(3)) ?? 0
+        // Continuation lines have a '-' after the 3-digit code; the final one has a space.
         if line.count > 3, line[line.index(line.startIndex, offsetBy: 3)] == "-" {
             accumulated += line + "\n"
             return

@@ -115,10 +115,6 @@ final class CollectingIMAPHandler: ChannelInboundHandler {
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let response = unwrapInboundIn(data)
         switch response {
-        case .untagged:
-            buffer.append(response)
-            // The very first untagged response is the greeting.
-            if let greeting { self.greeting = nil; greeting.succeed(()) }
         case .tagged(let tagged):
             let collected = buffer
             buffer.removeAll()
@@ -126,7 +122,10 @@ final class CollectingIMAPHandler: ChannelInboundHandler {
                 promise.succeed(IMAPCommandResult(untagged: collected, completion: tagged))
             }
         default:
-            break
+            // Buffer every non-tagged response (untagged data + fetch stream) for the pending command.
+            buffer.append(response)
+            // The very first response is the server greeting.
+            if let greeting { self.greeting = nil; greeting.succeed(()) }
         }
     }
 
