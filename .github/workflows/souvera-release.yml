@@ -121,7 +121,7 @@ jobs:
           <plist version="1.0">
           <dict>
             <key>method</key>
-            <string>${{ github.event.inputs.export_method || 'ad-hoc' }}</string>
+            <string>${{ github.event.inputs.export_method || 'app-store-connect' }}</string>
             <key>teamID</key>
             <string>${{ env.TEAM_ID }}</string>
             <key>signingStyle</key>
@@ -144,9 +144,22 @@ jobs:
             -authenticationKeyID "$ASC_API_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
 
-      - name: Upload IPA
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: Souvera Workspace IPA
           path: build/export/*.ipa
           retention-days: 14
+
+      - name: Upload to TestFlight
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          # altool looks for the key in ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
+          mkdir -p ~/.appstoreconnect/private_keys
+          cp ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 ~/.appstoreconnect/private_keys/
+          IPA=$(ls build/export/*.ipa | head -1)
+          echo "Uploading $IPA to TestFlight…"
+          xcrun altool --upload-app -t ios -f "$IPA" \
+            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"
