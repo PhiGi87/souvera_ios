@@ -1,6 +1,9 @@
 name: Souvera Workspace - Signed Build
 
 on:
+  push:
+    branches:
+      - 'souvera/**'
   workflow_dispatch:
     inputs:
       export_method:
@@ -20,9 +23,35 @@ env:
   TEAM_ID: S76D7JCS9V
 
 jobs:
+  build-check:
+    name: Compile check (no signing)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Build for simulator (no signing)
+        run: |
+          set -o pipefail && \
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+          | xcbeautify --quieter
+
   archive:
     name: Archive & Export IPA
     runs-on: macos-15
+    if: github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v5
