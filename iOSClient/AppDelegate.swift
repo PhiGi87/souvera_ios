@@ -87,6 +87,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
 
+        // Link (Talk) VoIP: register the PushKit token and present incoming calls via CallKit.
+        LinkVoIPManager.shared.register()
+        NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
+            guard let token = notification.userInfo?["token"] as? String, !token.isEmpty,
+                  let account = LinkAccount.active(),
+                  let root = UIApplication.shared.mainAppWindow?.rootViewController else { return }
+            let callVC = LinkCallViewController(account: account, token: token, title: NSLocalizedString("_link_", comment: ""))
+            root.present(callVC, animated: true)
+        }
+
 #if !targetEnvironment(simulator)
         let review = NCStoreReview()
         review.incrementAppRuns()

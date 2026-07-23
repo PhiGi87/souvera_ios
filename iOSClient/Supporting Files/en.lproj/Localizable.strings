@@ -822,3 +822,18 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_e2ee_setup_store_privatekey_" = "Private key generation returned no usable key";
 "_e2ee_setup_verify_publickey_" = "Public key does not match the certificate";
 "_e2ee_setup_generate_passphrase_" = "Unable to generate a passphrase";
+
+// Souvera: Link (Talk) + Mail
+"_link_"                        = "Link";
+"_link_start_conversation_"     = "Start conversation";
+"_link_no_conversations_"       = "No conversations yet";
+"_link_search_people_"          = "Search people";
+"_link_message_"                = "Message";
+"_link_incoming_call_"          = "Incoming call";
+"_mail_"                        = "Mail";
+"_mail_compose_"                = "New message";
+"_mail_to_"                     = "To";
+"_mail_subject_"                = "Subject";
+"_mail_send_"                   = "Send";
+"_mail_no_subject_"             = "(no subject)";
+"_mail_credential_failed_"      = "Could not set up mail. Please try again.";

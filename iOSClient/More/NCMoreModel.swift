@@ -139,6 +139,12 @@ final class NCMoreModel: ObservableObject {
         /// Opens the SwiftUI settings screen.
         case settings
 
+        /// Opens the native "Link" (Talk) chat screen.
+        case link
+
+        /// Opens the native mail client.
+        case mail
+
         /// No-op destination.
         case none
     }
@@ -180,6 +186,22 @@ final class NCMoreModel: ObservableObject {
         sections.removeAll()
         quotaExternalSiteTitle = ""
         quotaExternalSiteUrl = nil
+
+        functionItems.append(
+            Item(
+                titleKey: "_link_",
+                image: "bubble.left.and.bubble.right.fill",
+                destination: .link
+            )
+        )
+
+        functionItems.append(
+            Item(
+                titleKey: "_mail_",
+                image: "envelope.fill",
+                destination: .mail
+            )
+        )
 
         functionItems.append(
             Item(
@@ -350,9 +372,25 @@ final class NCMoreModel: ObservableObject {
         case .settings:
             openSettings()
 
+        case .link:
+            pushHosted(LinkView(), title: NSLocalizedString("_link_", comment: ""))
+
+        case .mail:
+            pushHosted(MailView(), title: NSLocalizedString("_mail_", comment: ""))
+
         case .none:
             break
         }
+    }
+
+    /// Pushes a SwiftUI screen onto the More navigation stack.
+    private func pushHosted<Content: View>(_ view: Content, title: String) {
+        guard let navigationController = controller?.currentNavigationController() else {
+            return
+        }
+        let hosting = UIHostingController(rootView: view)
+        hosting.title = title
+        navigationController.pushViewController(hosting, animated: true)
     }
 
     /// Configures the visible quota text and progress value for the account.
