@@ -1,0 +1,121 @@
+name: Souvera Workspace - Signed Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: 'Export method'
+        required: true
+        default: 'ad-hoc'
+        type: choice
+        options:
+          - ad-hoc
+          - app-store-connect
+          - development
+
+env:
+  PROJECT: Nextcloud.xcodeproj
+  SCHEME: Nextcloud
+  XCODE_VERSION: '26.0.1'
+  TEAM_ID: S76D7JCS9V
+
+jobs:
+  archive:
+    name: Archive & Export IPA
+    runs-on: macos-15
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      # App Store Connect API key drives fully automatic signing:
+      # xcodebuild -allowProvisioningUpdates will create/fetch the certificate
+      # and every needed provisioning profile (one per bundle id/target) itself,
+      # as long as every target's CODE_SIGN_STYLE is Automatic and DEVELOPMENT_TEAM
+      # is set (both true for this project after the eu.souvera.workspace rebrand).
+      #
+      # Required repo secrets (Settings -> Secrets and variables -> Actions):
+      #   ASC_API_KEY_ID          - Key ID from App Store Connect > Users and Access > Keys
+      #   ASC_API_ISSUER_ID       - Issuer ID shown on the same Keys page
+      #   ASC_API_KEY_P8_BASE64   - `base64 -i AuthKey_XXXX.p8 | pbcopy`, paste the output
+      - name: Install App Store Connect API key
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          echo "$ASC_API_KEY_P8_BASE64" | base64 --decode > ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+
+      - name: Unit tests
+        run: |
+          set -o pipefail && \
+          xcodebuild test \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -only-testing:NextcloudUnitTests \
+            CODE_SIGNING_ALLOWED=NO \
+          | xcbeautify --quieter
+
+      - name: Archive
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -o pipefail && \
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -archivePath "build/Souvera.xcarchive" \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+          | xcbeautify --quieter
+
+      - name: Write ExportOptions.plist
+        run: |
+          cat > ExportOptions.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${{ inputs.export_method }}</string>
+            <key>teamID</key>
+            <string>${{ env.TEAM_ID }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Export IPA
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "build/Souvera.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Souvera Workspace IPA
+          path: build/export/*.ipa
+          retention-days: 14
