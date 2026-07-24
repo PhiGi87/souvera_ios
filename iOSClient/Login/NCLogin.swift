@@ -328,13 +328,11 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         if url.hasSuffix("/") { url = String(url.dropLast()) }
         if url.isEmpty { return }
 
-        // Souvera slug login: If the input looks like a bare slug (no dots, no protocol),
-        // derive the full server URL as https://<slug>.<domain>
-        let domain = NCBrandOptions.shared.souveraDomain
+        // Souvera slug login: bare slug -> https://<slug>.souvera.work
         if !url.contains(".") && !url.hasPrefix("https") && !url.hasPrefix("http") {
-            let slug = SouveraServerUrl.extractSlug(rawInput: url, domain: domain)
-            if !slug.isEmpty {
-                url = SouveraServerUrl.buildUrl(slug: slug, domain: domain)
+            let slug = url.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if !slug.isEmpty, slug.range(of: "^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", options: .regularExpression) != nil {
+                url = "https://\(slug).souvera.work"
                 self.baseUrlTextField.text = url
                 isUrlValid(url: url)
                 return
