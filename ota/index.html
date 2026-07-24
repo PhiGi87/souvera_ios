@@ -3,21 +3,30 @@
 <head>
 <meta charset="utf-8">
 <title>Souvera Workspace</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <style>
-  body { font-family: -apple-system, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #1a1a2e; color: #fff; text-align: center; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; display: flex; align-items: center; justify-content: center; min-height: 100vh; background: #1a1a2e; color: #fff; text-align: center; }
   h1 { font-size: 28px; margin-bottom: 8px; }
   .version { color: #999; font-size: 14px; margin-bottom: 32px; }
-  .btn { display: inline-block; padding: 16px 32px; background: #e94560; color: #fff; border-radius: 12px; text-decoration: none; font-size: 18px; font-weight: 600; }
+  .install-link { display: inline-block; padding: 18px 36px; background: #e94560; color: #fff; border-radius: 12px; text-decoration: none; font-size: 18px; font-weight: 600; }
+  .install-link:active { background: #c73a52; }
   .hint { margin-top: 24px; color: #666; font-size: 14px; }
+  .manual { margin-top: 48px; color: #555; font-size: 13px; break-all; }
 </style>
+<script>
+  var manifest = "https://nsb5cjslfbgwrwvkz6njn0pp.preview.host-on.dev/manifest.plist";
+  function install() { window.location = "itms-services://?action=download-manifest&url=" + manifest; }
+</script>
 </head>
 <body>
 <div>
   <h1>Souvera Workspace</h1>
   <p class="version">Build 33.1.0</p>
-  <a class="btn" href="itms-services://?action=download-manifest&amp;url=https://nsb5cjslfbgwrwvkz6njn0pp.preview.host-on.dev/manifest.plist">Jetzt installieren</a>
-  <p class="hint">Diesen Link auf dem iPhone öffnen</p>
+  <a class="install-link" href="#" onclick="install();return false">Jetzt installieren</a>
+  <p class="hint">Diesen Link auf dem iPhone in Safari öffnen</p>
+  <p class="manual">Falls nichts passiert:<br>itms-services://?action=download-manifest&url=https://nsb5cjslfbgwrwvkz6njn0pp.preview.host-on.dev/manifest.plist</p>
 </div>
 </body>
 </html>
