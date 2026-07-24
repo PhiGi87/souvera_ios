@@ -48,6 +48,7 @@ final class NCManageDatabase: @unchecked Sendable {
 
     func openRealm() {
         let dirGroup = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: NCBrandOptions.shared.capabilitiesGroup)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let databaseFileUrl = dirGroup?.appendingPathComponent(NCGlobal.shared.appDatabaseNextcloud + "/" + databaseName)
         let configuration = Realm.Configuration(fileURL: databaseFileUrl,
                                                 schemaVersion: databaseSchemaVersion,
@@ -92,6 +93,7 @@ final class NCManageDatabase: @unchecked Sendable {
     @discardableResult
     func openRealmBackground() -> Bool {
         let dirGroup = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: NCBrandOptions.shared.capabilitiesGroup)
+            ?? FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first
         let databaseFileUrl = dirGroup?.appendingPathComponent(NCGlobal.shared.appDatabaseNextcloud + "/" + databaseName)
         let configuration = Realm.Configuration(fileURL: databaseFileUrl,
                                                 schemaVersion: databaseSchemaVersion,
