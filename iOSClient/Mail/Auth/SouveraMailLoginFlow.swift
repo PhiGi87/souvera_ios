@@ -1,0 +1,60 @@
+// SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Ported from souvera_android mail/SouveraMailLoginFlow.kt + CombinedAppPassword.kt.
+//
+// Wraps souvera_mail's `POST /apps/souvera_mail/app-passwords/login-flow` endpoint.
+//
+// Login Flow v2 hands the app a Nextcloud app-password `X` (kept as the account password for
+// Files/CalDAV/CardDAV). This endpoint mints an ADDITIONAL combined password `Y` that Stalwart
+// (IMAP/SMTP/Sieve) also accepts, used ONLY for the mail client. We deliberately use `/login-flow`
+// and NOT `/upgrade`: `/upgrade` revokes `X`, which would break WebDAV/DAV auth since those keep
+// using `X`. Keeping `X` and `Y` separate means no invalidation and no broken sync. Auth is HTTP
+// Basic with `X`.
+
+import Foundation
+
+/// One secret that Nextcloud (DAV) and Stalwart (IMAP/SMTP/Sieve) both accept.
+struct CombinedAppPassword: Decodable {
+    let loginName: String
+    let appPassword: String
+    let stalwartId: String
+}
+
+enum SouveraMailLoginFlow {
+    private static let description = "Souvera iOS"
+    private static let httpNotFound = 404
+
+    /// Fetches the combined app-password, retrying against the `/index.php` route on 404.
+    static func fetchCombinedAppPassword(baseUrl: String, username: String, currentAppPassword: String) async throws -> CombinedAppPassword {
+        do {
+            return try await request(baseUrl: baseUrl, username: username, currentAppPassword: currentAppPassword, useIndexPhp: false)
+        } catch let failure as HttpFailure where failure.code == httpNotFound {
+            return try await request(baseUrl: baseUrl, username: username, currentAppPassword: currentAppPassword, useIndexPhp: true)
+        }
+    }
+
+    struct HttpFailure: Error { let code: Int; let message: String }
+
+    private static func request(baseUrl: String, username: String, currentAppPassword: String, useIndexPhp: Bool) async throws -> CombinedAppPassword {
+        let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let path = useIndexPhp ? "/index.php/apps/souvera_mail" : "/apps/souvera_mail"
+        guard let url = URL(string: "\(root)\(path)/app-passwords/login-flow") else {
+            throw HttpFailure(code: -1, message: "Invalid URL")
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        let raw = "\(username):\(currentAppPassword)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["description": description])
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(code) else {
+            throw HttpFailure(code: code, message: "HTTP \(code) - \(String(data: data, encoding: .utf8) ?? "")")
+        }
+        return try JSONDecoder().decode(CombinedAppPassword.self, from: data)
+    }
+}

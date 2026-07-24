@@ -1,0 +1,165 @@
+name: Souvera Workspace - Signed Build
+
+on:
+  push:
+    branches:
+      - 'souvera/**'
+  workflow_dispatch:
+    inputs:
+      export_method:
+        description: 'Export method'
+        required: true
+        default: 'ad-hoc'
+        type: choice
+        options:
+          - ad-hoc
+          - app-store-connect
+          - development
+
+env:
+  PROJECT: Nextcloud.xcodeproj
+  SCHEME: Nextcloud
+  XCODE_VERSION: '26.0.1'
+  TEAM_ID: S76D7JCS9V
+
+jobs:
+  build-check:
+    name: Compile check (no signing)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Build for simulator (no signing)
+        run: |
+          set -o pipefail && \
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+          | xcbeautify --quieter
+
+  archive:
+    name: Archive & Export IPA
+    runs-on: macos-15
+    needs: build-check
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/')
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      # App Store Connect API key drives fully automatic signing:
+      # xcodebuild -allowProvisioningUpdates will create/fetch the certificate
+      # and every needed provisioning profile (one per bundle id/target) itself,
+      # as long as every target's CODE_SIGN_STYLE is Automatic and DEVELOPMENT_TEAM
+      # is set (both true for this project after the eu.souvera.workspace rebrand).
+      #
+      # Required repo secrets (Settings -> Secrets and variables -> Actions):
+      #   ASC_API_KEY_ID          - Key ID from App Store Connect > Users and Access > Keys
+      #   ASC_API_ISSUER_ID       - Issuer ID shown on the same Keys page
+      #   ASC_API_KEY_P8_BASE64   - `base64 -i AuthKey_XXXX.p8 | pbcopy`, paste the output
+      - name: Install App Store Connect API key
+        env:
+          ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+        run: |
+          mkdir -p ~/private_keys
+          KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
+          # Strip any whitespace/newlines the secret may carry, then decode.
+          printf '%s' "$ASC_API_KEY_P8_BASE64" | tr -d '[:space:]' | base64 --decode > "$KEYFILE"
+          # Fail fast with a clear message if the decoded key is not a valid PKCS#8 .p8.
+          if ! head -1 "$KEYFILE" | grep -q "BEGIN PRIVATE KEY"; then
+            echo "::error::ASC_API_KEY_P8_BASE64 did not decode to a valid .p8 (expected '-----BEGIN PRIVATE KEY-----'). Re-encode with: base64 -i AuthKey_XXXX.p8 | tr -d '\n'"
+            exit 1
+          fi
+          echo "API key decoded OK (Key ID ${ASC_API_KEY_ID})."
+
+      # NOTE: unit tests are intentionally NOT run in the archive job — the test host crashes on a
+      # pre-existing Realm configuration issue in CI, which is unrelated to producing an installable
+      # build. Tests run in a separate job/workflow once the Realm test setup is fixed.
+
+      - name: Archive
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          set -o pipefail && \
+          xcodebuild archive \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -archivePath "build/Souvera.xcarchive" \
+            -destination "generic/platform=iOS" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
+          | xcbeautify --quieter
+
+      - name: Write ExportOptions.plist
+        run: |
+          cat > ExportOptions.plist << PLIST
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${{ github.event.inputs.export_method || 'app-store-connect' }}</string>
+            <key>teamID</key>
+            <string>${{ env.TEAM_ID }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
+
+      - name: Export IPA
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath "build/Souvera.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Souvera Workspace IPA
+          path: build/export/*.ipa
+          retention-days: 14
+
+      - name: Upload to TestFlight
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: |
+          # altool looks for the key in ~/.appstoreconnect/private_keys/AuthKey_<id>.p8
+          mkdir -p ~/.appstoreconnect/private_keys
+          cp ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 ~/.appstoreconnect/private_keys/
+          IPA=$(ls build/export/*.ipa | head -1)
+          echo "Uploading $IPA to TestFlight…"
+          xcrun altool --upload-app -t ios -f "$IPA" \
+            --apiKey "$ASC_API_KEY_ID" --apiIssuer "$ASC_API_ISSUER_ID"
