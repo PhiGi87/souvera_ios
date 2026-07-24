@@ -1,9 +1,0 @@
-services:
-  ota:
-    build: .
-    ports:
-      - "80"
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.ota.rule=Host(`CHANGEME.preview.host-on.dev`)"
-      - "traefik.http.services.ota.loadbalancer.server.port=80"
