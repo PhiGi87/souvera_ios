@@ -70,11 +70,17 @@ final class NCBrandOptions: @unchecked Sendable {
     /// Hard-fixed production default — do not point this at the official Nextcloud proxy.
     static let SOUVERA_PUSH_PROXY_URL = "https://push.souvera.eu"
     var pushNotificationServerProxy: String = ""
+
+    /// Base domain for slug login: user enters just the workspace slug and
+    /// the full server URL is derived as https://<slug>.<domain>.
+    static let SOUVERA_DOMAIN = "souvera.work"
+    var souveraDomain: String = SOUVERA_DOMAIN
+
     var linkLoginHost: String = "https://souvera.eu"
     var linkloginPreferredProviders: String = "https://souvera.eu"
     var webLoginAutenticationProtocol: String = "souvera-login://"                             // example "abc://"
     var privacy: String = "https://souvera.eu/privacy"
-    var sourceCode: String = "https://github.com/nextcloud/ios"
+    var sourceCode: String = "https://souvera.work"
     var mobileconfig: String = "/remote.php/dav/provisioning/apple-provisioning.mobileconfig"
     var appStoreUrl: String = "https://apps.apple.com/app/souvera-workspace"
 
@@ -96,7 +102,7 @@ final class NCBrandOptions: @unchecked Sendable {
     var disable_multiaccount: Bool = false
     var disable_more_external_site: Bool = false
     var disable_openin_file: Bool = false                                                       // Don't touch me !!
-    var disable_crash_service: Bool = false
+    var disable_crash_service: Bool = true
     var disable_log: Bool = false
     var disable_mobileconfig: Bool = false  
     var disable_show_more_nextcloud_apps_in_settings: Bool = false

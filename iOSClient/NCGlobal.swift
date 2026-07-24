@@ -308,11 +308,11 @@ final class NCGlobal: Sendable {
 
     // WIDGET ACTION
     //
-    let widgetActionNoAction                                    = "nextcloud://open-action?action=no-action"
-    let widgetActionUploadAsset                                 = "nextcloud://open-action?action=upload-asset"
-    let widgetActionScanDocument                                = "nextcloud://open-action?action=add-scan-document"
-    let widgetActionTextDocument                                = "nextcloud://open-action?action=create-text-document"
-    let widgetActionVoiceMemo                                   = "nextcloud://open-action?action=create-voice-memo"
+    let widgetActionNoAction                                    = "souvera://open-action?action=no-action"
+    let widgetActionUploadAsset                                 = "souvera://open-action?action=upload-asset"
+    let widgetActionScanDocument                                = "souvera://open-action?action=add-scan-document"
+    let widgetActionTextDocument                                = "souvera://open-action?action=create-text-document"
+    let widgetActionVoiceMemo                                   = "souvera://open-action?action=create-voice-memo"
 
     // APPCONFIG
     //
@@ -331,13 +331,13 @@ final class NCGlobal: Sendable {
     let configuration_disable_openin_file                       = "disable_openin_file"
     let configuration_enforce_passcode_lock                     = "enforce_passcode_lock"
 
-    // MORE NEXTCLOUD APPS
+    // MORE SOUVERA APPS
     //
-    let talkSchemeUrl                                           = "nextcloudtalk://"
-    let notesSchemeUrl                                          = "nextcloudnotes://"
-    let talkAppStoreUrl                                         = "https://apps.apple.com/in/app/nextcloud-talk/id1296825574"
-    let notesAppStoreUrl                                        = "https://apps.apple.com/in/app/nextcloud-notes/id813973264"
-    let moreAppsUrl                                             = "itms-apps://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?media=software&term=nextcloud"
+    let talkSchemeUrl                                           = "souvera-link://"
+    let notesSchemeUrl                                          = "souvera-notes://"
+    let talkAppStoreUrl                                         = "https://apps.apple.com/app/souvera-workspace"
+    let notesAppStoreUrl                                        = "https://apps.apple.com/app/souvera-workspace"
+    let moreAppsUrl                                             = "itms-apps://search.itunes.apple.com/WebObjects/MZSearch.woa/wa/search?media=software&term=souvera"
 
     // SNAPSHOT PREVIEW
     //

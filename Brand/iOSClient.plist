@@ -46,8 +46,8 @@
 	<false/>
 	<key>LSApplicationQueriesSchemes</key>
 	<array>
-		<string>nextcloudtalk</string>
-		<string>nextcloudnotes</string>
+		<string>souvera-link</string>
+		<string>souvera-notes</string>
 	</array>
 	<key>LSMinimumSystemVersion</key>
 	<string>12.3</string>

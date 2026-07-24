@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Nextcloud GmbH
+// SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
 // SPDX-FileCopyrightText: 2025 Marino Faggiana
 // SPDX-FileCopyrightText: 2025 Milen Pivchev
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -79,7 +79,7 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         baseUrlTextField.leftViewMode = .always
         baseUrlTextField.rightView = UIView(frame: CGRect(x: 0, y: 0, width: 35, height: baseUrlTextField.frame.height))
         baseUrlTextField.rightViewMode = .always
-        baseUrlTextField.attributedPlaceholder = NSAttributedString(string: NSLocalizedString("_login_url_", comment: ""), attributes: [NSAttributedString.Key.foregroundColor: textColor.withAlphaComponent(0.5)])
+        baseUrlTextField.attributedPlaceholder = NSAttributedString(string: NSLocalizedString("_login_slug_placeholder_", comment: ""), attributes: [NSAttributedString.Key.foregroundColor: textColor.withAlphaComponent(0.5)])
         baseUrlTextField.delegate = self
 
         baseUrlTextField.isEnabled = !NCBrandOptions.shared.disable_request_login_url
@@ -327,6 +327,19 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         guard var url = baseUrlTextField.text?.trimmingCharacters(in: .whitespacesAndNewlines) else { return }
         if url.hasSuffix("/") { url = String(url.dropLast()) }
         if url.isEmpty { return }
+
+        // Souvera slug login: If the input looks like a bare slug (no dots, no protocol),
+        // derive the full server URL as https://<slug>.<domain>
+        let domain = NCBrandOptions.shared.souveraDomain
+        if !url.contains(".") && !url.hasPrefix("https") && !url.hasPrefix("http") {
+            let slug = SouveraServerUrl.extractSlug(rawInput: url, domain: domain)
+            if !slug.isEmpty {
+                url = SouveraServerUrl.buildUrl(slug: slug, domain: domain)
+                self.baseUrlTextField.text = url
+                isUrlValid(url: url)
+                return
+            }
+        }
 
         // Check whether baseUrl contain protocol. If not add https:// by default.
         if url.hasPrefix("https") == false && url.hasPrefix("http") == false {
