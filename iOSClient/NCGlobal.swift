@@ -21,15 +21,15 @@ final class NCGlobal: Sendable {
     let directoryProviderStorage                    = "File Provider Storage"
     let appApplicationSupport                       = "Library/Application Support"
     let appCertificates                             = "Library/Application Support/Certificates"
-    let appDatabaseNextcloud                        = "Library/Application Support/Nextcloud"
+    let appDatabaseNextcloud                        = "Library/Application Support/Souvera"
     let appScan                                     = "Library/Application Support/Scan"
     let appUserData                                 = "Library/Application Support/UserData"
 
     // Service
     //
-    let metadataKeyedUnarchiver                     = "it.twsweb.nextcloud.metadata"
-    let refreshTask                                 = "com.nextcloud.refreshTask"
-    let processingTask                              = "com.nextcloud.processingTask"
+    let metadataKeyedUnarchiver                     = "eu.souvera.workspace.metadata"
+    let refreshTask                                 = "eu.souvera.workspace.refreshTask"
+    let processingTask                              = "eu.souvera.workspace.processingTask"
 
     // App
     //
@@ -361,7 +361,7 @@ final class NCGlobal: Sendable {
 
     // DRAG & DROP
     //
-    let metadataOcIdDataRepresentation      = "text/com.nextcloud.ocId"
+    let metadataOcIdDataRepresentation      = "eu.souvera.workspace.ocId"
 
     // GROUP AMIN
     //

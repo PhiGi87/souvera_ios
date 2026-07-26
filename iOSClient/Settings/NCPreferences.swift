@@ -8,7 +8,7 @@ import KeychainAccess
 import NextcloudKit
 
 final class NCPreferences: NSObject {
-    let keychain = Keychain(service: "com.nextcloud.keychain")
+    let keychain = Keychain(service: "eu.souvera.workspace.keychain")
 
     var showDescription: Bool {
         get {

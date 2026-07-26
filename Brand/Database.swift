@@ -1,11 +1,9 @@
-// SPDX-FileCopyrightText: Nextcloud GmbH
+// SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
 // SPDX-FileCopyrightText: 2023 Marino Faggiana
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import Foundation
 
-// Database Realm
-//
-let databaseName                    = "nextcloud.realm"
+let databaseName                    = "souvera.realm"
 let tableAccountBackup              = "tableAccountBackup.json"
 let databaseSchemaVersion: UInt64   = 410

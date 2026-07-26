@@ -1,4 +1,4 @@
-// SPDX-FileCopyrightText: Nextcloud GmbH
+// SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
 // SPDX-FileCopyrightText: 2014 Marino Faggiana [Start 04/09/14]
 // SPDX-FileCopyrightText: 2021 Marino Faggiana [Swift 19/02/21]
 // SPDX-License-Identifier: GPL-3.0-or-later
@@ -25,7 +25,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     var loginFlowV2Endpoint = ""
     var loginFlowV2Login = ""
 
-    let backgroundQueue = DispatchQueue(label: "com.nextcloud.bgTaskQueue")
+    let backgroundQueue = DispatchQueue(label: "eu.souvera.workspace.bgTaskQueue")
     let global = NCGlobal.shared
 
     var bgTask: UIBackgroundTaskIdentifier = .invalid
@@ -44,7 +44,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         utilityFileSystem.emptyTemporaryDirectory()
         utilityFileSystem.clearCacheDirectory("com.limit-point.LivePhoto")
 
-        let versionNextcloudiOS = String(format: NCBrandOptions.shared.textCopyrightNextcloudiOS, utility.getVersionBuild())
+        let versionSouveraiOS = String(format: NCBrandOptions.shared.textCopyrightNextcloudiOS, utility.getVersionBuild())
 
         NCAppVersionManager.shared.checkAndUpdateInstallState()
         NCSettingsBundleHelper.checkAndExecuteSettings(delay: 0)
@@ -77,7 +77,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 //      NextcloudKit.configureLoggerWhitelist(whitelist: white)
         #endif
 
-        nkLog(start: "Start session with level \(NCPreferences().log) " + versionNextcloudiOS)
+        nkLog(start: "Start session with level \(NCPreferences().log) " + versionSouveraiOS)
 
         // Push Notification & display notification
         UNUserNotificationCenter.current().getNotificationSettings { settings in
