@@ -39,6 +39,7 @@ final class MailViewModel: ObservableObject {
     @Published var body: MailUiState<MessageBody> = .loading
     @Published var fromAddress = ""
     @Published var fromName = ""
+    @Published var fromAddresses: [String] = []
     @Published var isSending = false
     @Published var sendError: String?
 
@@ -56,11 +57,37 @@ final class MailViewModel: ObservableObject {
                 return
             }
             mailAccount = account
-            fromAddress = account.username.contains("@") ? account.username : account.username
+            let resolved = account.username.contains("@") ? account.username : account.username
+            fromAddress = resolved
+            fromAddresses = [resolved]
             fromName = NCManageDatabase.shared.getActiveTableAccount()?.displayName ?? account.username
+            let aliases = await fetchAliases(account: account)
+            if !aliases.isEmpty {
+                for alias in aliases where !fromAddresses.contains(alias) {
+                    fromAddresses.append(alias)
+                }
+            }
             client = MailImapClient(account: account)
             await loadMailboxes()
         }
+    }
+
+    private func fetchAliases(account: MailAccount) async -> [String] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        let baseUrl = tbl.urlBase
+        let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(root)/ocs/v2.php/apps/souvera_mail/api/v1/aliases") else { return [] }
+        var req = URLRequest(url: url)
+        let davPassword = NCPreferences().getPassword(account: account.account)
+        let raw = "\(account.username):\(davPassword)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = json["ocs"] as? [String: Any],
+              let data = ocs["data"] as? [[String: Any]] else { return [] }
+        return data.compactMap { $0["alias"] as? String ?? $0["email"] as? String }
     }
 
     func loadMailboxes() async {

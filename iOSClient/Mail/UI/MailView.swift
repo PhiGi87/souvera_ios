@@ -221,16 +221,39 @@ struct MailComposeView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var to = ""
+    @State private var cc = ""
+    @State private var bcc = ""
     @State private var subject = ""
     @State private var bodyText = ""
+    @State private var showCcBcc = false
+    @State private var selectedFromIndex = 0
 
     var body: some View {
         NavigationStack {
             Form {
+                if viewModel.fromAddresses.count > 1 {
+                    Section {
+                        Picker(NSLocalizedString("_mail_from_", comment: ""), selection: $selectedFromIndex) {
+                            ForEach(Array(viewModel.fromAddresses.enumerated()), id: \.offset) { _, addr in
+                                Text(addr).tag(viewModel.fromAddresses.firstIndex(of: addr) ?? 0)
+                            }
+                        }
+                    }
+                }
                 Section {
                     TextField(NSLocalizedString("_mail_to_", comment: ""), text: $to)
                         .keyboardType(.emailAddress).autocapitalization(.none)
+                    if showCcBcc {
+                        TextField(NSLocalizedString("_mail_cc_", comment: ""), text: $cc)
+                            .keyboardType(.emailAddress).autocapitalization(.none)
+                        TextField(NSLocalizedString("_mail_bcc_", comment: ""), text: $bcc)
+                            .keyboardType(.emailAddress).autocapitalization(.none)
+                    }
                     TextField(NSLocalizedString("_mail_subject_", comment: ""), text: $subject)
+                    if !showCcBcc {
+                        Button(NSLocalizedString("_mail_show_cc_bcc_", comment: "")) { showCcBcc = true }
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 Section {
                     TextEditor(text: $bodyText).frame(minHeight: 220)
@@ -252,8 +275,11 @@ struct MailComposeView: View {
                         Button(NSLocalizedString("_mail_send_", comment: "")) {
                             var outgoing = OutgoingMessage()
                             outgoing.to = to.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                            outgoing.cc = cc.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+                            outgoing.bcc = bcc.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                             outgoing.subject = subject
                             outgoing.body = bodyText
+                            viewModel.fromAddress = viewModel.fromAddresses[selectedFromIndex]
                             viewModel.send(outgoing)
                             dismiss()
                         }

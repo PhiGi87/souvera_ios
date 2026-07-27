@@ -90,7 +90,8 @@ actor MailImapClient {
             try await self.withConnection { connection in
                 _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
                 guard let set = self.uidSet(uid) else { return MessageBody(plainText: nil, html: nil, attachments: []) }
-                let result = try await connection.send(.uidFetch(set, [.bodyStructure(extensions: true)], []))
+                let section = BCParameters(section: SectionSpecification([]), peek: false)
+                let result = try await connection.send(.uidFetch(set, [.body(parameter: section)], []))
                 return MailIMAPResponseParser.body(from: result)
             }
         }

@@ -838,3 +838,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_send_"                   = "Send";
 "_mail_no_subject_"             = "(no subject)";
 "_mail_credential_failed_"      = "Could not set up mail. Please try again.";
+"_mail_cc_"                     = "Cc";
+"_mail_bcc_"                    = "Bcc";
+"_mail_from_"                   = "From";
+"_mail_show_cc_bcc_"            = "Add Cc/Bcc";
