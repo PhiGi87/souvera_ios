@@ -110,7 +110,7 @@ enum MailIMAPResponseParser {
         }
     }
 
-    private static func addresses(from list: [Address]) -> String {
+    private static func addresses<T: Collection>(from list: T) -> String {
         list.compactMap { addr in
             guard case let .singleAddress(single) = addr else { return nil }
             let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""

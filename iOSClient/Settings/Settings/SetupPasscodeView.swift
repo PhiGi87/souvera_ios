@@ -68,7 +68,7 @@ struct SetupPasscodeView: UIViewControllerRepresentable {
         Coordinator(self)
     }
 
-    class Coordinator: NSObject, @MainActor TOPasscodeSettingsViewControllerDelegate, @MainActor TOPasscodeViewControllerDelegate {
+    class Coordinator: NSObject, TOPasscodeSettingsViewControllerDelegate, TOPasscodeViewControllerDelegate {
         var parent: SetupPasscodeView
         init(_ parent: SetupPasscodeView) {
             self.parent = parent
