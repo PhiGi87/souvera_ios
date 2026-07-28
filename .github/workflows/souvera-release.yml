@@ -39,13 +39,11 @@ jobs:
             -scheme "$SCHEME" \
             -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
             -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee build.log | grep -E 'error:|warning:|BUILD|note:.*error|failed|FAILED' || true
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::BUILD FAILED — see full log below"
-            cat build.log
-            exit 1
-          fi
+            2>&1 | tee build.log | grep -E 'error:|BUILD FAILED' || true
+          [ ${PIPESTATUS[0]} -eq 0 ] || { cat build.log | grep 'error:'; exit 1; }
 
   archive:
     name: Archive & Export IPA
