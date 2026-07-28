@@ -26,14 +26,22 @@ public extension View {
             }
             .frame(maxWidth: .infinity, alignment: .center)
 
-        if #available(iOS 26, *) {
+        if #available(iOS 18, *) {
             base
                 .background(
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .fill(backgroundColor)
                         .id(backgroundColor)
                 )
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .background(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .fill(.ultraThinMaterial)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(backgroundColor, lineWidth: 0.6)
+                        .allowsHitTesting(false)
+                )
                 .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 4)
                 .frame(maxWidth: .infinity, alignment: .center)
 
@@ -91,13 +99,9 @@ public extension View {
                 self
             }
 
-        // ---- iOS 26+ effect: drawOn ----
+        // ---- iOS 26+ effect: drawOn (not available in this Xcode SDK) ----
         case .drawOn:
-            if #available(iOS 26, *) {
-                self.symbolEffect(.drawOn)
-            } else {
-                self
-            }
+            self
 
         // ---- no animation ----
         case .none:
