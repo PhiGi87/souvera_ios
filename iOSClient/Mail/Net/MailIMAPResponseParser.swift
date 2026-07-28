@@ -102,16 +102,16 @@ enum MailIMAPResponseParser {
             }
             m.toAddresses = addresses(from: envelope.to)
             m.ccAddresses = addresses(from: envelope.cc)
-            if let dateStr = envelope.date, let parsed = parseEnvelopeDate(dateStr) {
-                m.dateSent = parsed
+            if let date = envelope.date {
+                m.dateSent = date
             }
         default:
             break
         }
     }
 
-    private static func addresses<T: Collection>(from list: T) -> String {
-        list.compactMap { addr in
+    private static func addresses(from list: [NIOIMAPCore.Envelope.Address]) -> String {
+        list.compactMap { addr -> String? in
             guard case let .singleAddress(single) = addr else { return nil }
             let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""
             let host = single.host.map { String(buffer: $0) } ?? ""
@@ -134,13 +134,15 @@ enum MailIMAPResponseParser {
     }
 
     /// Assembles a MessageBody from streaming BODY[] FETCH data.
-    /// Collects all .stream data chunks, then parses the result as MIME or plain text.
     static func body(from result: IMAPCommandResult) -> MessageBody {
         var bodyData = Data()
         for response in result.untagged {
             guard case let .fetch(fetch) = response else { continue }
-            if case let .stream(_, buffer) = fetch, let buf = buffer {
-                bodyData.append(buf.readData(length: buf.readableBytes) ?? Data())
+            // In swift-nio-imap 0.4+, body data comes through simpleAttribute .bodySection
+            switch fetch {
+            case let .simpleAttribute(.bodySection(_, data, _)):
+                for chunk in data { bodyData.append(Data(chunk.bytes)) }
+            default: break
             }
         }
         guard !bodyData.isEmpty else { return MessageBody(plainText: nil, html: nil, attachments: []) }
