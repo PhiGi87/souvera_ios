@@ -221,7 +221,7 @@ struct HudBannerViewIndeterminate: View {
                         .fill(backgroundColor)
                         .id(backgroundColor)
                 )
-                .glassEffect(.clear, in: RoundedRectangle(cornerRadius: cornerRadius))
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: cornerRadius))
                 .shadow(color: .black.opacity(0.5), radius: 10, x: 0, y: 4)
         } else {
             content()

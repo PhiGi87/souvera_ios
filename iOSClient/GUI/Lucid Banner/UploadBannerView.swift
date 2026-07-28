@@ -99,7 +99,7 @@ struct UploadBannerView: View {
                          Image(systemName: "checkmark")
                              .font(.icon(30, weight: .semibold))
                              .foregroundStyle(.green)
-                             .symbolEffect(.drawOn, isActive: trigger)
+                             .symbolEffect(.variableColor, isActive: trigger)
                              .task {
                                  try? await Task.sleep(for: .seconds(0.1))
                                  trigger = false
