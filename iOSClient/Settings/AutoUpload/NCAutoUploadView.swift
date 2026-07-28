@@ -320,7 +320,7 @@ struct NCAutoUploadView: View {
                 toggle
                     .font(.body)
                     .toggleStyle(.button)
-                    .buttonStyle(.glass)
+                    .buttonStyle(.borderedProminent)
             } else {
                 toggle
                     .font(.body)

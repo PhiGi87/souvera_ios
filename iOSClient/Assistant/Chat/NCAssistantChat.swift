@@ -58,7 +58,7 @@ struct NCAssistantChat: View {
 
                         if #available(iOS 26.0, *) {
                             button
-                                .buttonStyle(.glass)
+                                .buttonStyle(.borderedProminent)
                         } else {
                             button
                                 .buttonStyle(.bordered)
