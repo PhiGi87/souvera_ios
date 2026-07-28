@@ -686,7 +686,7 @@ private extension View {
     ) -> some View {
         if #available(iOS 26.0, *) {
             self
-                .glassEffect(.regular, in: shape)
+                .background(.ultraThinMaterial, in: shape)
                 .overlay {
                     shape
                         .stroke(.white.opacity(0.58), lineWidth: 1.2)

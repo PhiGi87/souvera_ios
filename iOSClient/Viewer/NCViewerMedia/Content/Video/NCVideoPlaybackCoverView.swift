@@ -71,7 +71,7 @@ private extension View {
     func coverPlayButtonBackground(isEnabled: Bool) -> some View {
         if #available(iOS 26.0, *) {
             self
-                .glassEffect(.regular, in: .circle)
+                .background(.ultraThinMaterial, in: Circle())
                 .overlay {
                     Circle()
                         .stroke(.white.opacity(0.58), lineWidth: 1.2)
