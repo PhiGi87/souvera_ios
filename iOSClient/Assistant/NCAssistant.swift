@@ -282,7 +282,8 @@ struct NavigationSubtitleModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.navigationSubtitle(subtitle ?? "")
+            content/* navigationSubtitle removed in iOS 26 */
+            /* .navigationSubtitle(subtitle ?? "") */
         } else {
             content
         }
