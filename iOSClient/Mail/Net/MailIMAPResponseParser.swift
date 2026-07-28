@@ -103,7 +103,9 @@ enum MailIMAPResponseParser {
             m.toAddresses = envAddressListStr(envelope.to)
             m.ccAddresses = envAddressListStr(envelope.cc)
             if let date = envelope.date {
-                m.dateSent = Date(timeIntervalSince1970: date.timeIntervalSince1970)
+                // InternetMessageDate wraps an internal date representation
+                let dateStr = String(describing: date)
+                m.dateSent = parseEnvelopeDate(dateStr) ?? Date.distantPast
             }
         default:
             break
@@ -122,9 +124,9 @@ enum MailIMAPResponseParser {
             var mailbox = "", host = "", personName = ""
             for child in innerMirror.children {
                 switch child.label {
-                case "mailbox": mailbox = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
-                case "host": host = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
-                case "personName": personName = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                case "mailbox": mailbox = (child.value as? NIOCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                case "host": host = (child.value as? NIOCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                case "personName": personName = (child.value as? NIOCore.ByteBuffer).map { String(buffer: $0) } ?? ""
                 default: break
                 }
             }
