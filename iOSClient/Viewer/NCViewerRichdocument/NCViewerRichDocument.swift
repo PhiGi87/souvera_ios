@@ -127,7 +127,7 @@ class NCViewerRichDocument: UIViewController, WKNavigationDelegate, WKScriptMess
 
         // Prevent back navigation gesture of iOS >= 26 as that can cause unintended swipe backs
         if #available(iOS 26.0, *) {
-            navigationController?.interactiveContentPopGestureRecognizer?.isEnabled = false
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         }
 
         Task {
@@ -399,7 +399,7 @@ class NCViewerRichDocument: UIViewController, WKNavigationDelegate, WKScriptMess
 
     public func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         if #available(iOS 26.0, *) {
-            navigationController?.interactiveContentPopGestureRecognizer?.isEnabled = false
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         }
 
         NCActivityIndicator.shared.stop()
