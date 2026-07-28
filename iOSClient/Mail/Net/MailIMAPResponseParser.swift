@@ -110,7 +110,7 @@ enum MailIMAPResponseParser {
         }
     }
 
-    private static func addresses(from list: [NIOIMAPCore.Address]) -> String {
+    private static func addresses(from list: [NIOIMAP.Address]) -> String {
         list.compactMap { addr -> String? in
             guard case let .singleAddress(single) = addr else { return nil }
             let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""
