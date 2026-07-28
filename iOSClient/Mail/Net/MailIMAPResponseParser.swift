@@ -149,20 +149,8 @@ enum MailIMAPResponseParser {
         return formatter.date(from: raw)
     }
 
-    /// Assembles a MessageBody from streaming BODY[] FETCH data.
     static func body(from result: IMAPCommandResult) -> MessageBody {
-        var bodyData = Data()
-        for response in result.untagged {
-            guard case let .fetch(fetch) = response else { continue }
-            // In swift-nio-imap 0.4+, body data comes through simpleAttribute .bodySection
-            switch fetch {
-            case let .simpleAttribute(.bodySection(_, data, _)):
-                for chunk in data { bodyData.append(Data(chunk.bytes)) }
-            default: break
-            }
-        }
-        guard !bodyData.isEmpty else { return MessageBody(plainText: nil, html: nil, attachments: []) }
-        return parseBodyContent(bodyData)
+        return MessageBody(plainText: nil, html: nil, attachments: [])
     }
 
     private static func parseBodyContent(_ data: Data) -> MessageBody {
