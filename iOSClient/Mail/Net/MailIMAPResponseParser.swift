@@ -100,8 +100,8 @@ enum MailIMAPResponseParser {
                 let host = addr.host.map { String(buffer: $0) } ?? ""
                 m.fromAddress = host.isEmpty ? mailbox : "\(mailbox)@\(host)"
             }
-            m.toAddresses = addresses(from: envelope.to)
-            m.ccAddresses = addresses(from: envelope.cc)
+            m.toAddresses = envAddressListStr(envelope.to)
+            m.ccAddresses = envAddressListStr(envelope.cc)
             if let date = envelope.date {
                 m.dateSent = date
             }
@@ -110,16 +110,21 @@ enum MailIMAPResponseParser {
         }
     }
 
-    private static func addresses(from list: [NIOIMAP.Address]) -> String {
-        list.compactMap { addr -> String? in
-            guard case let .singleAddress(single) = addr else { return nil }
-            let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""
-            let host = single.host.map { String(buffer: $0) } ?? ""
-            let name = single.personName.map { String(buffer: $0) } ?? ""
-            let email = host.isEmpty ? mailbox : "\(mailbox)@\(host)"
-            if name.isEmpty { return email }
-            return "\(name) <\(email)>"
-        }.joined(separator: ", ")
+    /// Joins an envelope address list using the same pattern as the .from extraction above.
+    private static func envAddressListStr(_ list: some Collection) -> String {
+        var result = ""
+        for addr in list {
+            if case let .singleAddress(single) = addr {
+                if !result.isEmpty { result += ", " }
+                let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""
+                let host = single.host.map { String(buffer: $0) } ?? ""
+                let name = single.personName.map { String(buffer: $0) } ?? ""
+                let email = host.isEmpty ? mailbox : "\(mailbox)@\(host)"
+                if name.isEmpty { result += email }
+                else { result += "\(name) <\(email)>" }
+            }
+        }
+        return result
     }
 
     private static func parseEnvelopeDate(_ raw: String) -> Date? {
