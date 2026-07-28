@@ -103,26 +103,35 @@ enum MailIMAPResponseParser {
             m.toAddresses = envAddressListStr(envelope.to)
             m.ccAddresses = envAddressListStr(envelope.cc)
             if let date = envelope.date {
-                m.dateSent = date
+                m.dateSent = Date(timeIntervalSince1970: date.timeIntervalSince1970)
             }
         default:
             break
         }
     }
 
-    /// Joins an envelope address list using the same pattern as the .from extraction above.
     private static func envAddressListStr(_ list: some Collection) -> String {
         var result = ""
         for addr in list {
-            if case let .singleAddress(single) = addr {
-                if !result.isEmpty { result += ", " }
-                let mailbox = single.mailbox.map { String(buffer: $0) } ?? ""
-                let host = single.host.map { String(buffer: $0) } ?? ""
-                let name = single.personName.map { String(buffer: $0) } ?? ""
-                let email = host.isEmpty ? mailbox : "\(mailbox)@\(host)"
-                if name.isEmpty { result += email }
-                else { result += "\(name) <\(email)>" }
+            let mirror = Mirror(reflecting: addr)
+            let children = Array(mirror.children)
+            guard children.count > 0 else { continue }
+            // Address.singleAddress(addr) → child is the inner Address struct
+            let inner = children[0].value
+            let innerMirror = Mirror(reflecting: inner)
+            var mailbox = "", host = "", personName = ""
+            for child in innerMirror.children {
+                switch child.label {
+                case "mailbox": mailbox = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                case "host": host = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                case "personName": personName = (child.value as? NIOIMAPCore.ByteBuffer).map { String(buffer: $0) } ?? ""
+                default: break
+                }
             }
+            let email = host.isEmpty ? mailbox : "\(mailbox)@\(host)"
+            if !result.isEmpty { result += ", " }
+            if personName.isEmpty { result += email }
+            else { result += "\(personName) <\(email)>" }
         }
         return result
     }
