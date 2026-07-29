@@ -133,11 +133,20 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" \
             ONLY_ACTIVE_ARCH=NO \
             2>&1 | tee archive.log
+          echo $'\n' >> archive.log
+          echo "=== xcodebuild exit code: ${PIPESTATUS[0]} ===" >> archive.log
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::ARCHIVE FAILED"
-            grep -E 'error:' archive.log || true
+            cat archive.log
             exit 1
           fi
+
+      - name: Upload archive log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-log
+          path: archive.log
+          retention-days: 3
 
       - name: Write ExportOptions.plist
         run: |
