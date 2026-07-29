@@ -6443,7 +6443,6 @@
 					"@executable_path/../../Frameworks",
 				);
 				MARKETING_VERSION = 33.1.0;
-				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CFLAGS = "-v";
 				OTHER_LDFLAGS = "";
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";

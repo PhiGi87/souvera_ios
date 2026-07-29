@@ -97,18 +97,25 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
-          set -o pipefail && \
+          set -o pipefail
           xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
+            -skipPackagePluginValidation \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
             -authenticationKeyID "$ASC_API_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-          | xcbeautify --quieter
+            ONLY_ACTIVE_ARCH=NO \
+            2>&1 | tee archive.log
+          if [ ${PIPESTATUS[0]} -ne 0 ]; then
+            echo "::error::ARCHIVE FAILED"
+            grep -E 'error:' archive.log || true
+            exit 1
+          fi
 
       - name: Write ExportOptions.plist
         run: |
