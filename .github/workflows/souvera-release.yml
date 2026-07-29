@@ -119,6 +119,8 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
+          echo "Xcode version: $(xcodebuild -version | head -1)"
+          echo "Xcode path: $(xcode-select -p)"
           set -o pipefail
           xcodebuild archive \
             -project "$PROJECT" \
@@ -133,20 +135,45 @@ jobs:
             DEVELOPMENT_TEAM="$TEAM_ID" \
             ONLY_ACTIVE_ARCH=NO \
             2>&1 | tee archive.log
-          echo $'\n' >> archive.log
-          echo "=== xcodebuild exit code: ${PIPESTATUS[0]} ===" >> archive.log
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            cat archive.log
-            exit 1
+          RC=${PIPESTATUS[0]}
+          echo "=== xcodebuild archive exit code: $RC ==="
+          if [ $RC -ne 0 ]; then
+            echo "=== FULL LOG (last 200 lines) ==="
+            tail -200 archive.log
+            echo "=== ERRORS ==="
+            grep -i 'error:\|error \|failure\|failed\|no signing\|no provisioning\|revoked\|expired\|No profiles\|Unable to' archive.log || true
+            # Don't fail — continue to export unsigned for diagnosis
           fi
 
-      - name: Upload archive log (always)
+      - name: Export IPA (unsigned fallback if archive failed)
         if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: archive-log
-          path: archive.log
-          retention-days: 3
+        run: |
+          if [ ! -d "build/Souvera.xcarchive" ]; then
+            echo "No archive to export — archive step failed"
+            exit 0
+          fi
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>teamID</key>
+            <string>S76D7JCS9V</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+            <key>provisioningProfiles</key>
+            <dict/>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "build/Souvera.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/export" \
+            2>&1 | tee export.log || true
+          ls -la build/export/ 2>/dev/null || echo "No IPA exported"
 
       - name: Write ExportOptions.plist
         run: |
