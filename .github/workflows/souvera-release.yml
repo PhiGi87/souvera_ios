@@ -161,10 +161,64 @@ jobs:
         if: always()
         run: |
           mkdir -p build/logs
-          for f in archive.log archive-fallback.log device-build.log; do
+          for f in archive.log archive-fallback.log device-build.log export-fallback.log; do
             [ -f "$f" ] && cp "$f" build/logs/
           done
           ls -la build/logs/ || true
+
+      - name: Show signing error summary
+        if: steps.archive.outcome != 'success'
+        run: |
+          echo "================================================"
+          echo "SIGNING FAILED — check archive.log for details."
+          echo "Common causes:"
+          echo "1. Max certificates reached → revoke old certs:"
+          echo "   https://developer.apple.com/account/resources/certificates/list"
+          echo "2. Bundle IDs not registered → create in App Store Connect:"
+          echo "   https://appstoreconnect.apple.com/apps"
+          echo "3. API key lacks 'Developer' role (needs Certificates access)"
+          echo "================================================"
+          grep -c 'Choose a certificate to revoke' archive.log 2>/dev/null && echo "ACTION: Revoke old certificates in Apple Developer Portal" || true
+          grep -c 'No profiles for' archive.log 2>/dev/null && echo "ACTION: Once certs are cleared, re-run — profiles will be auto-created" || true
+
+      - name: Export Dev IPA (from fallback archive)
+        if: steps.archive.outcome != 'success'
+        run: |
+          if [ ! -d "build/Souvera.xcarchive" ]; then
+            echo "No archive to export"
+            exit 0
+          fi
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>teamID</key>
+            <string>S76D7JCS9V</string>
+            <key>signingStyle</key>
+            <string>manual</string>
+          </dict>
+          </plist>
+          PLIST
+          xcodebuild -exportArchive \
+            -archivePath "build/Souvera.xcarchive" \
+            -exportOptionsPlist ExportOptions.plist \
+            -exportPath "build/export" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee export-fallback.log || true
+          ls -la build/export/ || echo "No IPA produced"
+
+      - name: Upload Dev IPA artifact
+        if: steps.archive.outcome != 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Souvera Workspace Dev IPA
+          path: build/export/*.ipa
+          retention-days: 7
 
       - name: Upload build logs
         if: always()
