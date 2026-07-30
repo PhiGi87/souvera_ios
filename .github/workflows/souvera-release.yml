@@ -131,6 +131,7 @@ jobs:
 
       - name: Clean up old certificates (if no stored cert)
         if: steps.cert_import.outputs.IMPORTED != 'yes'
+        continue-on-error: true
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
@@ -276,6 +277,7 @@ print(jwt.encode({'iss':'$ASC_API_ISSUER_ID','exp':now+300,'aud':'appstoreconnec
 
       - name: Persist signing certificate
         if: steps.archive.outcome == 'success' && steps.cert_import.outputs.IMPORTED != 'yes'
+        continue-on-error: true
         env:
           IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
         run: |
