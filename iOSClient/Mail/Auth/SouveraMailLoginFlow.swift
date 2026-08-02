@@ -1,20 +1,18 @@
-// SPDX-FileCopyrightText: 2026 Host-On Service Provider GmbH (Souvera)
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+// SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Ported from souvera_android mail/SouveraMailLoginFlow.kt + CombinedAppPassword.kt.
 //
 // Wraps souvera_mail's `POST /apps/souvera_mail/app-passwords/login-flow` endpoint.
 //
-// Login Flow v2 hands the app a Nextcloud app-password `X` (kept as the account password for
-// Files/CalDAV/CardDAV). This endpoint mints an ADDITIONAL combined password `Y` that Stalwart
-// (IMAP/SMTP/Sieve) also accepts, used ONLY for the mail client. We deliberately use `/login-flow`
-// and NOT `/upgrade`: `/upgrade` revokes `X`, which would break WebDAV/DAV auth since those keep
-// using `X`. Keeping `X` and `Y` separate means no invalidation and no broken sync. Auth is HTTP
-// Basic with `X`.
+// Login Flow v2 hands the app a Nextcloud app-password `X` (kept as the account
+// password for Files/CalDAV/CardDAV). This endpoint mints an ADDITIONAL combined
+// password `Y` that Stalwart (JMAP/IMAP/SMTP/Sieve) also accepts, used ONLY for
+// the mail client. Keeping `X` and `Y` separate means no invalidation and no
+// broken sync. Auth is HTTP Basic with `X`.
 
 import Foundation
 
-/// One secret that Nextcloud (DAV) and Stalwart (IMAP/SMTP/Sieve) both accept.
 struct CombinedAppPassword: Decodable {
     let loginName: String
     let appPassword: String
@@ -25,7 +23,6 @@ enum SouveraMailLoginFlow {
     private static let description = "Souvera iOS"
     private static let httpNotFound = 404
 
-    /// Fetches the combined app-password, retrying against the `/index.php` route on 404.
     static func fetchCombinedAppPassword(baseUrl: String, username: String, currentAppPassword: String) async throws -> CombinedAppPassword {
         do {
             return try await request(baseUrl: baseUrl, username: username, currentAppPassword: currentAppPassword, useIndexPhp: false)
