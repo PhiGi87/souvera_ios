@@ -7,8 +7,6 @@
 
 import Foundation
 
-typealias JSONDictionary = [String: Any]
-typealias JSONArray = [Any]
 
 enum JmapCapabilities {
     static let core = "urn:ietf:params:jmap:core"
@@ -19,13 +17,13 @@ enum JmapCapabilities {
 
 struct JmapMethodCall {
     let name: String
-    let args: JSONDictionary
+    let args: [String: Any]
     let callId: String
 }
 
 struct JmapMethodResponse {
     let name: String
-    let args: JSONDictionary
+    let args: [String: Any]
     let callId: String
 }
 
@@ -34,7 +32,7 @@ struct JmapError {
     let description: String?
     let callId: String?
 
-    static func from(_ args: JSONDictionary, callId: String?) -> JmapError {
+    static func from(_ args: [String: Any], callId: String?) -> JmapError {
         JmapError(
             type: args["type"] as? String ?? "unknown",
             description: args["description"] as? String,
@@ -60,7 +58,7 @@ struct JmapSessionInfo {
     let accountId: String
     let primaryAccountId: String
     let username: String
-    let capabilities: [String: JSONDictionary]
+    let capabilities: [String: [String: Any]]
     let state: String?
 }
 
@@ -76,34 +74,18 @@ enum JmapException: Error {
     case authNeedsBearer(String)
 }
 
-extension JSONDictionary {
-    func optString(_ key: String) -> String? {
-        self[key] as? String
-    }
 
-    func optInt(_ key: String) -> Int {
-        self[key] as? Int ?? 0
-    }
 
+
+extension Dictionary where Key == String, Value == Any {
+    func optString(_ key: String) -> String? { self[key] as? String }
+    func optInt(_ key: String) -> Int { self[key] as? Int ?? 0 }
     func optInt64(_ key: String) -> Int64 {
         if let v = self[key] as? Int64 { return v }
         if let v = self[key] as? Int { return Int64(v) }
         return 0
     }
-
-    func optBool(_ key: String) -> Bool {
-        self[key] as? Bool ?? false
-    }
-
-    func optDict(_ key: String) -> JSONDictionary? {
-        self[key] as? JSONDictionary
-    }
-
-    func optArray(_ key: String) -> JSONArray? {
-        self[key] as? JSONArray
-    }
-
-    func optDouble(_ key: String) -> Double {
-        self[key] as? Double ?? 0
-    }
+    func optBool(_ key: String) -> Bool { self[key] as? Bool ?? false }
+    func optDict(_ key: String) -> [String: Any]? { self[key] as? [String: Any] }
+    func optArray(_ key: String) -> [Any]? { self[key] as? [Any] }
 }
