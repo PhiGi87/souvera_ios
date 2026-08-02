@@ -60,7 +60,12 @@ actor JmapClient {
         _ calls: [JmapMethodCall],
         using: [String] = [JmapCapabilities.core, JmapCapabilities.mail]
     ) async throws -> JmapBatchResult {
-        let apiUrl = resolvedApiUrl ?? (try await resolveApiUrl())
+        let apiUrl: String
+        if let resolved = resolvedApiUrl {
+            apiUrl = resolved
+        } else {
+            apiUrl = try await resolveApiUrl()
+        }
 
         let methodCalls: [Any] = calls.map {
             [$0.name, $0.args, $0.callId] as [Any]
@@ -180,7 +185,10 @@ actor JmapClient {
     }
 
     private func ensureSession() async throws -> JmapSessionInfo {
-        try jmapSession ?? refreshSession()
+        if let s = jmapSession {
+            return s
+        }
+        return try await refreshSession()
     }
 
     // MARK: - Internal
