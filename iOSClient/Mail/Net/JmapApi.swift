@@ -21,15 +21,15 @@ final class JmapApi {
 
     // MARK: - Mailbox/get
 
-    func getMailboxes(accountId: String) async throws -> [JSONDictionary] {
-        var args: JSONDictionary = [:]
+    func getMailboxes(accountId: String) async throws -> [[String: Any]] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
         args["ids"] = NSNull()
 
         let resp = try await client.singleCall("Mailbox/get", args: args)
-        guard let list = resp["list"] as? [JSONDictionary] else {
+        guard let list = resp["list"] as? [[String: Any]] else {
             throw JmapException.protocolError("Mailbox/get returned no list")
         }
         return list
@@ -44,8 +44,8 @@ final class JmapApi {
         limit: Int = 50,
         anchor: Int64? = nil,
         filterText: String? = nil
-    ) async throws -> JSONDictionary {
-        var filter: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var filter: [String: Any] = [:]
         if !inMailboxId.isEmpty {
             filter["inMailbox"] = inMailboxId
         }
@@ -53,7 +53,7 @@ final class JmapApi {
             filter["text"] = text
         }
 
-        var args: JSONDictionary = [:]
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -77,8 +77,8 @@ final class JmapApi {
         accountId: String,
         sinceState: String?,
         inMailboxId: String? = nil
-    ) async throws -> JSONDictionary {
-        var args: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -100,8 +100,8 @@ final class JmapApi {
         accountId: String,
         ids: [String],
         bodyProperties: [String]? = nil
-    ) async throws -> [JSONDictionary] {
-        var args: JSONDictionary = [:]
+    ) async throws -> [[String: Any]] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -111,7 +111,7 @@ final class JmapApi {
         }
 
         let resp = try await client.singleCall("Email/get", args: args)
-        guard let list = resp["list"] as? [JSONDictionary] else {
+        guard let list = resp["list"] as? [[String: Any]] else {
             throw JmapException.protocolError("Email/get returned no list")
         }
         return list
@@ -124,10 +124,10 @@ final class JmapApi {
         emailIds: [String],
         keywordsToAdd: [String: Bool] = [:],
         keywordsToRemove: [String] = []
-    ) async throws -> JSONDictionary {
-        var updates: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var updates: [String: Any] = [:]
         for id in emailIds {
-            var update: JSONDictionary = [:]
+            var update: [String: Any] = [:]
             if !keywordsToAdd.isEmpty {
                 update["keywords/$add"] = keywordsToAdd
             }
@@ -136,7 +136,7 @@ final class JmapApi {
             }
             updates[id] = update
         }
-        var args: JSONDictionary = [:]
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -148,12 +148,12 @@ final class JmapApi {
         accountId: String,
         emailIds: [String],
         targetMailboxId: String
-    ) async throws -> JSONDictionary {
-        var updates: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var updates: [String: Any] = [:]
         for id in emailIds {
             updates[id] = ["mailboxIds": [targetMailboxId: true]]
         }
-        var args: JSONDictionary = [:]
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -161,8 +161,8 @@ final class JmapApi {
         return try await client.singleCall("Email/set", args: args)
     }
 
-    func deleteEmails(accountId: String, emailIds: [String]) async throws -> JSONDictionary {
-        var args: JSONDictionary = [:]
+    func deleteEmails(accountId: String, emailIds: [String]) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -184,20 +184,20 @@ final class JmapApi {
         plainText: String?,
         inReplyTo: String?,
         blobIds: [String]
-    ) async throws -> JSONDictionary {
-        var email: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var email: [String: Any] = [:]
         email["mailboxIds"] = [mailboxId: true]
         email["subject"] = subject
         email["keywords"] = ["$draft": true]
 
-        var bodyValues: JSONDictionary = [:]
+        var bodyValues: [String: Any] = [:]
 
         if let html = htmlBody, !html.isEmpty {
             email["htmlBody"] = [["partId": "1", "type": "text/html"]]
             bodyValues["1"] = ["value": html]
         }
         if let text = plainText, !text.isEmpty {
-            var bodies: [JSONDictionary] = (email["textBody"] as? [JSONDictionary]) ?? []
+            var bodies: [[String: Any]] = (email["textBody"] as? [[String: Any]]) ?? []
             let partId = htmlBody?.isEmpty == false ? "2" : "1"
             bodies.append(["partId": partId, "type": "text/plain"])
             email["textBody"] = bodies
@@ -225,7 +225,7 @@ final class JmapApi {
             email["attachments"] = blobIds.map { ["blobId": $0, "type": "application/octet-stream"] }
         }
 
-        var args: JSONDictionary = [:]
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -237,8 +237,8 @@ final class JmapApi {
         accountId: String,
         emailId: String,
         identityId: String
-    ) async throws -> JSONDictionary {
-        var args: JSONDictionary = [:]
+    ) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -252,8 +252,8 @@ final class JmapApi {
 
     // MARK: - Identity/get
 
-    func getIdentities(accountId: String) async throws -> [JSONDictionary] {
-        var args: JSONDictionary = [:]
+    func getIdentities(accountId: String) async throws -> [[String: Any]] {
+        var args: [String: Any] = [:]
         if !accountId.isEmpty {
             args["accountId"] = accountId
         }
@@ -262,6 +262,6 @@ final class JmapApi {
             args: args,
             using: [JmapCapabilities.core, JmapCapabilities.mail, JmapCapabilities.submission]
         )
-        return resp["list"] as? [JSONDictionary] ?? []
+        return resp["list"] as? [[String: Any]] ?? []
     }
 }

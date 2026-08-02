@@ -18,7 +18,7 @@ actor JmapClient {
 
     private var jmapSession: JmapSessionInfo?
     private var resolvedApiUrl: String?
-    private var resolvedJson: JSONDictionary?
+    private var resolvedJson: [String: Any]?
     private var bearerToken: String?
 
     private nonisolated let urlSession: URLSession = {
@@ -35,7 +35,7 @@ actor JmapClient {
         self.bearerToken = bearerToken
     }
 
-    func getSessionJson() -> JSONDictionary? { resolvedJson }
+    func getSessionJson() -> [String: Any]? { resolvedJson }
 
     func setBearerToken(_ token: String) { bearerToken = token }
     var needsBearerToken: Bool { bearerToken == nil }
@@ -65,7 +65,7 @@ actor JmapClient {
         let methodCalls: [Any] = calls.map {
             [$0.name, $0.args, $0.callId] as [Any]
         }
-        let requestObj: JSONDictionary = [
+        let requestObj: [String: Any] = [
             "using": using,
             "methodCalls": methodCalls
         ]
@@ -80,7 +80,7 @@ actor JmapClient {
         for element in responses {
             guard let triple = element as? [Any], triple.count >= 2 else { continue }
             let name = triple[0] as? String ?? ""
-            let args = (triple[1] as? JSONDictionary) ?? [:]
+            let args = (triple[1] as? [String: Any]) ?? [:]
             let callId = triple.count > 2 ? (triple[2] as? String ?? "") : ""
 
             if name == "error" || args["type"] != nil {
@@ -94,9 +94,9 @@ actor JmapClient {
 
     func singleCall(
         _ name: String,
-        args: JSONDictionary,
+        args: [String: Any],
         using: [String]? = nil
-    ) async throws -> JSONDictionary {
+    ) async throws -> [String: Any] {
         let result = try await call(
             [JmapMethodCall(name: name, args: args, callId: "S")],
             using: using ?? [JmapCapabilities.core, JmapCapabilities.mail]
@@ -134,7 +134,7 @@ actor JmapClient {
         guard (200..<300).contains(code) else {
             throw JmapException.httpError(code: code, body: String(data: body, encoding: .utf8) ?? "")
         }
-        guard let json = try JSONSerialization.jsonObject(with: body) as? JSONDictionary else {
+        guard let json = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
             throw JmapException.protocolError("Invalid blob upload response")
         }
         return JmapBlobUploadResponse(
@@ -206,13 +206,13 @@ actor JmapClient {
         return "\(base)/jmap"
     }
 
-    private func parseSession(_ json: JSONDictionary) -> JmapSessionInfo {
-        var caps: [String: JSONDictionary] = [:]
-        (json["capabilities"] as? JSONDictionary)?.forEach { k, v in
-            caps[k] = v as? JSONDictionary
+    private func parseSession(_ json: [String: Any]) -> JmapSessionInfo {
+        var caps: [String: [String: Any]] = [:]
+        (json["capabilities"] as? [String: Any])?.forEach { k, v in
+            caps[k] = v as? [String: Any]
         }
 
-        let primaryAccId = (json["primaryAccounts"] as? JSONDictionary)?.optString(JmapCapabilities.mail)
+        let primaryAccId = (json["primaryAccounts"] as? [String: Any])?.optString(JmapCapabilities.mail)
             ?? caps[JmapCapabilities.mail]?.optString("accountId")
             ?? username
 
@@ -230,7 +230,7 @@ actor JmapClient {
         )
     }
 
-    private func httpGet(_ urlStr: String) async throws -> JSONDictionary? {
+    private func httpGet(_ urlStr: String) async throws -> [String: Any]? {
         guard let url = URL(string: urlStr) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
@@ -244,10 +244,10 @@ actor JmapClient {
         }
         guard (200..<300).contains(code) else { return nil }
 
-        return try? JSONSerialization.jsonObject(with: body) as? JSONDictionary
+        return try? JSONSerialization.jsonObject(with: body) as? [String: Any]
     }
 
-    private func httpPost(_ urlStr: String, body: JSONDictionary) async throws -> JSONDictionary {
+    private func httpPost(_ urlStr: String, body: [String: Any]) async throws -> [String: Any] {
         guard let url = URL(string: urlStr) else {
             throw JmapException.protocolError("Invalid URL: \(urlStr)")
         }
@@ -273,7 +273,7 @@ actor JmapClient {
             let bodyStr = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
             throw JmapException.httpError(code: code, body: String(bodyStr))
         }
-        guard let json = try? JSONSerialization.jsonObject(with: data) as? JSONDictionary else {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             let preview = String(data: data, encoding: .utf8)?.prefix(200) ?? ""
             throw JmapException.protocolError("JMAP response not JSON (\(preview))")
         }

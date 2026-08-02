@@ -12,7 +12,7 @@ enum JmapMapper {
 
     static func mapMailbox(
         account: String,
-        json: JSONDictionary,
+        json: [String: Any],
         path: String? = nil
     ) -> Mailbox {
         let name = json.optString("name") ?? path ?? "?"
@@ -37,12 +37,12 @@ enum JmapMapper {
     static func mapMessage(
         account: String,
         mailboxId: String,
-        json: JSONDictionary
+        json: [String: Any]
     ) -> MailMessage {
-        let fromList = json["from"] as? [JSONDictionary] ?? []
-        let toList = json["to"] as? [JSONDictionary] ?? []
+        let fromList = json["from"] as? [[String: Any]] ?? []
+        let toList = json["to"] as? [[String: Any]] ?? []
         let hasAtt = json.optBool("hasAttachment") || ((json["attachments"] as? [Any])?.count ?? 0) > 0
-        let keywords = json["keywords"] as? JSONDictionary
+        let keywords = json["keywords"] as? [String: Any]
 
         let isRead = (keywords?["$seen"] as? Bool) ?? false
         let isFlagged = (keywords?["$flagged"] as? Bool) ?? false
@@ -74,8 +74,8 @@ enum JmapMapper {
         )
     }
 
-    static func mapBody(json: JSONDictionary) -> MessageBody {
-        let attachments = (json["attachments"] as? [JSONDictionary])?.map { att in
+    static func mapBody(json: [String: Any]) -> MessageBody {
+        let attachments = (json["attachments"] as? [[String: Any]])?.map { att in
             AttachmentMeta(
                 name: att.optString("name") ?? att.optString("partId") ?? "attachment",
                 sizeBytes: att.optInt64("size"),
@@ -88,27 +88,27 @@ enum JmapMapper {
         var plainText: String?
         var html: String?
 
-        if let bodyValues = json["bodyValues"] as? JSONDictionary {
-            if let textParts = json["textBody"] as? [JSONDictionary],
+        if let bodyValues = json["bodyValues"] as? [String: Any] {
+            if let textParts = json["textBody"] as? [[String: Any]],
                let first = textParts.first,
                let partId = first.optString("partId"),
-               let value = bodyValues[partId] as? JSONDictionary {
+               let value = bodyValues[partId] as? [String: Any] {
                 plainText = value.optString("value")
             }
-            if let htmlParts = json["htmlBody"] as? [JSONDictionary],
+            if let htmlParts = json["htmlBody"] as? [[String: Any]],
                let first = htmlParts.first,
                let partId = first.optString("partId"),
-               let value = bodyValues[partId] as? JSONDictionary {
+               let value = bodyValues[partId] as? [String: Any] {
                 html = value.optString("value")
             }
         }
 
         if plainText == nil && html == nil {
-            if let textParts = json["textBody"] as? [JSONDictionary],
+            if let textParts = json["textBody"] as? [[String: Any]],
                let first = textParts.first {
                 plainText = first.optString("blobId")
             }
-            if let htmlParts = json["htmlBody"] as? [JSONDictionary],
+            if let htmlParts = json["htmlBody"] as? [[String: Any]],
                let first = htmlParts.first {
                 html = first.optString("blobId")
             }

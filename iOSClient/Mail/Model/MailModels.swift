@@ -41,7 +41,7 @@ struct MailMessage: Identifiable {
     let sizeBytes: Int64
     let blobId: String?
     let threadId: String?
-    let keywords: JSONDictionary?
+    let keywords: [String: Any]?
 
     var displayFrom: String {
         if let name = fromDisplayName, !name.isEmpty { return name }

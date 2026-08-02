@@ -305,8 +305,8 @@ final class MailViewModel: ObservableObject {
                     blobIds: blobIds
                 )
 
-                let created = draftResp["created"] as? JSONDictionary
-                let createdId = created?["new"] as? JSONDictionary
+                let created = draftResp["created"] as? [String: Any]
+                let createdId = created?["new"] as? [String: Any]
                 let emailId = createdId?.optString("id") ?? ""
 
                 if !emailId.isEmpty, let identId = identityId {
