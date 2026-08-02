@@ -8,7 +8,7 @@
 
 import Foundation
 
-final class JmapApi: @unchecked Sendable {
+final class JmapApi {
     private let client: JmapClient
 
     init(client: JmapClient) {
