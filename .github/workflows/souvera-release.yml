@@ -81,10 +81,10 @@ jobs:
 
       # Xcode version is default on macos-15 — setup-xcode is optional.
       # Enable this step if a specific Xcode version is required:
-      # - name: Setup Xcode
-      #   uses: maxim-lobanov/setup-xcode@v1.6.0
-      #   with:
-      #     xcode-version: ${{ env.XCODE_VERSION }}
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
 
       # App Store Connect API key drives fully automatic signing:
       # xcodebuild -allowProvisioningUpdates will create/fetch the certificate
