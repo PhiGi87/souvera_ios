@@ -68,10 +68,21 @@ struct JmapBlobUploadResponse {
     let type: String
 }
 
-enum JmapException: Error {
+enum JmapException: LocalizedError {
     case httpError(code: Int, body: String)
     case protocolError(String)
     case authNeedsBearer(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .httpError(let code, let body):
+            return "HTTP \(code): \(body)"
+        case .protocolError(let msg):
+            return msg
+        case .authNeedsBearer(let msg):
+            return msg
+        }
+    }
 }
 
 

@@ -46,7 +46,7 @@ actor JmapClient {
     func refreshSession() async throws -> JmapSessionInfo {
         let apiUrl = try await resolveApiUrl()
         guard let json = resolvedJson else {
-            throw JmapException.protocolError("Cannot fetch JMAP session from \(apiUrl)")
+            throw JmapException.protocolError("JMAP session not available at \(apiUrl). Check server connectivity and credentials.")
         }
         let info = parseSession(json)
         resolvedApiUrl = apiUrl
@@ -211,7 +211,15 @@ actor JmapClient {
             }
         }
 
-        return "\(base)/jmap"
+        let defaultUrl = "\(base)/jmap"
+        if let json = try? await httpGet(defaultUrl) {
+            resolvedJson = json
+            if let apiUrl = json.optString("apiUrl"), !apiUrl.isEmpty {
+                return apiUrl
+            }
+        }
+        resolvedJson = nil
+        return defaultUrl
     }
 
     private func parseSession(_ json: [String: Any]) -> JmapSessionInfo {
