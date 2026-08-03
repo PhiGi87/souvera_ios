@@ -274,6 +274,7 @@ jobs:
       - name: Persist signing certificate
         if: steps.archive.outcome == 'success' && steps.cert_import.outputs.IMPORTED != 'yes'
         continue-on-error: true
+        timeout-minutes: 5
         env:
           IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
         run: |
