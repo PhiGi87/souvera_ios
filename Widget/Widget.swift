@@ -7,7 +7,7 @@ import Intents
 import SwiftUI
 
 @main
-struct NextcloudWidgetBundle: WidgetBundle {
+struct SouveraWidgetBundle: WidgetBundle {
     @WidgetBundleBuilder
     var body: some Widget {
         DashboardWidget()
