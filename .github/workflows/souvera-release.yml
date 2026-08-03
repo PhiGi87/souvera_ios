@@ -274,30 +274,11 @@ jobs:
       - name: Persist signing certificate
         if: steps.archive.outcome == 'success' && steps.cert_import.outputs.IMPORTED != 'yes'
         continue-on-error: true
-        timeout-minutes: 5
-        env:
-          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
+        timeout-minutes: 3
         run: |
-          echo "Exporting newly created certificate..."
-          CERT_HASH=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db | grep "Apple Distribution" | head -1 | awk -F'"' '{print $2}')
-          if [ -z "$CERT_HASH" ]; then
-            CERT_HASH=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db | grep "iPhone Distribution" | head -1 | awk -F'"' '{print $2}')
-          fi
-          if [ -z "$CERT_HASH" ]; then
-            CERT_HASH=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db | grep "Development" | head -1 | awk -F'"' '{print $2}')
-          fi
-          if [ -z "$CERT_HASH" ]; then
-            echo "No certificate found to export"
-            exit 0
-          fi
-          echo "Found: $CERT_HASH"
-          PASSWORD="${IOS_CERT_PASSWORD:-ci-auto-p12-pwd}"
-          mkdir -p build/cert-export
-          security export -k ~/Library/Keychains/login.keychain-db \
-            -t identities -f pkcs12 -P "$PASSWORD" \
-            -o build/cert-export/souvera-signing.p12 "$CERT_HASH"
-          echo "Cert exported to build/cert-export/souvera-signing.p12"
-          echo "SHOULD_UPLOAD_CERT=1" >> $GITHUB_ENV
+          echo "Skipping cert export — security export hangs on CI runner"
+          echo "The archive succeeded; cert can be exported manually if needed"
+          echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
 
       - name: Upload cert artifact
         if: env.SHOULD_UPLOAD_CERT == '1'
