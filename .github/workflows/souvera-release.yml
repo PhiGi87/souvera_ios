@@ -274,11 +274,34 @@ jobs:
       - name: Persist signing certificate
         if: steps.archive.outcome == 'success' && steps.cert_import.outputs.IMPORTED != 'yes'
         continue-on-error: true
-        timeout-minutes: 3
+        timeout-minutes: 5
+        env:
+          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
         run: |
-          echo "Skipping cert export — security export hangs on CI runner"
-          echo "The archive succeeded; cert can be exported manually if needed"
-          echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
+          echo "Exporting certificate for IOS_CERT_P12_BASE64 secret..."
+          security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
+          CERT_HASH=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db | grep -E "Apple Distribution|iPhone Distribution|Apple Development" | head -1 | awk -F'"' '{print $2}')
+          if [ -z "$CERT_HASH" ]; then
+            echo "No certificate found — skipping export"
+            echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
+            exit 0
+          fi
+          echo "Found: $CERT_HASH"
+          PASSWORD="${IOS_CERT_PASSWORD:-ci-auto-p12-pwd}"
+          mkdir -p build/cert-export
+          timeout 120 security export -k ~/Library/Keychains/login.keychain-db \
+            -t identities -f pkcs12 -P "$PASSWORD" -A \
+            -o build/cert-export/souvera-signing.p12 "$CERT_HASH" 2>&1 || {
+            echo "security export failed or timed out — cert may already exist as artifact"
+            echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
+            exit 0
+          }
+          echo "Cert exported to build/cert-export/souvera-signing.p12"
+          echo "SHOULD_UPLOAD_CERT=1" >> $GITHUB_ENV
+          echo ""
+          echo "======== IOS_CERT_P12_BASE64 (copy this into GitHub Secret) ========"
+          base64 -i build/cert-export/souvera-signing.p12
+          echo "===================================================================="
 
       - name: Upload cert artifact
         if: env.SHOULD_UPLOAD_CERT == '1'
