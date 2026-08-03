@@ -842,3 +842,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_bcc_"                    = "Bcc";
 "_mail_from_"                   = "From";
 "_mail_show_cc_bcc_"            = "Add Cc/Bcc";
+"_souvera_mail_"                 = "Mail";
+"_souvera_link_"                 = "Link";
+"_souvera_notes_"                = "Notes";

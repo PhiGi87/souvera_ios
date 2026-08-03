@@ -307,18 +307,18 @@ extension NCMoreModel {
                 type: .moreApps,
                 items: [
                     Item(
-                        titleKey: "Talk",
-                        image: "talk-template",
+                        titleKey: "_souvera_mail_",
+                        image: "envelope.fill",
                         destination: .none
                     ),
                     Item(
-                        titleKey: "Notes",
-                        image: "notes-template",
+                        titleKey: "_souvera_link_",
+                        image: "bubble.left.and.bubble.right.fill",
                         destination: .none
                     ),
                     Item(
-                        titleKey: "More apps",
-                        image: "more-apps-template",
+                        titleKey: "_souvera_notes_",
+                        image: "note.text",
                         destination: .none
                     )
                 ]
