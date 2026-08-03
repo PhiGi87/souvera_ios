@@ -309,17 +309,17 @@ extension NCMoreModel {
                     Item(
                         titleKey: "_souvera_mail_",
                         image: "envelope.fill",
-                        destination: .none
+                        destination: .mail
                     ),
                     Item(
                         titleKey: "_souvera_link_",
                         image: "bubble.left.and.bubble.right.fill",
-                        destination: .none
+                        destination: .link
                     ),
                     Item(
                         titleKey: "_souvera_notes_",
                         image: "note.text",
-                        destination: .none
+                        destination: .notes
                     )
                 ]
             ),

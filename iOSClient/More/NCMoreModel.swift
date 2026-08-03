@@ -145,6 +145,9 @@ final class NCMoreModel: ObservableObject {
         /// Opens the native mail client.
         case mail
 
+        /// Opens the native Notes client.
+        case notes
+
         /// No-op destination.
         case none
     }
@@ -222,23 +225,17 @@ final class NCMoreModel: ObservableObject {
                         Item(
                             titleKey: "_souvera_mail_",
                             image: "envelope.fill",
-                            destination: .openApp(
-                                schemeUrl: NCGlobal.shared.talkSchemeUrl,
-                                fallbackUrl: NCGlobal.shared.talkAppStoreUrl
-                            )
+                            destination: .mail
                         ),
                         Item(
                             titleKey: "_souvera_link_",
                             image: "bubble.left.and.bubble.right.fill",
-                            destination: .openApp(
-                                schemeUrl: NCGlobal.shared.notesSchemeUrl,
-                                fallbackUrl: NCGlobal.shared.notesAppStoreUrl
-                            )
+                            destination: .link
                         ),
                         Item(
                             titleKey: "_souvera_notes_",
                             image: "note.text",
-                            destination: .openUrl(NCGlobal.shared.moreAppsUrl)
+                            destination: .notes
                         )
                     ]
                 )
@@ -377,6 +374,9 @@ final class NCMoreModel: ObservableObject {
 
         case .mail:
             pushHosted(MailView(), title: NSLocalizedString("_mail_", comment: ""))
+
+        case .notes:
+            pushHosted(SouveraNotesView(), title: NSLocalizedString("_souvera_notes_", comment: ""))
 
         case .none:
             break
