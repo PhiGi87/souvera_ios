@@ -63,24 +63,6 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
-      # Build for device WITHOUT signing first, to flush out compilation
-      # errors that only appear for arm64 (generic/platform=iOS).
-      - name: Build for device (compile only, no signing)
-        run: |
-          set -o pipefail
-          xcodebuild build \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "generic/platform=iOS" \
-
-... (device build) ...
-            2>&1 | tee device-build.log
-          if [ ${PIPESTATUS[0]} -ne 0 ]; then
-            echo "::error::DEVICE BUILD FAILED"
-            grep -E 'error:' device-build.log || true
-            exit 1
-          fi
-          echo "Device build OK"
 
       # App Store Connect API key drives fully automatic signing:
       # xcodebuild -allowProvisioningUpdates will create/fetch the certificate
