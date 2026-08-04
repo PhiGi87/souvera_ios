@@ -37,8 +37,9 @@ jobs:
           xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -destination "generic/platform=iOS" \
             -skipPackagePluginValidation \
+            -allowProvisioningUpdates \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
