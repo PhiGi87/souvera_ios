@@ -62,15 +62,12 @@ jobs:
       - name: Build for device (compile only, no signing)
         run: |
           set -o pipefail
-          xcodebuild build \
+          xcodebuild clean build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "generic/platform=iOS" \
-            -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
+
+... (device build) ...
             2>&1 | tee device-build.log
           if [ ${PIPESTATUS[0]} -ne 0 ]; then
             echo "::error::DEVICE BUILD FAILED"
@@ -168,7 +165,7 @@ jobs:
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
-          xcodebuild archive \
+          xcodebuild clean archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
@@ -187,7 +184,7 @@ jobs:
       - name: Archive (fallback, no signing)
         if: steps.archive.outcome != 'success'
         run: |
-          xcodebuild archive \
+          xcodebuild clean archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
