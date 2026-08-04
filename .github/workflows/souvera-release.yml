@@ -57,6 +57,11 @@ jobs:
       - name: Download GoogleService-Info.plist
         run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
 
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
       # Build for device WITHOUT signing first, to flush out compilation
       # errors that only appear for arm64 (generic/platform=iOS).
       - name: Build for device (compile only, no signing)
@@ -75,13 +80,6 @@ jobs:
             exit 1
           fi
           echo "Device build OK"
-
-      # Xcode version is default on macos-15 — setup-xcode is optional.
-      # Enable this step if a specific Xcode version is required:
-      - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1.6.0
-        with:
-          xcode-version: ${{ env.XCODE_VERSION }}
 
       # App Store Connect API key drives fully automatic signing:
       # xcodebuild -allowProvisioningUpdates will create/fetch the certificate
