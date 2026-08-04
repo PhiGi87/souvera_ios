@@ -62,7 +62,7 @@ jobs:
       - name: Build for device (compile only, no signing)
         run: |
           set -o pipefail
-          xcodebuild clean build \
+          xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination "generic/platform=iOS" \
@@ -184,7 +184,7 @@ jobs:
       - name: Archive (fallback, no signing)
         if: steps.archive.outcome != 'success'
         run: |
-          xcodebuild clean archive \
+          xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
