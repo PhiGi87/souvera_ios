@@ -139,7 +139,6 @@ jobs:
 
       - name: Archive (attempt signed)
         id: archive
-        continue-on-error: true
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
@@ -151,6 +150,7 @@ jobs:
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
+            -derivedDataPath "DerivedDataArchive" \
             -skipPackagePluginValidation \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
