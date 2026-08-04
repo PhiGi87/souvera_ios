@@ -145,7 +145,7 @@ jobs:
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
-          xcodebuild clean archive \
+          xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
