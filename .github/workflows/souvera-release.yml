@@ -353,36 +353,18 @@ jobs:
           path: build/cert-export/
           retention-days: 1
 
+      - name: Setup Ruby and fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
       - name: Install distribution provisioning profiles
         if: steps.archive.outcome == 'success'
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: |
-          pip3 install -q PyJWT requests 2>/dev/null || true
-          mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
-          KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
-          python3 - <<'PYEOF'
-          import base64, json, os, time
-          import jwt, requests
-          key = open(os.path.expanduser("~/private_keys/AuthKey_%s.p8" % os.environ["ASC_API_KEY_ID"])).read()
-          tok = jwt.encode({"iss": os.environ["ASC_API_ISSUER_ID"], "exp": int(time.time()) + 600, "aud": "appstoreconnect-v1"},
-                           key, algorithm="ES256", headers={"kid": os.environ["ASC_API_KEY_ID"], "typ": "JWT"})
-          h = {"Authorization": "Bearer %s" % tok}
-          r = requests.get("https://api.appstoreconnect.apple.com/v1/profiles?filter[profileType]=IOS_APP_STORE&limit=200", headers=h, timeout=60)
-          profiles = r.json().get("data", [])
-          print("Found", len(profiles), "IOS_APP_STORE profiles")
-          dest = os.path.expanduser("~/Library/MobileDevice/Provisioning Profiles")
-          for p in profiles:
-              attrs = p["attributes"]
-              if attrs.get("profileState") != "ACTIVE":
-                  continue
-              content = base64.b64decode(attrs["profileContent"])
-              path = os.path.join(dest, "%s.mobileprovision" % attrs["uuid"])
-              with open(path, "wb") as f:
-                  f.write(content)
-              print("Installed", attrs["uuid"], attrs["name"])
-          PYEOF
+        run: bundle exec fastlane fetch_profiles
 
       - name: Export IPA (signed only, skip if archive failed)
         if: steps.archive.outcome == 'success'
@@ -419,12 +401,6 @@ jobs:
           name: Souvera Workspace IPA
           path: build/export/*.ipa
           retention-days: 14
-
-      - name: Setup Ruby and fastlane
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
 
       - name: Upload to TestFlight via fastlane pilot
         if: steps.archive.outcome == 'success'
