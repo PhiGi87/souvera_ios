@@ -39,6 +39,7 @@ platform :ios do
       sigh(
         app_identifier: identifier,
         readonly: true,
+        ignore_profiles_with_different_name: true,
         skip_certificate_verification: true
       )
     end
