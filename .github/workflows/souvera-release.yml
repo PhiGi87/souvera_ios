@@ -138,11 +138,17 @@ jobs:
           fi
           mkdir -p ~/certs
           printf '%s' "$IOS_CERT_P12_BASE64" | tr -d '[:space:]' > ~/certs/souvera.p12.b64
-          echo "IOS_CERT_P12_BASE64 length: $(wc -c < ~/certs/souvera.p12.b64) (expected 4496)"
+          echo "IOS_CERT_P12_BASE64 length: $(wc -c < ~/certs/souvera.p12.b64) (expected 4308)"
           echo "IOS_CERT_PASSWORD length: ${#IOS_CERT_PASSWORD} (expected 24)"
           base64 --decode < ~/certs/souvera.p12.b64 > ~/certs/souvera.p12
           if ! openssl pkcs12 -in ~/certs/souvera.p12 -noout -passin "pass:${IOS_CERT_PASSWORD}" 2>/dev/null; then
             echo "::error::The .p12 does not match IOS_CERT_PASSWORD (wrong password or truncated base64 — re-check both secrets)"
+            exit 1
+          fi
+          # macOS Security framework rejects modern PBES2/AES + SHA-256 MAC .p12 files.
+          # Must be exported with OpenSSL legacy crypto: openssl pkcs12 -export -legacy ...
+          if openssl pkcs12 -in ~/certs/souvera.p12 -noout -info -passin "pass:${IOS_CERT_PASSWORD}" 2>&1 | grep -qE "MAC: sha256"; then
+            echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
             exit 1
           fi
           if ! security import ~/certs/souvera.p12 -k ~/Library/Keychains/login.keychain-db -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild; then
