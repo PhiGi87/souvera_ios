@@ -359,23 +359,34 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
 
-      - name: Install distribution provisioning profiles
+      - name: Export IPA (signed only, skip if archive failed)
         if: steps.archive.outcome == 'success'
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          EXPORT_METHOD: ${{ github.event.inputs.export_method || 'app-store-connect' }}
-        run: bundle exec ruby .github/scripts/install_profiles.rb
-
-      - name: Export IPA (signed only, skip if archive failed)
-        if: steps.archive.outcome == 'success'
-        env:
-          EXPORT_METHOD: ${{ github.event.inputs.export_method || 'app-store-connect' }}
         run: |
+          cat > ExportOptions.plist << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>${{ github.event.inputs.export_method || 'app-store-connect' }}</string>
+            <key>teamID</key>
+            <string>${{ env.TEAM_ID }}</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+          </dict>
+          </plist>
+          PLIST
           xcodebuild -exportArchive \
             -archivePath "build/Souvera.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath "build/export"
+            -exportPath "build/export" \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID"
 
       - name: Upload IPA artifact
         if: steps.archive.outcome == 'success'
