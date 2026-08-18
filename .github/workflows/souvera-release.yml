@@ -161,7 +161,7 @@ jobs:
         run: |
           pip3 install -q PyJWT 2>/dev/null || true
           KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
-          python3 -c "import jwt,time; f=open('${KEYFILE}'); k=f.read(); print(jwt.encode({'iss':'${ASC_API_ISSUER_ID}','exp':int(time.time())+300,'aud':'appstoreconnect-v1'}, k, algorithm='ES256'))" > /tmp/asc_jwt.txt
+          python3 -c "import jwt,time; f=open('${KEYFILE}'); k=f.read(); print(jwt.encode({'iss':'${ASC_API_ISSUER_ID}','exp':int(time.time())+300,'aud':'appstoreconnect-v1'}, k, algorithm='ES256', headers={'kid':'${ASC_API_KEY_ID}','typ':'JWT'}))" > /tmp/asc_jwt.txt
           JWT=$(cat /tmp/asc_jwt.txt)
           echo "JWT length: ${#JWT}"
           CERTS=$(curl -s -H "Authorization: Bearer $JWT" \
