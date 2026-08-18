@@ -359,6 +359,7 @@ jobs:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
+          pip3 install -q PyJWT requests 2>/dev/null || true
           mkdir -p "$HOME/Library/MobileDevice/Provisioning Profiles"
           KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
           python3 - <<'PYEOF'
