@@ -16,6 +16,21 @@ GoogleService-Info.plist
 DevicePushKey-Info.plist
 iOSClient/Brand/Device*
 
+## Signing secrets (never commit certificates/keys)
+*.p12
+*.cer
+*.mobileprovision
+AuthKey*.p8
+*.p8
+
+## Fastlane
+fastlane/report.xml
+fastlane/README.md
+fastlane/.env
+fastlane/*.log
+vendor/bundle/
+.bundle/
+
 ## Xcode
 .DS_Store
 */build/*

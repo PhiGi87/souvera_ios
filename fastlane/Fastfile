@@ -1,0 +1,73 @@
+# SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
+# SPDX-License-Identifier: GPL-2.0-or-later
+
+default_platform(:ios)
+
+PROJECT = "Nextcloud.xcodeproj"
+SCHEME = "Nextcloud"
+TEAM_ID = "S76D7JCS9V"
+
+# The .p8 file is written by the workflow step "Install App Store Connect API key".
+def souvera_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_API_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_API_ISSUER_ID"),
+    key_filepath: ENV.fetch(
+      "ASC_API_KEY_PATH",
+      File.expand_path("~/private_keys/AuthKey_#{ENV.fetch('ASC_API_KEY_ID')}.p8")
+    ),
+    in_house: false
+  )
+end
+
+platform :ios do
+  desc "Upload an already exported IPA (build/export/*.ipa) to TestFlight"
+  lane :upload_beta do |options|
+    souvera_api_key
+    ipa = options[:ipa] || Dir["build/export/*.ipa"].first
+    UI.user_error!("No IPA found in build/export — run the archive steps first") unless ipa && File.exist?(ipa)
+
+    pilot(
+      upload: true,
+      ipa: ipa,
+      skip_waiting_for_build_processing: true,
+      changelog: ENV["TESTFLIGHT_CHANGELOG"]
+    )
+  end
+
+  desc "Build, sign and upload a beta build to TestFlight"
+  lane :beta do |options|
+    souvera_api_key
+    export_method = options[:export_method] || "app-store-connect"
+
+    version = get_version_number(xcodeproj: PROJECT)
+    current = get_build_number(xcodeproj: PROJECT).to_i
+    latest = begin
+      latest_testflight_build_number(version: version, initial_build_number: 0)
+    rescue StandardError => e
+      UI.message("Could not read latest TestFlight build number: #{e.message}")
+      nil
+    end
+    next_number = [current, (latest || 0) + 1].max
+    increment_build_number(build_number: next_number, xcodeproj: PROJECT)
+    UI.message("Building version #{version} (#{next_number}) with export method #{export_method}")
+
+    gym(
+      project: PROJECT,
+      scheme: SCHEME,
+      destination: "generic/platform=iOS",
+      derived_data_path: "DerivedDataArchive",
+      export_method: export_method,
+      export_options: {
+        method: export_method,
+        signingStyle: "automatic",
+        teamID: TEAM_ID
+      },
+      xcargs: "-skipPackagePluginValidation -allowProvisioningUpdates ONLY_ACTIVE_ARCH=NO",
+      clean: false,
+      output_directory: "build/export"
+    )
+
+    upload_beta
+  end
+end
