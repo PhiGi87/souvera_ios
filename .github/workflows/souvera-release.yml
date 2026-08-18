@@ -195,11 +195,8 @@ jobs:
       # pre-existing Realm configuration issue in CI, which is unrelated to producing an installable
       # build. Tests run in a separate job/workflow once the Realm test setup is fixed.
 
-      - name: Archive (attempt signed)
+      - name: Archive (no signing)
         id: archive
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
@@ -210,11 +207,9 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "DerivedDataArchive" \
             -skipPackagePluginValidation \
-            -allowProvisioningUpdates \
-            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
-            -authenticationKeyID "$ASC_API_KEY_ID" \
-            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
-            DEVELOPMENT_TEAM="$TEAM_ID" \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=NO \
             2>&1 | tee archive.log
           echo "SIGNED_ARCHIVE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
