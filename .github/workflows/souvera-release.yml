@@ -137,7 +137,14 @@ jobs:
             exit 0
           fi
           mkdir -p ~/certs
-          printf '%s' "$IOS_CERT_P12_BASE64" | tr -d '[:space:]' | base64 --decode > ~/certs/souvera.p12
+          printf '%s' "$IOS_CERT_P12_BASE64" | tr -d '[:space:]' > ~/certs/souvera.p12.b64
+          echo "IOS_CERT_P12_BASE64 length: $(wc -c < ~/certs/souvera.p12.b64) (expected 4496)"
+          echo "IOS_CERT_PASSWORD length: ${#IOS_CERT_PASSWORD} (expected 24)"
+          base64 --decode < ~/certs/souvera.p12.b64 > ~/certs/souvera.p12
+          if ! openssl pkcs12 -in ~/certs/souvera.p12 -noout -passin "pass:${IOS_CERT_PASSWORD}" 2>/dev/null; then
+            echo "::error::The .p12 does not match IOS_CERT_PASSWORD (wrong password or truncated base64 — re-check both secrets)"
+            exit 1
+          fi
           if ! security import ~/certs/souvera.p12 -k ~/Library/Keychains/login.keychain-db -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild; then
             echo "::error::Failed to import IOS_CERT_P12_BASE64 (invalid base64 or wrong IOS_CERT_PASSWORD)"
             exit 1
