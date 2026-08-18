@@ -7,17 +7,6 @@ PROJECT = "Nextcloud.xcodeproj"
 SCHEME = "Nextcloud"
 TEAM_ID = "S76D7JCS9V"
 
-PROFILE_BUNDLE_IDS = [
-  "eu.souvera.workspace",
-  "eu.souvera.workspace.Share",
-  "eu.souvera.workspace.File-Provider-Extension",
-  "eu.souvera.workspace.File-Provider-Extension-UI",
-  "eu.souvera.workspace.Action-Assistant",
-  "eu.souvera.workspace.Widget",
-  "eu.souvera.workspace.WidgetDashboardIntentHandler",
-  "eu.souvera.workspace.Notification-Service-Extension"
-].freeze
-
 # The .p8 file is written by the workflow step "Install App Store Connect API key".
 def souvera_api_key
   app_store_connect_api_key(
@@ -32,19 +21,6 @@ def souvera_api_key
 end
 
 platform :ios do
-  desc "Download existing App Store provisioning profiles and install them locally"
-  lane :fetch_profiles do
-    souvera_api_key
-    PROFILE_BUNDLE_IDS.each do |identifier|
-      sigh(
-        app_identifier: identifier,
-        readonly: true,
-        ignore_profiles_with_different_name: true,
-        skip_certificate_verification: true
-      )
-    end
-  end
-
   desc "Upload an already exported IPA (build/export/*.ipa) to TestFlight"
   lane :upload_beta do |options|
     souvera_api_key

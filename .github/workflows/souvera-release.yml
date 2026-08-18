@@ -364,7 +364,7 @@ jobs:
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: bundle exec fastlane fetch_profiles
+        run: bundle exec ruby .github/scripts/install_profiles.rb
 
       - name: Export IPA (signed only, skip if archive failed)
         if: steps.archive.outcome == 'success'
