@@ -91,6 +91,12 @@ jobs:
           fi
           echo "API key decoded OK (Key ID ${ASC_API_KEY_ID})."
 
+      - name: Setup Ruby and fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
       # FIXED SIGNING CERTIFICATE
       # ---------------------------
       # Apple allows max. 3 "Apple Distribution" certificates per team. With automatic
@@ -159,6 +165,7 @@ jobs:
           security create-keychain -p ci ci.keychain
           security default-keychain -s ci.keychain
           security unlock-keychain -p ci ci.keychain
+          security list-keychains -d user -s ci.keychain "$HOME/Library/Keychains/login.keychain-db"
           security import ~/certs/souvera.p12 -k ci.keychain -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci ci.keychain
           echo "Imported signing identities:"
@@ -170,38 +177,21 @@ jobs:
           echo "IMPORTED=yes" >> "$GITHUB_OUTPUT"
           rm -f ~/certs/souvera.p12
 
-      - name: Clean up old certificates (if no stored cert)
-        if: steps.cert_import.outputs.IMPORTED != 'yes'
-        continue-on-error: true
+      - name: Clean up development certificates
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: |
-          pip3 install -q PyJWT 2>/dev/null || true
-          KEYFILE=~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8
-          python3 -c "import jwt,time; f=open('${KEYFILE}'); k=f.read(); print(jwt.encode({'iss':'${ASC_API_ISSUER_ID}','exp':int(time.time())+300,'aud':'appstoreconnect-v1'}, k, algorithm='ES256', headers={'kid':'${ASC_API_KEY_ID}','typ':'JWT'}))" > /tmp/asc_jwt.txt
-          JWT=$(cat /tmp/asc_jwt.txt)
-          echo "JWT length: ${#JWT}"
-          CERTS=$(curl -s -H "Authorization: Bearer $JWT" \
-            "https://api.appstoreconnect.apple.com/v1/certificates?limit=10" | \
-            python3 -c "import sys,json; [print(c['id']) for c in json.load(sys.stdin).get('data',[])]" 2>/dev/null)
-          if [ -n "$CERTS" ]; then
-            echo "Revoking old certificates..."
-            for CERT_ID in $CERTS; do
-              curl -s -X DELETE -H "Authorization: Bearer $JWT" \
-                "https://api.appstoreconnect.apple.com/v1/certificates/$CERT_ID" > /dev/null
-              echo "  Revoked: $CERT_ID"
-            done
-          else
-            echo "No certificates to revoke (cert list empty or API call failed)"
-          fi
+        run: bundle exec ruby .github/scripts/revoke_dev_certs.rb
 
       # NOTE: unit tests are intentionally NOT run in the archive job — the test host crashes on a
       # pre-existing Realm configuration issue in CI, which is unrelated to producing an installable
       # build. Tests run in a separate job/workflow once the Realm test setup is fixed.
 
-      - name: Archive (no signing)
+      - name: Archive (signed, automatic)
         id: archive
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
@@ -212,9 +202,11 @@ jobs:
             -destination "generic/platform=iOS" \
             -derivedDataPath "DerivedDataArchive" \
             -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
+            -authenticationKeyID "$ASC_API_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$TEAM_ID" \
             ONLY_ACTIVE_ARCH=NO \
             2>&1 | tee archive.log
           echo "SIGNED_ARCHIVE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
@@ -243,6 +235,9 @@ jobs:
           for f in archive.log archive-fallback.log device-build.log export-fallback.log; do
             [ -f "$f" ] && cp "$f" build/logs/
           done
+          if ls /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs 2>/dev/null; then
+            cp -R /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs build/logs/ 2>/dev/null || true
+          fi
           ls -la build/logs/ || true
 
       - name: Show signing error summary
@@ -352,12 +347,6 @@ jobs:
           name: signing-certificate
           path: build/cert-export/
           retention-days: 1
-
-      - name: Setup Ruby and fastlane
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
 
       - name: Install distribution provisioning profiles
         if: steps.archive.outcome == 'success'
