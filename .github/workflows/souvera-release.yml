@@ -51,7 +51,7 @@ jobs:
     name: Archive, Sign & Upload to TestFlight
     runs-on: macos-15
     needs: build-check
-    timeout-minutes: 240
+    timeout-minutes: 120
     if: |
       always() &&
       !cancelled() &&
@@ -127,8 +127,9 @@ jobs:
             echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
             exit 1
           fi
-          security import ~/certs/souvera.p12 -k "$HOME/Library/Keychains/login.keychain-db" -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
+          security unlock-keychain -p "" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
+          security import ~/certs/souvera.p12 -k "$HOME/Library/Keychains/login.keychain-db" -P "$IOS_CERT_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$HOME/Library/Keychains/login.keychain-db" || echo "WARNING: set-key-partition-list failed - relying on import -A"
           if ! security find-identity -v -p codesigning "$HOME/Library/Keychains/login.keychain-db" | grep -q "Apple Distribution"; then
             echo "::error::Import succeeded but no 'Apple Distribution' identity found in keychain"
             exit 1
@@ -154,16 +155,19 @@ jobs:
 
       - name: Archive (manual signing)
         id: archive
+        timeout-minutes: 50
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
-          xcodebuild archive \
+          perl -e 'alarm shift; exec @ARGV' 2700 \
+            xcodebuild archive \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
+            COMPILER_INDEX_STORE_ENABLE=NO \
             2>&1 | tee archive.log
           echo "=== xcodebuild archive exit: ${PIPESTATUS[0]} ==="
 
@@ -182,8 +186,10 @@ jobs:
 
       - name: Export IPA
         if: steps.archive.outcome == 'success'
+        timeout-minutes: 20
         run: |
-          xcodebuild -exportArchive \
+          perl -e 'alarm shift; exec @ARGV' 1200 \
+            xcodebuild -exportArchive \
             -archivePath "build/Souvera.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "build/export" \
