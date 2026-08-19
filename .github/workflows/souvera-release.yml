@@ -50,7 +50,7 @@ jobs:
     name: Archive & Export IPA
     runs-on: macos-15
     needs: build-check
-    timeout-minutes: 90
+    timeout-minutes: 240
     if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/')
 
     steps:
