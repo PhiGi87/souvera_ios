@@ -1,57 +1,27 @@
-name: Souvera Workspace - Signed Build
+name: Souvera Workspace - TestFlight Upload
 
 on:
   push:
     branches:
       - 'souvera/**'
+  pull_request:
+    types: [synchronize, opened, reopened, ready_for_review]
+    branches:
+      - 'souvera/**'
   workflow_dispatch:
-    inputs:
-      export_method:
-        description: 'Export method'
-        required: true
-        default: 'app-store-connect'
-        type: choice
-        options:
-          - ad-hoc
-          - app-store-connect
-          - development
 
 env:
   PROJECT: Nextcloud.xcodeproj
   SCHEME: Nextcloud
   XCODE_VERSION: '26.0.1'
   TEAM_ID: S76D7JCS9V
+  DERIVED_DATA: DerivedDataArchive
 
 jobs:
   build-check:
     name: Compile check (no signing)
     runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Download GoogleService-Info.plist
-        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
-
-      - name: Build for simulator (no signing)
-        run: |
-          xcodebuild build \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -destination "generic/platform=iOS" \
-            -skipPackagePluginValidation \
-            -allowProvisioningUpdates \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee build.log | grep -E 'error:|BUILD FAILED' || true
-          [ ${PIPESTATUS[0]} -eq 0 ] || { cat build.log | grep 'error:'; exit 1; }
-
-  archive:
-    name: Archive & Export IPA
-    runs-on: macos-15
-    needs: build-check
-    timeout-minutes: 240
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/')
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
 
     steps:
       - uses: actions/checkout@v5
@@ -60,23 +30,57 @@ jobs:
         run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
 
       - name: Setup Xcode
-        uses: maxim-lobanov/setup-xcode@v1.6.0
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Build (no signing)
+        run: |
+          xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "generic/platform=iOS" \
+            -skipPackagePluginValidation \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build.log | grep -E 'error:|BUILD FAILED' || true
+          [ ${PIPESTATUS[0]} -eq 0 ] || { cat build.log | grep 'error:'; exit 1; }
 
-      # App Store Connect API key drives fully automatic signing:
-      # xcodebuild -allowProvisioningUpdates creates/fetches every needed
-      # provisioning profile (one per bundle id/target) itself, as long as every
-      # target's CODE_SIGN_STYLE is Automatic and DEVELOPMENT_TEAM is set (both true
-      # for this project after the eu.souvera.workspace rebrand).
-      # For the SIGNING CERTIFICATE it reuses the fixed certificate imported below
-      # (see FIXED SIGNING CERTIFICATE) and only creates a new one if none exists.
-      #
+  archive:
+    name: Archive, Sign & Upload to TestFlight
+    runs-on: macos-15
+    needs: build-check
+    timeout-minutes: 240
+    if: |
+      always() &&
+      !cancelled() &&
+      (github.event_name != 'pull_request' || needs.build-check.result == 'success') &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/'))
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Setup Ruby and fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+
       # Required repo secrets (Settings -> Secrets and variables -> Actions):
       #   ASC_API_KEY_ID          - Key ID from App Store Connect > Users and Access > Keys
       #   ASC_API_ISSUER_ID       - Issuer ID shown on the same Keys page
-      #   ASC_API_KEY_P8_BASE64   - `base64 -i AuthKey_XXXX.p8 | pbcopy`, paste the output
+      #   ASC_API_KEY_P8_BASE64   - base64 of AuthKey_XXXX.p8
+      #   IOS_CERT_P12_BASE64     - base64 of the fixed distribution certificate (.p12, legacy export)
+      #   IOS_CERT_PASSWORD       - password of that .p12
       - name: Install App Store Connect API key
         env:
           ASC_API_KEY_P8_BASE64: ${{ secrets.ASC_API_KEY_P8_BASE64 }}
@@ -91,46 +95,14 @@ jobs:
           fi
           echo "API key decoded OK (Key ID ${ASC_API_KEY_ID})."
 
-      - name: Setup Ruby and fastlane
-        uses: ruby/setup-ruby@v1
-        with:
-          ruby-version: '3.3'
-          bundler-cache: true
-
-      # FIXED SIGNING CERTIFICATE
-      # ---------------------------
-      # Apple allows max. 3 "Apple Distribution" certificates per team. With automatic
-      # signing + the ASC API key, xcodebuild creates a NEW certificate whenever the
-      # runner keychain does not contain a matching one — hitting the limit quickly
-      # and breaking old builds when certs get revoked.
-      #
-      # Solution: create ONE distribution certificate, store it once as .p12 (base64)
-      # in the repo secrets IOS_CERT_P12_BASE64 + IOS_CERT_PASSWORD, and import it on
-      # every run. xcodebuild then reuses this certificate instead of creating a new one.
-      #
-      # How to obtain the .p12 (one time only, either way):
-      #
-      # A) On a Mac (manual):
-      #    1. Keychain Access → Certificate Assistant → "Request a Certificate From a
-      #       Certificate Authority" → save CSR to disk.
-      #    2. developer.apple.com → Certificates → + → "Apple Distribution" → upload CSR
-      #       → download .cer and double-click it (installs into keychain).
-      #    3. Export the certificate + private key as .p12 (with password) via Keychain
-      #       Access.
-      #    4. base64 -i cert.p12 | tr -d '\n' → GitHub secret IOS_CERT_P12_BASE64,
-      #       the password → IOS_CERT_PASSWORD.
-      #
-      # B) Via this workflow (automatic):
-      #    1. Run once WITHOUT the two secrets set. Automatic signing creates a new
-      #       certificate and the "Persist signing certificate" step uploads the .p12
-      #       as the 'signing-certificate' artifact (never printed to the log).
-      #    2. Download the artifact, then locally:
-      #         base64 -i souvera-signing.p12 | tr -d '\n'
-      #       → GitHub secret IOS_CERT_P12_BASE64; the p12 password → IOS_CERT_PASSWORD.
-      #       From now on every run imports and reuses the SAME certificate.
-      #
-      # Note: keep exactly one matching distribution certificate in the Apple Developer
-      # Portal. Stray certificates from earlier runs can be revoked there.
+      # Import the FIXED distribution certificate (.p12 from secrets) into a
+      # dedicated CI keychain, so xcodebuild reuses it instead of creating a
+      # new certificate on every run (Apple allows max. 3 per team).
+      # The .p12 must be exported with OpenSSL legacy crypto
+      # (openssl pkcs12 -export -legacy ...) - the macOS Security framework
+      # rejects modern PBES2/AES + SHA-256 MAC containers.
+      # To renew the certificate (expires Aug 2027): create a new one and
+      # update the secrets IOS_CERT_P12_BASE64 and IOS_CERT_PASSWORD.
       - name: Import signing certificate
         id: cert_import
         env:
@@ -139,9 +111,8 @@ jobs:
         run: |
           set -e
           if [ -z "$IOS_CERT_P12_BASE64" ]; then
-            echo "IOS_CERT_P12_BASE64 not set — no fixed certificate; automatic signing will create a new one"
-            echo "IMPORTED=no" >> "$GITHUB_OUTPUT"
-            exit 0
+            echo "::error::IOS_CERT_P12_BASE64 is not set"
+            exit 1
           fi
           mkdir -p ~/certs
           printf '%s' "$IOS_CERT_P12_BASE64" | tr -d '[:space:]' > ~/certs/souvera.p12.b64
@@ -149,18 +120,13 @@ jobs:
           echo "IOS_CERT_PASSWORD length: ${#IOS_CERT_PASSWORD} (expected 24)"
           base64 --decode < ~/certs/souvera.p12.b64 > ~/certs/souvera.p12
           if ! openssl pkcs12 -in ~/certs/souvera.p12 -noout -passin "pass:${IOS_CERT_PASSWORD}" 2>/dev/null; then
-            echo "::error::The .p12 does not match IOS_CERT_PASSWORD (wrong password or truncated base64 — re-check both secrets)"
+            echo "::error::The .p12 does not match IOS_CERT_PASSWORD (wrong password or truncated base64)"
             exit 1
           fi
-          # macOS Security framework rejects modern PBES2/AES + SHA-256 MAC .p12 files.
-          # Must be exported with OpenSSL legacy crypto: openssl pkcs12 -export -legacy ...
           if openssl pkcs12 -in ~/certs/souvera.p12 -noout -info -passin "pass:${IOS_CERT_PASSWORD}" 2>&1 | grep -qE "MAC: sha256"; then
             echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
             exit 1
           fi
-          # Import into a dedicated CI keychain with a known password, so the private
-          # key is accessible to codesign/xcodebuild without an interactive prompt
-          # (a prompt would make exportArchive hang forever).
           security delete-keychain ci.keychain 2>/dev/null || true
           security create-keychain -p ci ci.keychain
           security default-keychain -s ci.keychain
@@ -168,24 +134,26 @@ jobs:
           security list-keychains -d user -s ci.keychain "$HOME/Library/Keychains/login.keychain-db"
           security import ~/certs/souvera.p12 -k ci.keychain -P "$IOS_CERT_PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci ci.keychain
-          echo "Imported signing identities:"
-          security find-identity -v -p codesigning ci.keychain
           if ! security find-identity -v -p codesigning ci.keychain | grep -q "Apple Distribution"; then
-            echo "::error::Import succeeded but no 'Apple Distribution' identity found in keychain — check that the .p12 contains the private key"
+            echo "::error::Import succeeded but no 'Apple Distribution' identity found in keychain"
             exit 1
           fi
-          echo "IMPORTED=yes" >> "$GITHUB_OUTPUT"
           rm -f ~/certs/souvera.p12
 
+      # Automatic signing creates a new DEVELOPMENT certificate per run; revoke
+      # stale ones first so the certificate limit is never hit. The fixed
+      # DISTRIBUTION certificate is left untouched.
       - name: Clean up development certificates
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: bundle exec ruby .github/scripts/revoke_dev_certs.rb
 
-      # NOTE: unit tests are intentionally NOT run in the archive job — the test host crashes on a
-      # pre-existing Realm configuration issue in CI, which is unrelated to producing an installable
-      # build. Tests run in a separate job/workflow once the Realm test setup is fixed.
+      - name: Restore DerivedData cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.DERIVED_DATA }}
+          key: souvera-deriveddata-v1-${{ hashFiles('Nextcloud.xcodeproj/project.pbxproj') }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       - name: Archive (signed, automatic)
         id: archive
@@ -200,169 +168,63 @@ jobs:
             -scheme "$SCHEME" \
             -archivePath "build/Souvera.xcarchive" \
             -destination "generic/platform=iOS" \
-            -derivedDataPath "DerivedDataArchive" \
+            -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             -allowProvisioningUpdates \
             -authenticationKeyPath ~/private_keys/AuthKey_${ASC_API_KEY_ID}.p8 \
             -authenticationKeyID "$ASC_API_KEY_ID" \
             -authenticationKeyIssuerID "$ASC_API_ISSUER_ID" \
             DEVELOPMENT_TEAM="$TEAM_ID" \
-            ONLY_ACTIVE_ARCH=NO \
             2>&1 | tee archive.log
-          echo "SIGNED_ARCHIVE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
           echo "=== xcodebuild archive exit: ${PIPESTATUS[0]} ==="
 
-      - name: Archive (fallback, no signing)
-        if: steps.archive.outcome != 'success'
-        run: |
-          xcodebuild archive \
-            -project "$PROJECT" \
-            -scheme "$SCHEME" \
-            -archivePath "build/Souvera.xcarchive" \
-            -destination "generic/platform=iOS" \
-            -skipPackagePluginValidation \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=NO \
-            2>&1 | tee archive-fallback.log
-          echo "FALLBACK_ARCHIVE_EXIT=${PIPESTATUS[0]}" >> $GITHUB_ENV
-
-      - name: Collect logs
+      - name: Collect archive log
         if: always()
         run: |
           mkdir -p build/logs
-          for f in archive.log archive-fallback.log device-build.log export-fallback.log; do
-            [ -f "$f" ] && cp "$f" build/logs/
-          done
-          if ls /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs 2>/dev/null; then
-            cp -R /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs build/logs/ 2>/dev/null || true
-          fi
-          ls -la build/logs/ || true
+          [ -f archive.log ] && cp archive.log build/logs/ || true
 
-      - name: Show signing error summary
-        if: steps.archive.outcome != 'success'
-        run: |
-          echo "================================================"
-          echo "SIGNING FAILED — check archive.log for details."
-          echo "Common causes:"
-          echo "1. Max certificates reached → revoke old certs:"
-          echo "   https://developer.apple.com/account/resources/certificates/list"
-          echo "2. Bundle IDs not registered → create in App Store Connect:"
-          echo "   https://appstoreconnect.apple.com/apps"
-          echo "3. API key lacks 'Developer' role (needs Certificates access)"
-          echo "================================================"
-          grep -c 'Choose a certificate to revoke' archive.log 2>/dev/null && echo "ACTION: Revoke old certificates in Apple Developer Portal" || true
-          grep -c 'No profiles for' archive.log 2>/dev/null && echo "ACTION: Once certs are cleared, re-run — profiles will be auto-created" || true
-
-      - name: Export Dev IPA (from fallback archive)
-        if: steps.archive.outcome != 'success'
-        run: |
-          if [ ! -d "build/Souvera.xcarchive" ]; then
-            echo "No archive to export"
-            exit 0
-          fi
-          cat > ExportOptions.plist << 'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?>
-          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-          <plist version="1.0">
-          <dict>
-            <key>method</key>
-            <string>development</string>
-            <key>teamID</key>
-            <string>S76D7JCS9V</string>
-            <key>signingStyle</key>
-            <string>manual</string>
-          </dict>
-          </plist>
-          PLIST
-          xcodebuild -exportArchive \
-            -archivePath "build/Souvera.xcarchive" \
-            -exportOptionsPlist ExportOptions.plist \
-            -exportPath "build/export" \
-            CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee export-fallback.log || true
-          ls -la build/export/ || echo "No IPA produced"
-
-      - name: Upload Dev IPA artifact
-        if: steps.archive.outcome != 'success'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Souvera Workspace Dev IPA
-          path: build/export/*.ipa
-          retention-days: 7
-
-      - name: Upload build logs
+      - name: Save DerivedData cache
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/cache/save@v4
         with:
-          name: build-logs
-          path: build/logs/
-          retention-days: 7
+          path: ${{ env.DERIVED_DATA }}
+          key: souvera-deriveddata-v1-${{ hashFiles('Nextcloud.xcodeproj/project.pbxproj') }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
-      - name: Persist signing certificate
-        if: steps.archive.outcome == 'success' && steps.cert_import.outputs.IMPORTED != 'yes'
-        continue-on-error: true
-        timeout-minutes: 5
-        env:
-          IOS_CERT_PASSWORD: ${{ secrets.IOS_CERT_PASSWORD }}
-        run: |
-          echo "Exporting certificate for IOS_CERT_P12_BASE64 secret..."
-          security unlock-keychain -p "" ~/Library/Keychains/login.keychain-db 2>/dev/null || true
-          CERT_HASH=$(security find-identity -v -p codesigning ~/Library/Keychains/login.keychain-db | grep -E "Apple Distribution|iPhone Distribution|Apple Development" | head -1 | awk -F'"' '{print $2}')
-          if [ -z "$CERT_HASH" ]; then
-            echo "No certificate found — skipping export"
-            echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
-            exit 0
-          fi
-          echo "Found: $CERT_HASH"
-          PASSWORD="${IOS_CERT_PASSWORD:-ci-auto-p12-pwd}"
-          mkdir -p build/cert-export
-          timeout 120 security export -k ~/Library/Keychains/login.keychain-db \
-            -t identities -f pkcs12 -P "$PASSWORD" -A \
-            -o build/cert-export/souvera-signing.p12 "$CERT_HASH" 2>&1 || {
-            echo "security export failed or timed out — cert may already exist as artifact"
-            echo "SHOULD_UPLOAD_CERT=0" >> $GITHUB_ENV
-            exit 0
-          }
-          echo "Cert exported to build/cert-export/souvera-signing.p12"
-          echo "SHOULD_UPLOAD_CERT=1" >> $GITHUB_ENV
-          echo ""
-          echo "===================================================================="
-          echo "Private key is intentionally NOT printed to the log (security)."
-          echo "1. Download the 'signing-certificate' artifact of this run."
-          echo "2. Create the GitHub secret locally:"
-          echo "     base64 -i souvera-signing.p12 | tr -d '\n'"
-          echo "   → store the output as secret IOS_CERT_P12_BASE64"
-          echo "3. Store the p12 password as secret IOS_CERT_PASSWORD."
-          echo "   Password used for this p12: ${PASSWORD}"
-          echo "===================================================================="
-
-      - name: Upload cert artifact
-        if: env.SHOULD_UPLOAD_CERT == '1'
-        uses: actions/upload-artifact@v4
-        with:
-          name: signing-certificate
-          path: build/cert-export/
-          retention-days: 1
-
+      # Downloads the pre-created App Store provisioning profiles (which carry
+      # the App Groups capabilities) and writes ExportOptions.plist for manual
+      # signing. Manual signing avoids Xcode's cloud-signing path entirely.
       - name: Install distribution provisioning profiles
         if: steps.archive.outcome == 'success'
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-          EXPORT_METHOD: ${{ github.event.inputs.export_method || 'app-store-connect' }}
+          EXPORT_METHOD: app-store-connect
         run: bundle exec ruby .github/scripts/install_profiles.rb
 
-      - name: Export IPA (signed only, skip if archive failed)
+      - name: Export IPA
         if: steps.archive.outcome == 'success'
         run: |
           xcodebuild -exportArchive \
             -archivePath "build/Souvera.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
-            -exportPath "build/export"
+            -exportPath "build/export" \
+            2>&1 | tee export.log
+          EXPORT_EXIT=${PIPESTATUS[0]}
+          mkdir -p build/logs
+          cp export.log build/logs/ 2>/dev/null || true
+          cp -R /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs build/logs/ 2>/dev/null || true
+          ls -la build/export/ 2>/dev/null || true
+          echo "=== exportArchive exit: $EXPORT_EXIT ==="
+          exit $EXPORT_EXIT
+
+      - name: Upload debug logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-logs
+          path: build/logs/
+          retention-days: 7
 
       - name: Upload IPA artifact
         if: steps.archive.outcome == 'success'
