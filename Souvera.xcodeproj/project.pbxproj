@@ -6901,6 +6901,7 @@
 			productName = NIOSSL;
 		};
 		FEE09EDE671B3746C33CE3EC /* NIOIMAP */ = {
+			isa = XCSwiftPackageProductDependency;
 			package = FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */;
 			productName = NIOIMAP;
 		};
