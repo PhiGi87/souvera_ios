@@ -11,6 +11,11 @@
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
 		FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */; };
 		FEB1DABC0098896F7EA78F22 /* JmapMapper.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11EF7F13DD7D568D84C62 /* JmapMapper.swift */; };
+		D34439A746F8E9CE212DF356 /* MailNIOConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF97C900ADD812CB383D39E9 /* MailNIOConnection.swift */; };
+		7C2A1A06A970DA833AE58D69 /* MailImapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE102336C42239C620F9C820 /* MailImapClient.swift */; };
+		764D8F2CE04D57A643B6C4D0 /* MailMimeBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE24AFCFAF1A1754D60E9492 /* MailMimeBuilder.swift */; };
+		B5446C9B8DDC1B99BE5A5CB1 /* MailSmtpClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9575BD72F68E03E3F23FC4D /* MailSmtpClient.swift */; };
+		A46057A95161D8B23795C2E6 /* MailIMAPResponseParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 526DFDAF165D3C277731B3A1 /* MailIMAPResponseParser.swift */; };
 		FEF01135E4AA5A4F1D0163BC /* WebRTC in Frameworks */ = {isa = PBXBuildFile; productRef = FEE0D62C467FC6981B9A77FD /* WebRTC */; };
 		FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */; };
 		FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */; };
@@ -135,6 +140,7 @@
 		F33EE6E72BF4C02600CA1A51 /* NIOSSL in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6E62BF4C02600CA1A51 /* NIOSSL */; };
 		F33EE6ED2BF4C03800CA1A51 /* NIOSSL in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6EC2BF4C03800CA1A51 /* NIOSSL */; };
 		F33EE6F02BF4C0FF00CA1A51 /* NIO in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6EF2BF4C0FF00CA1A51 /* NIO */; };
+		FEE09EDE671B3746C33CE3EC /* NIOIMAP in Frameworks */ = {isa = PBXBuildFile; productRef = FEE09EDE671B3746C33CE3EC /* NIOIMAP */; };
 		F33EE6F22BF4C9B200CA1A51 /* PKCS12.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33EE6F12BF4C9B200CA1A51 /* PKCS12.swift */; };
 		F343A4B32A1E01FF00DDA874 /* PHAsset+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F343A4B22A1E01FF00DDA874 /* PHAsset+Extension.swift */; };
 		F343A4B62A1E084200DDA874 /* PHAsset+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F343A4B22A1E01FF00DDA874 /* PHAsset+Extension.swift */; };
@@ -2116,6 +2122,7 @@
 				F760DE032AE66EA80027D78A /* KeychainAccess in Frameworks */,
 				F3374AF62D78B01B002A38F9 /* HashTreeCollections in Frameworks */,
 				F33EE6F02BF4C0FF00CA1A51 /* NIO in Frameworks */,
+				FEE09EDE671B3746C33CE3EC /* NIOIMAP in Frameworks */,
 				F3A0479E2BD268B500658E7B /* PopupView in Frameworks */,
 				F3374AF82D78B01B002A38F9 /* HeapModule in Frameworks */,
 				F77333882927A72100466E35 /* OpenSSL in Frameworks */,
@@ -2192,6 +2199,11 @@
 				FEA1ADD802F125C3224605E0 /* JmapClient.swift */,
 				FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */,
 				FEA11EF7F13DD7D568D84C62 /* JmapMapper.swift */,
+				AF97C900ADD812CB383D39E9 /* MailNIOConnection.swift */,
+				AE102336C42239C620F9C820 /* MailImapClient.swift */,
+				CE24AFCFAF1A1754D60E9492 /* MailMimeBuilder.swift */,
+				D9575BD72F68E03E3F23FC4D /* MailSmtpClient.swift */,
+				526DFDAF165D3C277731B3A1 /* MailIMAPResponseParser.swift */,
 				FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */,
 				FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */,
 				FEA002689B11873630AAE8FD /* MailModels.swift */,
@@ -3988,6 +4000,7 @@
 				F7160A812BE933390034DCB3 /* RealmSwift */,
 				F33EE6E02BF4BDA500CA1A51 /* NIOSSL */,
 				F33EE6EF2BF4C0FF00CA1A51 /* NIO */,
+				FEE09EDE671B3746C33CE3EC /* NIOIMAP */,
 				F7D4BF532CA2ED9D00A5E746 /* VLCKitSPM */,
 				F3374AEF2D78B01B002A38F9 /* BitCollections */,
 				F3374AF12D78B01B002A38F9 /* Collections */,
@@ -4194,6 +4207,7 @@
 				F3A0479C2BD268B500658E7B /* XCRemoteSwiftPackageReference "PopupView" */,
 				F33EE6DF2BF4BDA500CA1A51 /* XCRemoteSwiftPackageReference "swift-nio-ssl" */,
 				F33EE6EE2BF4C0FF00CA1A51 /* XCRemoteSwiftPackageReference "swift-nio" */,
+				FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */,
 				F7D4BF4E2CA2ECCB00A5E746 /* XCRemoteSwiftPackageReference "vlckit-spm" */,
 				F3374AEE2D78B01B002A38F9 /* XCRemoteSwiftPackageReference "swift-collections" */,
 				F70557B52ED44E2700135623 /* XCRemoteSwiftPackageReference "LucidBanner" */,
@@ -4846,6 +4860,11 @@
 				FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */,
 				FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */,
 				FEB1DABC0098896F7EA78F22 /* JmapMapper.swift in Sources */,
+				D34439A746F8E9CE212DF356 /* MailNIOConnection.swift in Sources */,
+				7C2A1A06A970DA833AE58D69 /* MailImapClient.swift in Sources */,
+				764D8F2CE04D57A643B6C4D0 /* MailMimeBuilder.swift in Sources */,
+				B5446C9B8DDC1B99BE5A5CB1 /* MailSmtpClient.swift in Sources */,
+				A46057A95161D8B23795C2E6 /* MailIMAPResponseParser.swift in Sources */,
 				FEB0643E3977C6F3E931259D /* LinkAccount.swift in Sources */,
 				FEB0F4EF67643944092AF580 /* LinkOcsModels.swift in Sources */,
 				FEB0558021FA16836E3E3B20 /* LinkOcsApi.swift in Sources */,
@@ -6624,6 +6643,14 @@
 				minimumVersion = 2.26.0;
 			};
 		};
+		FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/apple/swift-nio-imap";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.4.0;
+			};
+		};
 		F33EE6EE2BF4C0FF00CA1A51 /* XCRemoteSwiftPackageReference "swift-nio" */ = {
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/apple/swift-nio.git";
@@ -6867,6 +6894,10 @@
 			isa = XCSwiftPackageProductDependency;
 			package = F33EE6DF2BF4BDA500CA1A51 /* XCRemoteSwiftPackageReference "swift-nio-ssl" */;
 			productName = NIOSSL;
+		};
+		FEE09EDE671B3746C33CE3EC /* NIOIMAP */ = {
+			package = FED070D0340D825E305E706B /* XCRemoteSwiftPackageReference "swift-nio-imap" */;
+			productName = NIOIMAP;
 		};
 		F33EE6EF2BF4C0FF00CA1A51 /* NIO */ = {
 			isa = XCSwiftPackageProductDependency;

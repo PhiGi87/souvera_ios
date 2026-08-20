@@ -26,6 +26,23 @@ struct MailAccount {
     let loginName: String
     let mailPassword: String
     let stalwartId: String
+
+    /// The SASL username for IMAP/SMTP (per the souvera_mail server contract
+    /// this is `loginName`, which may differ from the Nextcloud user id).
+    var saslUser: String {
+        loginName.isEmpty ? username : loginName
+    }
+
+    /// IMAP/SMTP host: base URL minus scheme, path and port.
+    var host: String {
+        var h = baseUrl
+        for prefix in ["https://", "http://"] where h.hasPrefix(prefix) {
+            h.removeFirst(prefix.count)
+        }
+        h = h.components(separatedBy: "/").first ?? h
+        h = h.components(separatedBy: ":").first ?? h
+        return h
+    }
 }
 
 struct SouveraMailCredentialManager {
