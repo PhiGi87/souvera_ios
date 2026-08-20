@@ -168,19 +168,22 @@ final class NCMoreModel: ObservableObject {
     /// - Clears existing sections.
     /// - Reads the current account from the local database.
     /// - Reads server capabilities from `NCNetworking`.
-    /// - Adds feature rows such as Recent, Shares, Offline, Scan, Trash.
+    /// - Adds feature rows such as Link, Mail, Recent, Offline, Scan, Trash.
     /// - Adds Settings.
     /// - Loads quota information.
     /// - Loads external sites when enabled by branding options and server capabilities.
     ///
+    /// The static entries (Link, Mail, Recent, Offline, Scan, Trash, Settings and the
+    /// Souvera apps section) are always added - even before an account exists or before
+    /// the server capabilities have arrived. Only entries that genuinely depend on the
+    /// server (Shares, Groupfolders, External Sites, Quota) are gated on capabilities.
+    ///
     /// The resulting sections are published through `sections` and rendered by `NCMoreView`.
     func loadItems() async {
-        guard let tableAccount = database.getTableAccount(predicate: NSPredicate(format: "account == %@", account)),
-              let capabilities = NCNetworking.shared.capabilities[tableAccount.account] else {
-            return
-        }
+        let tableAccount = database.getTableAccount(predicate: NSPredicate(format: "account == %@", account))
+        let capabilities = tableAccount.flatMap { NCNetworking.shared.capabilities[$0.account] }
 
-        autoUploadStart = tableAccount.autoUploadStart
+        autoUploadStart = tableAccount?.autoUploadStart ?? false
 
         var functionItems: [Item] = []
         var externalSiteItems: [Item] = []
@@ -189,6 +192,10 @@ final class NCMoreModel: ObservableObject {
         sections.removeAll()
         quotaExternalSiteTitle = ""
         quotaExternalSiteUrl = nil
+        if tableAccount == nil {
+            quotaDescription = ""
+            quotaProgress = 0
+        }
 
         functionItems.append(
             Item(
@@ -242,7 +249,7 @@ final class NCMoreModel: ObservableObject {
             )
         }
 
-        if capabilities.fileSharingApiEnabled {
+        if capabilities?.fileSharingApiEnabled == true {
             functionItems.append(
                 Item(
                     titleKey: "_list_shares_",
@@ -266,7 +273,7 @@ final class NCMoreModel: ObservableObject {
             )
         )
 
-        if capabilities.groupfoldersEnabled {
+        if capabilities?.groupfoldersEnabled == true {
             functionItems.append(
                 Item(
                     titleKey: "_group_folders_",
@@ -314,9 +321,10 @@ final class NCMoreModel: ObservableObject {
             )
         )
 
-        configureQuota(tableAccount: tableAccount)
-
-        loadExternalSites(sessionAccount: tableAccount.account, externalSiteItems: &externalSiteItems)
+        if let tableAccount {
+            configureQuota(tableAccount: tableAccount)
+            loadExternalSites(sessionAccount: tableAccount.account, externalSiteItems: &externalSiteItems)
+        }
 
         if !functionItems.isEmpty {
             sections.append(

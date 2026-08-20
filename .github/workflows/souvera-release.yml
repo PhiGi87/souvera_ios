@@ -325,7 +325,7 @@ jobs:
             xcodebuild build \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -destination "platform=iOS Simulator,name=iPhone 17,OS=latest" \
             -derivedDataPath "$SIM_DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \

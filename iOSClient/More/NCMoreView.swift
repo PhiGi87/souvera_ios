@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import SwiftUI
+import Combine
 import NextcloudKit
 
 /// SwiftUI implementation of the More tab content.
@@ -68,6 +69,12 @@ struct NCMoreView: View {
         .task {
             guard loadItemsOnAppear else { return }
             await model.loadItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterChangeUser))) { _ in
+            Task { await model.loadItems() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterServerDidUpdate))) { _ in
+            Task { await model.loadItems() }
         }
         .onAppear {
             updateAutoUploadCounter()
