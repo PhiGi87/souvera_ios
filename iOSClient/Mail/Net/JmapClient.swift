@@ -279,7 +279,11 @@ actor JmapClient {
         let primaryAccId = resolveAccountId(json: json, caps: caps)
         nkLog(debug: "[JMAP] resolved primary accountId: \(primaryAccId)")
 
-        let apiUrl = json.optString("apiUrl") ?? resolvedApiUrl ?? "\(baseUrl)/jmap"
+        // Normalize the api URL: the souvera_mail server itself posts to
+        // '/jmap' without a trailing slash. Some front proxies route '/jmap'
+        // and '/jmap/' differently and reject the latter with notRequest.
+        let apiUrl = (json.optString("apiUrl") ?? resolvedApiUrl ?? "\(baseUrl)/jmap")
+            .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
 
         return JmapSessionInfo(
             apiUrl: apiUrl,
@@ -343,7 +347,8 @@ actor JmapClient {
     }
 
     private func httpPost(_ urlStr: String, body: [String: Any]) async throws -> [String: Any] {
-        guard let url = URL(string: urlStr) else {
+        let normalizedUrl = urlStr.replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
+        guard let url = URL(string: normalizedUrl) else {
             throw JmapException.protocolError("Invalid URL: \(urlStr)")
         }
         guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
@@ -358,8 +363,8 @@ actor JmapClient {
         req.httpBody = bodyData
         lastPostBody = String(data: bodyData, encoding: .utf8) ?? ""
 
-        nkLog(debug: "[JMAP] POST \(urlStr) body: \(lastPostBody ?? "")")
-        JmapLog.write("POST \(urlStr) (method=POST, Content-Type=application/json, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
+        nkLog(debug: "[JMAP] POST \(normalizedUrl) body: \(lastPostBody ?? "")")
+        JmapLog.write("POST \(normalizedUrl) (method=POST, Content-Type=application/json, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
         JmapLog.write("body (\(bodyData.count) bytes): \(lastPostBody ?? "")")
 
         let (data, resp) = try await urlSession.data(for: req)
