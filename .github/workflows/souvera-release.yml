@@ -127,10 +127,17 @@ jobs:
             echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
             exit 1
           fi
-          security unlock-keychain -p "" "$HOME/Library/Keychains/login.keychain-db" 2>/dev/null || true
-          security import ~/certs/souvera.p12 -k "$HOME/Library/Keychains/login.keychain-db" -P "$IOS_CERT_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
-          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" "$HOME/Library/Keychains/login.keychain-db" || echo "WARNING: set-key-partition-list failed - relying on import -A"
-          if ! security find-identity -v -p codesigning "$HOME/Library/Keychains/login.keychain-db" | grep -q "Apple Distribution"; then
+          # Import into a dedicated CI keychain with a KNOWN password and put it
+          # first in the search list, so codesign can access the private key
+          # without any interactive prompt (a prompt hangs CI forever).
+          security delete-keychain ci.keychain 2>/dev/null || true
+          security create-keychain -p ci ci.keychain
+          security set-keychain-settings -lut 21600 ci.keychain
+          security unlock-keychain -p ci ci.keychain
+          security list-keychains -d user -s ci.keychain "$HOME/Library/Keychains/login.keychain-db"
+          security import ~/certs/souvera.p12 -k ci.keychain -P "$IOS_CERT_PASSWORD" -A -T /usr/bin/codesign -T /usr/bin/xcodebuild -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k ci ci.keychain
+          if ! security find-identity -v -p codesigning ci.keychain | grep -q "Apple Distribution"; then
             echo "::error::Import succeeded but no 'Apple Distribution' identity found in keychain"
             exit 1
           fi
@@ -168,8 +175,20 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            2>&1 | tee archive.log
-          echo "=== xcodebuild archive exit: ${PIPESTATUS[0]} ==="
+            2>&1 | tee archive.log || true
+          ARCHIVE_EXIT=${PIPESTATUS[0]}
+          echo "=== xcodebuild archive exit: $ARCHIVE_EXIT ==="
+          if [ "$ARCHIVE_EXIT" -eq 142 ]; then
+            echo "archive timed out - sampling hung processes"
+            mkdir -p build/logs
+            for pid in $(pgrep -x codesign); do
+              sample "$pid" 5 -file "build/logs/codesign-$pid-sample.txt" 2>/dev/null || true
+            done
+            for pid in $(pgrep -x xcodebuild); do
+              sample "$pid" 5 -file "build/logs/xcodebuild-$pid-sample.txt" 2>/dev/null || true
+            done
+          fi
+          [ "$ARCHIVE_EXIT" = "0" ]
 
       - name: Collect archive log
         if: always()
@@ -188,19 +207,26 @@ jobs:
         if: steps.archive.outcome == 'success'
         timeout-minutes: 20
         run: |
+          set -o pipefail
           perl -e 'alarm shift; exec @ARGV' 1200 \
             xcodebuild -exportArchive \
             -archivePath "build/Souvera.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "build/export" \
-            2>&1 | tee export.log
+            2>&1 | tee export.log || true
           EXPORT_EXIT=${PIPESTATUS[0]}
           mkdir -p build/logs
           cp export.log build/logs/ 2>/dev/null || true
           cp -R /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs build/logs/ 2>/dev/null || true
+          if [ "$EXPORT_EXIT" -eq 142 ]; then
+            echo "export timed out - sampling hung processes"
+            for pid in $(pgrep -x codesign); do
+              sample "$pid" 5 -file "build/logs/codesign-$pid-sample.txt" 2>/dev/null || true
+            done
+          fi
           ls -la build/export/ 2>/dev/null || true
           echo "=== exportArchive exit: $EXPORT_EXIT ==="
-          exit $EXPORT_EXIT
+          [ "$EXPORT_EXIT" = "0" ]
 
       - name: Upload debug logs (on failure)
         if: failure()
