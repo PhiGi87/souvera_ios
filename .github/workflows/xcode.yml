@@ -16,7 +16,7 @@ on:
       - develop
 
 env:
-  PROJECT: Nextcloud.xcodeproj
+  PROJECT: Souvera.xcodeproj
   DESTINATION: platform=iOS Simulator,name=iPhone 16,OS=18.5
   SCHEME: Nextcloud
   XCODE_VERSION: '26.0.1'

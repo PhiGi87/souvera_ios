@@ -1,4 +1,4 @@
-name: Souvera Workspace - TestFlight Upload
+name: Souvera Workspace - Build
 
 on:
   push:
@@ -9,13 +9,20 @@ on:
     branches:
       - 'souvera/**'
   workflow_dispatch:
+    inputs:
+      upload_testflight:
+        description: 'Upload the build to TestFlight'
+        required: true
+        default: false
+        type: boolean
 
 env:
-  PROJECT: Nextcloud.xcodeproj
+  PROJECT: Souvera.xcodeproj
   SCHEME: Nextcloud
   XCODE_VERSION: '26.0.1'
   TEAM_ID: S76D7JCS9V
   DERIVED_DATA: DerivedDataArchive
+  SIM_DERIVED_DATA: DerivedDataSim
 
 jobs:
   build-check:
@@ -48,7 +55,7 @@ jobs:
           [ ${PIPESTATUS[0]} -eq 0 ] || { cat build.log | grep 'error:'; exit 1; }
 
   archive:
-    name: Archive, Sign & Upload to TestFlight
+    name: Archive & IPA
     runs-on: macos-15
     needs: build-check
     timeout-minutes: 120
@@ -144,19 +151,20 @@ jobs:
           rm -f ~/certs/souvera.p12
 
       # Apple requires a strictly increasing bundle version per TestFlight
-      # upload: set it to (latest uploaded build + 1).
+      # upload: only run when a TestFlight upload was requested.
       - name: Bump build number
+        if: github.event_name == 'workflow_dispatch' && github.event.inputs.upload_testflight == 'true'
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: bundle exec fastlane bump_build_number
 
-      # Cache key must ignore the build number (it changes every run) but
+      # Cache key must ignore the build number (it changes on upload runs) but
       # still track dependency/pbxproj changes.
       - name: Compute dependency fingerprint
         id: depfingerprint
         run: |
-          KEY=$(grep -v CURRENT_PROJECT_VERSION Nextcloud.xcodeproj/project.pbxproj | shasum | cut -d' ' -f1)
+          KEY=$(grep -v CURRENT_PROJECT_VERSION Souvera.xcodeproj/project.pbxproj | shasum | cut -d' ' -f1)
           echo "key=$KEY" >> "$GITHUB_OUTPUT"
 
       - name: Restore DerivedData cache
@@ -261,8 +269,87 @@ jobs:
           retention-days: 14
 
       - name: Upload to TestFlight via fastlane pilot
-        if: steps.archive.outcome == 'success'
+        if: |
+          steps.archive.outcome == 'success' &&
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.upload_testflight == 'true'
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
         run: bundle exec fastlane upload_beta
+
+  simulator:
+    name: Simulator App (.app)
+    runs-on: macos-15
+    needs: build-check
+    timeout-minutes: 90
+    if: |
+      always() &&
+      !cancelled() &&
+      (github.event_name != 'pull_request' || needs.build-check.result == 'success') &&
+      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/'))
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Compute dependency fingerprint
+        id: depfingerprint
+        run: |
+          KEY=$(grep -v CURRENT_PROJECT_VERSION Souvera.xcodeproj/project.pbxproj | shasum | cut -d' ' -f1)
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Restore DerivedData cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.SIM_DERIVED_DATA }}
+          key: souvera-sim-v1-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+
+      - name: Build for simulator
+        timeout-minutes: 50
+        run: |
+          set -o pipefail
+          perl -e 'alarm shift; exec @ARGV' 2700 \
+            xcodebuild build \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination "platform=iOS Simulator,name=iPhone 16,OS=latest" \
+            -derivedDataPath "$SIM_DERIVED_DATA" \
+            -skipPackagePluginValidation \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            2>&1 | tee sim-build.log || true
+          SIM_EXIT=${PIPESTATUS[0]}
+          echo "=== simulator build exit: $SIM_EXIT ==="
+          mkdir -p build/logs
+          cp sim-build.log build/logs/ 2>/dev/null || true
+          [ "$SIM_EXIT" = "0" ]
+
+      - name: Save DerivedData cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.SIM_DERIVED_DATA }}
+          key: souvera-sim-v1-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+
+      - name: Package simulator app
+        if: success()
+        run: |
+          APP_PATH="$SIM_DERIVED_DATA/Build/Products/Debug-iphonesimulator/Nextcloud.app"
+          [ -d "$APP_PATH" ] || { echo "::error::Simulator app not found at $APP_PATH"; exit 1; }
+          ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "Nextcloud-Simulator.app.zip"
+          ls -la Nextcloud-Simulator.app.zip
+
+      - name: Upload simulator app artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Nextcloud Simulator App
+          path: Nextcloud-Simulator.app.zip
+          retention-days: 14

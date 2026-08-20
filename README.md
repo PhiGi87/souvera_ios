@@ -1,21 +1,9 @@
-# [Nextcloud](https://nextcloud.com) iOS app 
-[![Releases](https://img.shields.io/github/release/nextcloud/ios.svg)](https://github.com/nextcloud/ios/releases/latest) [![Build](https://github.com/nextcloud/ios/actions/workflows/xcode.yml/badge.svg)](https://github.com/nextcloud/ios/actions/workflows/xcode.yml) [![SwiftLint](https://github.com/nextcloud/ios/actions/workflows/lint.yml/badge.svg)](https://github.com/nextcloud/ios/actions/workflows/lint.yml)
-[![irc](https://img.shields.io/badge/IRC-%23nextcloud--mobile%20on%20freenode-blue.svg)](https://webchat.freenode.net/?channels=nextcloud-mobile)
+# Souvera Workspace iOS app
+Souvera Workspace is a fork of the [Nextcloud iOS app](https://github.com/nextcloud/ios) that syncs files with a Souvera/Nextcloud server. It combines file sync, mail, calls and notes in one app.
 
-<img src="Animation.gif" alt="Demo of the Nextcloud iOS files app" width="277" height="600">
+## Upstream
 
-[<img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg"
-alt="Demo of the Nextcloud iOS files app"
-height="40">](https://itunes.apple.com/us/app/nextcloud/id1125420102)
-
-Check out https://nextcloud.com and follow us on [twitter.com/nextclouders](https://twitter.com/nextclouders)
-
-## How to contribute
-If you want to [contribute](https://nextcloud.com/contribute/) to Nextcloud, you are very welcome:
-
-- our forum at https://help.nextcloud.com/c/clients/ios
-- for translations of the app on [Transifex](https://www.transifex.com/nextcloud/nextcloud/dashboard/)
-- opening issues and PRs (including a corresponding issue)
+This project is based on the Nextcloud iOS client. Many thanks to the Nextcloud contributors for the foundation this app builds on. For upstream contribution guidelines see the [Nextcloud iOS repository](https://github.com/nextcloud/ios).
 
 ## Contribution Guidelines & License
 

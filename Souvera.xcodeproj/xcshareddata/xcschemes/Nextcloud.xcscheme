@@ -17,7 +17,7 @@
                BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
                BuildableName = "Nextcloud.app"
                BlueprintName = "Nextcloud"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -31,7 +31,7 @@
                BlueprintIdentifier = "C0046CD92A17B98400D87C9D"
                BuildableName = "NextcloudUITests.xctest"
                BlueprintName = "NextcloudUITests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -45,7 +45,7 @@
                BlueprintIdentifier = "C04E2F1F2A17BB4D001BAD85"
                BuildableName = "NextcloudIntegrationTests.xctest"
                BlueprintName = "NextcloudIntegrationTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -59,7 +59,7 @@
                BlueprintIdentifier = "F31F69412A2F6D4500162F76"
                BuildableName = "NextcloudSnapshotTests.xctest"
                BlueprintName = "NextcloudSnapshotTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -77,7 +77,7 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -89,7 +89,7 @@
                BlueprintIdentifier = "AF8ED1F82757821000B8DBC4"
                BuildableName = "NextcloudUnitTests.xctest"
                BlueprintName = "NextcloudUnitTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -100,7 +100,7 @@
                BlueprintIdentifier = "C04E2F1F2A17BB4D001BAD85"
                BuildableName = "NextcloudIntegrationTests.xctest"
                BlueprintName = "NextcloudIntegrationTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -110,7 +110,7 @@
                BlueprintIdentifier = "C0046CD92A17B98400D87C9D"
                BuildableName = "NextcloudUITests.xctest"
                BlueprintName = "NextcloudUITests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -132,7 +132,7 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -179,7 +179,7 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

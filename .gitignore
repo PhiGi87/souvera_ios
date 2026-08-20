@@ -9,7 +9,7 @@
 
 ## Nextcloud
 *.xcodeproj
-!Nextcloud.xcodeproj
+!Souvera.xcodeproj
 Documentation/
 Custom/
 GoogleService-Info.plist

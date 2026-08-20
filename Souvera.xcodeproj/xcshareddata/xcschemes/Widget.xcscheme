@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
-               BuildableName = "Nextcloud.app"
-               BlueprintName = "Nextcloud"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               BlueprintIdentifier = "F7346E0F28B0EF5B006CE2D2"
+               BuildableName = "Widget.appex"
+               BlueprintName = "Widget"
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -29,10 +29,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F771E3CF20E2392D00AFB62D"
-               BuildableName = "File Provider Extension.appex"
-               BlueprintName = "File Provider Extension"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
+               BuildableName = "Nextcloud.app"
+               BlueprintName = "Nextcloud"
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -42,26 +42,7 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
-      <MacroExpansion>
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "F771E3CF20E2392D00AFB62D"
-            BuildableName = "File Provider Extension.appex"
-            BlueprintName = "File Provider Extension"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
-         </BuildableReference>
-      </MacroExpansion>
       <Testables>
-         <TestableReference
-            skipped = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "AF8ED1F82757821000B8DBC4"
-               BuildableName = "NextcloudUnitTests.xctest"
-               BlueprintName = "NextcloudUnitTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
          <TestableReference
             skipped = "NO"
             parallelizable = "YES">
@@ -70,7 +51,7 @@
                BlueprintIdentifier = "C0046CD92A17B98400D87C9D"
                BuildableName = "NextcloudUITests.xctest"
                BlueprintName = "NextcloudUITests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -81,7 +62,7 @@
                BlueprintIdentifier = "C04E2F1F2A17BB4D001BAD85"
                BuildableName = "NextcloudIntegrationTests.xctest"
                BlueprintName = "NextcloudIntegrationTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -92,7 +73,7 @@
                BlueprintIdentifier = "C04E2F2C2A17BB77001BAD85"
                BuildableName = "NextcloudEndToEndTests.xctest"
                BlueprintName = "NextcloudEndToEndTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -103,7 +84,7 @@
                BlueprintIdentifier = "F31F69412A2F6D4500162F76"
                BuildableName = "NextcloudSnapshotTests.xctest"
                BlueprintName = "NextcloudSnapshotTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -121,9 +102,15 @@
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2">
       <RemoteRunnable
-         runnableDebuggingMode = "1"
-         BundleIdentifier = "it.twsweb.Nextcloud"
-         RemotePath = "/Users/marinofaggiana/Library/Developer/CoreSimulator/Devices/F424A0A4-ADE0-4955-969F-C6426054B5C6/data/Containers/Bundle/Application/76DC966F-BA80-4ECE-B970-4FCAF9F503D8/Nextcloud.app">
+         runnableDebuggingMode = "2"
+         BundleIdentifier = "com.apple.springboard">
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "F7346E0F28B0EF5B006CE2D2"
+            BuildableName = "Widget.appex"
+            BlueprintName = "Widget"
+            ReferencedContainer = "container:Souvera.xcodeproj">
+         </BuildableReference>
       </RemoteRunnable>
       <MacroExpansion>
          <BuildableReference
@@ -131,9 +118,26 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
+      <EnvironmentVariables>
+         <EnvironmentVariable
+            key = "_XCWidgetKind"
+            value = ""
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "_XCWidgetDefaultView"
+            value = "timeline"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+         <EnvironmentVariable
+            key = "_XCWidgetFamily"
+            value = "medium"
+            isEnabled = "YES">
+         </EnvironmentVariable>
+      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -150,7 +154,7 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>

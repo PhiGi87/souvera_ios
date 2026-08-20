@@ -6,7 +6,7 @@ default_platform(:ios)
 # fastlane runs lanes with the fastlane/ directory as the working directory,
 # so anchor all project paths explicitly.
 ROOT = File.expand_path("..", __dir__)
-PROJECT = File.join(ROOT, "Nextcloud.xcodeproj")
+PROJECT = File.join(ROOT, "Souvera.xcodeproj")
 SCHEME = "Nextcloud"
 TEAM_ID = "S76D7JCS9V"
 EXPORT_DIR = File.join(ROOT, "build", "export")

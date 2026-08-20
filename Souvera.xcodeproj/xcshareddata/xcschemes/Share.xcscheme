@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F7346E0F28B0EF5B006CE2D2"
-               BuildableName = "Widget.appex"
-               BlueprintName = "Widget"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               BlueprintIdentifier = "F71459B41D12E3B700CAFEEC"
+               BuildableName = "Share.appex"
+               BlueprintName = "Share"
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
          <BuildActionEntry
@@ -32,7 +32,7 @@
                BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
                BuildableName = "Nextcloud.app"
                BlueprintName = "Nextcloud"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -42,7 +42,26 @@
       selectedDebuggerIdentifier = "Xcode.DebuggerFoundation.Debugger.LLDB"
       selectedLauncherIdentifier = "Xcode.DebuggerFoundation.Launcher.LLDB"
       shouldUseLaunchSchemeArgsEnv = "YES">
+      <MacroExpansion>
+         <BuildableReference
+            BuildableIdentifier = "primary"
+            BlueprintIdentifier = "F71459B41D12E3B700CAFEEC"
+            BuildableName = "Share.appex"
+            BlueprintName = "Share"
+            ReferencedContainer = "container:Souvera.xcodeproj">
+         </BuildableReference>
+      </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "AF8ED1F82757821000B8DBC4"
+               BuildableName = "NextcloudUnitTests.xctest"
+               BlueprintName = "NextcloudUnitTests"
+               ReferencedContainer = "container:Souvera.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
          <TestableReference
             skipped = "NO"
             parallelizable = "YES">
@@ -51,7 +70,7 @@
                BlueprintIdentifier = "C0046CD92A17B98400D87C9D"
                BuildableName = "NextcloudUITests.xctest"
                BlueprintName = "NextcloudUITests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -62,7 +81,7 @@
                BlueprintIdentifier = "C04E2F1F2A17BB4D001BAD85"
                BuildableName = "NextcloudIntegrationTests.xctest"
                BlueprintName = "NextcloudIntegrationTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -73,7 +92,7 @@
                BlueprintIdentifier = "C04E2F2C2A17BB77001BAD85"
                BuildableName = "NextcloudEndToEndTests.xctest"
                BlueprintName = "NextcloudEndToEndTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
          <TestableReference
@@ -84,7 +103,7 @@
                BlueprintIdentifier = "F31F69412A2F6D4500162F76"
                BuildableName = "NextcloudSnapshotTests.xctest"
                BlueprintName = "NextcloudSnapshotTests"
-               ReferencedContainer = "container:Nextcloud.xcodeproj">
+               ReferencedContainer = "container:Souvera.xcodeproj">
             </BuildableReference>
          </TestableReference>
       </Testables>
@@ -102,15 +121,9 @@
       allowLocationSimulation = "YES"
       launchAutomaticallySubstyle = "2">
       <RemoteRunnable
-         runnableDebuggingMode = "2"
-         BundleIdentifier = "com.apple.springboard">
-         <BuildableReference
-            BuildableIdentifier = "primary"
-            BlueprintIdentifier = "F7346E0F28B0EF5B006CE2D2"
-            BuildableName = "Widget.appex"
-            BlueprintName = "Widget"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
-         </BuildableReference>
+         runnableDebuggingMode = "0"
+         BundleIdentifier = "it.twsweb.Nextcloud"
+         RemotePath = "/var/containers/Bundle/Application/92F13FE8-7056-4509-8468-5856675AB1CA/Nextcloud.app">
       </RemoteRunnable>
       <MacroExpansion>
          <BuildableReference
@@ -118,26 +131,9 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
-      <EnvironmentVariables>
-         <EnvironmentVariable
-            key = "_XCWidgetKind"
-            value = ""
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "_XCWidgetDefaultView"
-            value = "timeline"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-         <EnvironmentVariable
-            key = "_XCWidgetFamily"
-            value = "medium"
-            isEnabled = "YES">
-         </EnvironmentVariable>
-      </EnvironmentVariables>
    </LaunchAction>
    <ProfileAction
       buildConfiguration = "Release"
@@ -154,7 +150,7 @@
             BlueprintIdentifier = "F77B0DEB1D118A16002130FE"
             BuildableName = "Nextcloud.app"
             BlueprintName = "Nextcloud"
-            ReferencedContainer = "container:Nextcloud.xcodeproj">
+            ReferencedContainer = "container:Souvera.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
    </ProfileAction>
