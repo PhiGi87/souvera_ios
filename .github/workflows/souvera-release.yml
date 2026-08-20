@@ -76,6 +76,13 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Stamp git commit into Info.plist
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          /usr/libexec/PlistBuddy -c "Delete :SouveraGitCommit" Brand/iOSClient.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SouveraGitCommit string $SHA" Brand/iOSClient.plist
+          echo "Stamped commit $SHA"
+
       - name: Setup Ruby and fastlane
         uses: ruby/setup-ruby@v1
         with:
@@ -200,7 +207,6 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            INFOPLIST_KEY_SouveraGitCommit=$(git rev-parse --short HEAD) \
             2>&1 | tee archive.log
           ARCHIVE_EXIT=${PIPESTATUS[0]}
           set -e
@@ -305,6 +311,13 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Stamp git commit into Info.plist
+        run: |
+          SHA=$(git rev-parse --short HEAD)
+          /usr/libexec/PlistBuddy -c "Delete :SouveraGitCommit" Brand/iOSClient.plist 2>/dev/null || true
+          /usr/libexec/PlistBuddy -c "Add :SouveraGitCommit string $SHA" Brand/iOSClient.plist
+          echo "Stamped commit $SHA"
+
       - name: Compute dependency fingerprint
         id: depfingerprint
         run: |
@@ -330,7 +343,6 @@ jobs:
             -derivedDataPath "$SIM_DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            INFOPLIST_KEY_SouveraGitCommit=$(git rev-parse --short HEAD) \
             2>&1 | tee sim-build.log
           SIM_EXIT=${PIPESTATUS[0]}
           set -e

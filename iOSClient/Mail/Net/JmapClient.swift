@@ -57,6 +57,10 @@ actor JmapClient {
             let accountKeys = accounts.keys.sorted().prefix(3).joined(separator: ", ")
             lines.append("primaryAccounts[mail]: \(primary)")
             lines.append("accounts count: \(accounts.count) (first: \(accountKeys))")
+            let caps = jmapSession?.capabilities.keys.sorted().joined(separator: ", ") ?? "?"
+            lines.append("session capabilities: \(caps)")
+            let sessionPreview = String(describing: json).prefix(2000)
+            lines.append("session json: \(sessionPreview)")
         }
         if let body = lastPostBody {
             lines.append("last request body: \(body)")
@@ -73,10 +77,12 @@ actor JmapClient {
             throw JmapException.protocolError("JMAP session not available at \(apiUrl). Check server connectivity and credentials.")
         }
         nkLog(debug: "[JMAP] session response: \(json)")
+        JmapLog.write("session response: \(String(describing: json).prefix(4000))")
         let info = parseSession(json)
         resolvedApiUrl = apiUrl
         jmapSession = info
         nkLog(debug: "[JMAP] using apiUrl: \(apiUrl) accountId: \(info.primaryAccountId)")
+        JmapLog.write("using apiUrl: \(apiUrl) accountId: \(info.primaryAccountId) capabilities: \(info.capabilities.keys.sorted().joined(separator: ", "))")
         return info
     }
 
@@ -91,6 +97,21 @@ actor JmapClient {
             apiUrl = resolved
         } else {
             apiUrl = try await resolveApiUrl()
+        }
+
+        // Parse the session first so the request only uses capabilities the
+        // server actually advertised (RFC 8620: requests using unknown
+        // capabilities are rejected with notRequest).
+        if jmapSession == nil, let json = resolvedJson {
+            jmapSession = parseSession(json)
+        }
+        if let session = jmapSession, !session.capabilities.isEmpty {
+            let required = using.filter { $0 != JmapCapabilities.core }
+            let missing = required.filter { session.capabilities[$0] == nil }
+            if !missing.isEmpty {
+                let offered = session.capabilities.keys.sorted().joined(separator: ", ")
+                throw JmapException.protocolError("JMAP session does not offer required capabilities: \(missing.joined(separator: ", ")) (offered: \(offered))")
+            }
         }
 
         let methodCalls: [Any] = calls.map {
@@ -338,9 +359,17 @@ actor JmapClient {
         lastPostBody = String(data: bodyData, encoding: .utf8) ?? ""
 
         nkLog(debug: "[JMAP] POST \(urlStr) body: \(lastPostBody ?? "")")
+        JmapLog.write("POST \(urlStr) (method=POST, Content-Type=application/json, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
+        JmapLog.write("body (\(bodyData.count) bytes): \(lastPostBody ?? "")")
 
         let (data, resp) = try await urlSession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+
+        if let http = resp as? HTTPURLResponse {
+            JmapLog.write("-> HTTP \(code) Server=\(http.value(forHTTPHeaderField: "Server") ?? "?") WWW-Authenticate=\(http.value(forHTTPHeaderField: "WWW-Authenticate") ?? "?")")
+        }
+        let responsePreview = String(data: data, encoding: .utf8)?.prefix(1000) ?? ""
+        JmapLog.write("response: \(responsePreview)")
 
         if code == 401 {
             let bodyStr = String(data: data, encoding: .utf8) ?? ""
@@ -357,5 +386,29 @@ actor JmapClient {
             throw JmapException.protocolError("JMAP response not JSON (\(preview))")
         }
         return json
+    }
+}
+
+/// Debug log written to <Documents>/souvera-mail.log in the app container,
+/// independent of the NextcloudKit log level. Inspect with:
+///   tail -100 "$(xcrun simctl get_app_container booted eu.souvera.workspace data)/Documents/souvera-mail.log"
+enum JmapLog {
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS"
+        return formatter
+    }()
+
+    static func write(_ message: String) {
+        guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
+        let url = documents.appendingPathComponent("souvera-mail.log")
+        let line = "[\(timestampFormatter.string(from: Date()))] \(message)\n"
+        if !FileManager.default.fileExists(atPath: url.path) {
+            FileManager.default.createFile(atPath: url.path, contents: Data(line.utf8))
+        } else if let handle = try? FileHandle(forWritingTo: url) {
+            handle.seekToEndOfFile()
+            handle.write(Data(line.utf8))
+            try? handle.close()
+        }
     }
 }
