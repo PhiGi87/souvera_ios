@@ -51,7 +51,7 @@ api() {
 }
 
 download() {
-    curl -sSL --retry 2 --retry-delay 2 \
+    curl -L --retry 2 --retry-delay 2 \
         ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
         "$@"
 }
@@ -177,7 +177,7 @@ while true; do
 
     log "Neuer erfolgreicher Build: Run #$RUN_ID (Commit $RUN_SHA) - lade Artefakt ..."
 
-    ARTIFACT_ID="$(api "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+    ARTIFACT_INFO="$(api "https://api.github.com/repos/$REPO/actions/runs/$RUN_ID/artifacts" \
         | python3 -c 'import sys, json
 try:
     d = json.load(sys.stdin)
@@ -186,8 +186,12 @@ except Exception:
 name = sys.argv[1]
 for a in d.get("artifacts", []):
     if a.get("name") == name:
-        print(a["id"])
+        print("%s|%s|%s" % (a["id"], a.get("size_in_bytes", 0), a.get("expired", False)))
         raise SystemExit(0)' "$ARTIFACT_NAME")"
+
+    ARTIFACT_ID="$(printf '%s' "$ARTIFACT_INFO" | cut -d'|' -f1)"
+    ARTIFACT_SIZE="$(printf '%s' "$ARTIFACT_INFO" | cut -d'|' -f2)"
+    ARTIFACT_EXPIRED="$(printf '%s' "$ARTIFACT_INFO" | cut -d'|' -f3)"
 
     if [ -z "$ARTIFACT_ID" ]; then
         log "Run #$RUN_ID hat kein Artefakt '$ARTIFACT_NAME' - überspringe ihn."
@@ -196,14 +200,26 @@ for a in d.get("artifacts", []):
         continue
     fi
 
+    if [ "$ARTIFACT_EXPIRED" = "True" ]; then
+        log "Artefakt '$ARTIFACT_NAME' von Run #$RUN_ID ist abgelaufen - überspringe ihn."
+        printf '%s' "$RUN_ID" > "$STATE_FILE"
+        sleep "$INTERVAL"
+        continue
+    fi
+
     cleanup_workdir
 
+    SIZE_HUMAN="$(awk -v s="$ARTIFACT_SIZE" 'BEGIN { printf "%.1f MB", s/1048576 }')"
+    log "Lade '$ARTIFACT_NAME' ($SIZE_HUMAN) ..."
+
     if ! download "https://api.github.com/repos/$REPO/actions/artifacts/$ARTIFACT_ID/zip" \
+            -#L --fail \
             -o "$WORKDIR/artifact.zip"; then
         log "Download fehlgeschlagen - versuche es im nächsten Zyklus erneut."
         sleep "$INTERVAL"
         continue
     fi
+    log "Download abgeschlossen, entpacke ..."
 
     # Das Artefakt-ZIP enthält ein weiteres ZIP (Souvera.app.zip) -> zweistufig entpacken.
     if ! unzip -o -q "$WORKDIR/artifact.zip" -d "$WORKDIR/download"; then
