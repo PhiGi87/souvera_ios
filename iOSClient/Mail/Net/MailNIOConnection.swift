@@ -74,7 +74,9 @@ actor MailNIOConnection {
         let tag = "A\(tagCounter)"
         let future = handler.expect(tag: tag)
         let part = CommandStreamPart.tagged(TaggedCommand(tag: tag, command: command))
-        try await channel.writeAndFlush(part).get()
+        // swift-nio-imap 0.4's IMAPClientHandler expects Message.part(...) as
+        // outbound type; writing a raw CommandStreamPart crashes at runtime.
+        try await channel.writeAndFlush(IMAPClientHandler.Message.part(part)).get()
         return try await future.get()
     }
 
