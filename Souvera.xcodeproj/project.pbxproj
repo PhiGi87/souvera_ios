@@ -1221,6 +1221,11 @@
 		FEA1ADD802F125C3224605E0 /* JmapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapClient.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapApi.swift"; sourceTree = SOURCE_ROOT; };
 		FEA11EF7F13DD7D568D84C62 /* JmapMapper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapMapper.swift"; sourceTree = SOURCE_ROOT; };
+		AF97C900ADD812CB383D39E9 /* MailNIOConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailNIOConnection.swift"; sourceTree = SOURCE_ROOT; };
+		AE102336C42239C620F9C820 /* MailImapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailImapClient.swift"; sourceTree = SOURCE_ROOT; };
+		CE24AFCFAF1A1754D60E9492 /* MailMimeBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailMimeBuilder.swift"; sourceTree = SOURCE_ROOT; };
+		D9575BD72F68E03E3F23FC4D /* MailSmtpClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailSmtpClient.swift"; sourceTree = SOURCE_ROOT; };
+		526DFDAF165D3C277731B3A1 /* MailIMAPResponseParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/MailIMAPResponseParser.swift"; sourceTree = SOURCE_ROOT; };
 		FEA04F6BFF377AC01DD8BAFD /* LinkAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/LinkAccount.swift"; sourceTree = SOURCE_ROOT; };
 		FEA07FC5FCB19EDBC4B0E0BA /* LinkOcsModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkOcsModels.swift"; sourceTree = SOURCE_ROOT; };
 		FEA0F91C0A165B55E3BDA2BC /* LinkOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkOcsApi.swift"; sourceTree = SOURCE_ROOT; };
