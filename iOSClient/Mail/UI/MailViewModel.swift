@@ -49,6 +49,7 @@ final class MailViewModel: ObservableObject {
     private var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
     private var identityId: String?
+    private var hasRecoveredCredential = false
 
     func start() {
         if jmapClient != nil { return }
@@ -58,25 +59,69 @@ final class MailViewModel: ObservableObject {
                 mailboxes = .error(NSLocalizedString("_mail_credential_failed_", comment: ""))
                 return
             }
-            mailAccount = account
-
-            let resolved = account.username.contains("@") ? account.username : account.username
-            fromAddress = resolved
-            fromAddresses = [resolved]
-            fromName = NCManageDatabase.shared.getActiveTableAccount()?.displayName ?? account.username
-
-            let baseUrl = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            let client = JmapClient(
-                baseUrl: baseUrl,
-                username: account.username,
-                password: account.mailPassword
-            )
-            jmapClient = client
-            jmapApi = JmapApi(client: client)
-
+            applyAccount(account)
             await loadMailboxes()
             await loadAliases()
             await loadIdentities()
+        }
+    }
+
+    /// Re-runs the setup from scratch, re-minting the mail credential if the
+    /// server rejected the stored one (401).
+    func retry() {
+        jmapClient = nil
+        jmapApi = nil
+        mailAccount = nil
+        mailboxes = .loading
+        start()
+    }
+
+    private func applyAccount(_ account: MailAccount) {
+        mailAccount = account
+
+        // The souvera_mail server contract: `loginName` is the SASL username for
+        // mail (IMAP/SMTP/JMAP) and may differ from the Nextcloud user id.
+        let mailLogin = account.loginName.isEmpty ? account.username : account.loginName
+        fromAddress = mailLogin
+        fromAddresses = [mailLogin]
+        fromName = NCManageDatabase.shared.getActiveTableAccount()?.displayName ?? account.username
+
+        let baseUrl = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let client = JmapClient(
+            baseUrl: baseUrl,
+            username: mailLogin,
+            password: account.mailPassword
+        )
+        jmapClient = client
+        jmapApi = JmapApi(client: client)
+    }
+
+    /// The server rejected the JMAP credentials with 401. Per the souvera_mail
+    /// playbook this means the stored password is dead: mint a fresh combined
+    /// password via login-flow and retry once.
+    private func recoverCredentialAndReload() async {
+        guard !hasRecoveredCredential else { return }
+        hasRecoveredCredential = true
+        guard let renewed = await SouveraMailCredentialManager().renewCredential() else {
+            mailboxes = .error(NSLocalizedString("_mail_credential_failed_", comment: ""))
+            return
+        }
+        applyAccount(renewed)
+        await loadMailboxes()
+    }
+
+    /// Whether an error indicates rejected credentials (401 on the JMAP API or
+    /// a session discovery that was rejected everywhere) - recoverable by
+    /// re-minting the combined app password.
+    private func isAuthRecoverable(_ error: Error) -> Bool {
+        guard let jmapError = error as? JmapException else { return false }
+        switch jmapError {
+        case .authNeedsBearer:
+            return true
+        case .protocolError(let message):
+            return message.contains("JMAP session not available")
+        default:
+            return false
         }
     }
 
@@ -131,6 +176,10 @@ final class MailViewModel: ObservableObject {
                 openMailbox(inbox)
             }
         } catch {
+            if isAuthRecoverable(error), !hasRecoveredCredential {
+                await recoverCredentialAndReload()
+                return
+            }
             mailboxes = .error(error.localizedDescription)
         }
     }

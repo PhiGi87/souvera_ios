@@ -80,7 +80,12 @@ private struct MailFolderListView: View {
         case .loading:
             ProgressView()
         case let .error(message):
-            Text(message).foregroundStyle(.secondary).padding()
+            VStack(spacing: 12) {
+                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button(NSLocalizedString("_mail_retry_", comment: "")) { viewModel.retry() }
+                    .buttonStyle(.bordered)
+            }
+            .padding()
         case let .success(boxes):
             List(boxes) { box in
                 Button { viewModel.openMailbox(box) } label: {
@@ -116,7 +121,12 @@ private struct MailMessageListView: View {
         case .loading:
             ProgressView()
         case let .error(message):
-            Text(message).foregroundStyle(.secondary).padding()
+            VStack(spacing: 12) {
+                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                Button(NSLocalizedString("_mail_retry_", comment: "")) { viewModel.retry() }
+                    .buttonStyle(.bordered)
+            }
+            .padding()
         case let .success(items):
             List {
                 ForEach(items) { message in
