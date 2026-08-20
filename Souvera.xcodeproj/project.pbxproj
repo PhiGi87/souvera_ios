@@ -140,7 +140,7 @@
 		F33EE6E72BF4C02600CA1A51 /* NIOSSL in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6E62BF4C02600CA1A51 /* NIOSSL */; };
 		F33EE6ED2BF4C03800CA1A51 /* NIOSSL in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6EC2BF4C03800CA1A51 /* NIOSSL */; };
 		F33EE6F02BF4C0FF00CA1A51 /* NIO in Frameworks */ = {isa = PBXBuildFile; productRef = F33EE6EF2BF4C0FF00CA1A51 /* NIO */; };
-		FEE09EDE671B3746C33CE3EC /* NIOIMAP in Frameworks */ = {isa = PBXBuildFile; productRef = FEE09EDE671B3746C33CE3EC /* NIOIMAP */; };
+		66D9DDF1E95A89E0CEAEFD47 /* NIOIMAP in Frameworks */ = {isa = PBXBuildFile; productRef = FEE09EDE671B3746C33CE3EC /* NIOIMAP */; };
 		F33EE6F22BF4C9B200CA1A51 /* PKCS12.swift in Sources */ = {isa = PBXBuildFile; fileRef = F33EE6F12BF4C9B200CA1A51 /* PKCS12.swift */; };
 		F343A4B32A1E01FF00DDA874 /* PHAsset+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F343A4B22A1E01FF00DDA874 /* PHAsset+Extension.swift */; };
 		F343A4B62A1E084200DDA874 /* PHAsset+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F343A4B22A1E01FF00DDA874 /* PHAsset+Extension.swift */; };
@@ -2127,7 +2127,7 @@
 				F760DE032AE66EA80027D78A /* KeychainAccess in Frameworks */,
 				F3374AF62D78B01B002A38F9 /* HashTreeCollections in Frameworks */,
 				F33EE6F02BF4C0FF00CA1A51 /* NIO in Frameworks */,
-				FEE09EDE671B3746C33CE3EC /* NIOIMAP in Frameworks */,
+				66D9DDF1E95A89E0CEAEFD47 /* NIOIMAP in Frameworks */,
 				F3A0479E2BD268B500658E7B /* PopupView in Frameworks */,
 				F3374AF82D78B01B002A38F9 /* HeapModule in Frameworks */,
 				F77333882927A72100466E35 /* OpenSSL in Frameworks */,
