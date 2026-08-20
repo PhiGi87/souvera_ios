@@ -6141,6 +6141,7 @@
 		F77B0F9B1D118A16002130FE /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				PRODUCT_MODULE_NAME = Nextcloud;
 				PRODUCT_NAME = Souvera;
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -6163,6 +6164,7 @@
 		F77B0F9C1D118A16002130FE /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				PRODUCT_MODULE_NAME = Nextcloud;
 				PRODUCT_NAME = Souvera;
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;

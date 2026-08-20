@@ -190,6 +190,7 @@ jobs:
         run: |
           echo "Xcode version: $(xcodebuild -version | head -1)"
           set -o pipefail
+          set +e
           perl -e 'alarm shift; exec @ARGV' 2700 \
             xcodebuild archive \
             -project "$PROJECT" \
@@ -199,8 +200,9 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            2>&1 | tee archive.log || true
+            2>&1 | tee archive.log
           ARCHIVE_EXIT=${PIPESTATUS[0]}
+          set -e
           echo "=== xcodebuild archive exit: $ARCHIVE_EXIT ==="
           if [ "$ARCHIVE_EXIT" -eq 142 ]; then
             echo "archive timed out - sampling hung processes"
@@ -232,13 +234,15 @@ jobs:
         timeout-minutes: 20
         run: |
           set -o pipefail
+          set +e
           perl -e 'alarm shift; exec @ARGV' 1200 \
             xcodebuild -exportArchive \
             -archivePath "build/Souvera.xcarchive" \
             -exportOptionsPlist ExportOptions.plist \
             -exportPath "build/export" \
-            2>&1 | tee export.log || true
+            2>&1 | tee export.log
           EXPORT_EXIT=${PIPESTATUS[0]}
+          set -e
           mkdir -p build/logs
           cp export.log build/logs/ 2>/dev/null || true
           cp -R /var/folders/*/*/T/Nextcloud_*.xcdistributionlogs build/logs/ 2>/dev/null || true
@@ -316,6 +320,7 @@ jobs:
         timeout-minutes: 50
         run: |
           set -o pipefail
+          set +e
           perl -e 'alarm shift; exec @ARGV' 2700 \
             xcodebuild build \
             -project "$PROJECT" \
@@ -324,8 +329,9 @@ jobs:
             -derivedDataPath "$SIM_DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
-            2>&1 | tee sim-build.log || true
+            2>&1 | tee sim-build.log
           SIM_EXIT=${PIPESTATUS[0]}
+          set -e
           echo "=== simulator build exit: $SIM_EXIT ==="
           mkdir -p build/logs
           cp sim-build.log build/logs/ 2>/dev/null || true
