@@ -3,9 +3,13 @@
 
 default_platform(:ios)
 
-PROJECT = "Nextcloud.xcodeproj"
+# fastlane runs lanes with the fastlane/ directory as the working directory,
+# so anchor all project paths explicitly.
+ROOT = File.expand_path("..", __dir__)
+PROJECT = File.join(ROOT, "Nextcloud.xcodeproj")
 SCHEME = "Nextcloud"
 TEAM_ID = "S76D7JCS9V"
+EXPORT_DIR = File.join(ROOT, "build", "export")
 
 # The .p8 file is written by the workflow step "Install App Store Connect API key".
 def souvera_api_key
@@ -24,8 +28,8 @@ platform :ios do
   desc "Upload an already exported IPA (build/export/*.ipa) to TestFlight"
   lane :upload_beta do |options|
     souvera_api_key
-    ipa = options[:ipa] || Dir["build/export/*.ipa"].first
-    UI.user_error!("No IPA found in build/export — run the archive steps first") unless ipa && File.exist?(ipa)
+    ipa = options[:ipa] || Dir[File.join(EXPORT_DIR, "*.ipa")].first
+    UI.user_error!("No IPA found in #{EXPORT_DIR} — run the archive steps first") unless ipa && File.exist?(ipa)
 
     pilot(
       upload: true,
@@ -56,7 +60,7 @@ platform :ios do
       project: PROJECT,
       scheme: SCHEME,
       destination: "generic/platform=iOS",
-      derived_data_path: "DerivedDataArchive",
+      derived_data_path: File.join(ROOT, "DerivedDataArchive"),
       export_method: export_method,
       export_options: {
         method: export_method,
@@ -65,7 +69,7 @@ platform :ios do
       },
       xcargs: "-skipPackagePluginValidation -allowProvisioningUpdates ONLY_ACTIVE_ARCH=NO",
       clean: false,
-      output_directory: "build/export"
+      output_directory: EXPORT_DIR
     )
 
     upload_beta
