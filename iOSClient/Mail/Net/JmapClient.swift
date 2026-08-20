@@ -10,6 +10,7 @@
 // - Blob upload/download
 
 import Foundation
+import NextcloudKit
 
 actor JmapClient {
     private let baseUrl: String
@@ -40,6 +41,13 @@ actor JmapClient {
     func setBearerToken(_ token: String) { bearerToken = token }
     var needsBearerToken: Bool { bearerToken == nil }
 
+    /// Short diagnostic summary (apiUrl + accountId) shown in the mail UI on errors.
+    func diagnosticSummary() -> String {
+        let accId = jmapSession?.primaryAccountId ?? "?"
+        let api = resolvedApiUrl ?? "?"
+        return "JMAP apiUrl: \(api)\naccountId: \(accId)"
+    }
+
     // MARK: - Session
 
     @discardableResult
@@ -48,9 +56,11 @@ actor JmapClient {
         guard let json = resolvedJson else {
             throw JmapException.protocolError("JMAP session not available at \(apiUrl). Check server connectivity and credentials.")
         }
+        nkLog(debug: "[JMAP] session response: \(json)")
         let info = parseSession(json)
         resolvedApiUrl = apiUrl
         jmapSession = info
+        nkLog(debug: "[JMAP] using apiUrl: \(apiUrl) accountId: \(info.primaryAccountId)")
         return info
     }
 
@@ -100,10 +110,11 @@ actor JmapClient {
     func singleCall(
         _ name: String,
         args: [String: Any],
-        using: [String]? = nil
+        using: [String]? = nil,
+        callId: String = "S"
     ) async throws -> [String: Any] {
         let result = try await call(
-            [JmapMethodCall(name: name, args: args, callId: "S")],
+            [JmapMethodCall(name: name, args: args, callId: callId)],
             using: using ?? [JmapCapabilities.core, JmapCapabilities.mail]
         )
         guard let single = result.results.first else {
@@ -228,9 +239,8 @@ actor JmapClient {
             caps[k] = v as? [String: Any]
         }
 
-        let primaryAccId = (json["primaryAccounts"] as? [String: Any])?.optString(JmapCapabilities.mail)
-            ?? caps[JmapCapabilities.mail]?.optString("accountId")
-            ?? username
+        let primaryAccId = resolveAccountId(json: json, caps: caps)
+        nkLog(debug: "[JMAP] resolved primary accountId: \(primaryAccId)")
 
         let apiUrl = json.optString("apiUrl") ?? resolvedApiUrl ?? "\(baseUrl)/jmap"
 
@@ -244,6 +254,39 @@ actor JmapClient {
             capabilities: caps,
             state: json.optString("state")
         )
+    }
+
+    /// Resolves the mail account id from the session resource.
+    ///
+    /// The value from `primaryAccounts` is validated against the session's
+    /// `accounts` map: some deployments hand out truncated account ids (a
+    /// single character) which Stalwart rejects with
+    /// `urn:ietf:params:jmap:error:notRequest`. If the primary id is not a
+    /// key of `accounts`, the personal account (or the first account) is
+    /// used instead.
+    private func resolveAccountId(json: [String: Any], caps: [String: [String: Any]]) -> String {
+        let accounts = json["accounts"] as? [String: Any] ?? [:]
+
+        func valid(_ candidate: String?) -> String? {
+            guard let candidate, !candidate.isEmpty, accounts[candidate] != nil else { return nil }
+            return candidate
+        }
+
+        if let primary = valid((json["primaryAccounts"] as? [String: Any])?.optString(JmapCapabilities.mail)) {
+            return primary
+        }
+        if let fromCaps = valid(caps[JmapCapabilities.mail]?.optString("accountId")) {
+            return fromCaps
+        }
+        if !accounts.isEmpty {
+            for (id, value) in accounts {
+                if let info = value as? [String: Any], info.optBool("isPersonal") {
+                    return id
+                }
+            }
+            return accounts.keys.sorted().first ?? ""
+        }
+        return username
     }
 
     private func httpGet(_ urlStr: String) async throws -> [String: Any]? {
@@ -278,15 +321,19 @@ actor JmapClient {
         req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
         req.httpBody = bodyData
 
+        nkLog(debug: "[JMAP] POST \(urlStr) body: \(String(data: bodyData, encoding: .utf8) ?? "")")
+
         let (data, resp) = try await urlSession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
 
         if code == 401 {
             let bodyStr = String(data: data, encoding: .utf8) ?? ""
+            nkLog(debug: "[JMAP] POST \(urlStr) -> 401: \(bodyStr)")
             throw JmapException.authNeedsBearer("JMAP auth rejected — needs Bearer token: \(bodyStr)")
         }
         guard (200..<300).contains(code) else {
             let bodyStr = String(data: data, encoding: .utf8)?.prefix(500) ?? ""
+            nkLog(debug: "[JMAP] POST \(urlStr) -> HTTP \(code): \(bodyStr)")
             throw JmapException.httpError(code: code, body: String(bodyStr))
         }
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {

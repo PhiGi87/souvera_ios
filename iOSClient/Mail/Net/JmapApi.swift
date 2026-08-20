@@ -28,7 +28,7 @@ final class JmapApi {
         }
         args["ids"] = NSNull()
 
-        let resp = try await client.singleCall("Mailbox/get", args: args)
+        let resp = try await client.singleCall("Mailbox/get", args: args, callId: "mailboxes")
         guard let list = resp["list"] as? [[String: Any]] else {
             throw JmapException.protocolError("Mailbox/get returned no list")
         }

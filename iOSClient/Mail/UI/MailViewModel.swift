@@ -180,7 +180,11 @@ final class MailViewModel: ObservableObject {
                 await recoverCredentialAndReload()
                 return
             }
-            mailboxes = .error(error.localizedDescription)
+            let summary = await jmapClient?.diagnosticSummary() ?? ""
+            let message = summary.isEmpty
+                ? error.localizedDescription
+                : "\(error.localizedDescription)\n\n\(summary)"
+            mailboxes = .error(message)
         }
     }
 
