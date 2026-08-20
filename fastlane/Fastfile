@@ -28,8 +28,8 @@ platform :ios do
   desc "Set the build number to (latest TestFlight build + 1)"
   lane :bump_build_number do |options|
     souvera_api_key
-    version = get_version_number(xcodeproj: PROJECT)
-    current = get_build_number(xcodeproj: PROJECT).to_i
+    version = get_version_number(xcodeproj: PROJECT, target: SCHEME)
+    current = get_build_number(xcodeproj: PROJECT, target: SCHEME).to_i
     latest = begin
       latest_testflight_build_number(version: version, initial_build_number: current)
     rescue StandardError => e
@@ -37,7 +37,7 @@ platform :ios do
       current
     end
     next_number = [current, latest + 1].max
-    increment_build_number(build_number: next_number, xcodeproj: PROJECT)
+    increment_build_number(build_number: next_number, xcodeproj: PROJECT, targets: [SCHEME])
     UI.message("Set build number to #{next_number} (version #{version})")
   end
 
@@ -59,8 +59,8 @@ platform :ios do
     souvera_api_key
     export_method = options[:export_method] || "app-store-connect"
 
-    version = get_version_number(xcodeproj: PROJECT)
-    current = get_build_number(xcodeproj: PROJECT).to_i
+    version = get_version_number(xcodeproj: PROJECT, target: SCHEME)
+    current = get_build_number(xcodeproj: PROJECT, target: SCHEME).to_i
     latest = begin
       latest_testflight_build_number(version: version, initial_build_number: 0)
     rescue StandardError => e
@@ -68,7 +68,7 @@ platform :ios do
       nil
     end
     next_number = [current, (latest || 0) + 1].max
-    increment_build_number(build_number: next_number, xcodeproj: PROJECT)
+    increment_build_number(build_number: next_number, xcodeproj: PROJECT, targets: [SCHEME])
     UI.message("Building version #{version} (#{next_number}) with export method #{export_method}")
 
     gym(
