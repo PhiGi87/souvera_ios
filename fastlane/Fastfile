@@ -32,7 +32,6 @@ platform :ios do
     UI.user_error!("No IPA found in #{EXPORT_DIR} — run the archive steps first") unless ipa && File.exist?(ipa)
 
     pilot(
-      upload: true,
       ipa: ipa,
       skip_waiting_for_build_processing: true,
       changelog: ENV["TESTFLIGHT_CHANGELOG"]
