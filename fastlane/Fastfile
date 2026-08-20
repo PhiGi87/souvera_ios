@@ -25,6 +25,22 @@ def souvera_api_key
 end
 
 platform :ios do
+  desc "Set the build number to (latest TestFlight build + 1)"
+  lane :bump_build_number do |options|
+    souvera_api_key
+    version = get_version_number(xcodeproj: PROJECT)
+    current = get_build_number(xcodeproj: PROJECT).to_i
+    latest = begin
+      latest_testflight_build_number(version: version, initial_build_number: current)
+    rescue StandardError => e
+      UI.message("Could not read latest TestFlight build number: #{e.message}")
+      current
+    end
+    next_number = [current, latest + 1].max
+    increment_build_number(build_number: next_number, xcodeproj: PROJECT)
+    UI.message("Set build number to #{next_number} (version #{version})")
+  end
+
   desc "Upload an already exported IPA (build/export/*.ipa) to TestFlight"
   lane :upload_beta do |options|
     souvera_api_key

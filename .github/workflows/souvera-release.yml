@@ -143,11 +143,27 @@ jobs:
           fi
           rm -f ~/certs/souvera.p12
 
+      # Apple requires a strictly increasing bundle version per TestFlight
+      # upload: set it to (latest uploaded build + 1).
+      - name: Bump build number
+        env:
+          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
+          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
+        run: bundle exec fastlane bump_build_number
+
+      # Cache key must ignore the build number (it changes every run) but
+      # still track dependency/pbxproj changes.
+      - name: Compute dependency fingerprint
+        id: depfingerprint
+        run: |
+          KEY=$(grep -v CURRENT_PROJECT_VERSION Nextcloud.xcodeproj/project.pbxproj | shasum | cut -d' ' -f1)
+          echo "key=$KEY" >> "$GITHUB_OUTPUT"
+
       - name: Restore DerivedData cache
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: souvera-deriveddata-v2-${{ hashFiles('Nextcloud.xcodeproj/project.pbxproj') }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-deriveddata-v3-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       # Downloads the pre-created App Store provisioning profiles (which carry
       # the App Groups capabilities) and writes ExportOptions.plist for manual
@@ -201,7 +217,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: souvera-deriveddata-v2-${{ hashFiles('Nextcloud.xcodeproj/project.pbxproj') }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-deriveddata-v3-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       - name: Export IPA
         if: steps.archive.outcome == 'success'
