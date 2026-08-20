@@ -274,18 +274,16 @@ actor JmapClient {
 
     /// Resolves the mail account id from the session resource.
     ///
-    /// The value from `primaryAccounts` is validated against the session's
-    /// `accounts` map: some deployments hand out truncated account ids (a
-    /// single character) which Stalwart rejects with
-    /// `urn:ietf:params:jmap:error:notRequest`. Only ids that are a key of
-    /// `accounts` AND at least 3 characters long are used; otherwise the
-    /// caller must send `accountId: null` so the server derives the primary
-    /// account from the authenticated principal (RFC 8620).
+    /// The value from `primaryAccounts` is the server-provided account id and
+    /// is used as-is (Stalwart ids can be short, e.g. "e"). It is only sanity
+    /// checked against the session's `accounts` map; if it is missing there,
+    /// the personal account (or the first account) is used. An empty result
+    /// means the caller must NOT send the request and surface an error.
     private func resolveAccountId(json: [String: Any], caps: [String: [String: Any]]) -> String {
         let accounts = json["accounts"] as? [String: Any] ?? [:]
 
         func valid(_ candidate: String?) -> String? {
-            guard let candidate, candidate.count >= 3, !candidate.isEmpty, accounts[candidate] != nil else { return nil }
+            guard let candidate, !candidate.isEmpty, accounts[candidate] != nil else { return nil }
             return candidate
         }
 
@@ -297,13 +295,11 @@ actor JmapClient {
         }
         if !accounts.isEmpty {
             for (id, value) in accounts {
-                if let info = value as? [String: Any], info.optBool("isPersonal"), id.count >= 3 {
+                if let info = value as? [String: Any], info.optBool("isPersonal") {
                     return id
                 }
             }
-            if let first = accounts.keys.sorted().first(where: { $0.count >= 3 }) {
-                return first
-            }
+            return accounts.keys.sorted().first ?? ""
         }
         return ""
     }
@@ -335,7 +331,7 @@ actor JmapClient {
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
         req.httpBody = bodyData
