@@ -181,9 +181,8 @@ final class MailViewModel: ObservableObject {
                 return
             }
             let summary = await jmapClient?.diagnosticSummary() ?? ""
-            let message = summary.isEmpty
-                ? error.localizedDescription
-                : "\(error.localizedDescription)\n\n\(summary)"
+            let message = "\(SouveraBuildInfo.label)\n\n\(error.localizedDescription)"
+                + (summary.isEmpty ? "" : "\n\n\(summary)")
             mailboxes = .error(message)
         }
     }

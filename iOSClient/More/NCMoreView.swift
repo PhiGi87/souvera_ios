@@ -64,6 +64,11 @@ struct NCMoreView: View {
             }
 
             quotaSection
+
+            Text(SouveraBuildInfo.label)
+                .font(.footnote)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 6)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
         .task {

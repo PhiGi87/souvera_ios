@@ -21,6 +21,7 @@ actor JmapClient {
     private var resolvedApiUrl: String?
     private var resolvedJson: [String: Any]?
     private var bearerToken: String?
+    private var lastPostBody: String?
 
     private nonisolated let urlSession: URLSession = {
         let config = URLSessionConfiguration.default
@@ -41,11 +42,26 @@ actor JmapClient {
     func setBearerToken(_ token: String) { bearerToken = token }
     var needsBearerToken: Bool { bearerToken == nil }
 
-    /// Short diagnostic summary (apiUrl + accountId) shown in the mail UI on errors.
+    /// Short diagnostic summary (build info, apiUrl, accountId, session facts)
+    /// shown in the mail UI on errors.
     func diagnosticSummary() -> String {
         let accId = jmapSession?.primaryAccountId ?? "?"
         let api = resolvedApiUrl ?? "?"
-        return "JMAP apiUrl: \(api)\naccountId: \(accId)"
+        var lines = [
+            "JMAP apiUrl: \(api)",
+            "accountId: \(accId)"
+        ]
+        if let json = resolvedJson {
+            let primary = (json["primaryAccounts"] as? [String: Any])?.optString(JmapCapabilities.mail) ?? "?"
+            let accounts = json["accounts"] as? [String: Any] ?? [:]
+            let accountKeys = accounts.keys.sorted().prefix(3).joined(separator: ", ")
+            lines.append("primaryAccounts[mail]: \(primary)")
+            lines.append("accounts count: \(accounts.count) (first: \(accountKeys))")
+        }
+        if let body = lastPostBody {
+            lines.append("last request body: \(body)")
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Session
@@ -261,14 +277,15 @@ actor JmapClient {
     /// The value from `primaryAccounts` is validated against the session's
     /// `accounts` map: some deployments hand out truncated account ids (a
     /// single character) which Stalwart rejects with
-    /// `urn:ietf:params:jmap:error:notRequest`. If the primary id is not a
-    /// key of `accounts`, the personal account (or the first account) is
-    /// used instead.
+    /// `urn:ietf:params:jmap:error:notRequest`. Only ids that are a key of
+    /// `accounts` AND at least 3 characters long are used; otherwise the
+    /// caller must send `accountId: null` so the server derives the primary
+    /// account from the authenticated principal (RFC 8620).
     private func resolveAccountId(json: [String: Any], caps: [String: [String: Any]]) -> String {
         let accounts = json["accounts"] as? [String: Any] ?? [:]
 
         func valid(_ candidate: String?) -> String? {
-            guard let candidate, !candidate.isEmpty, accounts[candidate] != nil else { return nil }
+            guard let candidate, candidate.count >= 3, !candidate.isEmpty, accounts[candidate] != nil else { return nil }
             return candidate
         }
 
@@ -280,13 +297,15 @@ actor JmapClient {
         }
         if !accounts.isEmpty {
             for (id, value) in accounts {
-                if let info = value as? [String: Any], info.optBool("isPersonal") {
+                if let info = value as? [String: Any], info.optBool("isPersonal"), id.count >= 3 {
                     return id
                 }
             }
-            return accounts.keys.sorted().first ?? ""
+            if let first = accounts.keys.sorted().first(where: { $0.count >= 3 }) {
+                return first
+            }
         }
-        return username
+        return ""
     }
 
     private func httpGet(_ urlStr: String) async throws -> [String: Any]? {
@@ -320,8 +339,9 @@ actor JmapClient {
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
         req.httpBody = bodyData
+        lastPostBody = String(data: bodyData, encoding: .utf8) ?? ""
 
-        nkLog(debug: "[JMAP] POST \(urlStr) body: \(String(data: bodyData, encoding: .utf8) ?? "")")
+        nkLog(debug: "[JMAP] POST \(urlStr) body: \(lastPostBody ?? "")")
 
         let (data, resp) = try await urlSession.data(for: req)
         let code = (resp as? HTTPURLResponse)?.statusCode ?? -1

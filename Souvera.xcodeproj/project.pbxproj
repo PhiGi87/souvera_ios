@@ -236,6 +236,7 @@
 		F70968A424212C4E00ED60E5 /* NCLivePhoto.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70968A324212C4E00ED60E5 /* NCLivePhoto.swift */; };
 		F70B86752642CE3B00ED5349 /* FirebaseCrashlytics in Frameworks */ = {isa = PBXBuildFile; productRef = F70B86742642CE3B00ED5349 /* FirebaseCrashlytics */; };
 		F70BFC7420E0FA7D00C67599 /* NCUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70BFC7320E0FA7C00C67599 /* NCUtility.swift */; };
+		D170BC925ED7D29598185E8A /* SouveraBuildInfo.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7833F8DB7D66BB7F8CFA0CD4 /* SouveraBuildInfo.swift */; };
 		F70BFC7520E0FA7D00C67599 /* NCUtility.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70BFC7320E0FA7C00C67599 /* NCUtility.swift */; };
 		F70CAE3A1F8CF31A008125FD /* NCEndToEndEncryption.m in Sources */ = {isa = PBXBuildFile; fileRef = F70CAE391F8CF31A008125FD /* NCEndToEndEncryption.m */; };
 		F70CEF5623E9C7E50007035B /* UIColor+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F70CEF5523E9C7E50007035B /* UIColor+Extension.swift */; };
@@ -1432,6 +1433,7 @@
 		F70968A324212C4E00ED60E5 /* NCLivePhoto.swift */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.swift; path = NCLivePhoto.swift; sourceTree = "<group>"; };
 		F70A07C8205285FB00DC1231 /* pt-PT */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = "pt-PT"; path = "pt-PT.lproj/Localizable.strings"; sourceTree = "<group>"; };
 		F70BFC7320E0FA7C00C67599 /* NCUtility.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCUtility.swift; sourceTree = "<group>"; };
+		7833F8DB7D66BB7F8CFA0CD4 /* SouveraBuildInfo.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraBuildInfo.swift; sourceTree = "<group>"; };
 		F70CAE381F8CF31A008125FD /* NCEndToEndEncryption.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = NCEndToEndEncryption.h; sourceTree = "<group>"; };
 		F70CAE391F8CF31A008125FD /* NCEndToEndEncryption.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; path = NCEndToEndEncryption.m; sourceTree = "<group>"; };
 		F70CEF5523E9C7E50007035B /* UIColor+Extension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UIColor+Extension.swift"; sourceTree = "<group>"; };
@@ -3242,6 +3244,7 @@
 				F707C26421A2DC5200F6181E /* NCStoreReview.swift */,
 				F7814E952F3B5F170074DA3A /* NCSVGRenderer.swift */,
 				F70BFC7320E0FA7C00C67599 /* NCUtility.swift */,
+				7833F8DB7D66BB7F8CFA0CD4 /* SouveraBuildInfo.swift */,
 				F711A4DB2AF92CAD00095DD8 /* NCUtility+Date.swift */,
 				F359D8662A7D03420023F405 /* NCUtility+Exif.swift */,
 				AF93474B27E34120002537EE /* NCUtility+Image.swift */,
@@ -4859,6 +4862,7 @@
 				FEB09C981F24A8F3A55C3CC6 /* MailModels.swift in Sources */,
 				FEB0841D6CE1FF0956A13590 /* MailViewModel.swift in Sources */,
 								47AD56AED61A4BEB8E552693 /* SouveraNotesView.swift in Sources */,
+				D170BC925ED7D29598185E8A /* SouveraBuildInfo.swift in Sources */,
 				FEB0BBC090C539965F384ECE /* MailView.swift in Sources */,
 				F77444F522281649000D5EB0 /* NCMediaCell.swift in Sources */,
 				F78C6FDE296D677300C952C3 /* NCContextMenuMain.swift in Sources */,

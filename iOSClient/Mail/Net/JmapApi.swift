@@ -23,9 +23,7 @@ final class JmapApi {
 
     func getMailboxes(accountId: String) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["ids"] = NSNull()
 
         let resp = try await client.singleCall("Mailbox/get", args: args, callId: "mailboxes")
@@ -54,9 +52,7 @@ final class JmapApi {
         }
 
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["filter"] = filter
         args["collapseThreads"] = false
         if let sort {
@@ -79,9 +75,7 @@ final class JmapApi {
         inMailboxId: String? = nil
     ) async throws -> [String: Any] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         if let mailboxId = inMailboxId, !mailboxId.isEmpty {
             args["filter"] = ["inMailbox": mailboxId]
         } else {
@@ -102,9 +96,7 @@ final class JmapApi {
         bodyProperties: [String]? = nil
     ) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["ids"] = ids
         if let props = bodyProperties {
             args["bodyProperties"] = props
@@ -137,9 +129,7 @@ final class JmapApi {
             updates[id] = update
         }
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["update"] = updates
         return try await client.singleCall("Email/set", args: args)
     }
@@ -154,18 +144,14 @@ final class JmapApi {
             updates[id] = ["mailboxIds": [targetMailboxId: true]]
         }
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["update"] = updates
         return try await client.singleCall("Email/set", args: args)
     }
 
     func deleteEmails(accountId: String, emailIds: [String]) async throws -> [String: Any] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["destroy"] = emailIds
         return try await client.singleCall("Email/set", args: args)
     }
@@ -226,9 +212,7 @@ final class JmapApi {
         }
 
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["create"] = ["new": email]
         return try await client.singleCall("Email/set", args: args)
     }
@@ -239,9 +223,7 @@ final class JmapApi {
         identityId: String
     ) async throws -> [String: Any] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         args["create"] = ["sendme": ["emailId": emailId, "identityId": identityId]]
         return try await client.singleCall(
             "EmailSubmission/set",
@@ -254,9 +236,7 @@ final class JmapApi {
 
     func getIdentities(accountId: String) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]
-        if !accountId.isEmpty {
-            args["accountId"] = accountId
-        }
+        args["accountId"] = accountId.count >= 3 ? (accountId as Any) : (NSNull() as Any)
         let resp = try await client.singleCall(
             "Identity/get",
             args: args,

@@ -62,8 +62,8 @@ jobs:
     if: |
       always() &&
       !cancelled() &&
-      (github.event_name != 'pull_request' || needs.build-check.result == 'success') &&
-      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/'))
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.upload_testflight == 'true'
 
     steps:
       - uses: actions/checkout@v5
@@ -200,6 +200,7 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            INFOPLIST_KEY_SouveraGitCommit=$(git rev-parse --short HEAD) \
             2>&1 | tee archive.log
           ARCHIVE_EXIT=${PIPESTATUS[0]}
           set -e
@@ -291,7 +292,7 @@ jobs:
       always() &&
       !cancelled() &&
       (github.event_name != 'pull_request' || needs.build-check.result == 'success') &&
-      (github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/heads/souvera/'))
+      startsWith(github.ref, 'refs/heads/souvera/')
 
     steps:
       - uses: actions/checkout@v5
@@ -329,6 +330,7 @@ jobs:
             -derivedDataPath "$SIM_DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            INFOPLIST_KEY_SouveraGitCommit=$(git rev-parse --short HEAD) \
             2>&1 | tee sim-build.log
           SIM_EXIT=${PIPESTATUS[0]}
           set -e
