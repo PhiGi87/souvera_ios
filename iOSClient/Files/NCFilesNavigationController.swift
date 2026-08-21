@@ -182,5 +182,6 @@ class NCFilesNavigationController: NCMainNavigationController {
             accountButton?.setImage(image, for: .normal)
             accountButton?.menu = await createLeftMenu()
         }
+        return nil
     }
 }
