@@ -10,6 +10,7 @@ import WebKit
 
 struct MailView: View {
     @StateObject private var viewModel = MailViewModel()
+    @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
 
     var body: some View {
         NavigationStack {
@@ -40,6 +41,20 @@ struct MailView: View {
         )) { context in
             MailComposeView(viewModel: viewModel, context: context)
         }
+        .sheet(item: Binding(
+            get: { detailMoveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
+            set: { if $0 == nil { detailMoveTarget = nil } }
+        )) { state in
+            MailMovePickerView(
+                title: state.messages.first?.subject ?? "",
+                mailboxes: state.mailboxes,
+                onSelect: { target in
+                    viewModel.move(state.messages, to: target)
+                    viewModel.back()
+                    detailMoveTarget = nil
+                }
+            )
+        }
     }
 
     private var navigationTitle: String {
@@ -62,6 +77,52 @@ struct MailView: View {
         if !isFolders {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: { Image(systemName: "chevron.backward") }
+            }
+        }
+        if case let .detail(message) = viewModel.route {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                Button {
+                    viewModel.startCompose(mode: .reply, message: message)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left")
+                }
+                Button {
+                    viewModel.startCompose(mode: .replyAll, message: message)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.left.2")
+                }
+                Button {
+                    viewModel.startCompose(mode: .forward, message: message)
+                } label: {
+                    Image(systemName: "arrowshape.turn.up.right")
+                }
+                Menu {
+                    Button {
+                        Task { await viewModel.setRead([message], !message.isRead) }
+                    } label: {
+                        Label(message.isRead
+                              ? NSLocalizedString("_mail_mark_unread_", comment: "")
+                              : NSLocalizedString("_mail_mark_read_", comment: ""),
+                              systemImage: message.isRead ? "envelope" : "envelope.open")
+                    }
+                    Button {
+                        detailMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                    } label: {
+                        Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                    }
+                    Button {
+                        viewModel.toggleFlagged(message)
+                    } label: {
+                        Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                }
+                Button(role: .destructive) {
+                    viewModel.delete([message])
+                } label: {
+                    Image(systemName: "trash")
+                }
             }
         }
         if isFolders {
@@ -172,7 +233,7 @@ private struct MailFolderListView: View {
         .listStyle(.insetGrouped)
         .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
         .refreshable { await viewModel.loadMailboxes() }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             if viewModel.folderScrollPosition != nil, let firstId = boxes.first?.id {
                 Button {
                     withAnimation { viewModel.folderScrollPosition = firstId }
@@ -185,7 +246,7 @@ private struct MailFolderListView: View {
                         .shadow(radius: 3)
                 }
                 .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-                .padding(14)
+                .padding(.bottom, 10)
             }
         }
     }
@@ -357,7 +418,24 @@ private struct MailMessageListView: View {
                     }
                 }
                 .listStyle(.plain)
+                .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
                 .refreshable { await viewModel.refreshMessages() }
+                .overlay(alignment: .bottom) {
+                    if viewModel.messageScrollPosition != nil, let firstId = viewModel.sortMessages(items).first?.id {
+                        Button {
+                            withAnimation { viewModel.messageScrollPosition = firstId }
+                        } label: {
+                            Image(systemName: "arrow.up")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(Color.white)
+                                .frame(width: 36, height: 36)
+                                .background(Circle().fill(Color(NCBrandColor.shared.customer)))
+                                .shadow(radius: 3)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+                        .padding(.bottom, 10)
+                    }
+                }
             }
         }
         .sheet(item: Binding(
@@ -402,7 +480,8 @@ private struct MailMessageListView: View {
                     }
                     Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
                     if !isEmptyList {
-                        Button(NSLocalizedString("_edit_", comment: "")) { editing = true }
+                        Button { editing = true } label: { Image(systemName: "checklist") }
+                            .accessibilityLabel(NSLocalizedString("_edit_", comment: ""))
                     }
                 }
             }
@@ -702,47 +781,6 @@ private struct MailDetailView: View {
                 }
                 Spacer()
             }
-            HStack(spacing: 18) {
-                actionButton(icon: "arrowshape.turn.up.left", label: NSLocalizedString("_mail_reply_", comment: "")) {
-                    viewModel.startCompose(mode: .reply, message: message)
-                }
-                actionButton(icon: "arrowshape.turn.up.left.2", label: NSLocalizedString("_mail_reply_all_", comment: "")) {
-                    viewModel.startCompose(mode: .replyAll, message: message)
-                }
-                actionButton(icon: "arrowshape.turn.up.right", label: NSLocalizedString("_mail_forward_", comment: "")) {
-                    viewModel.startCompose(mode: .forward, message: message)
-                }
-                Menu {
-                    Button {
-                        Task { await viewModel.setRead([message], !message.isRead) }
-                    } label: {
-                        Label(message.isRead
-                              ? NSLocalizedString("_mail_mark_unread_", comment: "")
-                              : NSLocalizedString("_mail_mark_read_", comment: ""),
-                              systemImage: message.isRead ? "envelope" : "envelope.open")
-                    }
-                    Button {
-                        moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
-                    } label: {
-                        Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
-                    }
-                    Button {
-                        viewModel.toggleFlagged(message)
-                    } label: {
-                        Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle").font(.body)
-                }
-                Spacer()
-                Button(role: .destructive) {
-                    viewModel.delete([message])
-                    viewModel.back()
-                } label: {
-                    Image(systemName: "trash")
-                }
-            }
-            .font(.body)
             if case let .success(body) = viewModel.body, !body.attachments.isEmpty {
                 Divider()
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -755,16 +793,6 @@ private struct MailDetailView: View {
             }
         }
         .padding()
-    }
-
-    private func actionButton(icon: String, label: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 2) {
-                Image(systemName: icon)
-                Text(label).font(.caption2)
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     private func attachmentChip(_ att: AttachmentMeta) -> some View {

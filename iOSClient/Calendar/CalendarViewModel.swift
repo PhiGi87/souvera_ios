@@ -7,6 +7,7 @@
 
 import Combine
 import Foundation
+import SwiftUI
 
 enum CalendarUiState<T> {
     case loading
@@ -20,9 +21,66 @@ final class CalendarViewModel: ObservableObject {
     @Published var calendars: [CalDavCalendar] = []
     @Published var offlineNotice: String?
     @Published var visibleMonth: Date = Date()
+    /// Active calendars; defaults to ALL available calendars and persists
+    /// across launches until the user changes the selection.
+    @Published var selectedCalendarHrefs: Set<String> = []
+    @Published var customCalendarColors: [String: String] = [:]
 
     private let client = CalDavClient()
     private var cachedEntries: [CalDavEventEntry] = []
+
+    private var accountKey: String {
+        NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"
+    }
+
+    private var selectionDefaultsKey: String { "souveraCalendarSelection_\(accountKey)" }
+    private var colorDefaultsKey: String { "souveraCalendarColors_\(accountKey)" }
+
+    func isSelected(_ calendar: CalDavCalendar) -> Bool {
+        selectedCalendarHrefs.contains(calendar.href)
+    }
+
+    func toggleCalendar(_ calendar: CalDavCalendar) {
+        if selectedCalendarHrefs.contains(calendar.href) {
+            selectedCalendarHrefs.remove(calendar.href)
+        } else {
+            selectedCalendarHrefs.insert(calendar.href)
+        }
+        persistSelection()
+    }
+
+    func color(for calendar: CalDavCalendar) -> Color? {
+        let hex = customCalendarColors[calendar.href] ?? calendar.color ?? ""
+        return Color(hex: hex)
+    }
+
+    func setCustomColor(_ hex: String, for calendar: CalDavCalendar) {
+        if hex.isEmpty {
+            customCalendarColors.removeValue(forKey: calendar.href)
+        } else {
+            customCalendarColors[calendar.href] = hex
+        }
+        UserDefaults.standard.set(customCalendarColors, forKey: colorDefaultsKey)
+    }
+
+    private func persistSelection() {
+        UserDefaults.standard.set(Array(selectedCalendarHrefs), forKey: selectionDefaultsKey)
+    }
+
+    /// Restores the selection: previously stored choices are applied, newly
+    /// discovered calendars start selected (all calendars visible by default).
+    private func restoreSelection(_ discovered: [CalDavCalendar]) {
+        customCalendarColors = UserDefaults.standard.dictionary(forKey: colorDefaultsKey) as? [String: String] ?? [:]
+        let stored = UserDefaults.standard.stringArray(forKey: selectionDefaultsKey)
+        if let stored, !stored.isEmpty {
+            // Merge: keep stored selection for known calendars, select new ones.
+            let known = Set(discovered.map(\.href))
+            selectedCalendarHrefs = Set(stored).intersection(known)
+            selectedCalendarHrefs.formUnion(known.subtracting(Set(stored)))
+        } else {
+            selectedCalendarHrefs = Set(discovered.map(\.href))
+        }
+    }
 
     var monthTitle: String {
         let formatter = DateFormatter()
@@ -50,12 +108,34 @@ final class CalendarViewModel: ObservableObject {
         guard case let .success(all) = events else { return [] }
         let calendar = Calendar.current
         return all.filter {
-            calendar.isDate($0.start, inSameDayAs: day) || ($0.allDay && day >= calendar.startOfDay(for: $0.start) && day < calendar.startOfDay(for: $0.end))
+            selectedCalendarHrefs.contains($0.calendarHref)
+                && (calendar.isDate($0.start, inSameDayAs: day)
+                    || ($0.allDay && day >= calendar.startOfDay(for: $0.start) && day < calendar.startOfDay(for: $0.end)))
         }.sorted { $0.start < $1.start }
     }
 
     func hasEvents(on day: Date) -> Bool {
         !events(on: day).isEmpty
+    }
+
+    /// The next upcoming events of the currently selected calendars (used
+    /// below the month grid when the selected day has no events).
+    func upcomingEvents(after date: Date = Date(), limit: Int = 3) -> [CalendarEventModel] {
+        guard case let .success(all) = events else { return [] }
+        return all.filter {
+            selectedCalendarHrefs.contains($0.calendarHref) && $0.start >= date
+        }.sorted { $0.start < $1.start }.prefix(limit).map { $0 }
+    }
+
+    /// Event color: the calendar's custom/server color, fallback brand.
+    func color(for event: CalendarEventModel) -> Color {
+        if let hex = customCalendarColors[event.calendarHref], !hex.isEmpty {
+            return Color(hex: hex)
+        }
+        if let calendar = calendars.first(where: { $0.href == event.calendarHref }) {
+            return Color(hex: calendar.color ?? "")
+        }
+        return Color(NCBrandColor.shared.customer)
     }
 
     func shiftMonth(by value: Int) {
@@ -79,16 +159,22 @@ final class CalendarViewModel: ObservableObject {
 
         let calendar = Calendar.current
         guard let monthInterval = calendar.dateInterval(of: .month, for: visibleMonth) else { return }
-        let start = monthInterval.start
-        let end = calendar.date(byAdding: .month, value: 1, to: start) ?? start.addingTimeInterval(31 * 86400)
+        // Extend the range by one day on both sides so events at the month
+        // edges are covered regardless of the device timezone.
+        let start = calendar.date(byAdding: .day, value: -1, to: monthInterval.start) ?? monthInterval.start
+        let end = calendar.date(byAdding: .day, value: 1, to: (calendar.date(byAdding: .month, value: 1, to: monthInterval.start) ?? monthInterval.start.addingTimeInterval(31 * 86400))) ?? Date.distantFuture
 
         let discovered = await client.fetchCalendars()
-        calendars = discovered.isEmpty ? calendars : discovered
+        if !discovered.isEmpty {
+            calendars = discovered
+            restoreSelection(discovered)
+        }
 
         var entries: [CalDavEventEntry] = []
-        for cal in calendars {
+        for cal in calendars where selectedCalendarHrefs.contains(cal.href) {
             entries += await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
         }
+        JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched")
 
         if entries.isEmpty, let cached = Self.loadCachedEntries(), !cached.isEmpty {
             entries = cached

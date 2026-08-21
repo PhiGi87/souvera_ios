@@ -244,6 +244,8 @@ struct LinkChatView: View {
     @State private var draft = ""
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
+    @State private var editingMessage: LinkChatMessage?
+    @State private var previewURL: URL?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -278,6 +280,7 @@ struct LinkChatView: View {
                 viewModel.shareAttachment(selection)
             }
         }
+        .quickLookPreview($previewURL)
     }
 
     @ViewBuilder
@@ -292,8 +295,20 @@ struct LinkChatView: View {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(items.filter { !$0.isSystemMessage }) { message in
-                            LinkMessageBubble(message: message, isOwn: message.actorId == viewModel.currentUserId)
-                                .id(message.id)
+                            LinkMessageRow(
+                                viewModel: viewModel,
+                                message: message,
+                                isOwn: message.actorId == viewModel.currentUserId,
+                                onStartEdit: { editingMessage = message; draft = message.message },
+                                onOpenFile: { info in
+                                    Task {
+                                        if let url = await viewModel.downloadAttachment(info) {
+                                            previewURL = url
+                                        }
+                                    }
+                                }
+                            )
+                            .id(message.id)
                         }
                     }
                     .padding(.horizontal, 12)
@@ -321,7 +336,32 @@ struct LinkChatView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
+        VStack(spacing: 0) {
+            if editingMessage != nil {
+                HStack {
+                    Text(NSLocalizedString("_link_edit_message_", comment: ""))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button(NSLocalizedString("_cancel_", comment: "")) {
+                        editingMessage = nil
+                        draft = ""
+                    }
+                    .font(.caption)
+                    Button(NSLocalizedString("_contact_save_", comment: "")) {
+                        if let message = editingMessage {
+                            viewModel.editMessage(message, text: draft)
+                            editingMessage = nil
+                            draft = ""
+                        }
+                    }
+                    .font(.caption).bold()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                Divider()
+            }
+            HStack(spacing: 8) {
             Menu {
                 Button {
                     showFilePicker = true
@@ -350,8 +390,60 @@ struct LinkChatView: View {
                     .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color(NCBrandColor.shared.customer))
             }
             .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+            .padding(10)
         }
-        .padding(10)
+    }
+}
+
+/// One chat message row: bubble, optional file chip, swipe actions
+/// (delete/edit for own messages).
+private struct LinkMessageRow: View {
+    @ObservedObject var viewModel: LinkViewModel
+    let message: LinkChatMessage
+    let isOwn: Bool
+    let onStartEdit: () -> Void
+    let onOpenFile: (LinkFileInfo) -> Void
+
+    var body: some View {
+        VStack(alignment: isOwn ? .trailing : .leading, spacing: 4) {
+            if let file = message.fileInfo() {
+                Button {
+                    onOpenFile(file)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "paperclip").font(.caption)
+                        Text(file.name).font(.caption).lineLimit(1)
+                        if file.size > 0 {
+                            Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Color(.secondarySystemBackground), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+            LinkMessageBubble(message: message, isOwn: isOwn)
+        }
+        .swipeActions(edge: .trailing) {
+            if isOwn {
+                Button {
+                    viewModel.deleteMessage(message)
+                } label: {
+                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                }
+                .tint(.red)
+                Button {
+                    onStartEdit()
+                } label: {
+                    Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+        }
     }
 }
 

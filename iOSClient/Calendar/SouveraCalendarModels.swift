@@ -52,6 +52,7 @@ enum ICSParser {
             var talkRoomName: String?
             var start: Date?
             var end: Date?
+            var duration: TimeInterval?
             var allDay = false
             var startDay: Date?
             var endDay: Date?
@@ -72,7 +73,8 @@ enum ICSParser {
                 }
                 if inTimeZone { continue }
                 guard let colon = line.firstIndex(of: ":") else { continue }
-                let keyPart = String(line[line.startIndex..<colon]).uppercased()
+                let rawKey = String(line[line.startIndex..<colon])
+                let keyPart = rawKey.uppercased()
                 let rawValue = String(line[line.index(after: colon)...])
                 let value = unescape(rawValue)
                 if keyPart == "UID" {
@@ -98,20 +100,23 @@ enum ICSParser {
                         allDay = true
                         startDay = parseDateOnly(value)
                     } else {
-                        start = parseDateTime(value, tzid: extractTzid(keyPart))
+                        start = parseDateTime(value, tzid: extractTzid(rawKey))
                     }
                 } else if keyPart.hasPrefix("DTEND") {
                     if keyPart.contains("VALUE=DATE") {
                         endDay = parseDateOnly(value)
                     } else {
-                        end = parseDateTime(value, tzid: extractTzid(keyPart))
+                        end = parseDateTime(value, tzid: extractTzid(rawKey))
                     }
+                } else if keyPart == "DURATION" {
+                    duration = parseDuration(value)
                 }
             }
 
             var resolvedStart = start ?? startDay ?? Date.distantPast
-            var resolvedEnd = end ?? endDay ?? resolvedStart.addingTimeInterval(3600)
-            if allDay, endDay == nil {
+            var resolvedEnd = end ?? endDay
+                ?? (duration.map { resolvedStart.addingTimeInterval($0) } ?? resolvedStart.addingTimeInterval(3600))
+            if allDay, endDay == nil, duration == nil {
                 resolvedEnd = resolvedStart.addingTimeInterval(86400)
             }
             if resolvedEnd <= resolvedStart {
@@ -146,16 +151,18 @@ enum ICSParser {
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.locale = Locale(identifier: "en_US_POSIX")
 
-        let dateFormatter = DateFormatter()
-        dateFormatter.dateFormat = "yyyyMMdd"
-        dateFormatter.timeZone = TimeZone(secondsFromGMT: 0)
-        dateFormatter.locale = Locale(identifier: "en_US_POSIX")
-
         let startLine: String
         let endLine: String
         if draft.allDay {
-            startLine = "DTSTART;VALUE=DATE:\(dateFormatter.string(from: draft.start))"
-            endLine = "DTEND;VALUE=DATE:\(dateFormatter.string(from: draft.end.addingTimeInterval(86400)))"
+            // All-day dates are written as the device-local calendar day
+            // (no GMT conversion, which could shift the date).
+            let startComponents = Calendar.current.dateComponents([.year, .month, .day], from: draft.start)
+            let startText = String(format: "%04d%02d%02d", startComponents.year ?? 0, startComponents.month ?? 0, startComponents.day ?? 0)
+            let endDate = Calendar.current.date(byAdding: .day, value: 1, to: draft.start) ?? draft.end
+            let endComponents = Calendar.current.dateComponents([.year, .month, .day], from: endDate)
+            let endText = String(format: "%04d%02d%02d", endComponents.year ?? 0, endComponents.month ?? 0, endComponents.day ?? 0)
+            startLine = "DTSTART;VALUE=DATE:\(startText)"
+            endLine = "DTEND;VALUE=DATE:\(endText)"
         } else {
             startLine = "DTSTART:\(formatter.string(from: draft.start))"
             endLine = "DTEND:\(formatter.string(from: draft.end))"
@@ -228,24 +235,52 @@ enum ICSParser {
         // device timezone.
         let local = DateFormatter()
         local.dateFormat = "yyyyMMdd'T'HHmmss"
+        local.timeZone = .current
         local.locale = Locale(identifier: "en_US_POSIX")
         return local.date(from: value)
     }
 
-    private static func extractTzid(_ keyPart: String) -> String? {
-        guard let range = keyPart.range(of: "TZID=") else { return nil }
-        var tzid = String(keyPart[range.upperBound...])
+    private static func extractTzid(_ rawKey: String) -> String? {
+        guard let range = rawKey.range(of: "TZID=", options: .caseInsensitive) else { return nil }
+        var tzid = String(rawKey[range.upperBound...])
         if tzid.hasPrefix("\""), tzid.hasSuffix("\"") {
             tzid = String(tzid.dropFirst().dropLast())
         }
         return tzid.isEmpty ? nil : tzid
     }
 
+    /// Parses an RFC 5545 duration (e.g. PT30M, PT1H, P1D) into seconds.
+    private static func parseDuration(_ value: String) -> TimeInterval? {
+        let pattern = #"^([+-])?P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$"#
+        guard let regex = try? NSRegularExpression(pattern: pattern),
+              let match = regex.firstMatch(in: value, range: NSRange(location: 0, length: (value as NSString).length)) else { return nil }
+        func group(_ i: Int) -> Double {
+            guard let r = Range(match.range(at: i), in: value) else { return 0 }
+            return Double(value[r]) ?? 0
+        }
+        var sign: Double = 1
+        if let r = Range(match.range(at: 1), in: value), value[r] == "-" {
+            sign = -1
+        }
+        return sign * (group(2) * 86400 + group(3) * 3600 + group(4) * 60 + group(5))
+    }
+
     private static func parseDateOnly(_ value: String) -> Date? {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyyMMdd"
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        return formatter.date(from: String(value.prefix(8)))
+        // All-day dates have no timezone; keep them on that calendar day in
+        // the DEVICE timezone (a GMT conversion could shift them to the
+        // previous day on negative-offset timezones).
+        let text = String(value.prefix(8))
+        guard text.count == 8,
+              let year = Int(text.prefix(4)),
+              let month = Int(text.dropFirst(4).prefix(2)),
+              let day = Int(text.suffix(2)) else { return nil }
+        var components = DateComponents()
+        components.calendar = Calendar.current
+        components.year = year
+        components.month = month
+        components.day = day
+        components.hour = 0
+        components.minute = 0
+        return Calendar.current.date(from: components)
     }
 }

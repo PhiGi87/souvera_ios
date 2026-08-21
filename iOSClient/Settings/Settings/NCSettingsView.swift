@@ -57,6 +57,21 @@ struct NCSettingsView: View {
                 }
             })
 
+            Section(content: {
+                Toggle(NSLocalizedString("_enable_touch_face_id_", comment: ""), isOn: $model.enableTouchFaceID)
+                    .font(.body)
+                    .disabled(!model.isLockActive)
+                    .onChange(of: model.enableTouchFaceID) {
+                        model.updateTouchIDSetting()
+                    }
+            }, footer: {
+                if !model.isLockActive {
+                    Text(NSLocalizedString("_touch_face_id_requires_passcode_", comment: ""))
+                        .font(.footnote)
+                }
+            })
+            .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
+
             if model.isLockActive {
                 Section(content: {
                     Group {
@@ -70,13 +85,6 @@ struct NCSettingsView: View {
                                     .tint(Color(NCBrandColor.shared.textColor))
                             }
                         })
-                        // Enable Touch ID
-                        Toggle(NSLocalizedString("_enable_touch_face_id_", comment: ""), isOn: $model.enableTouchFaceID)
-                            .font(.body)
-                            .onChange(of: model.enableTouchFaceID) {
-                                model.updateTouchIDSetting()
-                            }
-
                         if !NCBrandOptions.shared.enforce_passcode_lock {
                             // Do not ask for passcode on startup
                             Toggle(NSLocalizedString("_lock_protection_no_screen_", comment: ""), isOn: $model.lockScreen)

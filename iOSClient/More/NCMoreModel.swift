@@ -175,6 +175,9 @@ final class NCMoreModel: ObservableObject {
         /// Opens the Contacts placeholder screen.
         case contacts
 
+        /// Opens the native Shield (quarantine + lists) screen.
+        case shield
+
         /// No-op destination.
         case none
     }
@@ -261,6 +264,14 @@ final class NCMoreModel: ObservableObject {
 
         functionItems.append(
             Item(
+                titleKey: "_shield_",
+                image: "shield",
+                destination: .shield
+            )
+        )
+
+        functionItems.append(
+            Item(
                 titleKey: "_recent_",
                 image: "clock.arrow.circlepath",
                 destination: .storyboard(
@@ -270,20 +281,8 @@ final class NCMoreModel: ObservableObject {
             )
         )
 
-        if !NCBrandOptions.shared.disable_show_more_nextcloud_apps_in_settings {
-            sections.append(
-                Section(
-                    type: .moreApps,
-                    items: [
-                        Item(
-                            titleKey: "_souvera_notes_",
-                            image: "note.text",
-                            destination: .notes
-                        )
-                    ]
-                )
-            )
-        }
+        // Notes were removed from the menu on request; the destination
+        // (.notes) and SouveraNotesView stay in the source on hold.
 
         if capabilities?.fileSharingApiEnabled == true {
             functionItems.append(
@@ -433,6 +432,9 @@ final class NCMoreModel: ObservableObject {
 
         case .contacts:
             pushHosted(SouveraContactsView(), title: NSLocalizedString("_contacts_", comment: ""))
+
+        case .shield:
+            pushHosted(ShieldView(), title: NSLocalizedString("_shield_", comment: ""))
 
         case .none:
             break

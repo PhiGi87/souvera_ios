@@ -56,6 +56,7 @@ final class MailViewModel: ObservableObject {
     @Published var expandedMailboxIds: Set<String> = []
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
+    @Published var messageScrollPosition: String?
     @Published var sortOrder: MailSortOrder = .dateDesc
 
     private var imapClient: MailImapClient?
@@ -381,6 +382,7 @@ final class MailViewModel: ObservableObject {
 
     func openMailbox(_ mailbox: Mailbox) {
         currentMailbox = mailbox
+        messageScrollPosition = nil
         route = .messages(mailbox: mailbox)
         Task { await syncMessages() }
     }

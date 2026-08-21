@@ -14,6 +14,7 @@ struct SouveraCalendarView: View {
     @State private var searchQuery = ""
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
+    @State private var showCalendarPicker = false
 
     enum CalendarViewMode: String, CaseIterable, Identifiable {
         case day, threeDay, month
@@ -62,11 +63,24 @@ struct SouveraCalendarView: View {
                         Image(systemName: "plus")
                     }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showCalendarPicker = true
+                    } label: {
+                        Image(systemName: "calendar.badge.checkmark")
+                    }
+                }
             }
         }
         .onAppear {
             selectedDay = Date()
             Task { await viewModel.load() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
+            Task { await viewModel.load() }
+        }
+        .sheet(isPresented: $showCalendarPicker) {
+            CalendarPickerSheet(viewModel: viewModel)
         }
         .searchable(text: $searchQuery, prompt: Text(NSLocalizedString("_mail_search_", comment: "")))
         .sheet(item: $detailEvent) { event in
@@ -170,7 +184,7 @@ struct SouveraCalendarView: View {
                     )
                     .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color(NCBrandColor.shared.customer) : Color.primary) : Color.secondary))
                 Circle()
-                    .fill(viewModel.hasEvents(on: day) ? Color(NCBrandColor.shared.customer) : .clear)
+                    .fill(dayDotColor(day))
                     .frame(width: 5, height: 5)
             }
         }
@@ -188,7 +202,8 @@ struct SouveraCalendarView: View {
                 events: viewModel.events(on: selectedDay),
                 showHourLabels: true,
                 hourHeight: 56,
-                onSelect: { detailEvent = $0 }
+                onSelect: { detailEvent = $0 },
+                colorFor: { viewModel.color(for: $0) }
             )
             .refreshable { await viewModel.load() }
         }
@@ -217,6 +232,11 @@ struct SouveraCalendarView: View {
         .padding(.vertical, 8)
     }
 
+    private func dayDotColor(_ day: Date) -> Color {
+        guard let first = viewModel.events(on: day).first else { return .clear }
+        return viewModel.color(for: first)
+    }
+
     private func shiftSelectedDay(by days: Int) {
         let calendar = Calendar.current
         if let shifted = calendar.date(byAdding: .day, value: days, to: selectedDay) {
@@ -234,7 +254,8 @@ struct SouveraCalendarView: View {
             ThreeDayTimelineView(
                 days: threeDayRange,
                 eventsProvider: { viewModel.events(on: $0) },
-                onSelect: { detailEvent = $0 }
+                onSelect: { detailEvent = $0 },
+                colorFor: { viewModel.color(for: $0) }
             )
         }
     }
@@ -253,7 +274,7 @@ struct SouveraCalendarView: View {
         Button {
             detailEvent = event
         } label: {
-            CalendarEventRow(event: event)
+            CalendarEventRow(event: event, color: viewModel.color(for: event))
         }
         .buttonStyle(.plain)
     }
@@ -266,10 +287,22 @@ struct SouveraCalendarView: View {
                 .padding(.horizontal)
                 .padding(.top, 6)
             let dayEvents = viewModel.events(on: selectedDay)
+            let upcoming = viewModel.upcomingEvents()
             if dayEvents.isEmpty {
-                Spacer()
-                Text(NSLocalizedString("_calendar_no_events_", comment: "")).foregroundStyle(.secondary)
-                Spacer()
+                if upcoming.isEmpty {
+                    Spacer()
+                    Text(NSLocalizedString("_calendar_no_events_", comment: "")).foregroundStyle(.secondary)
+                    Spacer()
+                } else {
+                    List {
+                        Section(NSLocalizedString("_calendar_upcoming_", comment: "")) {
+                            ForEach(upcoming) { event in
+                                eventRow(event)
+                            }
+                        }
+                    }
+                    .listStyle(.plain)
+                }
             } else {
                 List(dayEvents) { event in
                     eventRow(event)
@@ -313,11 +346,12 @@ struct SouveraCalendarView: View {
 
 private struct CalendarEventRow: View {
     let event: CalendarEventModel
+    var color: Color = Color(NCBrandColor.shared.customer)
 
     var body: some View {
         HStack(spacing: 10) {
             RoundedRectangle(cornerRadius: 3)
-                .fill(Color(NCBrandColor.shared.customer))
+                .fill(color)
                 .frame(width: 4)
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
@@ -353,6 +387,7 @@ private struct TimelineDayView: View {
     let hourHeight: CGFloat
     var compactHeader: Bool = false
     let onSelect: (CalendarEventModel) -> Void
+    var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
 
     private let hours = Array(0..<24)
 
@@ -364,7 +399,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect)
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor)
                     }
                 }
                 .padding(.bottom, 40)
@@ -442,6 +477,7 @@ private struct TimelineColumn: View {
     let events: [CalendarEventModel]
     let hourHeight: CGFloat
     let onSelect: (CalendarEventModel) -> Void
+    var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
 
     private let hours = Array(0..<24)
 
@@ -492,7 +528,7 @@ private struct TimelineColumn: View {
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
             .padding(4)
-            .background(Color(NCBrandColor.shared.customer).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
+            .background(colorFor(event).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
         .offset(y: offsetY + 2)
@@ -514,6 +550,7 @@ private struct ThreeDayTimelineView: View {
     let days: [Date]
     let eventsProvider: (Date) -> [CalendarEventModel]
     let onSelect: (CalendarEventModel) -> Void
+    var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
 
     private let hours = Array(0..<24)
     private let hourHeight: CGFloat = 44
@@ -547,14 +584,21 @@ private struct ThreeDayTimelineView: View {
                                     .id("hour_\(hour)")
                             }
                         }
-                        ForEach(days, id: \.self) { day in
+                        ForEach(Array(days.enumerated()), id: \.element) { index, day in
                             TimelineColumn(
                                 day: day,
                                 events: eventsProvider(day),
                                 hourHeight: hourHeight,
-                                onSelect: onSelect
+                                onSelect: onSelect,
+                                colorFor: colorFor
                             )
                             .frame(maxWidth: .infinity)
+                            if index < days.count - 1 {
+                                // Subtle vertical separator between days.
+                                Rectangle()
+                                    .fill(Color(.separator).opacity(0.4))
+                                    .frame(width: 0.5)
+                            }
                         }
                     }
                 }
@@ -830,5 +874,93 @@ private struct CalendarEventEditSheet: View {
         draft.attendees.append(trimmed)
         attendeeInput = ""
         attendeeSuggestions = []
+    }
+}
+
+/// Calendar selection sheet: toggle calendars (persistent) and pick a
+/// custom color per calendar via its "..." menu.
+private struct CalendarPickerSheet: View {
+    @ObservedObject var viewModel: CalendarViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    private let palette: [String] = [
+        "#4BBFEA", "#496BBF", "#34C759", "#FF9500", "#FF3B30",
+        "#AF52DE", "#FF2D55", "#8E8E93"
+    ]
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(viewModel.calendars, id: \.href) { calendar in
+                    HStack(spacing: 12) {
+                        Circle()
+                            .fill(viewModel.color(for: calendar) ?? Color(NCBrandColor.shared.customer))
+                            .frame(width: 14, height: 14)
+                        Text(calendar.displayName)
+                            .lineLimit(1)
+                        Spacer()
+                        if viewModel.isSelected(calendar) {
+                            Image(systemName: "checkmark")
+                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        }
+                        Menu {
+                            Button {
+                                viewModel.setCustomColor("", for: calendar)
+                            } label: {
+                                Label(NSLocalizedString("_calendar_color_default_", comment: ""), systemImage: "arrow.counterclockwise")
+                            }
+                            ForEach(palette, id: \.self) { hex in
+                                Button {
+                                    viewModel.setCustomColor(hex, for: calendar)
+                                } label: {
+                                    Label(NSLocalizedString("_calendar_color_", comment: ""), systemImage: "circle.fill")
+                                }
+                                .tint(Color(hex: hex) ?? .blue)
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        viewModel.toggleCalendar(calendar)
+                        Task { await viewModel.load() }
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
+                }
+            }
+        }
+    }
+}
+
+extension Color {
+    /// Creates a Color from "#RRGGBB" / "#RRGGBBAA" hex strings; returns
+    /// nil for unparseable values.
+    init?(hex: String) {
+        let cleaned = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        guard cleaned.count == 6 || cleaned.count == 8 else { return nil }
+        var value: UInt64 = 0
+        guard Scanner(string: cleaned).scanHexInt64(&value) else { return nil }
+        let r, g, b, a: Double
+        if cleaned.count == 8 {
+            r = Double((value >> 24) & 0xFF) / 255
+            g = Double((value >> 16) & 0xFF) / 255
+            b = Double((value >> 8) & 0xFF) / 255
+            a = Double(value & 0xFF) / 255
+        } else {
+            r = Double((value >> 16) & 0xFF) / 255
+            g = Double((value >> 8) & 0xFF) / 255
+            b = Double(value & 0xFF) / 255
+            a = 1
+        }
+        self.init(red: r, green: g, blue: b, opacity: a)
     }
 }

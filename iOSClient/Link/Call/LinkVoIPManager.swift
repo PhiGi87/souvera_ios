@@ -90,6 +90,15 @@ final class LinkVoIPManager: NSObject {
         activeSession?.hangup()
     }
 
+    /// The call was ended from inside the app (hangup button): close the
+    /// matching CallKit transaction so no dead call remains.
+    func callEndedByApp() {
+        for uuid in activeCalls.keys {
+            provider.reportCallEnded(with: uuid, reason: .remoteEnded)
+        }
+        activeCalls.removeAll()
+    }
+
     // MARK: - Push-v2 VoIP registration
 
     private func subscribeVoipToken() {

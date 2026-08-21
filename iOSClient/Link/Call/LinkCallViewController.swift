@@ -222,5 +222,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
     }
 
-    deinit { NotificationCenter.default.removeObserver(self) }
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+        // Safety net: never leave the call audio session active.
+        let audioSession = RTCAudioSession.sharedInstance()
+        audioSession.lockForConfiguration()
+        try? audioSession.setActive(false)
+        audioSession.unlockForConfiguration()
+    }
 }

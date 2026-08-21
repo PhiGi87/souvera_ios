@@ -173,6 +173,17 @@ final class CallSession: NSObject, HpbSignalingListener {
         peers.values.forEach { $0.close() }
         peers.removeAll()
         webRtc.dispose()
+
+        // Deactivate the call audio session - leaving it active keeps iOS in
+        // a dead "call running" state (status bar, routing, mic).
+        let audioSession = RTCAudioSession.sharedInstance()
+        audioSession.lockForConfiguration()
+        try? audioSession.setActive(false)
+        audioSession.unlockForConfiguration()
+
+        // End the CallKit transaction if one is active for this call.
+        LinkVoIPManager.shared.callEndedByApp()
+
         callbacks?.onEnded()
     }
 

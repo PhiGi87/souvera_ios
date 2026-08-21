@@ -159,11 +159,17 @@ actor LinkOcsApi {
             if let chunk = string.data(using: .utf8) { body.append(chunk) }
         }
         // Talk requires a non-empty message field alongside the file
-        // (an empty message part is rejected with 400).
+        // (an empty message part is rejected with 400). The Content-
+        // Disposition header must stay ASCII - non-ASCII file names would
+        // break the multipart parsing server-side (the file part gets
+        // dropped and only the name is shown).
+        let headerName = fileName
+            .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
+            .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"message\"\r\n\r\n\(fileName)\r\n")
         append("--\(boundary)\r\n")
-        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(headerName.isEmpty ? "file" : headerName)\"\r\n")
         append("Content-Type: \(mimeType)\r\n\r\n")
         body.append(data)
         append("\r\n--\(boundary)--\r\n")
@@ -178,6 +184,26 @@ actor LinkOcsApi {
     /// Shares a Souvera/Nextcloud file into the conversation via the
     /// files_sharing API (room share type 10), mirroring the Android client.
     /// The share itself creates the chat message.
+    /// Deletes a chat message (own messages).
+    func deleteMessage(token: String, messageId: Int64) async -> Bool {
+        let req = signed(url: "\(base)/api/v1/chat/\(token)/\(messageId)", method: "DELETE")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "deleteMessage \(messageId) http=\(status)")
+        return (200..<300).contains(status)
+    }
+
+    /// Edits a chat message (own messages).
+    func editMessage(token: String, messageId: Int64, text: String) async -> Bool {
+        var req = signed(url: "\(base)/api/v1/chat/\(token)/\(messageId)", method: "PUT")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "message=\(text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text)".data(using: .utf8)
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "editMessage \(messageId) http=\(status)")
+        return (200..<300).contains(status)
+    }
+
     func shareFileToChat(token: String, relativePath: String) async -> Bool {
         var components = URLComponents(string: "\(root)/ocs/v2.php/apps/files_sharing/api/v1/shares")!
         components.queryItems = [

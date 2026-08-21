@@ -129,11 +129,13 @@ final class JmapApi {
         var updates: [String: Any] = [:]
         for id in emailIds {
             var update: [String: Any] = [:]
-            if !keywordsToAdd.isEmpty {
-                update["keywords/$add"] = keywordsToAdd
+            // RFC 8621 per-key patches; Stalwart rejects the non-standard
+            // "keywords/$remove" array with invalidProperties.
+            for (keyword, value) in keywordsToAdd {
+                update["keywords/\(keyword)"] = value
             }
-            if !keywordsToRemove.isEmpty {
-                update["keywords/$remove"] = keywordsToRemove
+            for keyword in keywordsToRemove {
+                update["keywords/\(keyword)"] = false
             }
             updates[id] = update
         }

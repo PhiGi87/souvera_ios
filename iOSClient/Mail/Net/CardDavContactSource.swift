@@ -105,11 +105,18 @@ final class CardDavContactSource {
         var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
         req.setValue("1", forHTTPHeaderField: "Depth")
         req.httpBody = Self.reportBody.data(using: .utf8)
-        guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
+        guard let (data, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> request failed")
+            return []
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> \(status)")
-        guard status == 207 else { return [] }
-        return Self.parseCards(from: data, limit: limit)
+        guard status == 207 else {
+            JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> \(status)")
+            return []
+        }
+        let cards = Self.parseCards(from: data, limit: limit)
+        JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> \(status), \(cards.count) cards parsed")
+        return cards
     }
 
     /// PROPFIND on the address book home to discover every address book
@@ -127,13 +134,13 @@ final class CardDavContactSource {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             JmapLog.write("CardDAV PROPFIND \(home.absoluteString) -> \(status)")
             guard status == 207, let xml = String(data: data, encoding: .utf8) else { continue }
-            result += Self.parseAddressBookURLs(from: xml)
+            result += Self.parseAddressBookURLs(from: xml, base: home)
             if !result.isEmpty { break }
         }
         return result
     }
 
-    static func parseAddressBookURLs(from xml: String) -> [URL] {
+    static func parseAddressBookURLs(from xml: String, base: URL) -> [URL] {
         var urls: [URL] = []
         let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
         guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
@@ -141,9 +148,13 @@ final class CardDavContactSource {
             guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
             let block = String(xml[blockRange])
             guard block.localizedCaseInsensitiveContains("addressbook"),
-                  let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block),
-                  let url = URL(string: href) else { continue }
-            urls.append(url)
+                  let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block) else { continue }
+            // Sabre returns absolute paths; resolve them against the address
+            // book home so URLSession gets a full URL (relative URLs fail
+            // silently).
+            if let absolute = URL(string: href, relativeTo: base)?.absoluteURL {
+                urls.append(absolute)
+            }
         }
         return urls
     }

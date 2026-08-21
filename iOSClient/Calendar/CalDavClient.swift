@@ -10,6 +10,8 @@ import Foundation
 struct CalDavCalendar {
     let href: String
     let displayName: String
+    /// Server-side calendar color as a hex string (#RRGGBB), if set.
+    let color: String?
 }
 
 struct CalDavEventEntry {
@@ -85,13 +87,21 @@ final class CalDavClient {
         for match in regex.matches(in: xml, range: NSRange(location: 0, length: (xml as NSString).length)) {
             guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
             let block = String(xml[blockRange])
-            let isCalendar = block.range(of: "calendar", options: .caseInsensitive) != nil
-            guard isCalendar,
-                  let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block),
+            // Only collections whose resourcetype contains <calendar/> are
+            // real VEVENT calendars (skips the home, scheduling inbox/outbox,
+            // trashbin and Deck boards).
+            let resourcetype = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?resourcetype[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?resourcetype>"#, in: block) ?? ""
+            guard resourcetype.localizedCaseInsensitiveContains("calendar") else { continue }
+            guard let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block),
                   !href.isEmpty else { continue }
             let name = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?displayname>([^<]*)</(?:[A-Za-z0-9_]+:)?displayname>"#, in: block)
                 ?? (href as NSString).lastPathComponent
-            calendars.append(CalDavCalendar(href: href, displayName: name.isEmpty ? (href as NSString).lastPathComponent : name))
+            let color = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?calendar-color[^>]*>([^<]*)</(?:[A-Za-z0-9_]+:)?calendar-color>"#, in: block)
+            calendars.append(CalDavCalendar(
+                href: href,
+                displayName: name.isEmpty ? (href as NSString).lastPathComponent : name,
+                color: (color?.isEmpty == false) ? color : nil
+            ))
         }
         return calendars
     }
@@ -106,9 +116,12 @@ final class CalDavClient {
         req.httpBody = Self.reportBody(start: start, end: end).data(using: .utf8)
         guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(status)")
         guard status == 207,
-              let xml = String(data: data, encoding: .utf8) else { return [] }
+              let xml = String(data: data, encoding: .utf8) else {
+            JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(status)")
+            return []
+        }
+        JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(status), \(data.count) bytes")
 
         var events: [CalDavEventEntry] = []
         let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
@@ -130,6 +143,7 @@ final class CalDavClient {
                 .replacingOccurrences(of: "&amp;", with: "&")
             events.append(CalDavEventEntry(calendarHref: calendarHref, href: href, etag: etag, ics: vcalendar))
         }
+        JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(events.count) events parsed")
         return events
     }
 

@@ -103,7 +103,28 @@ struct LinkChatMessage: Decodable, Identifiable {
         messageParameters?.values.first(where: { $0.type == "file" })?.name
     }
 
+    /// File metadata if this message carries a shared/uploaded file.
+    func fileInfo() -> LinkFileInfo? {
+        guard let file = messageParameters?.values.first(where: { $0.type == "file" }),
+              let name = file.name else { return nil }
+        return LinkFileInfo(
+            name: name,
+            path: file.path,
+            size: Int64(file.size ?? "0") ?? 0
+        )
+    }
+
     var isSystemMessage: Bool { !systemMessage.isEmpty }
+
+    /// The deleted message id when this is a `message_deleted` system
+    /// message (Talk keeps the deleted id in the parent rich object).
+    var deletedParentId: Int64? {
+        guard isSystemMessage, systemMessage == "message_deleted" else { return nil }
+        if let parent = messageParameters?.values.first, let id = parent.id {
+            return Int64(id)
+        }
+        return nil
+    }
 }
 
 /// A Talk rich-object parameter (only the fields we use).
@@ -111,6 +132,25 @@ struct LinkRichObject: Decodable {
     let type: String?
     let name: String?
     let id: String?
+    let path: String?
+    let size: String?
+
+    enum CodingKeys: String, CodingKey { case type, name, id, path, size }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = try? c.decode(String.self, forKey: .type)
+        name = try? c.decode(String.self, forKey: .name)
+        id = try? c.decode(String.self, forKey: .id)
+        path = try? c.decode(String.self, forKey: .path)
+        size = try? c.decode(String.self, forKey: .size)
+    }
+}
+
+struct LinkFileInfo {
+    let name: String
+    let path: String?
+    let size: Int64
 }
 
 /// A user/group suggestion from the autocomplete API, used to start a new conversation.

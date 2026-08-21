@@ -126,7 +126,16 @@ final class LinkViewModel: ObservableObject {
                 if case let .success(existing) = messages { current = existing } else { current = [] }
                 let merged = (current + fresh)
                 var seen = Set<Int64>()
-                let deduped = merged.filter { seen.insert($0.id).inserted }.sorted { $0.id < $1.id }
+                var deletedIds = Set<Int64>()
+                for message in merged {
+                    if let parentId = message.deletedParentId {
+                        deletedIds.insert(parentId)
+                    }
+                }
+                let deduped = merged
+                    .filter { !deletedIds.contains($0.id) }
+                    .filter { seen.insert($0.id).inserted }
+                    .sorted { $0.id < $1.id }
                 messages = .success(deduped)
             }
         }
@@ -138,6 +147,74 @@ final class LinkViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         Task { await api.sendMessage(token: token, message: trimmed) }
+    }
+
+    // MARK: - Delete / edit
+
+    func deleteMessage(_ message: LinkChatMessage) {
+        guard let api else { return }
+        guard case let .chat(token, _) = route else { return }
+        Task {
+            if await api.deleteMessage(token: token, messageId: message.id) {
+                removeLocalMessages([message.id])
+            }
+        }
+    }
+
+    func editMessage(_ message: LinkChatMessage, text: String) {
+        guard let api else { return }
+        guard case let .chat(token, _) = route else { return }
+        Task {
+            if await api.editMessage(token: token, messageId: message.id, text: text) {
+                reloadMessages(token: token)
+            }
+        }
+    }
+
+    /// Removes messages locally (own deletions and `message_deleted`
+    /// system messages coming from the server).
+    private func removeLocalMessages(_ ids: [Int64]) {
+        guard case var .success(existing) = messages else { return }
+        existing.removeAll { ids.contains($0.id) }
+        messages = .success(existing)
+    }
+
+    /// Fetches the full recent history once (used after edits/deletions).
+    private func reloadMessages(token: String) {
+        Task {
+            let history = await api?.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
+            let ordered = history.sorted { $0.id < $1.id }
+            self.lastMessageId = ordered.last?.id ?? 0
+            self.messages = .success(ordered)
+        }
+    }
+
+    /// Downloads a chat file attachment into the app cache for preview.
+    func downloadAttachment(_ info: LinkFileInfo) async -> URL? {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
+        let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let user = tbl.user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tbl.user
+        let relative = info.path ?? "/Talk/\(info.name)"
+        guard let url = URL(string: "\(root)/remote.php/dav/files/\(user)\(relative)") else { return nil }
+
+        var req = URLRequest(url: url)
+        let davPassword = NCPreferences().getPassword(account: tbl.account)
+        let raw = "\(tbl.user):\(davPassword)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+
+        let folder = (FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory).appendingPathComponent("link-attachments", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let safeName = info.name.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let file = folder.appendingPathComponent("\(UUID().uuidString)_\(safeName)")
+        do {
+            try data.write(to: file, options: .atomic)
+            return file
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Attachments
