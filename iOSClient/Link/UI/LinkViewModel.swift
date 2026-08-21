@@ -14,6 +14,8 @@ extension Notification.Name {
     /// Posted when another module (e.g. the calendar) wants the Link tab to
     /// open a specific conversation.
     static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
+    /// Posted whenever the active call state changes (started/ended).
+    static let linkCallStateChanged = Notification.Name("SouveraLinkCallStateChanged")
 }
 
 /// Loading/content/error state for a Link screen's data.
@@ -152,13 +154,7 @@ final class LinkViewModel: ObservableObject {
         guard let api else { return }
         guard case let .chat(token, _) = route else { return }
         Task {
-            await api.shareFileToChat(
-                token: token,
-                fileId: selection.fileId,
-                name: selection.name,
-                size: selection.size,
-                mimeType: selection.mimeType
-            )
+            await api.shareFileToChat(token: token, relativePath: selection.relativePath)
         }
     }
 

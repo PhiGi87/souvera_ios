@@ -55,10 +55,22 @@ enum ICSParser {
             var allDay = false
             var startDay: Date?
             var endDay: Date?
+            var inTimeZone = false
 
             for rawLine in body.components(separatedBy: .newlines) {
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty else { continue }
+                // VTIMEZONE blocks carry their own DTSTART/DST transitions
+                // that must not overwrite the event's real start time.
+                if line.hasPrefix("BEGIN:VTIMEZONE") {
+                    inTimeZone = true
+                    continue
+                }
+                if line.hasPrefix("END:VTIMEZONE") {
+                    inTimeZone = false
+                    continue
+                }
+                if inTimeZone { continue }
                 guard let colon = line.firstIndex(of: ":") else { continue }
                 let keyPart = String(line[line.startIndex..<colon]).uppercased()
                 let rawValue = String(line[line.index(after: colon)...])
@@ -86,13 +98,13 @@ enum ICSParser {
                         allDay = true
                         startDay = parseDateOnly(value)
                     } else {
-                        start = parseDateTime(value)
+                        start = parseDateTime(value, tzid: extractTzid(keyPart))
                     }
                 } else if keyPart.hasPrefix("DTEND") {
                     if keyPart.contains("VALUE=DATE") {
                         endDay = parseDateOnly(value)
                     } else {
-                        end = parseDateTime(value)
+                        end = parseDateTime(value, tzid: extractTzid(keyPart))
                     }
                 }
             }
@@ -197,13 +209,36 @@ enum ICSParser {
             .replacingOccurrences(of: "\\\\", with: "\\")
     }
 
-    private static func parseDateTime(_ value: String) -> Date? {
+    private static func parseDateTime(_ value: String, tzid: String? = nil) -> Date? {
+        // TZID-aware times (e.g. DTSTART;TZID=Europe/Berlin:20260822T110000).
+        if let tzid, !value.hasSuffix("Z") {
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyyMMdd'T'HHmmss"
+            formatter.timeZone = TimeZone(identifier: tzid) ?? .current
+            formatter.locale = Locale(identifier: "en_US_POSIX")
+            if let date = formatter.date(from: value) { return date }
+        }
         let cleaned = value.replacingOccurrences(of: "Z", with: "+00:00")
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let date = formatter.date(from: cleaned) { return date }
         formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: cleaned)
+        if let date = formatter.date(from: cleaned) { return date }
+        // Floating local time without zone information: interpret in the
+        // device timezone.
+        let local = DateFormatter()
+        local.dateFormat = "yyyyMMdd'T'HHmmss"
+        local.locale = Locale(identifier: "en_US_POSIX")
+        return local.date(from: value)
+    }
+
+    private static func extractTzid(_ keyPart: String) -> String? {
+        guard let range = keyPart.range(of: "TZID=") else { return nil }
+        var tzid = String(keyPart[range.upperBound...])
+        if tzid.hasPrefix("\""), tzid.hasSuffix("\"") {
+            tzid = String(tzid.dropFirst().dropLast())
+        }
+        return tzid.isEmpty ? nil : tzid
     }
 
     private static func parseDateOnly(_ value: String) -> Date? {

@@ -73,6 +73,12 @@ actor JmapClient {
 
     @discardableResult
     func refreshSession() async throws -> JmapSessionInfo {
+        // The session is static per credential - fetch it once and reuse it.
+        // Refetching on every sync caused transient GET failures to surface
+        // as "JMAP session not available" (e.g. on pull-to-refresh).
+        if let session = jmapSession {
+            return session
+        }
         let apiUrl = try await resolveApiUrl()
         guard let json = resolvedJson else {
             throw JmapException.protocolError("JMAP session not available at \(apiUrl). Check server connectivity and credentials.")
@@ -245,29 +251,30 @@ actor JmapClient {
     private func resolveApiUrl() async throws -> String {
         let base = baseUrl
 
+        // Once resolved, keep using the same api URL; a transient failure
+        // of a later fetch must never discard a working session.
+        if let cached = resolvedApiUrl {
+            return cached
+        }
+
         if let json = try? await httpGet("\(base)/jmap/session") {
             resolvedJson = json
-            if let apiUrl = json.optString("apiUrl"), !apiUrl.isEmpty {
-                return apiUrl
-            }
-            return "\(base)/jmap"
+            resolvedApiUrl = json.optString("apiUrl") ?? "\(base)/jmap"
+            return resolvedApiUrl ?? "\(base)/jmap"
         }
 
         if let json = try? await httpGet("\(base)/.well-known/jmap") {
             resolvedJson = json
-            if let apiUrl = json.optString("apiUrl"), !apiUrl.isEmpty {
-                return apiUrl
-            }
+            resolvedApiUrl = json.optString("apiUrl") ?? "\(base)/jmap"
+            return resolvedApiUrl ?? "\(base)/jmap"
         }
 
         let defaultUrl = "\(base)/jmap"
         if let json = try? await httpGet(defaultUrl) {
             resolvedJson = json
-            if let apiUrl = json.optString("apiUrl"), !apiUrl.isEmpty {
-                return apiUrl
-            }
+            resolvedApiUrl = json.optString("apiUrl") ?? defaultUrl
+            return resolvedApiUrl ?? defaultUrl
         }
-        resolvedJson = nil
         return defaultUrl
     }
 
@@ -345,6 +352,7 @@ actor JmapClient {
         guard let url = URL(string: urlStr) else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
+        req.cachePolicy = .reloadIgnoringLocalCacheData
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
 
@@ -353,9 +361,15 @@ actor JmapClient {
         if code == 401 {
             throw JmapException.authNeedsBearer("JMAP auth rejected — needs Bearer token")
         }
-        guard (200..<300).contains(code) else { return nil }
-
-        return try? JSONSerialization.jsonObject(with: body) as? [String: Any]
+        guard (200..<300).contains(code) else {
+            JmapLog.write("session GET \(urlStr) -> HTTP \(code)")
+            return nil
+        }
+        if let json = try? JSONSerialization.jsonObject(with: body) as? [String: Any] {
+            return json
+        }
+        JmapLog.write("session GET \(urlStr) -> 2xx but body is not JSON")
+        return nil
     }
 
     private func httpPost(_ urlStr: String, body: [String: Any]) async throws -> [String: Any] {

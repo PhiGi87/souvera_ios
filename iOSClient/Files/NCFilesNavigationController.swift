@@ -59,10 +59,18 @@ class NCFilesNavigationController: NCMainNavigationController {
     // MARK: - Left
 
     override func setNavigationLeftItems() async {
+        // Souvera: the account menu moved into the More tab (NCMoreView).
+        self.collectionViewCommon?.navigationItem.leftBarButtonItems = nil
+    }
+
+    /// Kept on hold: the previous account switcher menu (account list,
+    /// account settings and the add-account action). Not wired up anymore -
+    /// the account area now lives in the More tab.
+    func createLegacyAccountMenu() async -> UIMenu? {
         guard let tableAccount = database.getTableAccount(predicate: NSPredicate(format: "account == %@", self.session.account))
         else {
             self.collectionViewCommon?.navigationItem.leftBarButtonItems = nil
-            return
+            return nil
         }
         let image = utility.loadUserImage(for: tableAccount.user, displayName: tableAccount.displayName, urlBase: tableAccount.urlBase)
 

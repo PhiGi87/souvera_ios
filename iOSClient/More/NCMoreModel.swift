@@ -39,6 +39,21 @@ final class NCMoreModel: ObservableObject {
     @Published var quotaExternalSiteUrl: String?
     @Published var autoUploadStart: Bool = false
 
+    // Account menu state (top-left of the More screen).
+    @Published var activeAccountDisplayName: String = ""
+    @Published var activeAccountHost: String = ""
+    @Published var activeAvatar: UIImage?
+    @Published var accountList: [AccountItem] = []
+
+    struct AccountItem: Identifiable {
+        let account: String
+        let name: String
+        let host: String
+        var id: String { account }
+    }
+
+    var tabBarController: NCMainTabBarController? { controller }
+
     private weak var controller: NCMainTabBarController?
     var account: String {
         controller?.account ?? ""
@@ -197,6 +212,8 @@ final class NCMoreModel: ObservableObject {
         let capabilities = tableAccount.flatMap { NCNetworking.shared.capabilities[$0.account] }
 
         autoUploadStart = tableAccount?.autoUploadStart ?? false
+
+        await loadAccountMenuState()
 
         var functionItems: [Item] = []
         var externalSiteItems: [Item] = []
@@ -430,6 +447,50 @@ final class NCMoreModel: ObservableObject {
         guard let tabNavigationController = storyboard.instantiateViewController(withIdentifier: identifier) as? UINavigationController,
               let rootViewController = tabNavigationController.viewControllers.first else { return }
         navigationController.pushViewController(rootViewController, animated: true)
+    }
+
+    // MARK: - Account menu (top-left of the More screen)
+
+    private func loadAccountMenuState() async {
+        let utility = NCUtility()
+        let accounts = await database.getAllAccountOrderAliasAsync()
+        accountList = accounts.map { item in
+            let name = item.alias.isEmpty ? item.displayName : item.alias
+            let host = URL(string: item.urlBase)?.host ?? ""
+            return AccountItem(account: item.account, name: name, host: host)
+        }
+        if let active = accounts.first(where: { $0.account == account }) {
+            activeAccountDisplayName = active.alias.isEmpty ? active.displayName : active.alias
+            activeAccountHost = URL(string: active.urlBase)?.host ?? ""
+            activeAvatar = utility.loadUserImage(for: active.user, displayName: active.displayName, urlBase: active.urlBase)
+        }
+    }
+
+    /// Switches the active account (mirrors the old Files account switcher).
+    func switchAccount(_ account: String) {
+        Task { @MainActor in
+            await NCAccount().changeAccount(account, userProfile: nil, controller: controller)
+        }
+    }
+
+    /// Kept on hold: presents the login/intro flow for adding a second
+    /// account. Intentionally not wired into the menu for now.
+    func performAddAccount() {
+        guard let controller else { return }
+        if NCBrandOptions.shared.disable_intro {
+            if let viewController = UIStoryboard(name: "NCLogin", bundle: nil).instantiateViewController(withIdentifier: "NCLogin") as? NCLogin {
+                viewController.controller = controller
+                let navigationController = UINavigationController(rootViewController: viewController)
+                navigationController.modalPresentationStyle = .fullScreen
+                controller.present(navigationController, animated: true)
+            }
+        } else if let navigationController = UIStoryboard(name: "NCIntro", bundle: nil).instantiateInitialViewController() as? UINavigationController {
+            if let viewController = navigationController.topViewController as? NCIntroViewController {
+                viewController.controller = nil
+            }
+            navigationController.modalPresentationStyle = .fullScreen
+            controller.present(navigationController, animated: true)
+        }
     }
 
     /// Pushes a SwiftUI screen onto the More navigation stack.

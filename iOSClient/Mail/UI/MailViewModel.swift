@@ -56,6 +56,7 @@ final class MailViewModel: ObservableObject {
     @Published var expandedMailboxIds: Set<String> = []
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
+    @Published var sortOrder: MailSortOrder = .dateDesc
 
     private var imapClient: MailImapClient?
     private var jmapClient: JmapClient?
@@ -73,6 +74,21 @@ final class MailViewModel: ObservableObject {
     private var useJmap: Bool { NCBrandOptions.shared.useJmapMail }
     var transportLabel: String { useJmap ? "JMAP" : "IMAP" }
     var availableMailboxes: [Mailbox] { allMailboxes }
+
+    /// Applies the selected sort order to a loaded message list.
+    func sortMessages(_ list: [MailMessage]) -> [MailMessage] {
+        switch sortOrder {
+        case .dateDesc:
+            return list.sorted { $0.dateSent > $1.dateSent }
+        case .dateAsc:
+            return list.sorted { $0.dateSent < $1.dateSent }
+        case .unreadFirst:
+            return list.sorted {
+                if $0.isRead != $1.isRead { return !$0.isRead }
+                return $0.dateSent > $1.dateSent
+            }
+        }
+    }
 
     func start() {
         if imapClient != nil || jmapClient != nil { return }
@@ -351,11 +367,11 @@ final class MailViewModel: ObservableObject {
 
     private func isJmapAuthRecoverable(_ error: Error) -> Bool {
         guard let jmapError = error as? JmapException else { return false }
+        // Only genuine auth rejections trigger a credential re-mint; a
+        // missing session is a connectivity issue and must not re-mint.
         switch jmapError {
         case .authNeedsBearer:
             return true
-        case .protocolError(let message):
-            return message.contains("JMAP session not available")
         default:
             return false
         }

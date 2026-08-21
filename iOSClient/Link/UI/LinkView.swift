@@ -11,6 +11,8 @@ import UniformTypeIdentifiers
 struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @State private var callContext: CallContext?
+    @State private var showCallBanner = false
+    @State private var returnToCall = false
 
     struct CallContext: Identifiable {
         let token: String
@@ -55,6 +57,14 @@ struct LinkView: View {
                 viewModel.openConversation(token: pending.token, title: pending.title)
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
+            showCallBanner = LinkVoIPManager.shared.activeCallInfo != nil
+        }
+        .overlay(alignment: .top) {
+            if showCallBanner, let info = LinkVoIPManager.shared.activeCallInfo {
+                activeCallBanner(title: info.title)
+            }
+        }
         .fullScreenCover(item: $callContext) { context in
             if let account = LinkAccount.active() {
                 LinkCallViewControllerWrapper(
@@ -66,6 +76,52 @@ struct LinkView: View {
                 .ignoresSafeArea()
             }
         }
+        .fullScreenCover(isPresented: $returnToCall) {
+            if let info = LinkVoIPManager.shared.activeCallInfo,
+               let session = LinkVoIPManager.shared.activeSession,
+               let account = LinkAccount.active() {
+                LinkCallViewControllerWrapper(
+                    account: account,
+                    token: info.token,
+                    title: info.title,
+                    withVideo: info.withVideo,
+                    session: session
+                )
+                .ignoresSafeArea()
+            }
+        }
+    }
+
+    /// Green banner shown while a call is running without its own UI.
+    private func activeCallBanner(title: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "phone.fill")
+                .foregroundStyle(.white)
+                .padding(6)
+                .background(Circle().fill(Color.green))
+            Text(title)
+                .font(.subheadline)
+                .lineLimit(1)
+            Spacer()
+            Button(NSLocalizedString("_link_call_return_", comment: "")) {
+                returnToCall = true
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
+            Button(role: .destructive) {
+                LinkVoIPManager.shared.endActiveCall()
+            } label: {
+                Image(systemName: "phone.down.fill")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+        .shadow(radius: 4)
+        .padding(.horizontal, 10)
+        .padding(.top, 4)
     }
 
     private var navigationTitle: String {
@@ -90,9 +146,10 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
     let token: String
     let title: String
     let withVideo: Bool
+    var session: CallSession? = nil
 
     func makeUIViewController(context: Context) -> LinkCallViewController {
-        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo)
+        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo, session: session)
     }
 
     func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}

@@ -14,6 +14,7 @@ import NextcloudKit
 struct NCMoreView: View {
     @StateObject private var model: NCMoreModel
     @State private var autoUploadCounter = NCAutoUploadCounter()
+    @State private var showAccountSettings = false
     private let loadItemsOnAppear: Bool
     private let shortcutIconColor = Color(red: 0, green: 130 / 255, blue: 201 / 255) // Nextcloud Color
 
@@ -36,10 +37,69 @@ struct NCMoreView: View {
         model.perform(destination)
     }
 
+    /// Account area at the top-left of the More screen: avatar, display
+    /// name and the account menu (account switch + account settings).
+    private var accountHeader: some View {
+        Menu {
+            ForEach(model.accountList) { item in
+                Button {
+                    model.switchAccount(item.account)
+                } label: {
+                    if item.account == model.tabBarController?.account {
+                        Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
+                    } else {
+                        Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
+                    }
+                }
+            }
+            // "Add account" is intentionally kept out of the menu for now
+            // (the flow remains available as model.performAddAccount()).
+            Button {
+                showAccountSettings = true
+            } label: {
+                Label(NSLocalizedString("_account_settings_", comment: ""), systemImage: "gear")
+            }
+        } label: {
+            HStack(spacing: 12) {
+                if let avatar = model.activeAvatar {
+                    Image(uiImage: avatar)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: 44, height: 44)
+                        .clipShape(Circle())
+                } else {
+                    Circle()
+                        .fill(Color.gray.opacity(0.3))
+                        .frame(width: 44, height: 44)
+                        .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.activeAccountDisplayName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    if !model.activeAccountHost.isEmpty {
+                        Text(model.activeAccountHost)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .contentShape(Rectangle())
+        }
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 18) {
+                    accountHeader
+
                     if let appsSection = model.sections.first(where: { $0.type == .moreApps }) {
                         moreAppsSection(items: appsSection.items)
                     }
@@ -71,6 +131,9 @@ struct NCMoreView: View {
                 .padding(.bottom, 6)
         }
         .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .sheet(isPresented: $showAccountSettings) {
+            NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
+        }
         .task {
             guard loadItemsOnAppear else { return }
             await model.loadItems()

@@ -86,6 +86,80 @@ final class CardDavContactSource {
         return []
     }
 
+    /// Fetches the cards of EVERY address book of the user (the personal
+    /// book plus server-generated books like z-server-generated--system,
+    /// where the directory contacts live).
+    func fetchAllCards(limit: Int = 500) async -> [CardDavCard] {
+        var all: [CardDavCard] = []
+        var seenHrefs = Set<String>()
+        for url in discoverAddressBookURLs() {
+            let cards = await fetchCards(from: url, limit: limit)
+            for card in cards where seenHrefs.insert(card.href).inserted {
+                all.append(card)
+            }
+        }
+        return all
+    }
+
+    private func fetchCards(from url: URL, limit: Int) async -> [CardDavCard] {
+        var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
+        req.setValue("1", forHTTPHeaderField: "Depth")
+        req.httpBody = Self.reportBody.data(using: .utf8)
+        guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> \(status)")
+        guard status == 207 else { return [] }
+        return Self.parseCards(from: data, limit: limit)
+    }
+
+    /// PROPFIND on the address book home to discover every address book
+    /// collection (the personal one plus server-generated ones).
+    private func discoverAddressBookURLs() -> [URL] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        var result: [URL] = []
+        for principal in principalCandidates() {
+            guard let home = URL(string: "\(root)/remote.php/dav/addressbooks/users/\(principal)/") else { continue }
+            var req = authorizedRequest(for: home, method: "PROPFIND")
+            req.setValue("1", forHTTPHeaderField: "Depth")
+            req.httpBody = Self.propfindBody.data(using: .utf8)
+            guard let (data, response) = try? await urlSession.data(for: req) else { continue }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            JmapLog.write("CardDAV PROPFIND \(home.absoluteString) -> \(status)")
+            guard status == 207, let xml = String(data: data, encoding: .utf8) else { continue }
+            result += Self.parseAddressBookURLs(from: xml)
+            if !result.isEmpty { break }
+        }
+        return result
+    }
+
+    static func parseAddressBookURLs(from xml: String) -> [URL] {
+        var urls: [URL] = []
+        let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
+        guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
+        for match in regex.matches(in: xml, range: NSRange(location: 0, length: (xml as NSString).length)) {
+            guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
+            let block = String(xml[blockRange])
+            guard block.localizedCaseInsensitiveContains("addressbook"),
+                  let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block),
+                  let url = URL(string: href) else { continue }
+            urls.append(url)
+        }
+        return urls
+    }
+
+    private static var propfindBody: String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:carddav">
+          <d:prop>
+            <d:displayname/>
+            <d:resourcetype/>
+          </d:prop>
+        </d:propfind>
+        """
+    }
+
     /// Lightweight lookup used by the mail composer's recipient suggestions.
     func fetchContacts(limit: Int = 200) async -> [RecipientSuggestion] {
         let cards = await fetchCards(limit: limit)
@@ -242,6 +316,13 @@ final class CardDavContactSource {
                 in: block
             ) else { continue }
             let vcard = addressData
+                // Numeric character entities first - sabre encodes vCard
+                // line endings as &#13; which would otherwise glue all
+                // lines together into a single unparseable line.
+                .replacingOccurrences(of: "&#13;", with: "\n")
+                .replacingOccurrences(of: "&#10;", with: "\n")
+                .replacingOccurrences(of: "&#x0D;", with: "\n")
+                .replacingOccurrences(of: "&#x0A;", with: "\n")
                 .replacingOccurrences(of: "&lt;", with: "<")
                 .replacingOccurrences(of: "&gt;", with: ">")
                 .replacingOccurrences(of: "&quot;", with: "\"")

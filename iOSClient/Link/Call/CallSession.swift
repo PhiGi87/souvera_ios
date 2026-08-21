@@ -21,7 +21,7 @@ protocol CallSessionCallbacks: AnyObject {
 final class CallSession: NSObject, HpbSignalingListener {
     private let account: LinkAccount
     private let token: String
-    private weak var callbacks: CallSessionCallbacks?
+    var callbacks: CallSessionCallbacks?
 
     private let api: LinkOcsApi
     private let webRtc = WebRtcClient()
@@ -36,6 +36,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var ownSessionId = ""
     private var mcuActive = false
     private var endedOnce = false
+    private var publisherCreated = false
 
     private let callFlags: Int
 
@@ -57,7 +58,9 @@ final class CallSession: NSObject, HpbSignalingListener {
             guard let settings = await api.getSignalingSettings(token: token) else {
                 CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
             }
-            await api.joinCall(token: token, flags: callFlags)
+            // joinCall runs after the signaling room join (onRoomJoined) -
+            // mirroring the Android client. Opening the call earlier makes
+            // the MCU ignore our publisher.
             await MainActor.run {
                 self.localAudio = self.webRtc.createLocalAudioTrack()
                 if let video = self.webRtc.createLocalVideoTrack() {
@@ -78,10 +81,29 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     // MARK: - HpbSignalingListener
 
+    var hasEnded: Bool { endedOnce }
+
     func onConnected(ownSessionId: String, mcuActive: Bool) {
         self.ownSessionId = ownSessionId
         self.mcuActive = mcuActive
-        if mcuActive { createPublisher() }
+        CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
+    }
+
+    /// The signaling room join is confirmed - now open the call via OCS.
+    func onRoomJoined() {
+        Task {
+            await api.joinCall(token: token, flags: callFlags)
+            CallDebugLog.log("CallSession", "joinCall sent flags=\(callFlags) (after room join)")
+        }
+    }
+
+    /// The server confirmed our session is in-call; only now may we publish
+    /// to the MCU (publishing earlier is rejected/ignored by Janus).
+    func onSelfInCall() {
+        guard mcuActive, !publisherCreated else { return }
+        publisherCreated = true
+        CallDebugLog.log("CallSession", "createPublisher to own=\(ownSessionId)")
+        createPublisher()
     }
 
     private func createPublisher() {
@@ -179,7 +201,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "true"], optionalConstraints: nil)
     }
 
-    private func end() { callbacks?.onEnded() }
+    private func end() {
+        callbacks?.onEnded()
+        LinkVoIPManager.shared.callSessionDidEnd(self)
+    }
 
     fileprivate func emitCandidate(session: String, candidate: RTCIceCandidate) {
         let json: [String: Any] = [
@@ -190,8 +215,21 @@ final class CallSession: NSObject, HpbSignalingListener {
         signaling?.sendCandidate(toSession: session, candidate: json)
     }
 
+    private(set) var remoteVideoTracks: [RTCVideoTrack] = []
+
     fileprivate func emitRemoteVideo(_ track: RTCVideoTrack) {
+        if !remoteVideoTracks.contains(where: { $0 === track }) {
+            remoteVideoTracks.append(track)
+        }
         callbacks?.onRemoteVideo(track: track)
+    }
+
+    /// Re-attaches a new call UI (e.g. after returning from the chat) to the
+    /// running session and re-emits the active tracks.
+    func reattach(callbacks: CallSessionCallbacks) {
+        self.callbacks = callbacks
+        if let local = localVideo { callbacks.onLocalVideo(track: local) }
+        for track in remoteVideoTracks { callbacks.onRemoteVideo(track: track) }
     }
 }
 

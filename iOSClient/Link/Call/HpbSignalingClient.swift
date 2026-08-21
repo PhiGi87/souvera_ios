@@ -13,6 +13,12 @@ import Foundation
 
 protocol HpbSignalingListener: AnyObject {
     func onConnected(ownSessionId: String, mcuActive: Bool)
+    /// The signaling room join was confirmed - only now may joinCall run.
+    func onRoomJoined()
+    /// The server confirmed via participants/update that our own session is
+    /// in-call; only now may we publish to the MCU (Janus rejects earlier
+    /// publishers).
+    func onSelfInCall()
     func onParticipants(sessionIds: [String])
     func onOffer(fromSession: String, sdp: String)
     func onAnswer(fromSession: String, sdp: String)
@@ -124,6 +130,7 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     private func sendHello() {
         let hello: [String: Any] = [
             "version": "1.0",
+            "features": ["chat-relay"],
             "auth": [
                 "url": backendUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/ocs/v2.php/apps/spreed/api/v3/signaling/backend",
                 "params": ["userid": settings.userId, "ticket": settings.ticket]
@@ -158,6 +165,8 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         }
     }
 
+    private var roomJoinedNotified = false
+
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
               let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
@@ -166,7 +175,13 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         switch type {
         case "welcome": sendHello()
         case "hello": handleHello(root)
-        case "room": break // participants arrive via a subsequent "event"
+        case "room":
+            // The signaling room join is confirmed - only now may the call
+            // be opened via the OCS API.
+            if !roomJoinedNotified {
+                roomJoinedNotified = true
+                listener?.onRoomJoined()
+            }
         case "event": handleEvent(root)
         case "message": handleMessage(root)
         default: break
@@ -183,22 +198,38 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         sendRoomJoin()
     }
 
+    /// Only "participants/update" carries the in-call participant list (with
+    /// the inCall flag). "room/join" is mere presence and must NOT trigger
+    /// peer connections (mirrors the Android client).
     private func handleEvent(_ root: [String: Any]) {
         guard let event = root["event"] as? [String: Any] else { return }
         let target = event["target"] as? String
         let type = event["type"] as? String
-        var sessions: [String] = []
-        if target == "room", type == "join", let joins = event["join"] as? [[String: Any]] {
-            sessions = joins.compactMap { $0["sessionid"] as? String }
-        } else if target == "participants", type == "update",
-                  let users = (event["update"] as? [String: Any])?["users"] as? [[String: Any]] {
-            for user in users {
-                let inCall = (user["inCall"] as? Int ?? 0) != 0
-                if inCall { sessions.append((user["sessionId"] as? String) ?? (user["sessionid"] as? String) ?? "") }
+        guard target == "participants", type == "update",
+              let users = (event["update"] as? [String: Any])?["users"] as? [[String: Any]] else {
+            CallDebugLog.log("HpbSignaling", "event target=\(target ?? "?") type=\(type ?? "?") (ignored)")
+            return
+        }
+
+        var selfInCall = false
+        var remotes: [String] = []
+        for user in users {
+            let inCall = (user["inCall"] as? Int ?? 0) != 0
+            let session = (user["sessionId"] as? String) ?? (user["sessionid"] as? String) ?? ""
+            guard inCall, !session.isEmpty else { continue }
+            if session == ownSessionId {
+                selfInCall = true
+            } else {
+                remotes.append(session)
             }
         }
-        let fresh = sessions.filter { !$0.isEmpty && $0 != ownSessionId }
-        if !fresh.isEmpty { listener?.onParticipants(sessionIds: fresh) }
+        CallDebugLog.log("HpbSignaling", "participants/update self=\(selfInCall) remotes=\(remotes.count)")
+        if selfInCall {
+            listener?.onSelfInCall()
+        }
+        if !remotes.isEmpty {
+            listener?.onParticipants(sessionIds: remotes)
+        }
     }
 
     private func handleMessage(_ root: [String: Any]) {

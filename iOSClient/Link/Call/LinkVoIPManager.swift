@@ -30,6 +30,10 @@ final class LinkVoIPManager: NSObject {
 
     /// The current PushKit VoIP token as a lowercase hex string (never logged in full).
     private(set) var voipToken: String = ""
+    /// The currently running outgoing call (owned by this manager so it can
+    /// outlive the call UI when the user switches to the chat).
+    private(set) var activeSession: CallSession?
+    private(set) var activeCallInfo: (token: String, title: String, withVideo: Bool)?""
     /// Room token of the call currently reported to CallKit, keyed by CallKit UUID.
     private var activeCalls: [UUID: String] = [:]
 
@@ -49,6 +53,41 @@ final class LinkVoIPManager: NSObject {
         registry.delegate = self
         registry.desiredPushTypes = [.voIP]
         voipRegistry = registry
+    }
+
+    // MARK: - Outgoing calls (shared session)
+
+    /// Starts an outgoing call; the session stays alive independently of the
+    /// call view controller so the UI can be re-attached later.
+    func startOutgoingCall(account: LinkAccount, token: String, title: String, withVideo: Bool, callbacks: CallSessionCallbacks?) {
+        let session = CallSession(account: account, token: token, callbacks: callbacks, withVideo: withVideo)
+        activeSession = session
+        activeCallInfo = (token, title, withVideo)
+        session.start()
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// Adopts a session started by a call view controller so the call keeps
+    /// running while the user switches to the chat.
+    func takeOverCall(_ session: CallSession, token: String, title: String, withVideo: Bool) {
+        activeSession = session
+        activeCallInfo = (token, title, withVideo)
+        session.callbacks = nil
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// Called when the session reports it ended - clears the active state so
+    /// banners disappear everywhere.
+    func callSessionDidEnd(_ session: CallSession) {
+        guard activeSession === session else { return }
+        activeSession = nil
+        activeCallInfo = nil
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// Ends the active call from any surface (banner, CarPlay, ...).
+    func endActiveCall() {
+        activeSession?.hangup()
     }
 
     // MARK: - Push-v2 VoIP registration

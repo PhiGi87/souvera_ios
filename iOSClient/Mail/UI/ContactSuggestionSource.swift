@@ -26,7 +26,11 @@ final class ContactSuggestionSource {
         guard trimmed.count >= 3 else { return [] }
 
         var results = await directory.searchUsers(trimmed, limit: limit)
-        results += await cardDav.fetchContacts(limit: 50).filter {
+        results += await cardDav.fetchAllCards(limit: 50).compactMap { card -> RecipientSuggestion? in
+            let parsed = CardDavContactSource.parseVcard(card.vcard)
+            guard let email = parsed.emails.first else { return nil }
+            return RecipientSuggestion(displayName: parsed.name.isEmpty ? nil : parsed.name, email: email.lowercased())
+        }.filter {
             $0.email.localizedCaseInsensitiveContains(trimmed)
                 || ($0.displayName ?? "").localizedCaseInsensitiveContains(trimmed)
         }

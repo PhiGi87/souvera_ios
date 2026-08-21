@@ -150,9 +150,14 @@ struct SouveraCalendarView: View {
         let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
         let isToday = calendar.isDateInToday(day)
         Button {
-            selectedDay = day
-            viewModel.ensureMonth(contains: day)
-            withAnimation { viewMode = .day }
+            // First tap selects the day (the events appear in the list
+            // below); a second tap on the same day opens the day view.
+            if viewMode == .month, calendar.isDate(day, inSameDayAs: selectedDay) {
+                withAnimation { viewMode = .day }
+            } else {
+                selectedDay = day
+                viewModel.ensureMonth(contains: day)
+            }
         } label: {
             VStack(spacing: 3) {
                 Text("\(calendar.component(.day, from: day))")
@@ -226,19 +231,11 @@ struct SouveraCalendarView: View {
         VStack(spacing: 0) {
             daySwitcher(day: selectedDay)
             Divider()
-            HStack(alignment: .top, spacing: 0) {
-                ForEach(threeDayRange, id: \.self) { day in
-                    TimelineDayView(
-                        day: day,
-                        events: viewModel.events(on: day),
-                        showHourLabels: false,
-                        hourHeight: 44,
-                        compactHeader: true,
-                        onSelect: { detailEvent = $0 }
-                    )
-                    .frame(maxWidth: .infinity)
-                }
-            }
+            ThreeDayTimelineView(
+                days: threeDayRange,
+                eventsProvider: { viewModel.events(on: $0) },
+                onSelect: { detailEvent = $0 }
+            )
         }
     }
 
@@ -367,7 +364,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        timeline
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect)
                     }
                 }
                 .padding(.bottom, 40)
@@ -436,8 +433,19 @@ private struct TimelineDayView: View {
             }
         }
     }
+}
 
-    private var timeline: some View {
+/// The event lane of a single day: hour grid lines plus time-positioned
+/// event blocks. Shared between the day and 3-day views.
+private struct TimelineColumn: View {
+    let day: Date
+    let events: [CalendarEventModel]
+    let hourHeight: CGFloat
+    let onSelect: (CalendarEventModel) -> Void
+
+    private let hours = Array(0..<24)
+
+    var body: some View {
         ZStack(alignment: .topLeading) {
             VStack(spacing: 0) {
                 ForEach(hours, id: \.self) { hour in
@@ -497,6 +505,68 @@ private struct TimelineDayView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return "\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))"
+    }
+}
+
+/// The 3-day view: ONE shared hour scale on the left and three day columns
+/// that scroll together in a single scroll view.
+private struct ThreeDayTimelineView: View {
+    let days: [Date]
+    let eventsProvider: (Date) -> [CalendarEventModel]
+    let onSelect: (CalendarEventModel) -> Void
+
+    private let hours = Array(0..<24)
+    private let hourHeight: CGFloat = 44
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    HStack(alignment: .top, spacing: 0) {
+                        Color.clear.frame(width: 34, height: 44)
+                        ForEach(days, id: \.self) { day in
+                            VStack(spacing: 1) {
+                                Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                                    .font(.caption).fontWeight(.medium)
+                                    .foregroundStyle(.secondary)
+                                Text("\(Calendar.current.component(.day, from: day))")
+                                    .font(.headline)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 44)
+                        }
+                    }
+                    HStack(alignment: .top, spacing: 0) {
+                        VStack(alignment: .trailing, spacing: 0) {
+                            ForEach(hours, id: \.self) { hour in
+                                Text(String(format: "%02d", hour))
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 34, height: hourHeight, alignment: .topTrailing)
+                                    .padding(.trailing, 2)
+                                    .id("hour_\(hour)")
+                            }
+                        }
+                        ForEach(days, id: \.self) { day in
+                            TimelineColumn(
+                                day: day,
+                                events: eventsProvider(day),
+                                hourHeight: hourHeight,
+                                onSelect: onSelect
+                            )
+                            .frame(maxWidth: .infinity)
+                        }
+                    }
+                }
+                .padding(.bottom, 40)
+            }
+            .onAppear {
+                let currentHour = Calendar.current.component(.hour, from: Date())
+                if days.contains(where: { Calendar.current.isDateInToday($0) }) {
+                    proxy.scrollTo("hour_\(currentHour)", anchor: .top)
+                }
+            }
+        }
     }
 }
 

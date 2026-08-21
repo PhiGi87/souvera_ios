@@ -143,9 +143,10 @@ actor LinkOcsApi {
         _ = try? await session.data(for: req)
     }
 
-    /// Uploads a local file into the chat (multipart POST).
+    /// Uploads a local file into the chat (multipart POST to the v1 chat
+    /// endpoint - the v4 chat route does not exist for uploads).
     func uploadFileToChat(token: String, data: Data, fileName: String, mimeType: String) async -> Bool {
-        guard let url = URL(string: "\(base)/api/v4/chat/\(token)") else { return false }
+        guard let url = URL(string: "\(base)/api/v1/chat/\(token)") else { return false }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
@@ -172,24 +173,41 @@ actor LinkOcsApi {
         return (200..<300).contains(status)
     }
 
-    /// Shares an existing Souvera/Nextcloud file into the chat.
-    func shareFileToChat(token: String, fileId: String, name: String, size: Int64, mimeType: String) async -> Bool {
-        let metaData = "{\"type\":\"file\",\"id\":\"\(fileId)\",\"name\":\"\(name)\",\"size\":\(size),\"mimetype\":\"\(mimeType)\"}"
-        var components = URLComponents(string: "\(base)/api/v4/chat/\(token)/share")!
+    /// Shares a Souvera/Nextcloud file into the conversation via the
+    /// files_sharing API (room share type 10), mirroring the Android client.
+    /// The share itself creates the chat message.
+    func shareFileToChat(token: String, relativePath: String) async -> Bool {
+        var components = URLComponents(string: "\(root)/ocs/v2.php/apps/files_sharing/api/v1/shares")!
         components.queryItems = [
-            URLQueryItem(name: "objectType", value: "file"),
-            URLQueryItem(name: "fileId", value: fileId),
-            URLQueryItem(name: "metaData", value: metaData),
-            URLQueryItem(name: "referenceId", value: UUID().uuidString)
+            URLQueryItem(name: "path", value: relativePath),
+            URLQueryItem(name: "shareType", value: "10"),
+            URLQueryItem(name: "shareWith", value: token)
         ]
         let req = signed(url: components.url?.absoluteString ?? "", method: "POST")
-        guard let (_, response) = try? await session.data(for: req) else { return false }
+        guard let (data, response) = try? await session.data(for: req) else { return false }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        CallDebugLog.log("OcsApi", "shareFileToChat http=\(status)")
+        let bodySnippet = data.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
+        CallDebugLog.log("OcsApi", "shareFileToChat http=\(status) body=\(String(bodySnippet))")
         return (200..<300).contains(status)
     }
 
     private struct JoinRoomData: Decodable { let sessionId: String? }
+
+    private struct CallParticipant: Decodable {
+        let displayName: String?
+        let inCall: Int?
+    }
+
+    /// Display names of the room participants currently in a call.
+    func callParticipantNames(token: String) async -> [String] {
+        guard let body = await get("\(base)/api/v4/room/\(token)/participants"),
+              let data = body.data(using: .utf8),
+              let env = try? decoder.decode(OcsEnvelope<[CallParticipant]>.self, from: data) else { return [] }
+        return (env.ocs.data ?? [])
+            .filter { ($0.inCall ?? 0) != 0 }
+            .compactMap { $0.displayName }
+            .filter { !$0.isEmpty }
+    }
 
     // MARK: - HTTP plumbing
 

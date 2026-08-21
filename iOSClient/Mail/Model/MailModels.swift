@@ -10,6 +10,22 @@ enum MailboxKind: String {
     case inbox, sent, drafts, trash, junk, regular
 }
 
+enum MailSortOrder: String, CaseIterable, Identifiable {
+    case dateDesc
+    case dateAsc
+    case unreadFirst
+
+    var id: String { rawValue }
+
+    var titleKey: String {
+        switch self {
+        case .dateDesc: return "_mail_sort_date_desc_"
+        case .dateAsc: return "_mail_sort_date_asc_"
+        case .unreadFirst: return "_mail_sort_unread_"
+        }
+    }
+}
+
 /// RFC 2342 IMAP namespace a mailbox belongs to. Stalwart exposes the user's
 /// own folders as [personal], role/team mailboxes as [shared], and delegated
 /// access to another person's mailbox as [otherUsers]. Shared mailboxes are

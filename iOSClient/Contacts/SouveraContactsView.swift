@@ -131,10 +131,12 @@ struct SouveraContactsView: View {
                             }
                             .buttonStyle(.plain)
                             .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.delete(entry) }
-                                } label: {
-                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                if !entry.isReadOnly {
+                                    Button(role: .destructive) {
+                                        Task { await viewModel.delete(entry) }
+                                    } label: {
+                                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                    }
                                 }
                             }
                         }
@@ -243,23 +245,25 @@ private struct ContactDetailSheet: View {
                         Text(org)
                     }
                 }
-                Section {
-                    Button {
-                        var draft = ContactDraft()
-                        draft.name = entry.parsed.name
-                        draft.email = entry.parsed.emails.first ?? ""
-                        draft.phone = entry.parsed.phones.first ?? ""
-                        draft.organization = entry.parsed.organization ?? ""
-                        onEdit(draft)
-                        dismiss()
-                    } label: {
-                        Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        Task { await viewModel.delete(entry) }
-                        dismiss()
-                    } label: {
-                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                if !entry.isReadOnly {
+                    Section {
+                        Button {
+                            var draft = ContactDraft()
+                            draft.name = entry.parsed.name
+                            draft.email = entry.parsed.emails.first ?? ""
+                            draft.phone = entry.parsed.phones.first ?? ""
+                            draft.organization = entry.parsed.organization ?? ""
+                            onEdit(draft)
+                            dismiss()
+                        } label: {
+                            Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            Task { await viewModel.delete(entry) }
+                            dismiss()
+                        } label: {
+                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        }
                     }
                 }
             }

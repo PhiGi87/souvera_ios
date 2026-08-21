@@ -17,6 +17,9 @@ struct NextcloudFileSelection {
     let name: String
     let size: Int64
     let mimeType: String
+    /// Path relative to the user's files root (e.g. "/Documents/report.pdf"),
+    /// used by the files_sharing room share.
+    let relativePath: String
 }
 
 struct NextcloudFilePickerView: View {
@@ -149,11 +152,26 @@ struct NextcloudFilePickerView: View {
                 fileId: metadata.fileId,
                 name: metadata.fileName,
                 size: metadata.size,
-                mimeType: metadata.contentType.isEmpty ? "application/octet-stream" : metadata.contentType
+                mimeType: metadata.contentType.isEmpty ? "application/octet-stream" : metadata.contentType,
+                relativePath: Self.relativePath(for: metadata)
             ))
             dismiss()
         } else {
             errorMessage = results.nkError.errorDescription
         }
+    }
+
+    /// Path of the file relative to the user's files root, as required by
+    /// the files_sharing API (e.g. "/Documents/report.pdf").
+    static func relativePath(for metadata: tableMetadata) -> String {
+        let fallback = "/\(metadata.fileName)"
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return fallback }
+        let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let filesPrefix = "\(root)/remote.php/dav/files/\(tbl.user)/"
+        if let range = metadata.serverUrlFileName.range(of: filesPrefix) {
+            let relative = String(metadata.serverUrlFileName[range.upperBound...])
+            return relative.isEmpty ? fallback : relative
+        }
+        return fallback
     }
 }

@@ -142,11 +142,13 @@ private struct MailFolderListView: View {
                     if viewModel.collapsedGroupIds.contains(group.id) {
                         EmptyView()
                     } else {
-                        ForEach(viewModel.mailboxTree(for: group.folders)) { node in
+                        // Flat row list (instead of a nested VStack) so every
+                        // folder and subfolder gets a separator line.
+                        ForEach(visibleRows(for: viewModel.mailboxTree(for: group.folders))) { row in
                             MailboxTreeRow(
                                 viewModel: viewModel,
-                                node: node,
-                                depth: 0
+                                node: row.node,
+                                depth: row.depth
                             )
                         }
                     }
@@ -186,6 +188,24 @@ private struct MailFolderListView: View {
                 .padding(14)
             }
         }
+    }
+
+    private struct VisibleTreeRow: Identifiable {
+        let node: MailboxNode
+        let depth: Int
+        var id: String { node.id }
+    }
+
+    /// Flattens the visible (expanded) tree into a row list.
+    private func visibleRows(for nodes: [MailboxNode], depth: Int = 0) -> [VisibleTreeRow] {
+        var rows: [VisibleTreeRow] = []
+        for node in nodes {
+            rows.append(VisibleTreeRow(node: node, depth: depth))
+            if viewModel.expandedMailboxIds.contains(node.mailbox.id) {
+                rows.append(contentsOf: visibleRows(for: node.children, depth: depth + 1))
+            }
+        }
+        return rows
     }
 
     private struct FolderGroup: Identifiable {
@@ -245,56 +265,49 @@ private struct MailboxTreeRow: View {
     }
 
     var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 0) {
-                if node.children.isEmpty {
-                    Color.clear.frame(width: 28, height: 1)
-                } else {
-                    Button {
-                        if isExpanded {
-                            viewModel.expandedMailboxIds.remove(node.mailbox.id)
-                        } else {
-                            viewModel.expandedMailboxIds.insert(node.mailbox.id)
-                        }
-                    } label: {
-                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(width: 28, height: 40)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                }
+        HStack(spacing: 0) {
+            if node.children.isEmpty {
+                Color.clear.frame(width: 28, height: 1)
+            } else {
                 Button {
-                    viewModel.openMailbox(node.mailbox)
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: icon(for: node.mailbox.kind))
-                            .font(.body)
-                            .foregroundStyle(Color(NCBrandColor.shared.customer))
-                            .frame(width: 24)
-                        Text(node.mailbox.displayName)
-                            .font(.body)
-                        Spacer()
-                        if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
-                            Text("\(node.totalUnread)").foregroundStyle(.secondary)
-                        } else if node.mailbox.unreadCount > 0 {
-                            Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
-                        }
+                    if isExpanded {
+                        viewModel.expandedMailboxIds.remove(node.mailbox.id)
+                    } else {
+                        viewModel.expandedMailboxIds.insert(node.mailbox.id)
                     }
-                    .padding(.leading, CGFloat(depth) * 14)
-                    .frame(minHeight: 40)
-                    .contentShape(Rectangle())
+                } label: {
+                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 28, height: 40)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
-            .padding(.vertical, 2)
-            if isExpanded {
-                ForEach(node.children) { child in
-                    MailboxTreeRow(viewModel: viewModel, node: child, depth: depth + 1)
+            Button {
+                viewModel.openMailbox(node.mailbox)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: icon(for: node.mailbox.kind))
+                        .font(.body)
+                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .frame(width: 24)
+                    Text(node.mailbox.displayName)
+                        .font(.body)
+                    Spacer()
+                    if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
+                        Text("\(node.totalUnread)").foregroundStyle(.secondary)
+                    } else if node.mailbox.unreadCount > 0 {
+                        Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.leading, CGFloat(depth) * 14)
+                .frame(minHeight: 40)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
         }
+        .padding(.vertical, 2)
     }
 
     private func icon(for kind: MailboxKind) -> String {
@@ -339,7 +352,7 @@ private struct MailMessageListView: View {
                 Spacer()
             case let .success(items):
                 List {
-                    ForEach(items) { message in
+                    ForEach(viewModel.sortMessages(items)) { message in
                         row(message)
                     }
                 }
@@ -372,6 +385,21 @@ private struct MailMessageListView: View {
                         selected.removeAll()
                     }
                 } else {
+                    Menu {
+                        ForEach(MailSortOrder.allCases) { order in
+                            Button {
+                                viewModel.sortOrder = order
+                            } label: {
+                                if viewModel.sortOrder == order {
+                                    Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
+                                } else {
+                                    Text(NSLocalizedString(order.titleKey, comment: ""))
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
+                    }
                     Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
                     if !isEmptyList {
                         Button(NSLocalizedString("_edit_", comment: "")) { editing = true }
@@ -901,6 +929,7 @@ struct MailComposeView: View {
                         if bodyText.isEmpty {
                             Text(NSLocalizedString("_mail_message_", comment: ""))
                                 .foregroundStyle(.tertiary)
+                                .padding(.leading, 12)
                                 .padding(.top, 8)
                         }
                         AutoGrowingTextView(text: $bodyText)

@@ -35,6 +35,9 @@ final class ContactsViewModel: ObservableObject {
         let id: String
         let card: CardDavCard
         let parsed: ParsedContact
+        /// Server-generated books (system, recent interactions) are shown
+        /// read-only; edits go through the personal address book.
+        let isReadOnly: Bool
 
         var displayName: String {
             if !parsed.name.isEmpty { return parsed.name }
@@ -47,7 +50,7 @@ final class ContactsViewModel: ObservableObject {
         contacts = .loading
         offlineNotice = nil
 
-        let cards = await source.fetchCards()
+        let cards = await source.fetchAllCards()
         if !cards.isEmpty {
             apply(cards)
             return
@@ -109,7 +112,14 @@ final class ContactsViewModel: ObservableObject {
     private func apply(_ cards: [CardDavCard]) {
         let entries = cards
             .filter { !$0.href.isEmpty }
-            .map { ContactEntry(id: $0.href, card: $0, parsed: CardDavContactSource.parseVcard($0.vcard)) }
+            .map { card in
+                ContactEntry(
+                    id: card.href,
+                    card: card,
+                    parsed: CardDavContactSource.parseVcard(card.vcard),
+                    isReadOnly: card.href.contains("z-server-generated") || card.href.contains("z-app-generated")
+                )
+            }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
         let array: [[String: Any]] = cards.map { card in
             var dict: [String: Any] = ["href": card.href, "vcard": card.vcard]

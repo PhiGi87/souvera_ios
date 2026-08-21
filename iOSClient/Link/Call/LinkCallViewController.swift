@@ -5,6 +5,7 @@
 // controls. Driven by CallSession. Mirrors android link/call/CallActivity.
 
 import UIKit
+import AVFoundation
 import WebRTC
 
 final class LinkCallViewController: UIViewController, CallSessionCallbacks {
@@ -21,11 +22,15 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var isMuted = false
     private var isVideoOn: Bool
 
-    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true) {
+    private var attachedSession: CallSession?
+    private var isSpeakerOn = false
+
+    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true, session: CallSession? = nil) {
         self.account = account
         self.token = token
         self.title_ = title
         self.isVideoOn = withVideo
+        self.attachedSession = session
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -37,12 +42,47 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         view.backgroundColor = .black
         setupVideoViews()
         setupControls()
+        setupParticipantsOverlay()
 
-        let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn)
-        self.session = session
-        session.start()
+        if let attached = attachedSession {
+            self.session = attached
+            attached.reattach(callbacks: self)
+        } else {
+            let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn)
+            self.session = session
+            session.start()
+        }
 
         NotificationCenter.default.addObserver(self, selector: #selector(externalEnd), name: .linkEndCall, object: nil)
+        loadParticipants()
+    }
+
+    // MARK: - Participants overlay
+
+    private let participantsLabel = UILabel()
+
+    private func setupParticipantsOverlay() {
+        participantsLabel.translatesAutoresizingMaskIntoConstraints = false
+        participantsLabel.textColor = .white
+        participantsLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
+        participantsLabel.numberOfLines = 0
+        participantsLabel.textAlignment = .center
+        view.addSubview(participantsLabel)
+        NSLayoutConstraint.activate([
+            participantsLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            participantsLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            participantsLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+        ])
+    }
+
+    private func loadParticipants() {
+        Task {
+            let api = LinkOcsApi(account: account)
+            let names = await api.callParticipantNames(token: token)
+            await MainActor.run {
+                participantsLabel.text = names.isEmpty ? "" : names.joined(separator: ", ")
+            }
+        }
     }
 
     private func setupVideoViews() {
@@ -81,10 +121,24 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
 
-        stack.addArrangedSubview(controlButton(systemName: "mic.slash.fill", action: #selector(toggleMute)))
-        stack.addArrangedSubview(controlButton(systemName: "video.slash.fill", action: #selector(toggleVideo)))
-        stack.addArrangedSubview(controlButton(systemName: "phone.down.fill", tint: .systemRed, action: #selector(hangup)))
+        muteButton = controlButton(systemName: "mic.fill", action: #selector(toggleMute))
+        videoButton = controlButton(systemName: "video.slash.fill", action: #selector(toggleVideo))
+        speakerButton = controlButton(systemName: "speaker.wave.2.fill", action: #selector(toggleSpeaker))
+        chatButton = controlButton(systemName: "bubble.left.and.bubble.right.fill", action: #selector(openChat))
+        hangupButton = controlButton(systemName: "phone.down.fill", tint: .systemRed, action: #selector(hangup))
+
+        stack.addArrangedSubview(muteButton!)
+        stack.addArrangedSubview(speakerButton!)
+        stack.addArrangedSubview(videoButton!)
+        stack.addArrangedSubview(chatButton!)
+        stack.addArrangedSubview(hangupButton!)
     }
+
+    private var muteButton: UIButton?
+    private var videoButton: UIButton?
+    private var speakerButton: UIButton?
+    private var chatButton: UIButton?
+    private var hangupButton: UIButton?
 
     private func controlButton(systemName: String, tint: UIColor = .white, action: Selector) -> UIButton {
         let button = UIButton(type: .system)
@@ -101,11 +155,37 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     @objc private func toggleMute() {
         isMuted.toggle()
         session?.setMuted(isMuted)
+        muteButton?.setImage(UIImage(systemName: isMuted ? "mic.slash.fill" : "mic.fill"), for: .normal)
     }
 
     @objc private func toggleVideo() {
         isVideoOn.toggle()
         session?.setVideoEnabled(isVideoOn)
+        videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
+    }
+
+    @objc private func toggleSpeaker() {
+        isSpeakerOn.toggle()
+        let audioSession = RTCAudioSession.sharedInstance()
+        audioSession.lockForConfiguration()
+        do {
+            try audioSession.setCategory(AVAudioSession.Category.playAndRecord.rawValue, with: [.allowBluetooth, .allowBluetoothA2DP])
+            try audioSession.setMode(AVAudioSession.Mode.videoChat.rawValue)
+            try audioSession.setActive(true)
+            try audioSession.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
+        } catch {
+            CallDebugLog.log("CallVC", "audio route error \(error.localizedDescription)")
+        }
+        audioSession.unlockForConfiguration()
+        speakerButton?.setImage(UIImage(systemName: isSpeakerOn ? "speaker.wave.3.fill" : "speaker.fill"), for: .normal)
+    }
+
+    /// Hands the running call over to the shared manager and opens the chat.
+    @objc private func openChat() {
+        guard let session else { return }
+        LinkVoIPManager.shared.takeOverCall(session, token: token, title: title_, withVideo: isVideoOn)
+        NotificationCenter.default.post(name: .openLinkRoom, object: ["token": token, "title": title_])
+        dismiss(animated: true)
     }
 
     @objc private func hangup() {
