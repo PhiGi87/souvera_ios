@@ -40,7 +40,7 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     private let callFlags: Int
 
-    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks, withVideo: Bool = true) {
+    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks?, withVideo: Bool = true) {
         self.account = account
         self.token = token
         self.callbacks = callbacks

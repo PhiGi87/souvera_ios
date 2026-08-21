@@ -186,8 +186,11 @@ actor LinkOcsApi {
         let req = signed(url: components.url?.absoluteString ?? "", method: "POST")
         guard let (data, response) = try? await session.data(for: req) else { return false }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        let bodySnippet = data.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
-        CallDebugLog.log("OcsApi", "shareFileToChat http=\(status) body=\(String(bodySnippet))")
+        var bodySnippet = ""
+        if let text = String(data: data, encoding: .utf8) {
+            bodySnippet = String(text.prefix(200))
+        }
+        CallDebugLog.log("OcsApi", "shareFileToChat http=\(status) body=\(bodySnippet)")
         return (200..<300).contains(status)
     }
 

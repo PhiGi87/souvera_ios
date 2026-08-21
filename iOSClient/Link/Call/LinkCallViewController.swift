@@ -169,8 +169,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let audioSession = RTCAudioSession.sharedInstance()
         audioSession.lockForConfiguration()
         do {
-            try audioSession.setCategory(AVAudioSession.Category.playAndRecord.rawValue, with: [.allowBluetooth, .allowBluetoothA2DP])
-            try audioSession.setMode(AVAudioSession.Mode.videoChat.rawValue)
+            try audioSession.setCategory(.playAndRecord, with: [.allowBluetooth, .allowBluetoothA2DP])
+            try audioSession.setMode(.videoChat)
             try audioSession.setActive(true)
             try audioSession.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
         } catch {
