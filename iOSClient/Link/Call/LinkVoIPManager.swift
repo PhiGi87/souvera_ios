@@ -33,7 +33,7 @@ final class LinkVoIPManager: NSObject {
     /// The currently running outgoing call (owned by this manager so it can
     /// outlive the call UI when the user switches to the chat).
     private(set) var activeSession: CallSession?
-    private(set) var activeCallInfo: (token: String, title: String, withVideo: Bool)?""
+    private(set) var activeCallInfo: (token: String, title: String, withVideo: Bool)?
     /// Room token of the call currently reported to CallKit, keyed by CallKit UUID.
     private var activeCalls: [UUID: String] = [:]
 
