@@ -60,6 +60,7 @@ final class MailViewModel: ObservableObject {
 
     private var useJmap: Bool { NCBrandOptions.shared.useJmapMail }
     var transportLabel: String { useJmap ? "JMAP" : "IMAP" }
+    var availableMailboxes: [Mailbox] { allMailboxes }
 
     func start() {
         if imapClient != nil || jmapClient != nil { return }
@@ -463,6 +464,24 @@ final class MailViewModel: ObservableObject {
             }
             if let mailbox = currentMailbox {
                 route = .messages(mailbox: mailbox)
+                await syncMessages()
+            } else if !lastSearchQuery.isEmpty {
+                await search(lastSearchQuery)
+            }
+        }
+    }
+
+    /// Moves a message to another mailbox of the same JMAP account
+    /// (mirrors the Android move action).
+    func move(_ message: MailMessage, to target: Mailbox) {
+        Task {
+            guard useJmap, let api = jmapApi,
+                  let client = jmapClient,
+                  let session = try? await client.refreshSession() else { return }
+            let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
+            guard let targetJmapId = target.jmapId, !targetJmapId.isEmpty else { return }
+            _ = try? await api.moveEmails(accountId: accId, emailIds: [message.emailId], targetMailboxId: targetJmapId)
+            if currentMailbox != nil {
                 await syncMessages()
             } else if !lastSearchQuery.isEmpty {
                 await search(lastSearchQuery)

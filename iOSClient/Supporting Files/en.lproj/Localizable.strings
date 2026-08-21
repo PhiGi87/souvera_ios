@@ -855,6 +855,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_search_no_results_"      = "No results";
 "_mail_attachments_"            = "Attachments";
 "_mail_attachment_add_"         = "Add attachment";
+"_mail_move_"                   = "Move";
 "_souvera_mail_"                 = "Mail";
 "_souvera_link_"                 = "Link";
 "_souvera_notes_"                = "Notes";

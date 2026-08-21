@@ -125,6 +125,7 @@ private struct MailFolderListView: View {
                     }
                 }
                 .listStyle(.insetGrouped)
+                .refreshable { await viewModel.loadMailboxes() }
             }
         }
     }
@@ -188,6 +189,7 @@ private struct MailFolderListView: View {
 
 private struct MailMessageListView: View {
     @ObservedObject var viewModel: MailViewModel
+    @State private var moveTarget: (MailMessage, [Mailbox])?
 
     var body: some View {
         switch viewModel.messages {
@@ -209,12 +211,72 @@ private struct MailMessageListView: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) { viewModel.delete(message) } label: { Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash") }
+                        Button {
+                            moveTarget = (message, viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                        } label: {
+                            Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                        }
+                        .tint(.blue)
                         Button { viewModel.toggleFlagged(message) } label: { Label("Flag", systemImage: "flag") }.tint(.orange)
                     }
                 }
             }
             .listStyle(.plain)
             .refreshable { await viewModel.syncMessages() }
+            .sheet(item: Binding(
+                get: { moveTarget.map { MoveSheetState(message: $0.0, mailboxes: $0.1) } },
+                set: { if $0 == nil { moveTarget = nil } }
+            )) { state in
+                MailMovePickerView(
+                    title: state.message.subject.isEmpty ? NSLocalizedString("_mail_no_subject_", comment: "") : state.message.subject,
+                    mailboxes: state.mailboxes,
+                    onSelect: { target in
+                        viewModel.move(state.message, to: target)
+                        moveTarget = nil
+                    }
+                )
+            }
+        }
+    }
+}
+
+private struct MoveSheetState: Identifiable, Equatable {
+    let message: MailMessage
+    let mailboxes: [Mailbox]
+    var id: String { message.id }
+
+    static func == (lhs: MoveSheetState, rhs: MoveSheetState) -> Bool {
+        lhs.id == rhs.id
+    }
+}
+
+private struct MailMovePickerView: View {
+    let title: String
+    let mailboxes: [Mailbox]
+    let onSelect: (Mailbox) -> Void
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List(mailboxes) { box in
+                Button {
+                    onSelect(box)
+                    dismiss()
+                } label: {
+                    HStack {
+                        Image(systemName: "folder").foregroundStyle(Color(NCBrandColor.shared.customer))
+                        Text(box.name)
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
         }
     }
 }
