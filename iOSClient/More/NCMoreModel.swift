@@ -148,6 +148,15 @@ final class NCMoreModel: ObservableObject {
         /// Opens the native Notes client.
         case notes
 
+        /// Opens the Favorites screen (formerly its own tab).
+        case favorites
+
+        /// Opens the Media screen (formerly its own tab).
+        case media
+
+        /// Opens the Activity screen (formerly its own tab).
+        case activity
+
         /// No-op destination.
         case none
     }
@@ -168,15 +177,16 @@ final class NCMoreModel: ObservableObject {
     /// - Clears existing sections.
     /// - Reads the current account from the local database.
     /// - Reads server capabilities from `NCNetworking`.
-    /// - Adds feature rows such as Link, Mail, Recent, Offline, Scan, Trash.
+    /// - Adds feature rows such as Favorites, Media, Activity, Recent, Offline, Scan, Trash.
     /// - Adds Settings.
     /// - Loads quota information.
     /// - Loads external sites when enabled by branding options and server capabilities.
     ///
-    /// The static entries (Link, Mail, Recent, Offline, Scan, Trash, Settings and the
-    /// Souvera apps section) are always added - even before an account exists or before
-    /// the server capabilities have arrived. Only entries that genuinely depend on the
-    /// server (Shares, Groupfolders, External Sites, Quota) are gated on capabilities.
+    /// The static entries (Favorites, Media, Activity, Recent, Offline, Scan,
+    /// Trash, Settings and the Souvera apps section) are always added - even
+    /// before an account exists or before the server capabilities have
+    /// arrived. Only entries that genuinely depend on the server (Shares,
+    /// Groupfolders, External Sites, Quota) are gated on capabilities.
     ///
     /// The resulting sections are published through `sections` and rendered by `NCMoreView`.
     func loadItems() async {
@@ -199,17 +209,25 @@ final class NCMoreModel: ObservableObject {
 
         functionItems.append(
             Item(
-                titleKey: "_link_",
-                image: "bubble.left.and.bubble.right.fill",
-                destination: .link
+                titleKey: "_favorites_",
+                image: "star.fill",
+                destination: .favorites
             )
         )
 
         functionItems.append(
             Item(
-                titleKey: "_mail_",
-                image: "envelope.fill",
-                destination: .mail
+                titleKey: "_media_",
+                image: "photo.fill",
+                destination: .media
+            )
+        )
+
+        functionItems.append(
+            Item(
+                titleKey: "_activity_",
+                image: "bolt.fill",
+                destination: .activity
             )
         )
 
@@ -229,16 +247,6 @@ final class NCMoreModel: ObservableObject {
                 Section(
                     type: .moreApps,
                     items: [
-                        Item(
-                            titleKey: "_souvera_mail_",
-                            image: "envelope.fill",
-                            destination: .mail
-                        ),
-                        Item(
-                            titleKey: "_souvera_link_",
-                            image: "bubble.left.and.bubble.right.fill",
-                            destination: .link
-                        ),
                         Item(
                             titleKey: "_souvera_notes_",
                             image: "note.text",
@@ -386,9 +394,28 @@ final class NCMoreModel: ObservableObject {
         case .notes:
             pushHosted(SouveraNotesView(), title: NSLocalizedString("_souvera_notes_", comment: ""))
 
+        case .favorites:
+            pushStoryboardTab(identifier: "NCFavoritesNavigationController")
+
+        case .media:
+            pushStoryboardTab(identifier: "NCMediaNavigationController")
+
+        case .activity:
+            pushStoryboardTab(identifier: "NCActivityNavigationController")
+
         case .none:
             break
         }
+    }
+
+    /// Instantiates a former tab's navigation controller scene and pushes its
+    /// root view controller onto the More navigation stack.
+    private func pushStoryboardTab(identifier: String) {
+        guard let navigationController = controller?.currentNavigationController() else { return }
+        let storyboard = UIStoryboard(name: "Main", bundle: nil)
+        guard let tabNavigationController = storyboard.instantiateViewController(withIdentifier: identifier) as? UINavigationController,
+              let rootViewController = tabNavigationController.viewControllers.first else { return }
+        navigationController.pushViewController(rootViewController, animated: true)
     }
 
     /// Pushes a SwiftUI screen onto the More navigation stack.

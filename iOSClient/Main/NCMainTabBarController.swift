@@ -47,8 +47,7 @@ class NCMainTabBarController: UITabBarController {
 
         tabBar.tintColor = NCBrandColor.shared.getElement(account: account)
 
-        configureMoreController()
-        configureTabBarItems()
+        configureTabControllers()
         configureTabBarAppearance()
 
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: self.global.notificationCenterChangeTheming), object: nil, queue: .main) { [weak self] notification in
@@ -102,11 +101,63 @@ class NCMainTabBarController: UITabBarController {
         tabBar.scrollEdgeAppearance = appearance
     }
 
-    private func configureMoreController() {
-        guard var controllers = viewControllers else { return }
+    /// Builds the tab bar: Mail, Calendar, Link, Files, More.
+    ///
+    /// The storyboard supplies the Files/Favorites/Media/Activity navigation
+    /// controllers. Favorites, Media and Activity no longer have their own
+    /// tabs; they are available inside the More tab instead. Mail, Calendar
+    /// and Link are SwiftUI roots hosted in navigation controllers whose
+    /// UIKit bar stays hidden - the SwiftUI views render their own bars
+    /// (avoids stacked navigation bars and double back arrows). The app
+    /// starts on the Mail tab (index 0).
+    private func configureTabControllers() {
+        let storyboardControllers = viewControllers ?? []
+        let filesController = storyboardControllers.first(where: { $0 is NCFilesNavigationController })
+            ?? storyboardControllers.first
+            ?? UINavigationController()
+        let moreController = makeMoreNavigationController()
 
-        controllers.append(makeMoreNavigationController())
-        viewControllers = controllers
+        let mailController = makeHostedTab(
+            root: MailView(),
+            titleKey: "_mail_",
+            imageName: "envelope.fill",
+            tag: 100
+        )
+        let calendarController = makeHostedTab(
+            root: SouveraCalendarView(),
+            titleKey: "_calendar_",
+            imageName: "calendar",
+            tag: 101
+        )
+        let linkController = makeHostedTab(
+            root: LinkView(),
+            titleKey: "_link_",
+            imageName: "bubble.left.and.bubble.right.fill",
+            tag: 102
+        )
+
+        filesController.tabBarItem = UITabBarItem(
+            title: NSLocalizedString("_home_", comment: ""),
+            image: UIImage(systemName: "folder.fill"),
+            selectedImage: UIImage(systemName: "folder.fill")
+        )
+        filesController.tabBarItem.tag = 103
+
+        viewControllers = [mailController, calendarController, linkController, filesController, moreController]
+        selectedIndex = 0
+    }
+
+    private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
+        let hostingController = UIHostingController(rootView: root)
+        let navigationController = UINavigationController(rootViewController: hostingController)
+        navigationController.setNavigationBarHidden(true, animated: false)
+        navigationController.tabBarItem = UITabBarItem(
+            title: NSLocalizedString(titleKey, comment: ""),
+            image: UIImage(systemName: imageName),
+            selectedImage: UIImage(systemName: imageName)
+        )
+        navigationController.tabBarItem.tag = tag
+        return navigationController
     }
 
     private func makeMoreNavigationController() -> UIViewController {
@@ -125,46 +176,6 @@ class NCMainTabBarController: UITabBarController {
         navigationController.tabBarItem.tag = 104
 
         return navigationController
-    }
-
-    private func configureTabBarItems() {
-        configureTabBarItem(
-            at: 0,
-            title: "_home_",
-            imageName: "folder.fill",
-            tag: 100
-        )
-
-        configureTabBarItem(
-            at: 1,
-            title: "_favorites_",
-            imageName: "star.fill",
-            tag: 101
-        )
-
-        configureTabBarItem(
-            at: 2,
-            title: "_media_",
-            imageName: "photo.fill",
-            tag: 102
-        )
-
-        configureTabBarItem(
-            at: 3,
-            title: "_activity_",
-            imageName: "bolt.fill",
-            tag: 103
-        )
-    }
-
-    private func configureTabBarItem(at index: Int, title: String, imageName: String, tag: Int) {
-        guard let items = tabBar.items, items.indices.contains(index) else { return }
-
-        let item = items[index]
-        item.title = NSLocalizedString(title, comment: "")
-        item.image = UIImage(systemName: imageName)
-        item.selectedImage = item.image
-        item.tag = tag
     }
 
     @MainActor

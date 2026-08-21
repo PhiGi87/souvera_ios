@@ -24,10 +24,8 @@ enum DeepLink: String {
 }
 
 enum ControllerConstants {
-    static let filesIndex = 0
-    static let favouriteIndex = 1
-    static let mediaIndex = 2
-    static let activityIndex = 3
+    static let mailIndex = 0
+    static let filesIndex = 3
     static let moreIndex = 4
     static let notification = "NCNotification"
 }
@@ -53,9 +51,13 @@ class NCDeepLinkHandler {
         case .openFiles:
             navigateTo(index: ControllerConstants.filesIndex, controller: controller)
         case .openFavorites:
-            navigateTo(index: ControllerConstants.favouriteIndex, controller: controller)
+            Task { @MainActor in
+                navigateToMore(destination: .favorites, controller: controller)
+            }
         case .openMedia:
-            navigateTo(index: ControllerConstants.mediaIndex, controller: controller)
+            Task { @MainActor in
+                navigateToMore(destination: .media, controller: controller)
+            }
         case .openShared:
             Task { @MainActor in
                 navigateToMore(destination: .storyboard(name: "NCShares", presentation: .push), controller: controller)

@@ -358,9 +358,10 @@ final class MailViewModel: ObservableObject {
         else { return }
         let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
         do {
-            // Mirror the Android request: body part properties plus bodyValues
-            // (Stalwart answers with either inline values or blob ids).
-            let bodyProperties: [String] = ["partId", "blobId", "size", "type", "name", "bodyValues", "textBody", "htmlBody", "attachments"]
+            // Mirror the Android request exactly: only body part properties.
+            // Stalwart then returns either inline bodyValues (used as-is) or
+            // text/html blobIds, which are downloaded below.
+            let bodyProperties: [String] = ["partId", "blobId", "size", "type", "name"]
             let list = try await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties)
             if let json = list.first {
                 var mapped = JmapMapper.mapBody(json: json)

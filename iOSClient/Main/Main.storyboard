@@ -62,7 +62,7 @@
         <!--Favorites-->
         <scene sceneID="YSr-JF-a0V">
             <objects>
-                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="hwM-4d-Afb" customClass="NCFavoriteNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
+                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="hwM-4d-Afb" storyboardIdentifier="NCFavoritesNavigationController" customClass="NCFavoriteNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
                     <tabBarItem key="tabBarItem" title="Favorites" id="o09-67-hwf"/>
                     <toolbarItems/>
                     <navigationBar key="navigationBar" contentMode="scaleToFill" largeTitles="YES" id="MJw-Bn-5le">
@@ -91,7 +91,7 @@
         <!--Media-->
         <scene sceneID="IuY-Iu-oAm">
             <objects>
-                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="Npr-vu-PSD" customClass="NCMediaNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
+                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="Npr-vu-PSD" storyboardIdentifier="NCMediaNavigationController" customClass="NCMediaNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
                     <tabBarItem key="tabBarItem" title="Media" id="5cw-bP-7It"/>
                     <toolbarItems/>
                     <navigationBar key="navigationBar" contentMode="scaleToFill" largeTitles="YES" id="ixg-Pw-TNO">
@@ -120,7 +120,7 @@
         <!--Activity-->
         <scene sceneID="ZMV-5S-PnW">
             <objects>
-                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="cJk-3t-NeM" customClass="NCActivityNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
+                <navigationController extendedLayoutIncludesOpaqueBars="YES" automaticallyAdjustsScrollViewInsets="NO" id="cJk-3t-NeM" storyboardIdentifier="NCActivityNavigationController" customClass="NCActivityNavigationController" customModule="Nextcloud" customModuleProvider="target" sceneMemberID="viewController">
                     <tabBarItem key="tabBarItem" title="Activity" id="tc3-kx-Dca" userLabel="Activity"/>
                     <navigationBar key="navigationBar" contentMode="scaleToFill" largeTitles="YES" id="Qkh-XJ-mse">
                         <rect key="frame" x="0.0" y="96" width="414" height="106"/>

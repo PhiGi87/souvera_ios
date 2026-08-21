@@ -306,9 +306,9 @@ extension NCNetworking: NCTransferDelegate {
                       metadata: tableMetadata? = nil,
                       sceneIdentifier: String) async {
         guard let controller = SceneManager.shared.getController(sceneIdentifier: sceneIdentifier),
-              let navigationController = controller.viewControllers?.first as? UINavigationController
+              let navigationController = controller.viewControllers?.first(where: { $0 is NCFilesNavigationController }) as? UINavigationController
         else { return }
-        controller.selectedIndex = 0
+        controller.selectedIndex = ControllerConstants.filesIndex
 
         if let viewController = navigationController.topViewController as? NCFiles {
             await viewController.open(metadata: metadata)
@@ -318,7 +318,7 @@ extension NCNetworking: NCTransferDelegate {
     @MainActor
     func moveInFolder(serverUrl: String, sceneIdentifier: String) async -> NCFiles? {
         guard let controller = SceneManager.shared.getController(sceneIdentifier: sceneIdentifier),
-              let navigationController = controller.viewControllers?.first as? UINavigationController
+              let navigationController = controller.viewControllers?.first(where: { $0 is NCFilesNavigationController }) as? UINavigationController
         else {
             return nil
         }
@@ -327,7 +327,7 @@ extension NCNetworking: NCTransferDelegate {
         var serverUrlPush = utilityFileSystem.getHomeServer(session: session)
 
         navigationController.popToRootViewController(animated: false)
-        controller.selectedIndex = 0
+        controller.selectedIndex = ControllerConstants.filesIndex
 
         if serverUrlPush == serverUrl,
            let files = navigationController.topViewController as? NCFiles {

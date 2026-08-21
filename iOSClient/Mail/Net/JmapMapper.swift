@@ -111,16 +111,9 @@ enum JmapMapper {
             }
         }
 
-        if plainText == nil && html == nil {
-            if let textParts = json["textBody"] as? [[String: Any]],
-               let first = textParts.first {
-                plainText = first.optString("blobId")
-            }
-            if let htmlParts = json["htmlBody"] as? [[String: Any]],
-               let first = htmlParts.first {
-                html = first.optString("blobId")
-            }
-        }
+        // When the server did not inline body values, the caller downloads
+        // the text/html blobs via their blobIds (mirrors the Android client).
+        // Never surface the raw blobId as text.
 
         return MessageBody(plainText: plainText, html: html, attachments: attachments)
     }

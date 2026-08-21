@@ -856,6 +856,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_attachments_"            = "Attachments";
 "_mail_attachment_add_"         = "Add attachment";
 "_mail_move_"                   = "Move";
+"_calendar_"                    = "Calendar";
+"_calendar_coming_soon_"        = "Calendar is coming soon";
 "_souvera_mail_"                 = "Mail";
 "_souvera_link_"                 = "Link";
 "_souvera_notes_"                = "Notes";
