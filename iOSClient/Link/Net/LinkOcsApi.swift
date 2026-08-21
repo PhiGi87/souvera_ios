@@ -158,8 +158,10 @@ actor LinkOcsApi {
         func append(_ string: String) {
             if let chunk = string.data(using: .utf8) { body.append(chunk) }
         }
+        // Talk requires a non-empty message field alongside the file
+        // (an empty message part is rejected with 400).
         append("--\(boundary)\r\n")
-        append("Content-Disposition: form-data; name=\"message\"\r\n\r\n\r\n")
+        append("Content-Disposition: form-data; name=\"message\"\r\n\r\n\(fileName)\r\n")
         append("--\(boundary)\r\n")
         append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
         append("Content-Type: \(mimeType)\r\n\r\n")
