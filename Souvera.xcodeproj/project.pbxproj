@@ -2231,7 +2231,6 @@
 			path = Calendar;
 			sourceTree = "<group>";
 		};
-;
 		2C33C48023E2C475005F963B /* Notification Service Extension */ = {
 			isa = PBXGroup;
 			children = (
