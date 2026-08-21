@@ -94,7 +94,7 @@ final class LinkVoIPManager: NSObject {
     /// matching CallKit transaction so no dead call remains.
     func callEndedByApp() {
         for uuid in activeCalls.keys {
-            provider.reportCallEnded(with: uuid, reason: .remoteEnded)
+            provider.reportCall(with: uuid, endedAtDate: Date(), reason: .remoteEnded)
         }
         activeCalls.removeAll()
     }
