@@ -352,8 +352,20 @@ actor JmapClient {
         guard let url = URL(string: normalizedUrl) else {
             throw JmapException.protocolError("Invalid URL: \(urlStr)")
         }
-        guard let bodyData = try? JSONSerialization.data(withJSONObject: body) else {
+        guard var bodyData = try? JSONSerialization.data(withJSONObject: body) else {
             throw JmapException.protocolError("Failed to serialize JSON body")
+        }
+
+        // Stalwart v1.0.0 rejects JMAP requests whose JSON escapes forward
+        // slashes as "\/" (it validates the raw body text). iOS 26's
+        // Foundation (swift-foundation) escapes "/" that way, while Android's
+        // JSONObject.toString() never does. Unescaping is lossless because
+        // "\/" always decodes to "/" in JSON; the replacement also keeps
+        // literal "\/" string content intact ("\\\/" -> "\\/").
+        if let bodyString = String(data: bodyData, encoding: .utf8)?
+            .replacingOccurrences(of: "\\/", with: "/")
+            .data(using: .utf8) {
+            bodyData = bodyString
         }
 
         var req = URLRequest(url: url)
