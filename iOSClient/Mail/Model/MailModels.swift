@@ -10,9 +10,19 @@ enum MailboxKind: String {
     case inbox, sent, drafts, trash, junk, regular
 }
 
+/// RFC 2342 IMAP namespace a mailbox belongs to. Stalwart exposes the user's
+/// own folders as [personal], role/team mailboxes as [shared], and delegated
+/// access to another person's mailbox as [otherUsers]. Shared mailboxes are
+/// grouped by [Mailbox.ownerIdentity] in the folder list.
+enum MailboxNamespace {
+    case personal, shared, otherUsers
+}
+
 struct Mailbox: Identifiable, Hashable {
     let id: String
     let account: String
+    /// JMAP account id this mailbox lives in ("e" = personal, "j" = shared).
+    let accountId: String
     let name: String
     let path: String
     let kind: MailboxKind
@@ -20,6 +30,8 @@ struct Mailbox: Identifiable, Hashable {
     var messageCount: Int
     let jmapId: String?
     let role: String?
+    let namespace: MailboxNamespace
+    let ownerIdentity: String?
 
     static func makeId(account: String, path: String) -> String { "\(account)|\(path)" }
 }
@@ -27,6 +39,7 @@ struct Mailbox: Identifiable, Hashable {
 struct MailMessage: Identifiable {
     let id: String
     let account: String
+    let accountId: String
     let mailboxId: String
     let emailId: String
     let messageId: String?

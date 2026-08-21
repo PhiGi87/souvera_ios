@@ -12,8 +12,11 @@ enum JmapMapper {
 
     static func mapMailbox(
         account: String,
+        accountId: String,
         json: [String: Any],
-        path: String? = nil
+        path: String? = nil,
+        namespace: MailboxNamespace = .personal,
+        ownerIdentity: String? = nil
     ) -> Mailbox {
         let name = json.optString("name") ?? path ?? "?"
         let resolvedPath = path ?? name
@@ -24,18 +27,22 @@ enum JmapMapper {
         return Mailbox(
             id: Mailbox.makeId(account: account, path: resolvedPath),
             account: account,
+            accountId: accountId,
             name: name,
             path: resolvedPath,
             kind: kind,
             unreadCount: json.optInt("unreadEmails"),
             messageCount: json.optInt("totalEmails"),
             jmapId: jmapId,
-            role: role
+            role: role,
+            namespace: namespace,
+            ownerIdentity: ownerIdentity
         )
     }
 
     static func mapMessage(
         account: String,
+        accountId: String,
         mailboxId: String,
         json: [String: Any]
     ) -> MailMessage {
@@ -56,6 +63,7 @@ enum JmapMapper {
         return MailMessage(
             id: "\(mailboxId)|\(json.optString("id") ?? "")",
             account: account,
+            accountId: accountId,
             mailboxId: mailboxId,
             emailId: json.optString("id") ?? "",
             messageId: (json["messageId"] as? [String])?.first,

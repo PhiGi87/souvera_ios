@@ -286,6 +286,16 @@ actor JmapClient {
         let apiUrl = (json.optString("apiUrl") ?? resolvedApiUrl ?? "\(baseUrl)/jmap")
             .replacingOccurrences(of: "/+$", with: "", options: .regularExpression)
 
+        var accounts: [String: JmapAccountInfo] = [:]
+        (json["accounts"] as? [String: Any])?.forEach { key, value in
+            guard let info = value as? [String: Any] else { return }
+            accounts[key] = JmapAccountInfo(
+                id: key,
+                name: info.optString("name") ?? key,
+                isPersonal: info.optBool("isPersonal")
+            )
+        }
+
         return JmapSessionInfo(
             apiUrl: apiUrl,
             downloadUrl: json.optString("downloadUrl") ?? "\(apiUrl)download/{accountId}/{blobId}/{name}?accept={type}",
@@ -294,7 +304,8 @@ actor JmapClient {
             primaryAccountId: primaryAccId,
             username: json.optString("username") ?? username,
             capabilities: caps,
-            state: json.optString("state")
+            state: json.optString("state"),
+            accounts: accounts
         )
     }
 

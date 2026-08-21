@@ -22,13 +22,16 @@ enum MailIMAPResponseParser {
             boxes.append(Mailbox(
                 id: Mailbox.makeId(account: account, path: path),
                 account: account,
+                accountId: account,
                 name: path.components(separatedBy: "/").last ?? path,
                 path: path,
                 kind: classify(path: path, attributes: attrs),
                 unreadCount: 0,
                 messageCount: 0,
                 jmapId: nil,
-                role: nil
+                role: nil,
+                namespace: .personal,
+                ownerIdentity: nil
             ))
         }
         return boxes
@@ -293,6 +296,7 @@ private struct PartialMessage {
         MailMessage(
             id: "\(mailboxId)|\(uid)",
             account: account,
+            accountId: account,
             mailboxId: mailboxId,
             emailId: String(uid),
             messageId: nil,

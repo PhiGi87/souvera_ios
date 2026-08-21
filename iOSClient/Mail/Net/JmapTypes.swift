@@ -51,6 +51,12 @@ struct JmapBatchResult {
     let sessionState: String?
 }
 
+struct JmapAccountInfo {
+    let id: String
+    let name: String
+    let isPersonal: Bool
+}
+
 struct JmapSessionInfo {
     let apiUrl: String
     let downloadUrl: String
@@ -60,6 +66,9 @@ struct JmapSessionInfo {
     let username: String
     let capabilities: [String: [String: Any]]
     let state: String?
+    /// All accounts the user can access: the personal one plus shared
+    /// mailboxes (isPersonal=false), keyed by account id.
+    let accounts: [String: JmapAccountInfo]
 }
 
 struct JmapBlobUploadResponse {

@@ -5,6 +5,7 @@
 // Mirrors android mail/ui Compose screens.
 
 import SwiftUI
+import UniformTypeIdentifiers
 import WebKit
 
 struct MailView: View {
@@ -30,6 +31,7 @@ struct MailView: View {
         case let .messages(mailbox): return mailbox.name
         case .detail: return ""
         case .compose: return NSLocalizedString("_mail_compose_", comment: "")
+        case .search: return NSLocalizedString("_mail_search_", comment: "")
         }
     }
 
@@ -55,6 +57,11 @@ struct MailView: View {
                 Button { showCompose = true } label: { Image(systemName: "square.and.pencil") }
             }
         }
+        if isFolders {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { viewModel.route = .search } label: { Image(systemName: "magnifyingglass") }
+            }
+        }
     }
 
     @ViewBuilder
@@ -68,6 +75,8 @@ struct MailView: View {
             MailDetailView(viewModel: viewModel, message: message)
         case .compose:
             MailComposeView(viewModel: viewModel)
+        case .search:
+            MailSearchView(viewModel: viewModel)
         }
     }
 }
@@ -92,18 +101,76 @@ private struct MailFolderListView: View {
                 }
                 .padding()
             case let .success(boxes):
-            List(boxes) { box in
-                Button { viewModel.openMailbox(box) } label: {
-                    HStack {
-                        Image(systemName: icon(for: box.kind)).foregroundStyle(Color(NCBrandColor.shared.customer))
-                        Text(box.name)
-                        Spacer()
-                        if box.unreadCount > 0 { Text("\(box.unreadCount)").foregroundStyle(.secondary) }
+                List {
+                    ForEach(mailboxGroups(boxes)) { group in
+                        Section {
+                            ForEach(group.folders) { box in
+                                Button { viewModel.openMailbox(box) } label: {
+                                    HStack {
+                                        Image(systemName: icon(for: box.kind)).foregroundStyle(Color(NCBrandColor.shared.customer))
+                                        Text(folderDisplayName(box))
+                                        Spacer()
+                                        if box.unreadCount > 0 { Text("\(box.unreadCount)").foregroundStyle(.secondary) }
+                                    }
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        } header: {
+                            HStack {
+                                Text(group.label)
+                                Spacer()
+                                if group.totalUnread > 0 { Text("\(group.totalUnread)") }
+                            }
+                        }
                     }
                 }
-                .buttonStyle(.plain)
+                .listStyle(.insetGrouped)
             }
         }
+    }
+
+    private struct MailboxGroup: Identifiable {
+        let id: String
+        let label: String
+        let folders: [Mailbox]
+        let totalUnread: Int
+    }
+
+    /// Personal mailboxes first, then one group per shared owner
+    /// (mirrors the Android folder sheet grouping).
+    private func mailboxGroups(_ boxes: [Mailbox]) -> [MailboxGroup] {
+        let personal = boxes.filter { $0.namespace == .personal }
+        var groups: [MailboxGroup] = []
+        if !personal.isEmpty {
+            groups.append(MailboxGroup(
+                id: "personal",
+                label: NSLocalizedString("_mail_mailboxes_", comment: ""),
+                folders: personal,
+                totalUnread: personal.reduce(0) { $0 + $1.unreadCount }
+            ))
+        }
+        let shared = boxes.filter { $0.namespace != .personal }
+        let byOwner = Dictionary(grouping: shared) { $0.ownerIdentity ?? $0.path.components(separatedBy: "/").first ?? "?" }
+        for owner in byOwner.keys.sorted() {
+            let folders = byOwner[owner] ?? []
+            groups.append(MailboxGroup(
+                id: "shared_\(owner)",
+                label: "\(NSLocalizedString("_mail_shared_prefix_", comment: "")) \(owner)",
+                folders: folders,
+                totalUnread: folders.reduce(0) { $0 + $1.unreadCount }
+            ))
+        }
+        return groups
+    }
+
+    private func folderDisplayName(_ box: Mailbox) -> String {
+        switch box.kind {
+        case .inbox: return NSLocalizedString("_mail_folder_inbox_", comment: "")
+        case .sent: return NSLocalizedString("_mail_folder_sent_", comment: "")
+        case .drafts: return NSLocalizedString("_mail_folder_drafts_", comment: "")
+        case .trash: return NSLocalizedString("_mail_folder_trash_", comment: "")
+        case .junk: return NSLocalizedString("_mail_folder_junk_", comment: "")
+        case .regular: return box.name
         }
     }
 
@@ -152,6 +219,65 @@ private struct MailMessageListView: View {
     }
 }
 
+private struct MailSearchView: View {
+    @ObservedObject var viewModel: MailViewModel
+    @State private var query = ""
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $query)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                    .onSubmit { Task { await viewModel.search(query) } }
+                if !query.isEmpty {
+                    Button {
+                        query = ""
+                        Task { await viewModel.search("") }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            Divider()
+            switch viewModel.searchResults {
+            case .loading:
+                Spacer()
+                ProgressView()
+                Spacer()
+            case let .error(message):
+                Spacer()
+                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
+                Spacer()
+            case let .success(items):
+                if items.isEmpty {
+                    Spacer()
+                    Text(query.isEmpty
+                         ? NSLocalizedString("_mail_search_hint_", comment: "")
+                         : NSLocalizedString("_mail_search_no_results_", comment: ""))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                } else {
+                    List(items) { message in
+                        Button { viewModel.openMessage(message, fromSearch: true) } label: {
+                            MailRow(message: message)
+                        }
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) { viewModel.delete(message) } label: { Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash") }
+                            Button { viewModel.toggleFlagged(message) } label: { Label("Flag", systemImage: "flag") }.tint(.orange)
+                        }
+                    }
+                    .listStyle(.plain)
+                }
+            }
+        }
+    }
+}
+
 private struct MailRow: View {
     let message: MailMessage
 
@@ -176,6 +302,9 @@ private struct MailRow: View {
 private struct MailDetailView: View {
     @ObservedObject var viewModel: MailViewModel
     let message: MailMessage
+
+    @State private var previewURL: URL?
+    @State private var downloadingIds: Set<String> = []
 
     var body: some View {
         ScrollView {
@@ -205,14 +334,38 @@ private struct MailDetailView: View {
                     if !body.attachments.isEmpty {
                         Divider()
                         ForEach(body.attachments) { att in
-                            Label("\(att.name) (\(ByteCountFormatter.string(fromByteCount: att.sizeBytes, countStyle: .file)))", systemImage: "paperclip")
-                                .font(.caption)
+                            Button {
+                                Task {
+                                    downloadingIds.insert(att.id)
+                                    if let url = await viewModel.downloadAttachment(att, for: message) {
+                                        previewURL = url
+                                    }
+                                    downloadingIds.remove(att.id)
+                                }
+                            } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "paperclip").font(.caption)
+                                    Text(att.name).font(.caption).lineLimit(1)
+                                    Spacer()
+                                    if downloadingIds.contains(att.id) {
+                                        ProgressView()
+                                    } else {
+                                        Text(ByteCountFormatter.string(fromByteCount: att.sizeBytes, countStyle: .file))
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                                .padding(8)
+                                .background(Color(.secondarySystemBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                 }
             }
             .padding()
         }
+        .quickLookPreview(item: $previewURL)
     }
 }
 
@@ -243,6 +396,10 @@ struct MailComposeView: View {
     @State private var bodyText = ""
     @State private var showCcBcc = false
     @State private var selectedFromIndex = 0
+    @State private var attachments: [OutgoingAttachment] = []
+    @State private var showFilePicker = false
+    @State private var suggestions: [RecipientSuggestion] = []
+    @State private var suggestionTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -259,6 +416,35 @@ struct MailComposeView: View {
                 Section {
                     TextField(NSLocalizedString("_mail_to_", comment: ""), text: $to)
                         .keyboardType(.emailAddress).autocapitalization(.none)
+                        .onChange(of: to) { _, newValue in
+                            suggestionTask?.cancel()
+                            suggestionTask = Task {
+                                try? await Task.sleep(nanoseconds: 150_000_000)
+                                guard !Task.isCancelled else { return }
+                                let token = newValue
+                                    .split(separator: ",").last.map(String.init)?
+                                    .split(separator: ";").last.map(String.init)?
+                                    .trimmingCharacters(in: .whitespaces) ?? ""
+                                let found = await ContactSuggestionSource().search(token)
+                                if !Task.isCancelled { suggestions = found }
+                            }
+                        }
+                    if !suggestions.isEmpty {
+                        ForEach(suggestions) { suggestion in
+                            Button {
+                                replaceLastToken(in: &to, with: suggestion.email)
+                                suggestions = []
+                            } label: {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(suggestion.displayName ?? suggestion.email).font(.subheadline)
+                                    if suggestion.displayName != nil {
+                                        Text(suggestion.email).font(.caption).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
                     if showCcBcc {
                         TextField(NSLocalizedString("_mail_cc_", comment: ""), text: $cc)
                             .keyboardType(.emailAddress).autocapitalization(.none)
@@ -274,12 +460,43 @@ struct MailComposeView: View {
                 Section {
                     TextEditor(text: $bodyText).frame(minHeight: 220)
                 }
+                Section(NSLocalizedString("_mail_attachments_", comment: "")) {
+                    ForEach(attachments) { att in
+                        HStack {
+                            Image(systemName: "paperclip").foregroundStyle(.secondary)
+                            Text(att.name).font(.caption).lineLimit(1)
+                            Spacer()
+                            Button(role: .destructive) {
+                                attachments.removeAll { $0.id == att.id }
+                            } label: {
+                                Image(systemName: "trash")
+                            }
+                        }
+                    }
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label(NSLocalizedString("_mail_attachment_add_", comment: ""), systemImage: "plus.circle")
+                    }
+                }
                 if let error = viewModel.sendError {
                     Text(error).foregroundStyle(.red)
                 }
             }
             .navigationTitle(NSLocalizedString("_mail_compose_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .fileImporter(
+                isPresented: $showFilePicker,
+                allowedContentTypes: [.item],
+                allowsMultipleSelection: true
+            ) { result in
+                switch result {
+                case let .success(urls):
+                    importFiles(urls)
+                case .failure:
+                    break
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
@@ -295,6 +512,7 @@ struct MailComposeView: View {
                             outgoing.bcc = bcc.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                             outgoing.subject = subject
                             outgoing.body = bodyText
+                            outgoing.attachments = attachments
                             viewModel.fromAddress = viewModel.fromAddresses[selectedFromIndex]
                             viewModel.send(outgoing)
                             dismiss()
@@ -303,6 +521,48 @@ struct MailComposeView: View {
                     }
                 }
             }
+        }
+    }
+
+    /// Copies picked files into the app's temporary directory so they stay
+    /// readable after the picker's security-scoped access ends.
+    private func importFiles(_ urls: [URL]) {
+        for url in urls {
+            let didStart = url.startAccessingSecurityScopedResource()
+            let data = try? Data(contentsOf: url)
+            if didStart { url.stopAccessingSecurityScopedResource() }
+            guard let data else { continue }
+            let tmp = FileManager.default.temporaryDirectory
+                .appendingPathComponent("\(UUID().uuidString)_\(url.lastPathComponent)")
+            do {
+                try data.write(to: tmp, options: .atomic)
+                attachments.append(OutgoingAttachment(
+                    name: url.lastPathComponent,
+                    mimeType: mimeType(for: url.pathExtension),
+                    fileURL: tmp
+                ))
+            } catch {}
+        }
+    }
+
+    private func mimeType(for fileExtension: String) -> String {
+        UTType(filenameExtension: fileExtension)?.preferredMIMEType ?? "application/octet-stream"
+    }
+
+    /// Replaces the token being typed (after the last comma/semicolon) with
+    /// the picked suggestion, mirroring the Android RecipientField.
+    private func replaceLastToken(in value: inout String, with email: String) {
+        let comma = value.lastIndex(of: ",")
+        let semi = value.lastIndex(of: ";")
+        if let comma, let semi {
+            let separatorIndex = max(comma, semi)
+            value = "\(value[...separatorIndex]) \(email)"
+        } else if let comma {
+            value = "\(value[...comma]) \(email)"
+        } else if let semi {
+            value = "\(value[...semi]) \(email)"
+        } else {
+            value = email
         }
     }
 }
