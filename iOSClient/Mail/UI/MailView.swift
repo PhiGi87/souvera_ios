@@ -427,7 +427,7 @@ private struct MailDetailView: View {
             }
             .padding()
         }
-        .quickLookPreview(item: $previewURL)
+        .quickLookPreview($previewURL)
     }
 }
 
