@@ -510,7 +510,7 @@ final class MailViewModel: ObservableObject {
         }
         let accId = session.primaryAccountId
         do {
-            let resp = try await api.queryEmails(accountId: accId, inMailboxId: "", filterText: trimmed, limit: 50)
+            let resp = try await api.queryEmails(accountId: accId, inMailboxId: "", limit: 50, filterText: trimmed)
             let ids = (resp["ids"] as? [String]) ?? []
             guard !ids.isEmpty else {
                 searchResults = .success([])
