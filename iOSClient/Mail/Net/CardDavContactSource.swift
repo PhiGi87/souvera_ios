@@ -92,7 +92,7 @@ final class CardDavContactSource {
     func fetchAllCards(limit: Int = 500) async -> [CardDavCard] {
         var all: [CardDavCard] = []
         var seenHrefs = Set<String>()
-        for url in discoverAddressBookURLs() {
+        for url in await discoverAddressBookURLs() {
             let cards = await fetchCards(from: url, limit: limit)
             for card in cards where seenHrefs.insert(card.href).inserted {
                 all.append(card)
@@ -114,7 +114,7 @@ final class CardDavContactSource {
 
     /// PROPFIND on the address book home to discover every address book
     /// collection (the personal one plus server-generated ones).
-    private func discoverAddressBookURLs() -> [URL] {
+    private func discoverAddressBookURLs() async -> [URL] {
         guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         var result: [URL] = []
