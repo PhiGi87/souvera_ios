@@ -11,8 +11,10 @@ struct SouveraContactsView: View {
     @StateObject private var viewModel = ContactsViewModel()
     @State private var searchQuery = ""
     @State private var detailEntry: ContactsViewModel.ContactEntry?
+    @State private var directoryDetail: RecipientSuggestion?
     @State private var editDraft: (ContactDraft, ContactsViewModel.ContactEntry?)?
     @State private var showNewContact = false
+    @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -30,6 +32,9 @@ struct SouveraContactsView: View {
                 }
         }
         .task { await viewModel.load() }
+        .sheet(item: $directoryDetail) { user in
+            DirectoryUserDetailSheet(user: user)
+        }
         .sheet(item: $detailEntry) { entry in
             ContactDetailSheet(viewModel: viewModel, entry: entry) { draft in
                 editDraft = (draft, entry)
@@ -79,32 +84,58 @@ struct SouveraContactsView: View {
                     }
                     Spacer()
                 } else {
-                    List(filtered(entries)) { entry in
-                        Button {
-                            detailEntry = entry
-                        } label: {
-                            HStack(spacing: 12) {
-                                Circle()
-                                    .fill(Color(NCBrandColor.shared.customer))
-                                    .frame(width: 38, height: 38)
-                                    .overlay(
-                                        Text(String(entry.displayName.prefix(1)).uppercased())
-                                            .foregroundStyle(.white)
-                                    )
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(entry.displayName).font(.body).fontWeight(.medium)
-                                    if let email = entry.parsed.emails.first {
-                                        Text(email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    List {
+                        if !viewModel.directoryResults.isEmpty {
+                            Section(NSLocalizedString("_contacts_directory_users_", comment: "")) {
+                                ForEach(viewModel.directoryResults) { user in
+                                    Button {
+                                        directoryDetail = user
+                                    } label: {
+                                        HStack(spacing: 12) {
+                                            Circle()
+                                                .fill(Color(NCBrandColor.shared.customer))
+                                                .frame(width: 38, height: 38)
+                                                .overlay(
+                                                    Text(String((user.displayName ?? user.email).prefix(1)).uppercased())
+                                                        .foregroundStyle(.white)
+                                                )
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(user.displayName ?? user.email).font(.body).fontWeight(.medium)
+                                                Text(user.email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            }
+                                        }
                                     }
+                                    .buttonStyle(.plain)
                                 }
                             }
                         }
-                        .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) {
-                                Task { await viewModel.delete(entry) }
+                        ForEach(filtered(entries)) { entry in
+                            Button {
+                                detailEntry = entry
                             } label: {
-                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                HStack(spacing: 12) {
+                                    Circle()
+                                        .fill(Color(NCBrandColor.shared.customer))
+                                        .frame(width: 38, height: 38)
+                                        .overlay(
+                                            Text(String(entry.displayName.prefix(1)).uppercased())
+                                                .foregroundStyle(.white)
+                                        )
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.displayName).font(.body).fontWeight(.medium)
+                                        if let email = entry.parsed.emails.first {
+                                            Text(email).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        }
+                                    }
+                                }
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    Task { await viewModel.delete(entry) }
+                                } label: {
+                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                }
                             }
                         }
                     }
@@ -114,6 +145,14 @@ struct SouveraContactsView: View {
             }
         }
         .searchable(text: $searchQuery, prompt: Text(NSLocalizedString("_mail_search_contacts_", comment: "")))
+        .onChange(of: searchQuery) { _, newValue in
+            searchTask?.cancel()
+            searchTask = Task {
+                try? await Task.sleep(nanoseconds: 200_000_000)
+                guard !Task.isCancelled else { return }
+                await viewModel.searchDirectory(newValue)
+            }
+        }
     }
 
     private func filtered(_ entries: [ContactsViewModel.ContactEntry]) -> [ContactsViewModel.ContactEntry] {
@@ -122,6 +161,42 @@ struct SouveraContactsView: View {
         return entries.filter {
             $0.displayName.localizedCaseInsensitiveContains(trimmed)
                 || $0.parsed.emails.contains { $0.localizedCaseInsensitiveContains(trimmed) }
+        }
+    }
+}
+
+/// Minimal detail view for a directory user (instance member).
+private struct DirectoryUserDetailSheet: View {
+    let user: RecipientSuggestion
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 14) {
+                        Circle()
+                            .fill(Color(NCBrandColor.shared.customer))
+                            .frame(width: 56, height: 56)
+                            .overlay(
+                                Text(String((user.displayName ?? user.email).prefix(1)).uppercased())
+                                    .font(.title3).foregroundStyle(.white)
+                            )
+                        Text(user.displayName ?? user.email).font(.title3).fontWeight(.semibold)
+                    }
+                    .padding(.vertical, 6)
+                }
+                Section(NSLocalizedString("_contact_email_", comment: "")) {
+                    Text(user.email)
+                }
+            }
+            .navigationTitle(NSLocalizedString("_contacts_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
         }
     }
 }

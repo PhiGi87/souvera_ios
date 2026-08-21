@@ -31,7 +31,8 @@ enum MailIMAPResponseParser {
                 jmapId: nil,
                 role: nil,
                 namespace: .personal,
-                ownerIdentity: nil
+                ownerIdentity: nil,
+                parentId: nil
             ))
         }
         return boxes

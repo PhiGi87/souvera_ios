@@ -79,6 +79,17 @@ class NCMainTabBarController: UITabBarController {
                 }
             }
         }
+
+        // The calendar module can ask the app to switch to the Link tab and
+        // open a specific Talk conversation (e.g. the channel of an event).
+        NotificationCenter.default.addObserver(forName: .openLinkRoom, object: nil, queue: .main) { [weak self] notification in
+            guard let self,
+                  let info = notification.object as? [String: String] else { return }
+            Task { @MainActor in
+                LinkViewModel.pendingOpenRoom = (info["token"] ?? "", info["title"] ?? "")
+                self.selectedIndex = 2
+            }
+        }
     }
 
     override func viewDidAppear(_ animated: Bool) {

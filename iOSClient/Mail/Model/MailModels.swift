@@ -32,8 +32,33 @@ struct Mailbox: Identifiable, Hashable {
     let role: String?
     let namespace: MailboxNamespace
     let ownerIdentity: String?
+    let parentId: String?
 
     static func makeId(account: String, path: String) -> String { "\(account)|\(path)" }
+
+    /// Localized display name: system mailboxes use the active language
+    /// (e.g. INBOX → "Posteingang"), user folders show their real name.
+    var displayName: String {
+        switch kind {
+        case .inbox: return NSLocalizedString("_mail_folder_inbox_", comment: "")
+        case .sent: return NSLocalizedString("_mail_folder_sent_", comment: "")
+        case .drafts: return NSLocalizedString("_mail_folder_drafts_", comment: "")
+        case .trash: return NSLocalizedString("_mail_folder_trash_", comment: "")
+        case .junk: return NSLocalizedString("_mail_folder_junk_", comment: "")
+        case .regular: return name
+        }
+    }
+}
+
+/// One node of the collapsible mailbox tree (JMAP parentId hierarchy).
+struct MailboxNode: Identifiable {
+    let mailbox: Mailbox
+    let children: [MailboxNode]
+
+    var id: String { mailbox.id }
+    var totalUnread: Int {
+        mailbox.unreadCount + children.reduce(0) { $0 + $1.totalUnread }
+    }
 }
 
 struct MailMessage: Identifiable {

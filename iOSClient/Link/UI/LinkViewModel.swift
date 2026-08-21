@@ -10,6 +10,12 @@
 import Foundation
 import Combine
 
+extension Notification.Name {
+    /// Posted when another module (e.g. the calendar) wants the Link tab to
+    /// open a specific conversation.
+    static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
+}
+
 /// Loading/content/error state for a Link screen's data.
 enum LinkUiState<T> {
     case loading
@@ -25,6 +31,10 @@ enum LinkRoute: Equatable {
 
 @MainActor
 final class LinkViewModel: ObservableObject {
+    /// Room requested by another module while the Link tab was not visible;
+    /// opened on the next appearance.
+    static var pendingOpenRoom: (token: String, title: String)?
+
     @Published var route: LinkRoute = .home
     @Published var conversations: LinkUiState<[LinkConversation]> = .loading
     @Published var messages: LinkUiState<[LinkChatMessage]> = .loading

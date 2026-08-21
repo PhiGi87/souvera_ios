@@ -47,7 +47,13 @@ struct LinkView: View {
                     }
                 }
         }
-        .onAppear { viewModel.start() }
+        .onAppear {
+            viewModel.start()
+            if let pending = LinkViewModel.pendingOpenRoom {
+                LinkViewModel.pendingOpenRoom = nil
+                viewModel.openConversation(token: pending.token, title: pending.title)
+            }
+        }
         .fullScreenCover(item: $callContext) { context in
             if let account = LinkAccount.active() {
                 LinkCallViewControllerWrapper(

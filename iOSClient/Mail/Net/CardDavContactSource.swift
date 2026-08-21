@@ -39,8 +39,10 @@ final class CardDavContactSource {
     private func addressBookURL() -> URL? {
         guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let userId = tbl.userId.isEmpty ? tbl.user : tbl.userId
-        return URL(string: "\(root)/remote.php/dav/addressbooks/users/\(userId)/contacts/")
+        // The DAV principal on Souvera is the full login (email), not the
+        // short userId.
+        let principal = tbl.user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tbl.user
+        return URL(string: "\(root)/remote.php/dav/addressbooks/users/\(principal)/contacts/")
     }
 
     private func authorizedRequest(for url: URL, method: String, contentType: String? = nil) -> URLRequest {

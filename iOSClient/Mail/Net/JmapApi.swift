@@ -146,11 +146,16 @@ final class JmapApi {
     func moveEmails(
         accountId: String,
         emailIds: [String],
-        targetMailboxId: String
+        targetMailboxId: String,
+        markRead: Bool = false
     ) async throws -> [String: Any] {
         var updates: [String: Any] = [:]
         for id in emailIds {
-            updates[id] = ["mailboxIds": [targetMailboxId: true]]
+            var update: [String: Any] = ["mailboxIds": [targetMailboxId: true]]
+            if markRead {
+                update["keywords/$seen"] = true
+            }
+            updates[id] = update
         }
         var args: [String: Any] = [:]
         args["accountId"] = try resolveAccountArg(accountId)

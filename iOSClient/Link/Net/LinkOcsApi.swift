@@ -81,6 +81,28 @@ actor LinkOcsApi {
         return env?.ocs.data?.token
     }
 
+    /// Creates a public group conversation with the given name (used for the
+    /// calendar's "create Talk channel for this event" action). Returns the
+    /// conversation token and display name.
+    func createEventRoom(name: String) async -> (token: String, name: String)? {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let req = signed(url: "\(base)/api/v4/room?roomType=3&roomName=\(encoded)", method: "POST")
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode ?? 500 < 300 else { return nil }
+        let env: OcsEnvelope<LinkConversation>? = try? decoder.decode(OcsEnvelope<LinkConversation>.self, from: data)
+        guard let token = env?.ocs.data?.token else { return nil }
+        return (token, env?.ocs.data?.displayName ?? name)
+    }
+
+    /// Adds users (email/user ids) to a conversation.
+    func addParticipants(token: String, userIds: [String]) async {
+        for userId in userIds {
+            let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId
+            let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=users&newParticipant=\(encoded)", method: "POST")
+            _ = try? await session.data(for: req)
+        }
+    }
+
     // MARK: - Calls / signaling
 
     func getSignalingSettings(token: String) async -> SignalingSettings? {

@@ -25,8 +25,10 @@ struct ContactDraft {
 final class ContactsViewModel: ObservableObject {
     @Published var contacts: ContactsUiState<[ContactEntry]> = .loading
     @Published var offlineNotice: String?
+    @Published var directoryResults: [RecipientSuggestion] = []
 
     private let source = CardDavContactSource()
+    private let suggestionSource = ContactSuggestionSource()
     private let cacheKey = "contacts"
 
     struct ContactEntry: Identifiable {
@@ -64,6 +66,16 @@ final class ContactsViewModel: ObservableObject {
     func delete(_ entry: ContactEntry) async {
         _ = await source.delete(entry.card)
         await load()
+    }
+
+    /// Searches known users of the Souvera instance (directory).
+    func searchDirectory(_ query: String) async {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3 else {
+            directoryResults = []
+            return
+        }
+        directoryResults = await suggestionSource.searchDirectory(trimmed)
     }
 
     func save(_ draft: ContactDraft, existing: ContactEntry?) async -> Bool {

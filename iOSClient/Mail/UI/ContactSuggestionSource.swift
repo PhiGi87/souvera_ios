@@ -17,13 +17,16 @@ struct RecipientSuggestion: Identifiable, Hashable {
 final class ContactSuggestionSource {
     private let store = CNContactStore()
     private let cardDav = CardDavContactSource()
+    private let directory = NextcloudDirectorySource()
 
-    /// Debounced search used while typing a recipient.
+    /// Debounced search used while typing a recipient. Instance users come
+    /// first, then the CardDAV address book, then device contacts.
     func search(_ token: String, limit: Int = 6) async -> [RecipientSuggestion] {
         let trimmed = token.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 3 else { return [] }
 
-        var results = await cardDav.fetchContacts(limit: 50).filter {
+        var results = await directory.searchUsers(trimmed, limit: limit)
+        results += await cardDav.fetchContacts(limit: 50).filter {
             $0.email.localizedCaseInsensitiveContains(trimmed)
                 || ($0.displayName ?? "").localizedCaseInsensitiveContains(trimmed)
         }
@@ -34,6 +37,12 @@ final class ContactSuggestionSource {
             return []
         }
         return Array(deduped.prefix(limit))
+    }
+
+    /// Directory-only search for the contact picker and contacts module.
+    func searchDirectory(_ token: String, limit: Int = 10) async -> [RecipientSuggestion] {
+        guard token.trimmingCharacters(in: .whitespaces).count >= 2 else { return [] }
+        return await directory.searchUsers(token, limit: limit)
     }
 
     /// Full contact list for the contact picker sheet.

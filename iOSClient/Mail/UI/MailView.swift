@@ -45,7 +45,7 @@ struct MailView: View {
     private var navigationTitle: String {
         switch viewModel.route {
         case .folders: return NSLocalizedString("_mail_", comment: "")
-        case let .messages(mailbox): return mailbox.name
+        case let .messages(mailbox): return mailbox.displayName
         case .detail: return ""
         case .compose: return NSLocalizedString("_mail_compose_", comment: "")
         case .search: return NSLocalizedString("_mail_search_", comment: "")
@@ -118,7 +118,9 @@ private struct MailFolderListView: View {
                 .padding(.vertical, 4)
             switch viewModel.mailboxes {
             case .loading:
+                Spacer()
                 ProgressView()
+                Spacer()
             case let .error(message):
                 VStack(spacing: 12) {
                     Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -127,53 +129,81 @@ private struct MailFolderListView: View {
                 }
                 .padding()
             case let .success(boxes):
-                List {
-                    ForEach(mailboxGroups(boxes)) { group in
-                        Section {
-                            ForEach(group.folders) { box in
-                                Button { viewModel.openMailbox(box) } label: {
-                                    HStack {
-                                        Image(systemName: icon(for: box.kind)).foregroundStyle(Color(NCBrandColor.shared.customer))
-                                        Text(folderDisplayName(box))
-                                        Spacer()
-                                        if box.unreadCount > 0 { Text("\(box.unreadCount)").foregroundStyle(.secondary) }
-                                    }
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        } header: {
-                            HStack {
-                                Text(group.label)
-                                Spacer()
-                                if group.totalUnread > 0 { Text("\(group.totalUnread)") }
-                            }
-                        }
-                    }
-                }
-                .listStyle(.insetGrouped)
-                .refreshable { await viewModel.loadMailboxes() }
+                folderList(boxes)
             }
         }
     }
 
-    private struct MailboxGroup: Identifiable {
+    @ViewBuilder
+    private func folderList(_ boxes: [Mailbox]) -> some View {
+        List {
+            ForEach(groups(boxes)) { group in
+                Section {
+                    if viewModel.collapsedGroupIds.contains(group.id) {
+                        EmptyView()
+                    } else {
+                        ForEach(viewModel.mailboxTree(for: group.folders)) { node in
+                            MailboxTreeRow(
+                                viewModel: viewModel,
+                                node: node,
+                                depth: 0
+                            )
+                        }
+                    }
+                } header: {
+                    Button {
+                        toggleGroup(group.id)
+                    } label: {
+                        HStack {
+                            Image(systemName: viewModel.collapsedGroupIds.contains(group.id) ? "chevron.right" : "chevron.down")
+                                .font(.caption2).foregroundStyle(.secondary)
+                            Text(group.label)
+                            Spacer()
+                            if group.totalUnread > 0 { Text("\(group.totalUnread)").foregroundStyle(.secondary) }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+        .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
+        .refreshable { await viewModel.loadMailboxes() }
+        .overlay(alignment: .bottomTrailing) {
+            if viewModel.folderScrollPosition != nil, let firstId = boxes.first?.id {
+                Button {
+                    withAnimation { viewModel.folderScrollPosition = firstId }
+                } label: {
+                    Image(systemName: "arrow.up")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(Color.white)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(Color(NCBrandColor.shared.customer)))
+                        .shadow(radius: 3)
+                }
+                .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+                .padding(14)
+            }
+        }
+    }
+
+    private struct FolderGroup: Identifiable {
         let id: String
         let label: String
         let folders: [Mailbox]
         let totalUnread: Int
     }
 
-    /// Personal mailboxes first, then one group per shared owner
-    /// (mirrors the Android folder sheet grouping). The personal group is
-    /// labeled with the user's own email address.
-    private func mailboxGroups(_ boxes: [Mailbox]) -> [MailboxGroup] {
+    /// Personal group first, then one collapsible group per shared owner.
+    private func groups(_ boxes: [Mailbox]) -> [FolderGroup] {
         let personal = boxes.filter { $0.namespace == .personal }
-        var groups: [MailboxGroup] = []
+        var result: [FolderGroup] = []
         if !personal.isEmpty {
             let label = viewModel.ownEmailLabel.isEmpty
                 ? NSLocalizedString("_mail_mailboxes_", comment: "")
                 : viewModel.ownEmailLabel
-            groups.append(MailboxGroup(
+            result.append(FolderGroup(
                 id: "personal",
                 label: label,
                 folders: personal,
@@ -184,24 +214,83 @@ private struct MailFolderListView: View {
         let byOwner = Dictionary(grouping: shared) { $0.ownerIdentity ?? $0.path.components(separatedBy: "/").first ?? "?" }
         for owner in byOwner.keys.sorted() {
             let folders = byOwner[owner] ?? []
-            groups.append(MailboxGroup(
+            result.append(FolderGroup(
                 id: "shared_\(owner)",
                 label: "\(NSLocalizedString("_mail_shared_prefix_", comment: "")) \(owner)",
                 folders: folders,
                 totalUnread: folders.reduce(0) { $0 + $1.unreadCount }
             ))
         }
-        return groups
+        return result
     }
 
-    private func folderDisplayName(_ box: Mailbox) -> String {
-        switch box.kind {
-        case .inbox: return NSLocalizedString("_mail_folder_inbox_", comment: "")
-        case .sent: return NSLocalizedString("_mail_folder_sent_", comment: "")
-        case .drafts: return NSLocalizedString("_mail_folder_drafts_", comment: "")
-        case .trash: return NSLocalizedString("_mail_folder_trash_", comment: "")
-        case .junk: return NSLocalizedString("_mail_folder_junk_", comment: "")
-        case .regular: return box.name
+    private func toggleGroup(_ id: String) {
+        if viewModel.collapsedGroupIds.contains(id) {
+            viewModel.collapsedGroupIds.remove(id)
+        } else {
+            viewModel.collapsedGroupIds.insert(id)
+        }
+    }
+}
+
+/// One collapsible row of the mailbox tree: folders with children get a
+/// disclosure chevron and start collapsed; unread counts sum up children.
+private struct MailboxTreeRow: View {
+    @ObservedObject var viewModel: MailViewModel
+    let node: MailboxNode
+    let depth: Int
+
+    private var isExpanded: Bool {
+        viewModel.expandedMailboxIds.contains(node.mailbox.id)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                if node.children.isEmpty {
+                    Color.clear.frame(width: 24, height: 1)
+                } else {
+                    Button {
+                        if isExpanded {
+                            viewModel.expandedMailboxIds.remove(node.mailbox.id)
+                        } else {
+                            viewModel.expandedMailboxIds.insert(node.mailbox.id)
+                        }
+                    } label: {
+                        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(width: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button {
+                    viewModel.openMailbox(node.mailbox)
+                } label: {
+                    HStack {
+                        Image(systemName: icon(for: node.mailbox.kind))
+                            .font(.footnote)
+                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            .frame(width: 20)
+                        Text(node.mailbox.displayName)
+                        Spacer()
+                        if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
+                            Text("\(node.totalUnread)").foregroundStyle(.secondary)
+                        } else if node.mailbox.unreadCount > 0 {
+                            Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding(.leading, CGFloat(depth) * 14)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            if isExpanded {
+                ForEach(node.children) { child in
+                    MailboxTreeRow(viewModel: viewModel, node: child, depth: depth + 1)
+                }
+            }
         }
     }
 
@@ -286,8 +375,10 @@ private struct MailMessageListView: View {
                     }
                 }
             }
-            ToolbarItemGroup(placement: .bottomBar) {
-                if editing && !selected.isEmpty {
+        }
+        .safeAreaInset(edge: .bottom) {
+            if editing && !selected.isEmpty {
+                HStack {
                     Button {
                         Task { await viewModel.setRead(selectedMessages, true) }
                         selected.removeAll()
@@ -313,8 +404,10 @@ private struct MailMessageListView: View {
                     } label: {
                         selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
                     }
-                    Spacer()
                 }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(.bar)
             }
         }
         .onChange(of: editing) { _, value in
@@ -410,7 +503,7 @@ private struct MailMovePickerView: View {
                 } label: {
                     HStack {
                         Image(systemName: "folder").foregroundStyle(Color(NCBrandColor.shared.customer))
-                        Text(box.name)
+                        Text(box.displayName)
                     }
                 }
                 .buttonStyle(.plain)
@@ -595,12 +688,6 @@ private struct MailDetailView: View {
                     } label: {
                         Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
                     }
-                    Button(role: .destructive) {
-                        viewModel.delete([message])
-                        viewModel.back()
-                    } label: {
-                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                    }
                 } label: {
                     Image(systemName: "ellipsis.circle").font(.body)
                 }
@@ -745,59 +832,57 @@ struct MailComposeView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            VStack(spacing: 0) {
                 if viewModel.fromAddresses.count > 1 {
-                    Section {
-                        Picker(NSLocalizedString("_mail_from_", comment: ""), selection: $selectedFromIndex) {
+                    HStack {
+                        Text(NSLocalizedString("_mail_from_", comment: "")).foregroundStyle(.secondary)
+                        Picker("", selection: $selectedFromIndex) {
                             ForEach(Array(viewModel.fromAddresses.enumerated()), id: \.offset) { _, addr in
                                 Text(addr).tag(viewModel.fromAddresses.firstIndex(of: addr) ?? 0)
                             }
                         }
+                        .pickerStyle(.menu)
+                        Spacer()
                     }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    Divider()
                 }
-                Section {
-                    recipientField(label: NSLocalizedString("_mail_to_", comment: ""), text: $to, kind: .to)
-                    if showCcBcc {
-                        recipientField(label: NSLocalizedString("_mail_cc_", comment: ""), text: $cc, kind: .cc)
-                        recipientField(label: NSLocalizedString("_mail_bcc_", comment: ""), text: $bcc, kind: .bcc)
-                    }
-                    TextField(NSLocalizedString("_mail_subject_", comment: ""), text: $subject)
+
+                recipientField(label: NSLocalizedString("_mail_to_", comment: ""), text: $to, kind: .to)
+                Divider()
+                if showCcBcc {
+                    recipientField(label: NSLocalizedString("_mail_cc_", comment: ""), text: $cc, kind: .cc)
+                    Divider()
+                    recipientField(label: NSLocalizedString("_mail_bcc_", comment: ""), text: $bcc, kind: .bcc)
+                    Divider()
+                }
+
+                HStack(spacing: 8) {
+                    Text(NSLocalizedString("_mail_subject_", comment: "")).foregroundStyle(.secondary)
+                    TextField("", text: $subject)
                     if !showCcBcc {
-                        Button(NSLocalizedString("_mail_show_cc_bcc_", comment: "")) { showCcBcc = true }
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Section {
-                    TextField(NSLocalizedString("_mail_message_", comment: ""), text: $bodyText, axis: .vertical)
-                        .lineLimit(4...20)
-                }
-                Section(NSLocalizedString("_mail_attachments_", comment: "")) {
-                    ForEach(attachments) { att in
-                        HStack {
-                            Image(systemName: "paperclip").foregroundStyle(.secondary)
-                            Text(att.name).font(.caption).lineLimit(1)
-                            Spacer()
-                            Button(role: .destructive) {
-                                attachments.removeAll { $0.id == att.id }
-                            } label: {
-                                Image(systemName: "trash")
-                            }
+                        Button {
+                            showCcBcc = true
+                        } label: {
+                            Image(systemName: "chevron.down.circle")
+                                .foregroundStyle(.secondary)
                         }
                     }
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        Label(NSLocalizedString("_mail_attachment_add_", comment: ""), systemImage: "plus.circle")
-                    }
-                    Button {
-                        showNextcloudPicker = true
-                    } label: {
-                        Label(NSLocalizedString("_mail_souvera_files_", comment: ""), systemImage: "building.columns")
-                    }
                 }
-                if let error = viewModel.sendError {
-                    Text(error).foregroundStyle(.red)
-                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider()
+
+                // The body fills all remaining space and grows with the
+                // text instead of scrolling inside a small box.
+                TextField(NSLocalizedString("_mail_message_", comment: ""), text: $bodyText, axis: .vertical)
+                    .textFieldStyle(.plain)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+
+                attachmentsBar
             }
             .navigationTitle(NSLocalizedString("_mail_compose_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
@@ -859,6 +944,58 @@ struct MailComposeView: View {
                         .disabled(to.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
                 }
+            }
+        }
+    }
+
+    /// Attachment chips plus the attach menu (local file / Souvera files).
+    private var attachmentsBar: some View {
+        VStack(spacing: 0) {
+            Divider()
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(attachments) { att in
+                        HStack(spacing: 5) {
+                            Image(systemName: "paperclip").font(.caption2).foregroundStyle(.secondary)
+                            Text(att.name).font(.caption).lineLimit(1)
+                            Button {
+                                attachments.removeAll { $0.id == att.id }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
+                    }
+                    Menu {
+                        Button {
+                            showFilePicker = true
+                        } label: {
+                            Label(NSLocalizedString("_mail_attachment_add_", comment: ""), systemImage: "plus.circle")
+                        }
+                        Button {
+                            showNextcloudPicker = true
+                        } label: {
+                            Label(NSLocalizedString("_mail_souvera_files_", comment: ""), systemImage: "building.columns")
+                        }
+                    } label: {
+                        Image(systemName: "paperclip")
+                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            .padding(8)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+            }
+            if let error = viewModel.sendError {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 4)
             }
         }
     }

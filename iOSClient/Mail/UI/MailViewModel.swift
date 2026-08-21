@@ -53,6 +53,9 @@ final class MailViewModel: ObservableObject {
     @Published var offlineNotice: String?
     @Published var composeContext: MailComposeContext?
     @Published var sendFeedback: MailSendFeedback?
+    @Published var expandedMailboxIds: Set<String> = []
+    @Published var collapsedGroupIds: Set<String> = []
+    @Published var folderScrollPosition: String?
 
     private var imapClient: MailImapClient?
     private var jmapClient: JmapClient?
@@ -242,7 +245,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
 
-            let sorted = sortMailboxGroups(all)
+            let sorted = sortMailboxGroups(filterNonStandardSentFolders(all))
             allMailboxes = sorted
             mailboxes = .success(sorted)
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
@@ -255,7 +258,7 @@ final class MailViewModel: ObservableObject {
             // Offline: rebuild the folder list from the cache when possible.
             if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
                 let boxes = cached.map { mailbox(from: $0) }
-                let sorted = sortMailboxGroups(boxes)
+                let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
                 allMailboxes = sorted
                 mailboxes = .success(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
@@ -274,11 +277,12 @@ final class MailViewModel: ObservableObject {
         dict["_path"] = path ?? json.optString("name")
         dict["_owner"] = owner
         dict["_namespace"] = namespace
+        dict["_parentId"] = json.optString("parentId")
         return dict
     }
 
     private func mailbox(from cached: [String: Any]) -> Mailbox {
-        JmapMapper.mapMailbox(
+        var box = JmapMapper.mapMailbox(
             account: mailAccount?.account ?? "",
             accountId: cached.optString("_accountId") ?? "",
             json: cached,
@@ -286,6 +290,46 @@ final class MailViewModel: ObservableObject {
             namespace: cached.optString("_namespace") == "shared" ? .shared : .personal,
             ownerIdentity: cached.optString("_owner")
         )
+        // mapMailbox reads parentId from json["parentId"]; cached snapshots
+        // store it under "_parentId", so patch it in.
+        if let parentId = cached.optString("_parentId") {
+            box = Mailbox(
+                id: box.id, account: box.account, accountId: box.accountId,
+                name: box.name, path: box.path, kind: box.kind,
+                unreadCount: box.unreadCount, messageCount: box.messageCount,
+                jmapId: box.jmapId, role: box.role, namespace: box.namespace,
+                ownerIdentity: box.ownerIdentity, parentId: parentId
+            )
+        }
+        return box
+    }
+
+    /// Hides non-special-use mailboxes named "Sent" when the account has a
+    /// real sent special-use mailbox ("Sent Items" on Stalwart).
+    private func filterNonStandardSentFolders(_ boxes: [Mailbox]) -> [Mailbox] {
+        var result = boxes
+        for accId in Set(boxes.map(\.accountId)) {
+            let group = boxes.filter { $0.accountId == accId }
+            guard group.contains(where: { $0.role == "sent" }) else { continue }
+            result.removeAll { box in
+                box.accountId == accId
+                    && box.role == nil
+                    && box.name.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare("Sent") == .orderedSame
+            }
+        }
+        return result
+    }
+
+    /// Builds the collapsible mailbox tree from the JMAP parentId hierarchy.
+    func mailboxTree(for boxes: [Mailbox]) -> [MailboxNode] {
+        let byParent = Dictionary(grouping: boxes) { $0.parentId ?? "" }
+        func children(of id: String?) -> [MailboxNode] {
+            let list = byParent[id ?? ""] ?? []
+            return list
+                .sorted { (kindOrder($0.kind), $0.name.lowercased()) < (kindOrder($1.kind), $1.name.lowercased()) }
+                .map { MailboxNode(mailbox: $0, children: children(of: $0.jmapId)) }
+        }
+        return children(of: nil)
     }
 
     /// Personal mailboxes first (kind order), then shared groups by owner.
@@ -844,7 +888,7 @@ final class MailViewModel: ObservableObject {
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,
-                    namespace: .personal, ownerIdentity: nil
+                    namespace: .personal, ownerIdentity: nil, parentId: nil
                 ))
                 await syncMessages()
             case .failure(let error):
@@ -912,10 +956,12 @@ final class MailViewModel: ObservableObject {
                 _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId)
 
                 // Make sure the submitted mail lands in the Sent folder of
-                // this account (some servers do not move it automatically).
-                if let sent = allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }),
+                // this account (some servers do not move it automatically),
+                // and arrives there as read ($seen).
+                if let sent = allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
+                    ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }),
                    let sentJmapId = sent.jmapId, !sentJmapId.isEmpty {
-                    _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId], targetMailboxId: sentJmapId)
+                    _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId], targetMailboxId: sentJmapId, markRead: true)
                     invalidateCache(for: sent)
                 }
             }

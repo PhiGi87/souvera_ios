@@ -66,6 +66,13 @@ final class CalendarViewModel: ObservableObject {
         }
     }
 
+    func ensureMonth(contains day: Date) {
+        let calendar = Calendar.current
+        guard !calendar.isDate(day, equalTo: visibleMonth, toGranularity: .month) else { return }
+        visibleMonth = day
+        Task { await load() }
+    }
+
     func load() async {
         events = .loading
         offlineNotice = nil
@@ -127,6 +134,46 @@ final class CalendarViewModel: ObservableObject {
             await load()
         }
         return ok
+    }
+
+    // MARK: - Talk channel for an event
+
+    /// Creates a public Talk conversation named after the event, invites the
+    /// attendees and stores the room on the event (X-SOUVERA-TALK-ROOM).
+    func createTalkRoom(for event: CalendarEventModel) async -> Bool {
+        guard let account = LinkAccount.active() else { return false }
+        let api = LinkOcsApi(account: account)
+        guard let room = await api.createEventRoom(name: event.title) else { return false }
+        let attendeeIds = event.attendees.isEmpty ? [] : event.attendees
+        await api.addParticipants(token: room.token, userIds: attendeeIds)
+
+        var draft = draft(from: event)
+        draft.talkRoomToken = room.token
+        draft.talkRoomName = room.name
+        return await saveEvent(draft, existing: event)
+    }
+
+    func openTalkRoom(for event: CalendarEventModel) {
+        guard let token = event.talkRoomToken else { return }
+        NotificationCenter.default.post(
+            name: .openLinkRoom,
+            object: ["token": token, "title": event.talkRoomName ?? event.title]
+        )
+    }
+
+    func draft(from event: CalendarEventModel) -> EventDraft {
+        var draft = EventDraft()
+        draft.uid = event.uid
+        draft.title = event.title
+        draft.start = event.start
+        draft.end = event.end
+        draft.allDay = event.allDay
+        draft.location = event.location ?? ""
+        draft.notes = event.description ?? ""
+        draft.attendees = event.attendees
+        draft.talkRoomToken = event.talkRoomToken
+        draft.talkRoomName = event.talkRoomName
+        return draft
     }
 
     // MARK: - Cache

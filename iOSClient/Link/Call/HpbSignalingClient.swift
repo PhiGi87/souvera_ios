@@ -43,13 +43,40 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     func connect() {
-        let urlString = settings.server.trimmingCharacters(in: CharacterSet(charactersIn: "/")) + "/spreed"
-        guard let url = URL(string: urlString) else { return }
-        CallDebugLog.log("HpbSignaling", "connect \(urlString)")
+        guard let url = Self.websocketURL(for: settings.server) else {
+            CallDebugLog.log("HpbSignaling", "invalid signaling server URL: \(settings.server)")
+            listener?.onClosed()
+            return
+        }
+        CallDebugLog.log("HpbSignaling", "connect \(url.absoluteString)")
         session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         socket = session.webSocketTask(with: url)
         socket?.resume()
         receiveLoop()
+    }
+
+    /// Builds the WebSocket URL for the external signaling server. Talk
+    /// returns the HPB address with an https:// scheme (e.g.
+    /// https://talk-sig-….oncloud.zone); URLSession requires ws/wss for
+    /// WebSocket tasks, so the scheme is normalized. Missing schemes
+    /// default to wss.
+    static func websocketURL(for server: String) -> URL? {
+        let trimmed = server.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard var components = URLComponents(string: trimmed) else {
+            if trimmed.isEmpty { return nil }
+            return URL(string: "wss://\(trimmed)/spreed")
+        }
+        switch components.scheme {
+        case "https": components.scheme = "wss"
+        case "http": components.scheme = "ws"
+        case "wss", "ws": break
+        default: components.scheme = "wss"
+        }
+        guard let host = components.host, !host.isEmpty else { return nil }
+        if !(components.path).hasSuffix("/spreed") {
+            components.path = "/spreed"
+        }
+        return components.url
     }
 
     func close() {

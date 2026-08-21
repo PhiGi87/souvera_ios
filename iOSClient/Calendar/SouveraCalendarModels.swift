@@ -15,6 +15,9 @@ struct CalendarEventModel: Identifiable {
     let allDay: Bool
     let location: String?
     let description: String?
+    let attendees: [String]
+    let talkRoomToken: String?
+    let talkRoomName: String?
     let calendarHref: String
     let href: String
     let etag: String?
@@ -28,6 +31,9 @@ struct EventDraft {
     var allDay: Bool = false
     var location: String = ""
     var notes: String = ""
+    var attendees: [String] = []
+    var talkRoomToken: String?
+    var talkRoomName: String?
 }
 
 enum ICSParser {
@@ -41,6 +47,9 @@ enum ICSParser {
             var title = ""
             var location: String?
             var notes: String?
+            var attendees: [String] = []
+            var talkRoomToken: String?
+            var talkRoomName: String?
             var start: Date?
             var end: Date?
             var allDay = false
@@ -52,7 +61,8 @@ enum ICSParser {
                 guard !line.isEmpty else { continue }
                 guard let colon = line.firstIndex(of: ":") else { continue }
                 let keyPart = String(line[line.startIndex..<colon]).uppercased()
-                let value = String(line[line.index(after: colon)...])
+                let rawValue = String(line[line.index(after: colon)...])
+                let value = unescape(rawValue)
                 if keyPart == "UID" {
                     uid = value
                 } else if keyPart == "SUMMARY" {
@@ -61,6 +71,16 @@ enum ICSParser {
                     location = value
                 } else if keyPart == "DESCRIPTION" {
                     notes = value
+                } else if keyPart.hasPrefix("ATTENDEE") {
+                    let email = value.replacingOccurrences(of: "mailto:", with: "")
+                        .trimmingCharacters(in: .whitespaces)
+                    if email.contains("@") && !attendees.contains(email.lowercased()) {
+                        attendees.append(email.lowercased())
+                    }
+                } else if keyPart == "X-SOUVERA-TALK-ROOM" {
+                    talkRoomToken = value
+                } else if keyPart == "X-SOUVERA-TALK-ROOM-NAME" {
+                    talkRoomName = value
                 } else if keyPart.hasPrefix("DTSTART") {
                     if keyPart.contains("VALUE=DATE") {
                         allDay = true
@@ -95,6 +115,9 @@ enum ICSParser {
                 allDay: allDay,
                 location: location,
                 description: notes,
+                attendees: attendees,
+                talkRoomToken: talkRoomToken,
+                talkRoomName: talkRoomName,
                 calendarHref: calendarHref,
                 href: href,
                 etag: etag
@@ -143,6 +166,15 @@ enum ICSParser {
         if !draft.notes.isEmpty {
             lines.append("DESCRIPTION:\(escape(draft.notes))")
         }
+        for attendee in draft.attendees {
+            lines.append("ATTENDEE:mailto:\(attendee)")
+        }
+        if let token = draft.talkRoomToken, !token.isEmpty {
+            lines.append("X-SOUVERA-TALK-ROOM:\(escape(token))")
+        }
+        if let roomName = draft.talkRoomName, !roomName.isEmpty {
+            lines.append("X-SOUVERA-TALK-ROOM-NAME:\(escape(roomName))")
+        }
         lines.append("END:VEVENT")
         lines.append("END:VCALENDAR")
         return lines.joined(separator: "\r\n")
@@ -155,6 +187,14 @@ enum ICSParser {
             .replacingOccurrences(of: ",", with: "\\,")
             .replacingOccurrences(of: "\r", with: "\\n")
             .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    private static func unescape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\,", with: ",")
+            .replacingOccurrences(of: "\\;", with: ";")
+            .replacingOccurrences(of: "\\\\", with: "\\")
     }
 
     private static func parseDateTime(_ value: String) -> Date? {

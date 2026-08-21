@@ -36,7 +36,8 @@ enum JmapMapper {
             jmapId: jmapId,
             role: role,
             namespace: namespace,
-            ownerIdentity: ownerIdentity
+            ownerIdentity: ownerIdentity,
+            parentId: json.optString("parentId")
         )
     }
 
@@ -131,12 +132,12 @@ enum JmapMapper {
         case "archive": return .regular
         default: break
         }
-        // Only exact, standard English names identify system mailboxes. A
-        // user folder named "Gesendet" or "Entwürfe" stays a regular folder
-        // and is displayed with its real name.
+        // Only exact, standard English names identify system mailboxes.
+        // Stalwart's sent special-use mailbox is "Sent Items"; a plain
+        // "Sent" folder is user data and stays a regular folder.
         switch name {
         case "Inbox": return .inbox
-        case "Sent": return .sent
+        case "Sent Items", "Sent Messages": return .sent
         case "Drafts": return .drafts
         case "Trash", "Deleted Items": return .trash
         case "Junk", "Spam": return .junk
