@@ -156,7 +156,7 @@ class NCFilesNavigationController: NCMainNavigationController {
         }
 
         if self.topViewController != self.viewControllers.first {
-            return
+            return nil
         }
 
         if self.collectionViewCommon?.navigationItem.leftBarButtonItems == nil {
