@@ -71,6 +71,22 @@ enum MailCache {
         return boxes
     }
 
+    // MARK: - Generic compressed JSON blobs (contacts, calendar, ...)
+
+    static func saveJSON(_ object: Any, key: String) {
+        guard let data = try? JSONSerialization.data(withJSONObject: object),
+              let compressed = compress(data) else { return }
+        try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
+        try? compressed.write(to: rootDirectory.appendingPathComponent("\(key).json.gz"), options: .atomic)
+    }
+
+    static func loadJSON(key: String) -> Any? {
+        guard let compressed = try? Data(contentsOf: rootDirectory.appendingPathComponent("\(key).json.gz")),
+              let data = decompress(compressed),
+              let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        return json
+    }
+
     // MARK: - zlib compression (Compression framework)
 
     private static func compress(_ data: Data) -> Data? {

@@ -19,12 +19,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var localTrack: RTCVideoTrack?
 
     private var isMuted = false
-    private var isVideoOn = true
+    private var isVideoOn: Bool
 
-    init(account: LinkAccount, token: String, title: String) {
+    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true) {
         self.account = account
         self.token = token
         self.title_ = title
+        self.isVideoOn = withVideo
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -120,7 +121,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     func onLocalVideo(track: RTCVideoTrack) {
         DispatchQueue.main.async {
             self.localTrack = track
-            track.add(self.localView)
+            if !self.isVideoOn {
+                track.isEnabled = false
+            } else {
+                track.add(self.localView)
+            }
         }
     }
 

@@ -19,6 +19,21 @@ struct MailView: View {
                 .toolbar { toolbar }
         }
         .onAppear { viewModel.start() }
+        .overlay(alignment: .bottom) {
+            if let feedback = viewModel.sendFeedback {
+                MailSendBanner(feedback: feedback)
+                    .padding(.horizontal)
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onChange(of: viewModel.sendFeedback) { _, feedback in
+            guard feedback != nil else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                viewModel.sendFeedback = nil
+            }
+        }
         .sheet(item: Binding(
             get: { viewModel.composeContext },
             set: { viewModel.composeContext = $0 }
@@ -70,6 +85,25 @@ struct MailView: View {
         case .search:
             MailSearchView(viewModel: viewModel)
         }
+    }
+}
+
+/// Transient overlay shown after sending a message (success or failure).
+struct MailSendBanner: View {
+    let feedback: MailSendFeedback
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: feedback.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                .foregroundStyle(feedback.success ? .green : .red)
+            Text(feedback.message)
+                .font(.subheadline)
+                .lineLimit(2)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(.regularMaterial, in: Capsule())
+        .shadow(radius: 6)
     }
 }
 
@@ -252,10 +286,55 @@ private struct MailMessageListView: View {
                     }
                 }
             }
+            ToolbarItemGroup(placement: .bottomBar) {
+                if editing && !selected.isEmpty {
+                    Button {
+                        Task { await viewModel.setRead(selectedMessages, true) }
+                        selected.removeAll()
+                    } label: {
+                        selectionAction(icon: "envelope.open", label: NSLocalizedString("_mail_mark_read_", comment: ""))
+                    }
+                    Button {
+                        Task { await viewModel.setRead(selectedMessages, false) }
+                        selected.removeAll()
+                    } label: {
+                        selectionAction(icon: "envelope", label: NSLocalizedString("_mail_mark_unread_", comment: ""))
+                    }
+                    Button {
+                        if let first = selectedMessages.first {
+                            moveTarget = (selectedMessages, viewModel.availableMailboxes.filter { $0.accountId == first.accountId })
+                        }
+                    } label: {
+                        selectionAction(icon: "folder", label: NSLocalizedString("_mail_move_", comment: ""))
+                    }
+                    Button(role: .destructive) {
+                        viewModel.delete(selectedMessages)
+                        selected.removeAll()
+                    } label: {
+                        selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
+                    }
+                    Spacer()
+                }
+            }
         }
         .onChange(of: editing) { _, value in
             if !value { selected.removeAll() }
         }
+    }
+
+    private func selectionAction(icon: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Image(systemName: icon)
+            Text(label).font(.caption2).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var selectedMessages: [MailMessage] {
+        if case let .success(items) = viewModel.messages {
+            return items.filter { selected.contains($0.id) }
+        }
+        return []
     }
 
     private var isEmptyList: Bool {
@@ -689,7 +768,8 @@ struct MailComposeView: View {
                     }
                 }
                 Section {
-                    TextEditor(text: $bodyText).frame(minHeight: 220)
+                    TextField(NSLocalizedString("_mail_message_", comment: ""), text: $bodyText, axis: .vertical)
+                        .lineLimit(4...20)
                 }
                 Section(NSLocalizedString("_mail_attachments_", comment: "")) {
                     ForEach(attachments) { att in

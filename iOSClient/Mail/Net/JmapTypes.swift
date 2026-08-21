@@ -77,6 +77,15 @@ struct JmapBlobUploadResponse {
     let type: String
 }
 
+/// One attachment referenced when creating an Email via Email/set: the
+/// uploaded blob plus the metadata shown to the recipient.
+struct JmapAttachmentSpec {
+    let blobId: String
+    let name: String
+    let mimeType: String
+    let sizeBytes: Int64
+}
+
 enum JmapException: LocalizedError {
     case httpError(code: Int, body: String)
     case protocolError(String)

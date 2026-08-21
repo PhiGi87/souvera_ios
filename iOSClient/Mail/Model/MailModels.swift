@@ -101,6 +101,11 @@ enum MailResult<T> {
     case failure(String)
 }
 
+struct MailSendFeedback: Equatable {
+    let success: Bool
+    let message: String
+}
+
 /// Context for the compose sheet: a new message or a reply/reply-all/forward
 /// with pre-filled recipients, subject, quoted body and (for forwards) the
 /// original attachments - the user can still remove them before sending.

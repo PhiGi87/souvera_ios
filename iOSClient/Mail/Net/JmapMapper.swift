@@ -131,13 +131,15 @@ enum JmapMapper {
         case "archive": return .regular
         default: break
         }
-        let lower = name.lowercased()
-        switch lower {
-        case "inbox": return .inbox
-        case "sent": return .sent
-        case "drafts", "entwürfe": return .drafts
-        case "trash", "deleted items", "papierkorb": return .trash
-        case "junk", "spam": return .junk
+        // Only exact, standard English names identify system mailboxes. A
+        // user folder named "Gesendet" or "Entwürfe" stays a regular folder
+        // and is displayed with its real name.
+        switch name {
+        case "Inbox": return .inbox
+        case "Sent": return .sent
+        case "Drafts": return .drafts
+        case "Trash", "Deleted Items": return .trash
+        case "Junk", "Spam": return .junk
         default: return .regular
         }
     }

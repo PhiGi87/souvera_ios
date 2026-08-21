@@ -9,6 +9,14 @@ import SwiftUI
 /// Root Link screen; switches between the conversation list and an open chat.
 struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
+    @State private var callContext: CallContext?
+
+    struct CallContext: Identifiable {
+        let token: String
+        let title: String
+        let withVideo: Bool
+        var id: String { "\(token)|\(withVideo)" }
+    }
 
     var body: some View {
         NavigationStack {
@@ -16,7 +24,7 @@ struct LinkView: View {
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    if case .chat = viewModel.route {
+                    if case let .chat(token, title) = viewModel.route {
                         ToolbarItem(placement: .topBarLeading) {
                             Button {
                                 viewModel.back()
@@ -24,10 +32,33 @@ struct LinkView: View {
                                 Image(systemName: "chevron.backward")
                             }
                         }
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            Button {
+                                callContext = CallContext(token: token, title: title, withVideo: false)
+                            } label: {
+                                Image(systemName: "phone.fill").foregroundStyle(.green)
+                            }
+                            Button {
+                                callContext = CallContext(token: token, title: title, withVideo: true)
+                            } label: {
+                                Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
+                            }
+                        }
                     }
                 }
         }
         .onAppear { viewModel.start() }
+        .fullScreenCover(item: $callContext) { context in
+            if let account = LinkAccount.active() {
+                LinkCallViewControllerWrapper(
+                    account: account,
+                    token: context.token,
+                    title: context.title,
+                    withVideo: context.withVideo
+                )
+                .ignoresSafeArea()
+            }
+        }
     }
 
     private var navigationTitle: String {
@@ -44,6 +75,20 @@ struct LinkView: View {
             LinkChatView(viewModel: viewModel, token: token, title: title)
         }
     }
+}
+
+/// Hosts the UIKit in-call screen inside SwiftUI.
+struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
+    let account: LinkAccount
+    let token: String
+    let title: String
+    let withVideo: Bool
+
+    func makeUIViewController(context: Context) -> LinkCallViewController {
+        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo)
+    }
+
+    func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}
 }
 
 /// The list of conversations with a "start new conversation" search bar.

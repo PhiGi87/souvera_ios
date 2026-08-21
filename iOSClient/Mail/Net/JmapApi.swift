@@ -178,7 +178,7 @@ final class JmapApi {
         htmlBody: String?,
         plainText: String?,
         inReplyTo: String?,
-        blobIds: [String]
+        attachments: [JmapAttachmentSpec]
     ) async throws -> [String: Any] {
         var email: [String: Any] = [:]
         email["mailboxIds"] = [mailboxId: true]
@@ -216,8 +216,15 @@ final class JmapApi {
         if let replyTo = inReplyTo, !replyTo.isEmpty {
             email["inReplyTo"] = [replyTo]
         }
-        if !blobIds.isEmpty {
-            email["attachments"] = blobIds.map { ["blobId": $0, "type": "application/octet-stream"] }
+        if !attachments.isEmpty {
+            email["attachments"] = attachments.map { spec in
+                [
+                    "blobId": spec.blobId,
+                    "type": spec.mimeType,
+                    "name": spec.name,
+                    "size": spec.sizeBytes
+                ]
+            }
         }
 
         var args: [String: Any] = [:]

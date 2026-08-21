@@ -52,6 +52,7 @@ final class MailViewModel: ObservableObject {
     @Published var searchResults: MailUiState<[MailMessage]> = .success([])
     @Published var offlineNotice: String?
     @Published var composeContext: MailComposeContext?
+    @Published var sendFeedback: MailSendFeedback?
 
     private var imapClient: MailImapClient?
     private var jmapClient: JmapClient?
@@ -365,7 +366,13 @@ final class MailViewModel: ObservableObject {
                 do {
                     let changes = try await api.queryEmailChanges(accountId: accId, sinceState: state, inMailboxId: jmapMailboxId)
                     let removed = Set((changes["removed"] as? [String]) ?? [])
-                    let added = (changes["added"] as? [String]) ?? []
+                    // Stalwart returns `added` as objects [{id, index}] (RFC
+                    // 8620 allows both plain ids and positioned objects).
+                    let added: [String] = (changes["added"] as? [Any])?.compactMap { item in
+                        if let id = item as? String { return id }
+                        if let dict = item as? [String: Any], let id = dict["id"] as? String { return id }
+                        return nil
+                    } ?? []
                     var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
                     if !added.isEmpty {
                         let fetched = try await api.getEmails(accountId: accId, ids: added)
@@ -605,6 +612,7 @@ final class MailViewModel: ObservableObject {
                    let trashJmapId = trash.jmapId,
                    trashJmapId != currentMailbox?.jmapId {
                     _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId), targetMailboxId: trashJmapId)
+                    invalidateCache(for: trash)
                 } else {
                     _ = try? await api.deleteEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId))
                 }
@@ -634,6 +642,9 @@ final class MailViewModel: ObservableObject {
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 guard let targetJmapId = target.jmapId, !targetJmapId.isEmpty else { return }
                 _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToMove.map(\.emailId), targetMailboxId: targetJmapId)
+                // The target folder's cached snapshot and query state are now
+                // stale - force a full refresh the next time it opens.
+                invalidateCache(for: target)
             } else {
                 guard let mailbox = currentMailbox, let client = imapClient else { return }
                 for message in messagesToMove {
@@ -643,6 +654,12 @@ final class MailViewModel: ObservableObject {
             }
             afterListMutation(messagesToMove.map(\.emailId))
         }
+    }
+
+    private func invalidateCache(for mailbox: Mailbox) {
+        let accountName = mailAccount?.account ?? ""
+        MailCache.remove(account: accountName, mailboxId: mailbox.id)
+        queryStates.removeValue(forKey: mailbox.id)
     }
 
     private func afterListMutation(_ removedIds: [String]) {
@@ -819,6 +836,10 @@ final class MailViewModel: ObservableObject {
             isSending = false
             switch result {
             case .success:
+                sendFeedback = MailSendFeedback(
+                    success: true,
+                    message: NSLocalizedString("_mail_sent_", comment: "")
+                )
                 composeContext = nil
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
@@ -828,6 +849,7 @@ final class MailViewModel: ObservableObject {
                 await syncMessages()
             case .failure(let error):
                 sendError = errorText(error.localizedDescription)
+                sendFeedback = MailSendFeedback(success: false, message: error.localizedDescription)
             }
         }
     }
@@ -848,17 +870,22 @@ final class MailViewModel: ObservableObject {
         else { return .failure(MailSendError.noClient) }
         let accId = session.primaryAccountId
         do {
-            let draftsMailbox = allMailboxes.first(where: { $0.kind == .drafts })?.jmapId
+            let draftsMailbox = allMailboxes.first(where: { $0.kind == .drafts && $0.accountId == accId })?.jmapId
                 ?? allMailboxes.first(where: { $0.jmapId != nil })?.jmapId ?? ""
 
             let plainText = outgoing.body
             let htmlBody = outgoing.bodyHtml.isEmpty ? nil : outgoing.bodyHtml
 
-            var blobIds: [String] = []
+            var specs: [JmapAttachmentSpec] = []
             for att in outgoing.attachments {
                 guard let data = try? Data(contentsOf: att.fileURL) else { continue }
                 if let uploaded = try? await client.uploadBlob(accountId: accId, data: data, contentType: att.mimeType) {
-                    blobIds.append(uploaded.blobId)
+                    specs.append(JmapAttachmentSpec(
+                        blobId: uploaded.blobId,
+                        name: att.name,
+                        mimeType: att.mimeType,
+                        sizeBytes: Int64(data.count)
+                    ))
                 }
             }
 
@@ -873,7 +900,7 @@ final class MailViewModel: ObservableObject {
                 htmlBody: htmlBody,
                 plainText: plainText,
                 inReplyTo: outgoing.inReplyTo,
-                blobIds: blobIds
+                attachments: specs
             )
 
             let created = draftResp["created"] as? [String: Any]
@@ -883,6 +910,14 @@ final class MailViewModel: ObservableObject {
             let resolvedIdentity = identity(for: fromAddress) ?? identityId
             if !emailId.isEmpty, let identId = resolvedIdentity, !identId.isEmpty {
                 _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId)
+
+                // Make sure the submitted mail lands in the Sent folder of
+                // this account (some servers do not move it automatically).
+                if let sent = allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }),
+                   let sentJmapId = sent.jmapId, !sentJmapId.isEmpty {
+                    _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId], targetMailboxId: sentJmapId)
+                    invalidateCache(for: sent)
+                }
             }
             return .success(())
         } catch {

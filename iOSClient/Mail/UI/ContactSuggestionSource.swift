@@ -21,7 +21,7 @@ final class ContactSuggestionSource {
     /// Debounced search used while typing a recipient.
     func search(_ token: String, limit: Int = 6) async -> [RecipientSuggestion] {
         let trimmed = token.trimmingCharacters(in: .whitespaces)
-        guard trimmed.count >= 2 else { return [] }
+        guard trimmed.count >= 3 else { return [] }
 
         var results = await cardDav.fetchContacts(limit: 50).filter {
             $0.email.localizedCaseInsensitiveContains(trimmed)
