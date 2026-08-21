@@ -2222,8 +2222,7 @@
 			);
 			name = Mail;
 			sourceTree = "<group>";
-		}
-		FF06D18A4CA940FC82413A4A /* Calendar */ = {
+		};		FF06D18A4CA940FC82413A4A /* Calendar */ = {
 			isa = PBXGroup;
 			children = (
 				CA03AE7073634F3BBFF2F610 /* SouveraCalendarView.swift */,
@@ -2231,6 +2230,7 @@
 			path = Calendar;
 			sourceTree = "<group>";
 		};
+
 		2C33C48023E2C475005F963B /* Notification Service Extension */ = {
 			isa = PBXGroup;
 			children = (
