@@ -99,7 +99,12 @@ final class ContactsViewModel: ObservableObject {
             .filter { !$0.href.isEmpty }
             .map { ContactEntry(id: $0.href, card: $0, parsed: CardDavContactSource.parseVcard($0.vcard)) }
             .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
-        MailCache.saveJSON(cards.map { ["href": $0.href, "etag": $0.etag ?? NSNull(), "vcard": $0.vcard] }, key: cacheKey)
+        let array: [[String: Any]] = cards.map { card in
+            var dict: [String: Any] = ["href": card.href, "vcard": card.vcard]
+            dict["etag"] = card.etag ?? ""
+            return dict
+        }
+        MailCache.saveJSON(array, key: cacheKey)
         contacts = .success(entries)
     }
 

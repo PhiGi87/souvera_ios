@@ -112,7 +112,7 @@ struct SouveraCalendarView: View {
                         Circle()
                             .fill(isSelected ? Color(NCBrandColor.shared.customer) : .clear)
                     )
-                    .foregroundStyle(isSelected ? .white : (inMonth ? (isToday ? Color(NCBrandColor.shared.customer) : .primary) : .tertiary))
+                    .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color(NCBrandColor.shared.customer) : Color.primary) : Color.secondary))
                 Circle()
                     .fill(viewModel.hasEvents(on: day) ? Color(NCBrandColor.shared.customer) : .clear)
                     .frame(width: 5, height: 5)

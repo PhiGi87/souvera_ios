@@ -134,7 +134,12 @@ final class CalendarViewModel: ObservableObject {
     private static var cacheKey: String { "calendar_events" }
 
     private static func saveCachedEntries(_ entries: [CalDavEventEntry]) {
-        MailCache.saveJSON(entries.map { ["calendarHref": $0.calendarHref, "href": $0.href, "etag": $0.etag ?? NSNull(), "ics": $0.ics] }, key: cacheKey)
+        let array: [[String: Any]] = entries.map { entry in
+            var dict: [String: Any] = ["calendarHref": entry.calendarHref, "href": entry.href, "ics": entry.ics]
+            dict["etag"] = entry.etag ?? ""
+            return dict
+        }
+        MailCache.saveJSON(array, key: cacheKey)
     }
 
     private static func loadCachedEntries() -> [CalDavEventEntry]? {
