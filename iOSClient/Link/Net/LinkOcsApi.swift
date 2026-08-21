@@ -129,9 +129,9 @@ actor LinkOcsApi {
         var req = signed(url: "\(base)/api/v4/call/\(token)", method: "POST")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = "flags=\(flags)&silent=false&recordingConsent=true".data(using: .utf8)
-        let (data, response) = try? await session.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        let body = data.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
+        let result = try? await session.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
+        let body = result?.0.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
         CallDebugLog.log("OcsApi", "joinCall http=\(status) body=\(body)")
     }
 
