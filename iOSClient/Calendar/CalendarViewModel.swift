@@ -130,10 +130,10 @@ final class CalendarViewModel: ObservableObject {
     /// Event color: the calendar's custom/server color, fallback brand.
     func color(for event: CalendarEventModel) -> Color {
         if let hex = customCalendarColors[event.calendarHref], !hex.isEmpty {
-            return Color(hex: hex)
+            return Color(hex: hex) ?? Color(NCBrandColor.shared.customer)
         }
         if let calendar = calendars.first(where: { $0.href == event.calendarHref }) {
-            return Color(hex: calendar.color ?? "")
+            return Color(hex: calendar.color ?? "") ?? Color(NCBrandColor.shared.customer)
         }
         return Color(NCBrandColor.shared.customer)
     }
