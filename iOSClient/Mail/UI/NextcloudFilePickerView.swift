@@ -6,6 +6,7 @@
 // drill into folders and downloads the picked file into a temporary location.
 
 import SwiftUI
+import NextcloudKit
 
 struct NextcloudFilePickerView: View {
     let onSelect: (URL?) -> Void
