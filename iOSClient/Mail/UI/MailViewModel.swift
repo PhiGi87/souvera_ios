@@ -1,12 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// View model for the native mail client (IMAP/SMTP via MailImapClient).
-// Manages folder list, message list, detail, compose and send flows.
-//
-// The JMAP implementation (JmapClient/JmapApi/JmapMapper) remains in the
-// project as standby until the server-side JMAP route is opened for native
-// clients - see the souvera_mail deployment notes.
+// View model for the native mail client. Supports two transports:
+//   - JMAP (default, NCBrandOptions.shared.useJmapMail == true) - mirrors the
+//     Android client and talks to Stalwart via JmapClient/JmapApi.
+//   - IMAP/SMTP (fallback) via MailImapClient.
+// The active transport is shown in the UI ("Mail via JMAP" / "Mail via IMAP").
 
 import Combine
 import Foundation
@@ -45,14 +44,20 @@ final class MailViewModel: ObservableObject {
     @Published var isSending = false
     @Published var sendError: String?
 
-    private var client: MailImapClient?
+    private var imapClient: MailImapClient?
+    private var jmapClient: JmapClient?
+    private var jmapApi: JmapApi?
     private var mailAccount: MailAccount?
     private var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
+    private var identityId: String?
     private var hasRecoveredCredential = false
 
+    private var useJmap: Bool { NCBrandOptions.shared.useJmapMail }
+    var transportLabel: String { useJmap ? "JMAP" : "IMAP" }
+
     func start() {
-        if client != nil { return }
+        if imapClient != nil || jmapClient != nil { return }
         Task {
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
@@ -62,13 +67,16 @@ final class MailViewModel: ObservableObject {
             applyAccount(account)
             await loadMailboxes()
             await loadAliases()
+            await loadIdentities()
         }
     }
 
     /// Re-runs the setup from scratch, re-minting the mail credential if the
-    /// server rejected the stored one (authentication failure).
+    /// server rejected the stored one.
     func retry() {
-        client = nil
+        imapClient = nil
+        jmapClient = nil
+        jmapApi = nil
         mailAccount = nil
         mailboxes = .loading
         start()
@@ -77,19 +85,25 @@ final class MailViewModel: ObservableObject {
     private func applyAccount(_ account: MailAccount) {
         mailAccount = account
 
-        // The souvera_mail server contract: `loginName` is the SASL username for
-        // mail (IMAP/SMTP) and may differ from the Nextcloud user id.
         let mailLogin = account.saslUser
         fromAddress = mailLogin
         fromAddresses = [mailLogin]
         fromName = NCManageDatabase.shared.getActiveTableAccount()?.displayName ?? account.username
 
-        client = MailImapClient(account: account)
+        if useJmap {
+            let baseUrl = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            let client = JmapClient(
+                baseUrl: baseUrl,
+                username: mailLogin,
+                password: account.mailPassword
+            )
+            jmapClient = client
+            jmapApi = JmapApi(client: client)
+        } else {
+            imapClient = MailImapClient(account: account)
+        }
     }
 
-    /// The mail server rejected the credentials. Per the souvera_mail
-    /// playbook this means the stored password is dead: mint a fresh combined
-    /// password via login-flow and retry once.
     private func recoverCredentialAndReload() async {
         guard !hasRecoveredCredential else { return }
         hasRecoveredCredential = true
@@ -101,14 +115,8 @@ final class MailViewModel: ObservableObject {
         await loadMailboxes()
     }
 
-    /// Whether an error message indicates rejected credentials (IMAP/SMTP
-    /// authentication failure) - recoverable by re-minting the password.
-    private func isAuthRecoverable(_ message: String) -> Bool {
-        message.contains("[AUTH]")
-    }
-
     private func errorText(_ message: String) -> String {
-        "\(SouveraBuildInfo.label)\n\n\(message)"
+        "\(SouveraBuildInfo.label)\n\nMail via \(transportLabel)\n\n\(message)"
     }
 
     private func loadAliases() async {
@@ -133,25 +141,75 @@ final class MailViewModel: ObservableObject {
         }
     }
 
+    private func loadIdentities() async {
+        guard useJmap, let api = jmapApi else { return }
+        do {
+            let session = try await jmapClient?.refreshSession()
+            let accId = session?.primaryAccountId ?? ""
+            let identities = try await api.getIdentities(accountId: accId)
+            identityId = identities.first?.optString("id")
+        } catch {
+            identityId = nil
+        }
+    }
+
     // MARK: - Folders
 
     func loadMailboxes() async {
-        guard let client else { return }
         mailboxes = .loading
+        if useJmap {
+            await loadMailboxesJmap()
+        } else {
+            await loadMailboxesImap()
+        }
+    }
+
+    private func loadMailboxesImap() async {
+        guard let client = imapClient else { return }
         switch await client.fetchMailboxes() {
         case let .success(boxes):
             allMailboxes = boxes.sorted { kindOrder($0.kind) < kindOrder($1.kind) }
             mailboxes = .success(allMailboxes)
-
-            if let inbox = allMailboxes.first(where: { $0.kind == .inbox }) {
-                openMailbox(inbox)
-            }
+            if let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         case let .failure(message):
-            if isAuthRecoverable(message), !hasRecoveredCredential {
+            if message.contains("[AUTH]"), !hasRecoveredCredential {
                 await recoverCredentialAndReload()
                 return
             }
             mailboxes = .error(errorText(message))
+        }
+    }
+
+    private func loadMailboxesJmap() async {
+        guard let api = jmapApi else { return }
+        do {
+            let session = try await jmapClient?.refreshSession()
+            let accId = session?.primaryAccountId ?? ""
+            let list = try await api.getMailboxes(accountId: accId)
+            let boxes = list.map { JmapMapper.mapMailbox(account: mailAccount?.account ?? "", json: $0) }
+            allMailboxes = boxes.sorted { kindOrder($0.kind) < kindOrder($1.kind) }
+            mailboxes = .success(allMailboxes)
+            if let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+        } catch {
+            if isJmapAuthRecoverable(error), !hasRecoveredCredential {
+                await recoverCredentialAndReload()
+                return
+            }
+            let summary = await jmapClient?.diagnosticSummary() ?? ""
+            let message = error.localizedDescription + (summary.isEmpty ? "" : "\n\n\(summary)")
+            mailboxes = .error(errorText(message))
+        }
+    }
+
+    private func isJmapAuthRecoverable(_ error: Error) -> Bool {
+        guard let jmapError = error as? JmapException else { return false }
+        switch jmapError {
+        case .authNeedsBearer:
+            return true
+        case .protocolError(let message):
+            return message.contains("JMAP session not available")
+        default:
+            return false
         }
     }
 
@@ -164,11 +222,45 @@ final class MailViewModel: ObservableObject {
     }
 
     func syncMessages() async {
-        guard let client, let mailbox = currentMailbox else { return }
+        guard let mailbox = currentMailbox else { return }
         messages = .loading
+        if useJmap {
+            await syncMessagesJmap(mailbox)
+        } else {
+            await syncMessagesImap(mailbox)
+        }
+    }
+
+    private func syncMessagesImap(_ mailbox: Mailbox) async {
+        guard let client = imapClient else { return }
         switch await client.syncMessages(mailboxPath: mailbox.path) {
         case let .success(list): messages = .success(list)
         case let .failure(message): messages = .error(errorText(message))
+        }
+    }
+
+    private func syncMessagesJmap(_ mailbox: Mailbox) async {
+        guard let api = jmapApi else { return }
+        do {
+            let session = try await jmapClient?.refreshSession()
+            let accId = session?.primaryAccountId ?? ""
+            guard let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty else {
+                messages = .error(errorText("Mailbox has no JMAP ID"))
+                return
+            }
+            let resp = try await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId)
+            let ids = (resp["ids"] as? [String]) ?? []
+            guard !ids.isEmpty else {
+                messages = .success([])
+                return
+            }
+            let list = try await api.getEmails(accountId: accId, ids: ids)
+            let msgList = list.map {
+                JmapMapper.mapMessage(account: mailAccount?.account ?? "", mailboxId: mailbox.id, json: $0)
+            }
+            messages = .success(msgList)
+        } catch {
+            messages = .error(errorText(error.localizedDescription))
         }
     }
 
@@ -178,37 +270,104 @@ final class MailViewModel: ObservableObject {
         route = .detail(message: message)
         body = .loading
         Task {
-            guard let client, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-            switch await client.fetchBody(mailboxPath: mailbox.path, uid: uid) {
-            case let .success(b):
-                body = .success(b)
-                if !message.isRead { await setRead(message, true) }
-            case let .failure(m):
-                body = .error(errorText(m))
+            if useJmap {
+                await openMessageJmap(message)
+            } else {
+                await openMessageImap(message)
             }
+        }
+    }
+
+    private func openMessageImap(_ message: MailMessage) async {
+        guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
+        switch await client.fetchBody(mailboxPath: mailbox.path, uid: uid) {
+        case let .success(b):
+            body = .success(b)
+            if !message.isRead { await setRead(message, true) }
+        case let .failure(m):
+            body = .error(errorText(m))
+        }
+    }
+
+    private func openMessageJmap(_ message: MailMessage) async {
+        guard let api = jmapApi,
+              let client = jmapClient,
+              let session = try? await client.refreshSession()
+        else { return }
+        let accId = session.primaryAccountId
+        do {
+            let bodyProperties: [String] = ["bodyValues", "textBody", "htmlBody", "attachments"]
+            let list = try await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties)
+            if let json = list.first {
+                body = .success(JmapMapper.mapBody(json: json))
+                if !message.isRead { await setRead(message, true) }
+            } else {
+                body = .error(errorText("Message not found"))
+            }
+        } catch {
+            body = .error(errorText(error.localizedDescription))
         }
     }
 
     // MARK: - Flags
 
     func setRead(_ message: MailMessage, _ read: Bool) async {
-        guard let client, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-        _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .seen, value: read)
+        if useJmap {
+            guard let api = jmapApi,
+                  let client = jmapClient,
+                  let session = try? await client.refreshSession() else { return }
+            let accId = session.primaryAccountId
+            if read {
+                _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$seen": true])
+            } else {
+                _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$seen"])
+            }
+        } else {
+            guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
+            _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .seen, value: read)
+        }
     }
 
     func toggleFlagged(_ message: MailMessage) {
         Task {
-            guard let client, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-            _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .flagged, value: !message.isFlagged)
+            if useJmap {
+                guard let api = jmapApi,
+                      let client = jmapClient,
+                      let session = try? await client.refreshSession() else { return }
+                let accId = session.primaryAccountId
+                if message.isFlagged {
+                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$flagged"])
+                } else {
+                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$flagged": true])
+                }
+            } else {
+                guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
+                _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .flagged, value: !message.isFlagged)
+            }
             await syncMessages()
         }
     }
 
     func delete(_ message: MailMessage) {
         Task {
-            guard let client, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-            if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {
-                _ = await client.move(mailboxPath: mailbox.path, uid: uid, targetPath: trash.path)
+            guard let mailbox = currentMailbox else { return }
+            if useJmap {
+                guard let api = jmapApi,
+                      let client = jmapClient,
+                      let session = try? await client.refreshSession() else { return }
+                let accId = session.primaryAccountId
+                if let trash = allMailboxes.first(where: { $0.kind == .trash }),
+                   let trashJmapId = trash.jmapId,
+                   trashJmapId != mailbox.jmapId {
+                    _ = try? await api.moveEmails(accountId: accId, emailIds: [message.emailId], targetMailboxId: trashJmapId)
+                } else {
+                    _ = try? await api.deleteEmails(accountId: accId, emailIds: [message.emailId])
+                }
+            } else {
+                guard let client = imapClient, let uid = UInt64(message.emailId) else { return }
+                if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {
+                    _ = await client.move(mailboxPath: mailbox.path, uid: uid, targetPath: trash.path)
+                }
             }
             route = .messages(mailbox: mailbox)
             await syncMessages()
@@ -219,11 +378,14 @@ final class MailViewModel: ObservableObject {
 
     func send(_ outgoing: OutgoingMessage) {
         Task {
-            guard let client else { return }
             isSending = true
             sendError = nil
-            let sentPath = allMailboxes.first(where: { $0.kind == .sent })?.path
-            let result = await client.send(fromAddress: fromAddress, fromName: fromName, outgoing: outgoing, sentPath: sentPath)
+            let result: Result<Void, Error>
+            if useJmap {
+                result = await sendJmap(outgoing)
+            } else {
+                result = await sendImap(outgoing)
+            }
             isSending = false
             switch result {
             case .success:
@@ -232,8 +394,77 @@ final class MailViewModel: ObservableObject {
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil
                 ))
                 await syncMessages()
-            case let .failure(message):
-                sendError = errorText(message)
+            case .failure(let error):
+                sendError = errorText(error.localizedDescription)
+            }
+        }
+    }
+
+    private func sendImap(_ outgoing: OutgoingMessage) async -> Result<Void, Error> {
+        guard let client = imapClient else { return .failure(MailSendError.noClient) }
+        let sentPath = allMailboxes.first(where: { $0.kind == .sent })?.path
+        switch await client.send(fromAddress: fromAddress, fromName: fromName, outgoing: outgoing, sentPath: sentPath) {
+        case .success: return .success(())
+        case .failure(let message): return .failure(MailSendError.smtp(message))
+        }
+    }
+
+    private func sendJmap(_ outgoing: OutgoingMessage) async -> Result<Void, Error> {
+        guard let api = jmapApi,
+              let client = jmapClient,
+              let session = try? await client.refreshSession()
+        else { return .failure(MailSendError.noClient) }
+        let accId = session.primaryAccountId
+        do {
+            let draftsMailbox = allMailboxes.first(where: { $0.kind == .drafts })?.jmapId
+                ?? allMailboxes.first(where: { $0.jmapId != nil })?.jmapId ?? ""
+
+            let plainText = outgoing.body
+            let htmlBody = outgoing.bodyHtml.isEmpty ? nil : outgoing.bodyHtml
+
+            var blobIds: [String] = []
+            for att in outgoing.attachments {
+                guard let data = try? Data(contentsOf: att.fileURL) else { continue }
+                if let uploaded = try? await client.uploadBlob(accountId: accId, data: data, contentType: att.mimeType) {
+                    blobIds.append(uploaded.blobId)
+                }
+            }
+
+            let draftResp = try await api.createDraft(
+                accountId: accId,
+                mailboxId: draftsMailbox,
+                fromAddress: fromAddress,
+                toAddresses: outgoing.to,
+                ccAddresses: outgoing.cc,
+                bccAddresses: outgoing.bcc,
+                subject: outgoing.subject,
+                htmlBody: htmlBody,
+                plainText: plainText,
+                inReplyTo: outgoing.inReplyTo,
+                blobIds: blobIds
+            )
+
+            let created = draftResp["created"] as? [String: Any]
+            let createdId = created?["new"] as? [String: Any]
+            let emailId = createdId?.optString("id") ?? ""
+
+            if !emailId.isEmpty, let identId = identityId {
+                _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId)
+            }
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    enum MailSendError: LocalizedError {
+        case noClient
+        case smtp(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .noClient: return "Mail client not ready"
+            case .smtp(let message): return message
             }
         }
     }

@@ -76,17 +76,22 @@ private struct MailFolderListView: View {
     @ObservedObject var viewModel: MailViewModel
 
     var body: some View {
-        switch viewModel.mailboxes {
-        case .loading:
-            ProgressView()
-        case let .error(message):
-            VStack(spacing: 12) {
-                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                Button(NSLocalizedString("_mail_retry_", comment: "")) { viewModel.retry() }
-                    .buttonStyle(.bordered)
-            }
-            .padding()
-        case let .success(boxes):
+        VStack(spacing: 0) {
+            Text("Mail via \(viewModel.transportLabel) · \(SouveraBuildInfo.label)")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.vertical, 4)
+            switch viewModel.mailboxes {
+            case .loading:
+                ProgressView()
+            case let .error(message):
+                VStack(spacing: 12) {
+                    Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    Button(NSLocalizedString("_mail_retry_", comment: "")) { viewModel.retry() }
+                        .buttonStyle(.bordered)
+                }
+                .padding()
+            case let .success(boxes):
             List(boxes) { box in
                 Button { viewModel.openMailbox(box) } label: {
                     HStack {
@@ -98,6 +103,7 @@ private struct MailFolderListView: View {
                 }
                 .buttonStyle(.plain)
             }
+        }
         }
     }
 

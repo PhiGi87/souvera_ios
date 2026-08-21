@@ -94,6 +94,9 @@ final class NCBrandOptions: @unchecked Sendable {
     // BRAND ONLY
     var use_AppConfig: Bool = false                                                         // Don't touch me !!
 
+    // Mail transport: JMAP (like the Android client) or IMAP/SMTP fallback.
+    var useJmapMail: Bool = true
+
     // Use server theming color
     var use_themingColor: Bool = true
 
