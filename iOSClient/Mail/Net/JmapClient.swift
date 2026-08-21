@@ -10,6 +10,7 @@
 // - Blob upload/download
 
 import Foundation
+import Network
 import NextcloudKit
 
 actor JmapClient {
@@ -357,22 +358,33 @@ actor JmapClient {
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json; charset=utf-8", forHTTPHeaderField: "Content-Type")
         req.setValue("application/json", forHTTPHeaderField: "Accept")
         req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
         req.httpBody = bodyData
         lastPostBody = String(data: bodyData, encoding: .utf8) ?? ""
 
         nkLog(debug: "[JMAP] POST \(normalizedUrl) body: \(lastPostBody ?? "")")
-        JmapLog.write("POST \(normalizedUrl) (method=POST, Content-Type=application/json, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
+        JmapLog.write("POST \(normalizedUrl) (method=POST, Content-Type=application/json; charset=utf-8, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
         JmapLog.write("body (\(bodyData.count) bytes): \(lastPostBody ?? "")")
 
-        let (data, resp) = try await urlSession.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        // The Android client talks to this endpoint over plain HTTP/1.1
+        // (HttpURLConnection). URLSession negotiates HTTP/2, which some front
+        // proxies reject for JMAP POSTs with a canned notRequest. Mirror the
+        // Android transport: HTTP/1.1 over Network.framework.
+        var requestHeaders = [
+            "Content-Type": "application/json; charset=utf-8",
+            "Accept": "application/json",
+            "Authorization": authHeader(),
+            "User-Agent": "Souvera-iOS/\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0")"
+        ]
+        let response = try await Http1Transport.post(url: url, headers: requestHeaders, body: bodyData)
+        let code = response.status
 
-        if let http = resp as? HTTPURLResponse {
-            JmapLog.write("-> HTTP \(code) Server=\(http.value(forHTTPHeaderField: "Server") ?? "?") WWW-Authenticate=\(http.value(forHTTPHeaderField: "WWW-Authenticate") ?? "?")")
-        }
+        let headerSummary = response.headers.map { "\($0.key)=\($0.value)" }.sorted().joined(separator: " | ")
+        JmapLog.write("-> HTTP \(code) headers: \(headerSummary)")
+
+        let data = response.body
         let responsePreview = String(data: data, encoding: .utf8)?.prefix(1000) ?? ""
         JmapLog.write("response: \(responsePreview)")
 
@@ -414,6 +426,127 @@ enum JmapLog {
             handle.seekToEndOfFile()
             handle.write(Data(line.utf8))
             try? handle.close()
+        }
+    }
+}
+
+/// Minimal HTTP/1.1 client over Network.framework for JMAP POSTs.
+///
+/// URLSession negotiates HTTP/2 via ALPN; the deployment's front proxy
+/// rejects those POSTs with `urn:ietf:params:jmap:error:notRequest`. The
+/// Android client uses HttpURLConnection (HTTP/1.1 only) and works, so this
+/// transport mirrors that behaviour by advertising only "http/1.1" in ALPN.
+private final class Http1Transport {
+    struct Response {
+        let status: Int
+        let headers: [String: String]
+        let body: Data
+    }
+
+    static func post(url: URL, headers: [String: String], body: Data) async throws -> Response {
+        guard let host = url.host, !host.isEmpty else {
+            throw JmapException.protocolError("Invalid URL host: \(url)")
+        }
+        let port = UInt16(url.port ?? (url.scheme == "https" ? 443 : 80)) ?? 443
+        let path = (url.path.isEmpty ? "/" : url.path) + (url.query.map { "?\($0)" } ?? "")
+
+        let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, host)
+        sec_protocol_options_add_tls_application_protocol(tls.securityProtocolOptions, "http/1.1")
+        let connection = NWConnection(
+            host: NWEndpoint.Host(host),
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: NWParameters(tls: tls)
+        )
+
+        var request = "POST \(path) HTTP/1.1\r\n"
+        request += "Host: \(host)\r\n"
+        for (key, value) in headers.sorted(by: { $0.key < $1.key }) {
+            request += "\(key): \(value)\r\n"
+        }
+        request += "Content-Length: \(body.count)\r\n"
+        request += "Connection: close\r\n\r\n"
+        var payload = Data(request.utf8)
+        payload.append(body)
+
+        return try await withCheckedThrowingContinuation { continuation in
+            let lock = NSLock()
+            var done = false
+            var received = Data()
+
+            func finish(_ result: Result<Response, Error>) {
+                lock.lock()
+                defer { lock.unlock() }
+                guard !done else { return }
+                done = true
+                connection.cancel()
+                continuation.resume(with: result)
+            }
+
+            func parseAndFinish() {
+                guard let separator = received.firstRange(of: Data("\r\n\r\n".utf8)) else {
+                    finish(.failure(JmapException.protocolError("Invalid HTTP/1.1 response (no header separator)")))
+                    return
+                }
+                let headData = received[received.startIndex..<separator.lowerBound]
+                let bodyData = Data(received[separator.upperBound...])
+                guard let head = String(data: headData, encoding: .utf8) else {
+                    finish(.failure(JmapException.protocolError("Invalid HTTP/1.1 response (headers not UTF-8)")))
+                    return
+                }
+                let lines = head.components(separatedBy: "\r\n")
+                guard let statusLine = lines.first,
+                      statusLine.hasPrefix("HTTP/1.1 ") || statusLine.hasPrefix("HTTP/1.0 ") else {
+                    finish(.failure(JmapException.protocolError("Invalid HTTP/1.1 status line: \(lines.first ?? "")")))
+                    return
+                }
+                let parts = statusLine.components(separatedBy: " ")
+                let status = parts.count > 1 ? (Int(parts[1]) ?? 0) : 0
+                var responseHeaders: [String: String] = [:]
+                for line in lines.dropFirst() {
+                    guard let colon = line.firstIndex(of: ":") else { continue }
+                    let key = String(line[line.startIndex..<colon]).trimmingCharacters(in: .whitespaces).lowercased()
+                    let value = String(line[line.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
+                    responseHeaders[key] = value
+                }
+                finish(.success(Response(status: status, headers: responseHeaders, body: bodyData)))
+            }
+
+            func readChunk() {
+                connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 16) { data, _, isComplete, error in
+                    if let data {
+                        received.append(data)
+                    }
+                    if error != nil || isComplete {
+                        parseAndFinish()
+                    } else {
+                        readChunk()
+                    }
+                }
+            }
+
+            connection.stateUpdateHandler = { state in
+                switch state {
+                case .ready:
+                    connection.send(content: payload, completion: .contentProcessed { sendError in
+                        if let sendError {
+                            finish(.failure(sendError))
+                        } else {
+                            readChunk()
+                        }
+                    })
+                case .failed(let error):
+                    finish(.failure(error))
+                default:
+                    break
+                }
+            }
+
+            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+                finish(.failure(JmapException.protocolError("HTTP/1.1 POST timed out")))
+            }
+
+            connection.start(queue: .global())
         }
     }
 }
