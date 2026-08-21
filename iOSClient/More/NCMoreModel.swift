@@ -157,6 +157,9 @@ final class NCMoreModel: ObservableObject {
         /// Opens the Activity screen (formerly its own tab).
         case activity
 
+        /// Opens the Contacts placeholder screen.
+        case contacts
+
         /// No-op destination.
         case none
     }
@@ -228,6 +231,14 @@ final class NCMoreModel: ObservableObject {
                 titleKey: "_activity_",
                 image: "bolt.fill",
                 destination: .activity
+            )
+        )
+
+        functionItems.append(
+            Item(
+                titleKey: "_contacts_",
+                image: "person.crop.circle",
+                destination: .contacts
             )
         )
 
@@ -402,6 +413,9 @@ final class NCMoreModel: ObservableObject {
 
         case .activity:
             pushStoryboardTab(identifier: "NCActivityNavigationController")
+
+        case .contacts:
+            pushHosted(SouveraContactsView(), title: NSLocalizedString("_contacts_", comment: ""))
 
         case .none:
             break

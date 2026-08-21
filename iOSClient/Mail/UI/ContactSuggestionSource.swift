@@ -1,8 +1,9 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Device-contact lookup for the composer's recipient field, mirroring the
-// Android ContactSuggestionSource (mail/ContactSuggestionSource.kt).
+// Contact lookup for the composer's recipient fields. Queries the user's
+// Souvera/Nextcloud address book (CardDAV) first and falls back to the
+// device contacts, mirroring the Android ContactSuggestionSource.
 
 import Contacts
 import Foundation
@@ -15,46 +16,78 @@ struct RecipientSuggestion: Identifiable, Hashable {
 
 final class ContactSuggestionSource {
     private let store = CNContactStore()
+    private let cardDav = CardDavContactSource()
 
+    /// Debounced search used while typing a recipient.
     func search(_ token: String, limit: Int = 6) async -> [RecipientSuggestion] {
         let trimmed = token.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 2 else { return [] }
-        guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return [] }
 
+        var results = await cardDav.fetchContacts(limit: 50).filter {
+            $0.email.localizedCaseInsensitiveContains(trimmed)
+                || ($0.displayName ?? "").localizedCaseInsensitiveContains(trimmed)
+        }
+        results += await deviceSearch(trimmed, limit: max(0, limit - results.count))
+
+        let deduped = dedupe(results)
+        if deduped.count == 1, deduped[0].email.caseInsensitiveCompare(trimmed) == .orderedSame {
+            return []
+        }
+        return Array(deduped.prefix(limit))
+    }
+
+    /// Full contact list for the contact picker sheet.
+    func allContacts(limit: Int = 200) async -> [RecipientSuggestion] {
+        var results = await cardDav.fetchContacts(limit: limit)
+        results += await deviceAll(limit: max(0, limit - results.count))
+        return dedupe(results).sorted {
+            ($0.displayName ?? $0.email).localizedCaseInsensitiveCompare($1.displayName ?? $1.email) == .orderedAscending
+        }
+    }
+
+    private func dedupe(_ list: [RecipientSuggestion]) -> [RecipientSuggestion] {
+        var seen = Set<String>()
+        return list.filter { seen.insert($0.email.lowercased()).inserted }
+    }
+
+    // MARK: - Device contacts
+
+    private var deviceContacts: [RecipientSuggestion] {
+        guard CNContactStore.authorizationStatus(for: .contacts) == .authorized else { return [] }
         let keys: [CNKeyDescriptor] = [
             CNContactGivenNameKey as NSString,
             CNContactFamilyNameKey as NSString,
             CNContactEmailAddressesKey as NSString
         ]
-        let predicate = CNContact.predicateForContacts(matchingName: trimmed)
-        let contacts: [CNContact]
-        do {
-            contacts = try store.unifiedContacts(matching: predicate, keysToFetch: keys)
-        } catch {
-            return []
-        }
-
+        let predicate = CNContact.predicateForContacts(matchingName: "")
+        let contacts = (try? store.unifiedContacts(matching: predicate, keysToFetch: keys)) ?? []
         var result: [RecipientSuggestion] = []
         for contact in contacts {
+            let name = [contact.givenName, contact.familyName]
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
             for emailValue in contact.emailAddresses {
-                let email = String(emailValue.value)
-                if email.localizedCaseInsensitiveContains(trimmed) {
-                    let name = [contact.givenName, contact.familyName]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: " ")
-                    result.append(RecipientSuggestion(
-                        displayName: name.isEmpty ? nil : name,
-                        email: email
-                    ))
-                    if result.count >= limit { break }
-                }
+                let email = String(emailValue.value).lowercased()
+                guard email.contains("@") else { continue }
+                result.append(RecipientSuggestion(
+                    displayName: name.isEmpty ? nil : name,
+                    email: email
+                ))
             }
-            if result.count >= limit { break }
         }
+        return result
+    }
 
-        if result.count == 1, result[0].email.caseInsensitiveCompare(trimmed) == .orderedSame {
-            return []
-        }
-        return Array(result.prefix(limit))
+    private func deviceSearch(_ token: String, limit: Int) async -> [RecipientSuggestion] {
+        guard limit > 0 else { return [] }
+        return Array(deviceContacts.filter {
+            $0.email.localizedCaseInsensitiveContains(token)
+                || ($0.displayName ?? "").localizedCaseInsensitiveContains(token)
+        }.prefix(limit))
+    }
+
+    private func deviceAll(limit: Int) async -> [RecipientSuggestion] {
+        guard limit > 0 else { return [] }
+        return Array(deviceContacts.prefix(limit))
     }
 }

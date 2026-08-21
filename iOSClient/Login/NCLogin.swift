@@ -86,7 +86,9 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
 
         // Login button
         loginAddressDetail.textColor = textColor
-        loginAddressDetail.text = String.localizedStringWithFormat(NSLocalizedString("_login_address_detail_", comment: ""), NCBrandOptions.shared.brand)
+        // Slug-only hint: show the derived domain so users know they only
+        // have to enter the part before ".souvera.work".
+        loginAddressDetail.text = String.localizedStringWithFormat(NSLocalizedString("_login_address_detail_", comment: ""), NCBrandOptions.shared.souveraDomain)
 
         // QR code button
         qrCode.tintColor = NCBrandColor.shared.customer.isTooLight() ? .black : .white

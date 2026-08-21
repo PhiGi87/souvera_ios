@@ -70,10 +70,16 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         buttonSignUp.backgroundColor = textColor.withAlphaComponent(0.2)
         buttonSignUp.titleLabel?.adjustsFontSizeToFitWidth = true
         buttonSignUp.setTitle(NSLocalizedString("_sign_up_", comment: ""), for: .normal)
+        // Souvera: workspaces are provisioned by the operator - hide the
+        // provider sign-up and own-server options, only sign-in is offered.
+        buttonSignUp.isHidden = true
+        buttonSignUp.isEnabled = false
 
         buttonHost.layer.cornerRadius = 20
         buttonHost.setTitle(NSLocalizedString("_host_your_own_server", comment: ""), for: .normal)
         buttonHost.setTitleColor(textColor.withAlphaComponent(0.5), for: .normal)
+        buttonHost.isHidden = true
+        buttonHost.isEnabled = false
 
         introCollectionView.register(UINib(nibName: "NCIntroCollectionViewCell", bundle: nil), forCellWithReuseIdentifier: "introCell")
         introCollectionView.dataSource = self

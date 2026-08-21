@@ -97,6 +97,15 @@ enum JmapException: LocalizedError {
 
 
 
+extension String {
+    /// Replaces CRLF/CR line endings with LF so multi-line plain text
+    /// bodies render with proper line breaks.
+    func normalizedLineEndings() -> String {
+        replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+    }
+}
+
 extension Dictionary where Key == String, Value == Any {
     func optString(_ key: String) -> String? { self[key] as? String }
     func optInt(_ key: String) -> Int { self[key] as? Int ?? 0 }

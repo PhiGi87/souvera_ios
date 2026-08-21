@@ -48,6 +48,7 @@ enum JmapMapper {
     ) -> MailMessage {
         let fromList = json["from"] as? [[String: Any]] ?? []
         let toList = json["to"] as? [[String: Any]] ?? []
+        let ccList = json["cc"] as? [[String: Any]] ?? []
         let hasAtt = json.optBool("hasAttachment") || ((json["attachments"] as? [Any])?.count ?? 0) > 0
         let keywords = json["keywords"] as? [String: Any]
 
@@ -59,6 +60,7 @@ enum JmapMapper {
         let fromName = fromFirst?.optString("name")
 
         let toAddressStr = toList.compactMap { $0.optString("email") }.joined(separator: ", ")
+        let ccAddressStr = ccList.compactMap { $0.optString("email") }.joined(separator: ", ")
 
         return MailMessage(
             id: "\(mailboxId)|\(json.optString("id") ?? "")",
@@ -71,6 +73,7 @@ enum JmapMapper {
             fromAddress: fromAddress,
             fromDisplayName: fromName,
             toAddresses: toAddressStr,
+            ccAddresses: ccAddressStr,
             dateSent: parseJmapDate(json.optString("receivedAt")),
             isRead: isRead,
             isFlagged: isFlagged,
@@ -101,7 +104,7 @@ enum JmapMapper {
                let first = textParts.first,
                let partId = first.optString("partId"),
                let value = bodyValues[partId] as? [String: Any] {
-                plainText = value.optString("value")
+                plainText = value.optString("value")?.normalizedLineEndings()
             }
             if let htmlParts = json["htmlBody"] as? [[String: Any]],
                let first = htmlParts.first,
@@ -139,8 +142,7 @@ enum JmapMapper {
         }
     }
 
-    private static func parseJmapDate(_ iso: String?) -> Date {
-        guard let iso, !iso.isEmpty else { return Date.distantPast }
+    private static func parseJmapDate(_ iso: String?) -> Date {        guard let iso, !iso.isEmpty else { return Date.distantPast }
         let cleaned = iso.replacingOccurrences(of: "Z", with: "+00:00")
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

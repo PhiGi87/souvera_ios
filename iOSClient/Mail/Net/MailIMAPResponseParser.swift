@@ -304,6 +304,7 @@ private struct PartialMessage {
             fromAddress: fromAddress,
             fromDisplayName: fromName,
             toAddresses: toAddresses,
+            ccAddresses: ccAddresses,
             dateSent: dateSent,
             isRead: isRead,
             isFlagged: isFlagged,

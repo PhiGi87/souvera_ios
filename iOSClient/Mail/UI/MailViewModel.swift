@@ -6,6 +6,10 @@
 //     Android client and talks to Stalwart via JmapClient/JmapApi.
 //   - IMAP/SMTP (fallback) via MailImapClient.
 // The active transport is shown in the UI ("Mail via JMAP" / "Mail via IMAP").
+//
+// Message lists are cached locally (compressed JSON snapshots) and refreshed
+// incrementally via Email/queryChanges when a previous query state is known;
+// on network failure the last cached state is shown.
 
 import Combine
 import Foundation
@@ -42,9 +46,12 @@ final class MailViewModel: ObservableObject {
     @Published var fromAddress = ""
     @Published var fromName = ""
     @Published var fromAddresses: [String] = []
+    @Published var ownEmailLabel = ""
     @Published var isSending = false
     @Published var sendError: String?
     @Published var searchResults: MailUiState<[MailMessage]> = .success([])
+    @Published var offlineNotice: String?
+    @Published var composeContext: MailComposeContext?
 
     private var imapClient: MailImapClient?
     private var jmapClient: JmapClient?
@@ -52,6 +59,7 @@ final class MailViewModel: ObservableObject {
     private var mailAccount: MailAccount?
     private var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
+    private var queryStates: [String: String] = [:]
     private var identityId: String?
     private var allIdentities: [[String: Any]] = []
     private var hasRecoveredCredential = false
@@ -94,6 +102,7 @@ final class MailViewModel: ObservableObject {
         let mailLogin = account.saslUser
         fromAddress = mailLogin
         fromAddresses = [mailLogin]
+        ownEmailLabel = mailLogin
         fromName = NCManageDatabase.shared.getActiveTableAccount()?.displayName ?? account.username
 
         if useJmap {
@@ -198,14 +207,17 @@ final class MailViewModel: ObservableObject {
             let session = try await jmapClient?.refreshSession()
             let primaryAccId = session?.primaryAccountId ?? ""
             let accountName = mailAccount?.account ?? ""
+            ownEmailLabel = session?.username ?? mailAccount?.username ?? ownEmailLabel
 
             var all: [Mailbox] = []
+            var rawBoxes: [[String: Any]] = []
 
             // Personal mailboxes.
             let personalList = try await api.getMailboxes(accountId: primaryAccId)
             all += personalList.map {
                 JmapMapper.mapMailbox(account: accountName, accountId: primaryAccId, json: $0)
             }
+            rawBoxes += personalList.map { cacheMailboxJson($0, accountId: primaryAccId, path: nil, owner: nil, namespace: "personal") }
 
             // Shared mailboxes: session accounts with isPersonal=false.
             if let session {
@@ -224,6 +236,7 @@ final class MailViewModel: ObservableObject {
                             namespace: .shared,
                             ownerIdentity: sharedAcc.name
                         ))
+                        rawBoxes.append(cacheMailboxJson(json, accountId: sharedAcc.id, path: path, owner: sharedAcc.name, namespace: "shared"))
                     }
                 }
             }
@@ -231,16 +244,47 @@ final class MailViewModel: ObservableObject {
             let sorted = sortMailboxGroups(all)
             allMailboxes = sorted
             mailboxes = .success(sorted)
+            MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
             if let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         } catch {
             if isJmapAuthRecoverable(error), !hasRecoveredCredential {
                 await recoverCredentialAndReload()
                 return
             }
+            // Offline: rebuild the folder list from the cache when possible.
+            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
+                let boxes = cached.map { mailbox(from: $0) }
+                let sorted = sortMailboxGroups(boxes)
+                allMailboxes = sorted
+                mailboxes = .success(sorted)
+                offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
+                if let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+                return
+            }
             let summary = await jmapClient?.diagnosticSummary() ?? ""
             let message = error.localizedDescription + (summary.isEmpty ? "" : "\n\n\(summary)")
             mailboxes = .error(errorText(message))
         }
+    }
+
+    private func cacheMailboxJson(_ json: [String: Any], accountId: String, path: String?, owner: String?, namespace: String) -> [String: Any] {
+        var dict = json
+        dict["_accountId"] = accountId
+        dict["_path"] = path ?? json.optString("name")
+        dict["_owner"] = owner
+        dict["_namespace"] = namespace
+        return dict
+    }
+
+    private func mailbox(from cached: [String: Any]) -> Mailbox {
+        JmapMapper.mapMailbox(
+            account: mailAccount?.account ?? "",
+            accountId: cached.optString("_accountId") ?? "",
+            json: cached,
+            path: cached.optString("_path"),
+            namespace: cached.optString("_namespace") == "shared" ? .shared : .personal,
+            ownerIdentity: cached.optString("_owner")
+        )
     }
 
     /// Personal mailboxes first (kind order), then shared groups by owner.
@@ -296,7 +340,7 @@ final class MailViewModel: ObservableObject {
         }
     }
 
-    private func syncMessagesJmap(_ mailbox: Mailbox) async {
+    private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
         do {
             _ = try await jmapClient?.refreshSession()
@@ -309,20 +353,81 @@ final class MailViewModel: ObservableObject {
                 messages = .error(errorText("Mailbox has no JMAP ID"))
                 return
             }
+            let accountName = mailAccount?.account ?? ""
+            let cacheKey = mailbox.id
+            offlineNotice = nil
+
+            // 1) Incremental refresh via Email/queryChanges when a previous
+            //    query state and a cached snapshot are known.
+            if !forceFullRefresh,
+               let state = queryStates[cacheKey],
+               let snapshot = MailCache.loadMessages(account: accountName, mailboxId: cacheKey) {
+                do {
+                    let changes = try await api.queryEmailChanges(accountId: accId, sinceState: state, inMailboxId: jmapMailboxId)
+                    let removed = Set((changes["removed"] as? [String]) ?? [])
+                    let added = (changes["added"] as? [String]) ?? []
+                    var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
+                    if !added.isEmpty {
+                        let fetched = try await api.getEmails(accountId: accId, ids: added)
+                        emails = mergeEmails(existing: emails, incoming: fetched)
+                    }
+                    let newState = changes.optString("newQueryState") ?? state
+                    queryStates[cacheKey] = newState
+                    MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
+                    messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                    return
+                } catch {
+                    // Incremental path failed - fall through to a full refresh.
+                }
+            }
+
+            // 2) Full refresh.
             let resp = try await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId, limit: 100)
             let ids = (resp["ids"] as? [String]) ?? []
+            let state = resp.optString("queryState")
+            queryStates[cacheKey] = state
             guard !ids.isEmpty else {
                 messages = .success([])
+                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: [], queryState: state)
                 return
             }
             let list = try await api.getEmails(accountId: accId, ids: ids)
-            let msgList = list.map {
-                JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
-            }
-            messages = .success(msgList)
+            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: list, queryState: state)
+            messages = .success(list.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
         } catch {
+            // Offline: show the last cached state.
+            if let snapshot = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {
+                let accId = mailbox.accountId
+                messages = .success(snapshot.emails.map {
+                    JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
+                })
+                offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
+                return
+            }
             messages = .error(errorText(error.localizedDescription))
         }
+    }
+
+    /// Pull-to-refresh: always a full query so read/unread states stay fresh.
+    func refreshMessages() async {
+        guard let mailbox = currentMailbox else { return }
+        messages = .loading
+        if useJmap {
+            await syncMessagesJmap(mailbox, forceFullRefresh: true)
+        } else {
+            await syncMessagesImap(mailbox)
+        }
+    }
+
+    private func mergeEmails(existing: [[String: Any]], incoming: [[String: Any]]) -> [[String: Any]] {
+        var byId: [String: [String: Any]] = [:]
+        for email in existing {
+            if let id = email.optString("id") { byId[id] = email }
+        }
+        for email in incoming {
+            if let id = email.optString("id") { byId[id] = email }
+        }
+        return byId.values.sorted { ($0.optString("receivedAt") ?? "") > ($1.optString("receivedAt") ?? "") }
     }
 
     // MARK: - Detail
@@ -345,149 +450,295 @@ final class MailViewModel: ObservableObject {
         switch await client.fetchBody(mailboxPath: mailbox.path, uid: uid) {
         case let .success(b):
             body = .success(b)
-            if !message.isRead { await setRead(message, true) }
+            if !message.isRead { await setRead([message], true) }
         case let .failure(m):
             body = .error(errorText(m))
         }
     }
 
     private func openMessageJmap(_ message: MailMessage) async {
+        guard let json = await fetchMessageJson(message) else {
+            body = .error(errorText("Message not found"))
+            return
+        }
+        var mapped = JmapMapper.mapBody(json: json)
+        let accId = message.accountId
+        if mapped.plainText == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
+           let blobId = textPart.optString("blobId"), !blobId.isEmpty {
+            mapped = MessageBody(
+                plainText: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
+                html: mapped.html,
+                attachments: mapped.attachments
+            )
+        }
+        if mapped.html == nil, let htmlPart = (json["htmlBody"] as? [[String: Any]])?.first,
+           let blobId = htmlPart.optString("blobId"), !blobId.isEmpty {
+            mapped = MessageBody(
+                plainText: mapped.plainText,
+                html: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
+                attachments: mapped.attachments
+            )
+        }
+        body = .success(mapped)
+        if !message.isRead { await setRead([message], true) }
+    }
+
+    /// Fetches the full Email/get JSON for a message (Android-parity body
+    /// properties).
+    private func fetchMessageJson(_ message: MailMessage) async -> [String: Any]? {
         guard let api = jmapApi,
               let client = jmapClient,
               let session = try? await client.refreshSession()
-        else { return }
+        else { return nil }
         let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
-        do {
-            // Mirror the Android request exactly: only body part properties.
-            // Stalwart then returns either inline bodyValues (used as-is) or
-            // text/html blobIds, which are downloaded below.
-            let bodyProperties: [String] = ["partId", "blobId", "size", "type", "name"]
-            let list = try await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties)
-            if let json = list.first {
-                var mapped = JmapMapper.mapBody(json: json)
-                if mapped.plainText == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
-                   let blobId = textPart.optString("blobId"), !blobId.isEmpty {
-                    mapped = MessageBody(
-                        plainText: try? await downloadTextBlob(accountId: accId, blobId: blobId),
-                        html: mapped.html,
-                        attachments: mapped.attachments
-                    )
-                }
-                if mapped.html == nil, let htmlPart = (json["htmlBody"] as? [[String: Any]])?.first,
-                   let blobId = htmlPart.optString("blobId"), !blobId.isEmpty {
-                    mapped = MessageBody(
-                        plainText: mapped.plainText,
-                        html: try? await downloadTextBlob(accountId: accId, blobId: blobId),
-                        attachments: mapped.attachments
-                    )
-                }
-                body = .success(mapped)
-                if !message.isRead { await setRead(message, true) }
-            } else {
-                body = .error(errorText("Message not found"))
-            }
-        } catch {
-            body = .error(errorText(error.localizedDescription))
+        let bodyProperties: [String] = ["partId", "blobId", "size", "type", "name"]
+        guard let list = try? await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties) else {
+            return nil
         }
+        return list.first
     }
 
     private func downloadTextBlob(accountId: String, blobId: String) async throws -> String? {
         guard let client = jmapClient else { return nil }
         let data = try await client.downloadBlob(accountId: accountId, blobId: blobId, mimeType: "text/plain")
-        return String(data: data, encoding: .utf8)
+        return String(data: data, encoding: .utf8)?.normalizedLineEndings()
     }
 
-    // MARK: - Flags
+    // MARK: - Flags (read/unread, flagged)
 
-    func setRead(_ message: MailMessage, _ read: Bool) async {
+    func setRead(_ messagesToMark: [MailMessage], _ read: Bool) async {
+        guard let first = messagesToMark.first else { return }
         if useJmap {
             guard let api = jmapApi,
                   let client = jmapClient,
                   let session = try? await client.refreshSession() else { return }
-            let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
+            let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
+            let ids = messagesToMark.map(\.emailId)
             if read {
-                _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$seen": true])
+                _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToAdd: ["$seen": true])
             } else {
-                _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$seen"])
+                _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToRemove: ["$seen"])
+            }
+            for message in messagesToMark {
+                applyLocalKeyword(message, keyword: "$seen", value: read)
             }
         } else {
-            guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-            _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .seen, value: read)
+            guard let client = imapClient, let mailbox = currentMailbox else { return }
+            for message in messagesToMark {
+                guard let uid = UInt64(message.emailId) else { continue }
+                _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .seen, value: read)
+                applyLocalKeyword(message, keyword: "$seen", value: read)
+            }
         }
     }
 
     func toggleFlagged(_ message: MailMessage) {
         Task {
+            let newValue = !message.isFlagged
             if useJmap {
                 guard let api = jmapApi,
                       let client = jmapClient,
                       let session = try? await client.refreshSession() else { return }
                 let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
-                if message.isFlagged {
-                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$flagged"])
-                } else {
+                if newValue {
                     _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$flagged": true])
+                } else {
+                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$flagged"])
                 }
             } else {
                 guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
-                _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .flagged, value: !message.isFlagged)
+                _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .flagged, value: newValue)
             }
-            if currentMailbox != nil {
-                await syncMessages()
-            } else if !lastSearchQuery.isEmpty {
+            applyLocalKeyword(message, keyword: "$flagged", value: newValue)
+            if currentMailbox == nil, !lastSearchQuery.isEmpty {
                 await search(lastSearchQuery)
             }
         }
     }
 
-    func delete(_ message: MailMessage) {
+    /// Updates the in-memory message (list + detail + search results) and the
+    /// cached snapshot for a keyword change.
+    private func applyLocalKeyword(_ message: MailMessage, keyword: String, value: Bool) {
+        var updated = message
+        if keyword == "$seen" {
+            updated.isRead = value
+        } else if keyword == "$flagged" {
+            updated.isFlagged = value
+        }
+        updateLocalMessage(updated)
+
+        // Mirror the change into the cached snapshot.
+        let accountName = mailAccount?.account ?? ""
+        guard let snapshot = MailCache.loadMessages(account: accountName, mailboxId: message.mailboxId) else { return }
+        var emails = snapshot.emails
+        for i in emails.indices where emails[i].optString("id") == message.emailId {
+            var keywords = emails[i]["keywords"] as? [String: Any] ?? [:]
+            keywords[keyword] = value
+            emails[i]["keywords"] = keywords
+        }
+        MailCache.saveMessages(account: accountName, mailboxId: message.mailboxId, emails: emails, queryState: snapshot.queryState)
+    }
+
+    private func updateLocalMessage(_ updated: MailMessage) {
+        if case var .success(list) = messages, let idx = list.firstIndex(where: { $0.id == updated.id }) {
+            list[idx] = updated
+            messages = .success(list)
+        }
+        if case var .success(results) = searchResults, let idx = results.firstIndex(where: { $0.id == updated.id }) {
+            results[idx] = updated
+            searchResults = .success(results)
+        }
+    }
+
+    // MARK: - Move / Delete
+
+    func delete(_ messagesToDelete: [MailMessage]) {
         Task {
+            guard let first = messagesToDelete.first else { return }
             if useJmap {
                 guard let api = jmapApi,
                       let client = jmapClient,
                       let session = try? await client.refreshSession() else { return }
-                let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
+                let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 // Trash must live in the same JMAP account as the message.
                 if let trash = allMailboxes.first(where: { $0.kind == .trash && $0.accountId == accId }),
                    let trashJmapId = trash.jmapId,
                    trashJmapId != currentMailbox?.jmapId {
-                    _ = try? await api.moveEmails(accountId: accId, emailIds: [message.emailId], targetMailboxId: trashJmapId)
+                    _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId), targetMailboxId: trashJmapId)
                 } else {
-                    _ = try? await api.deleteEmails(accountId: accId, emailIds: [message.emailId])
+                    _ = try? await api.deleteEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId))
                 }
             } else {
                 guard let mailbox = currentMailbox,
-                      let client = imapClient,
-                      let uid = UInt64(message.emailId) else { return }
-                if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {
-                    _ = await client.move(mailboxPath: mailbox.path, uid: uid, targetPath: trash.path)
+                      let client = imapClient else { return }
+                for message in messagesToDelete {
+                    guard let uid = UInt64(message.emailId) else { continue }
+                    if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {
+                        _ = await client.move(mailboxPath: mailbox.path, uid: uid, targetPath: trash.path)
+                    }
                 }
             }
-            if let mailbox = currentMailbox {
-                route = .messages(mailbox: mailbox)
-                await syncMessages()
-            } else if !lastSearchQuery.isEmpty {
-                await search(lastSearchQuery)
-            }
+            afterListMutation(messagesToDelete.map(\.emailId))
         }
     }
 
-    /// Moves a message to another mailbox of the same JMAP account
+    /// Moves messages to another mailbox of the same JMAP account
     /// (mirrors the Android move action).
-    func move(_ message: MailMessage, to target: Mailbox) {
+    func move(_ messagesToMove: [MailMessage], to target: Mailbox) {
         Task {
-            guard useJmap, let api = jmapApi,
-                  let client = jmapClient,
-                  let session = try? await client.refreshSession() else { return }
-            let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
-            guard let targetJmapId = target.jmapId, !targetJmapId.isEmpty else { return }
-            _ = try? await api.moveEmails(accountId: accId, emailIds: [message.emailId], targetMailboxId: targetJmapId)
-            if currentMailbox != nil {
-                await syncMessages()
-            } else if !lastSearchQuery.isEmpty {
-                await search(lastSearchQuery)
+            guard let first = messagesToMove.first else { return }
+            if useJmap {
+                guard let api = jmapApi,
+                      let client = jmapClient,
+                      let session = try? await client.refreshSession() else { return }
+                let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
+                guard let targetJmapId = target.jmapId, !targetJmapId.isEmpty else { return }
+                _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToMove.map(\.emailId), targetMailboxId: targetJmapId)
+            } else {
+                guard let mailbox = currentMailbox, let client = imapClient else { return }
+                for message in messagesToMove {
+                    guard let uid = UInt64(message.emailId) else { continue }
+                    _ = await client.move(mailboxPath: mailbox.path, uid: uid, targetPath: target.path)
+                }
             }
+            afterListMutation(messagesToMove.map(\.emailId))
         }
+    }
+
+    private func afterListMutation(_ removedIds: [String]) {
+        // Remove from the visible list (server confirms the change).
+        if case var .success(list) = messages {
+            list.removeAll { removedIds.contains($0.emailId) }
+            messages = .success(list)
+        }
+        let removed = Set(removedIds)
+        if case var .success(results) = searchResults {
+            results.removeAll { removed.contains($0.emailId) }
+            searchResults = .success(results)
+        }
+        if let mailbox = currentMailbox {
+            route = .messages(mailbox: mailbox)
+            Task { await syncMessages() }
+        } else if !lastSearchQuery.isEmpty {
+            Task { await search(lastSearchQuery) }
+        }
+    }
+
+    // MARK: - Compose (new / reply / reply-all / forward)
+
+    func startCompose(mode: MailComposeContext.ComposeMode = .new, message: MailMessage? = nil) {
+        composeContext = nil
+        Task {
+            var quote = ""
+            var attachments: [OutgoingAttachment] = []
+            var to: [String] = []
+            var cc: [String] = []
+            var subject = ""
+
+            if let message {
+                if let json = await fetchMessageJson(message) {
+                    var plain = JmapMapper.mapBody(json: json).plainText
+                    if plain == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
+                       let blobId = textPart.optString("blobId"), !blobId.isEmpty {
+                        plain = try? await downloadTextBlob(accountId: message.accountId, blobId: blobId)
+                    }
+                    quote = buildQuote(for: message, plain: plain ?? "")
+                    if mode == .forward {
+                        attachments = await downloadOriginalAttachments(message, json: json)
+                    }
+                }
+                switch mode {
+                case .reply:
+                    to = [message.fromAddress]
+                case .replyAll:
+                    to = [message.fromAddress]
+                    var others: [String] = message.toAddresses.commaSeparated() + message.ccAddresses.commaSeparated()
+                    others.removeAll { $0.caseInsensitiveCompare(message.fromAddress) == .orderedSame || $0.caseInsensitiveCompare(fromAddress) == .orderedSame }
+                    cc = Array(Set(others))
+                case .forward:
+                    subject = message.subject.hasPrefix("Fwd:") ? message.subject : "Fwd: \(message.subject)"
+                case .new:
+                    break
+                }
+                if mode == .reply || mode == .replyAll {
+                    subject = message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)"
+                }
+            }
+
+            composeContext = MailComposeContext(
+                mode: mode,
+                message: message,
+                to: to,
+                cc: cc,
+                subject: subject,
+                quoteBody: quote,
+                preAttachments: attachments
+            )
+        }
+    }
+
+    private func buildQuote(for message: MailMessage, plain: String) -> String {
+        let dateFormatter = DateFormatter()
+        dateFormatter.dateStyle = .medium
+        dateFormatter.timeStyle = .short
+        let header = String(format: NSLocalizedString("_mail_quote_header_", comment: ""), dateFormatter.string(from: message.dateSent), message.displayFrom)
+        guard !plain.isEmpty else { return "" }
+        let quoted = plain
+            .normalizedLineEndings()
+            .split(separator: "\n", omittingEmptySubsequences: false)
+            .map { "> \($0)" }
+            .joined(separator: "\n")
+        return "\n\n\(header)\n\(quoted)"
+    }
+
+    private func downloadOriginalAttachments(_ message: MailMessage, json: [String: Any]) async -> [OutgoingAttachment] {
+        let metas = JmapMapper.mapBody(json: json).attachments
+        var result: [OutgoingAttachment] = []
+        for meta in metas {
+            guard let url = await downloadAttachment(meta, for: message) else { continue }
+            result.append(OutgoingAttachment(name: meta.name, mimeType: meta.mimeType, fileURL: url))
+        }
+        return result
     }
 
     // MARK: - Search
@@ -530,7 +781,7 @@ final class MailViewModel: ObservableObject {
     // MARK: - Attachments
 
     /// Downloads an attachment blob into the app cache and returns the file
-    /// URL for preview (QuickLook) or sharing.
+    /// URL for preview (QuickLook), sharing or forwarding.
     func downloadAttachment(_ attachment: AttachmentMeta, for message: MailMessage) async -> URL? {
         guard useJmap, let client = jmapClient else { return nil }
         let accId = message.accountId.isEmpty
@@ -568,6 +819,7 @@ final class MailViewModel: ObservableObject {
             isSending = false
             switch result {
             case .success:
+                composeContext = nil
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,
@@ -678,5 +930,11 @@ final class MailViewModel: ObservableObject {
         case .trash: return 4
         case .regular: return 5
         }
+    }
+}
+
+extension String {
+    func commaSeparated() -> [String] {
+        split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 }

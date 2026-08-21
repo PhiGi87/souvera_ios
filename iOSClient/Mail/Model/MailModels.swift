@@ -47,6 +47,7 @@ struct MailMessage: Identifiable {
     let fromAddress: String
     let fromDisplayName: String?
     let toAddresses: String
+    let ccAddresses: String
     let dateSent: Date
     var isRead: Bool
     var isFlagged: Bool
@@ -98,4 +99,23 @@ struct OutgoingAttachment: Identifiable {
 enum MailResult<T> {
     case success(T)
     case failure(String)
+}
+
+/// Context for the compose sheet: a new message or a reply/reply-all/forward
+/// with pre-filled recipients, subject, quoted body and (for forwards) the
+/// original attachments - the user can still remove them before sending.
+struct MailComposeContext: Identifiable {
+    enum ComposeMode {
+        case new, reply, replyAll, forward
+    }
+
+    let mode: ComposeMode
+    let message: MailMessage?
+    var to: [String]
+    var cc: [String]
+    var subject: String
+    var quoteBody: String
+    var preAttachments: [OutgoingAttachment]
+
+    var id: String { message?.id ?? "new" }
 }
