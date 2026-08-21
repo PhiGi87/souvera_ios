@@ -131,8 +131,11 @@ actor LinkOcsApi {
         req.httpBody = "flags=\(flags)&silent=false&recordingConsent=true".data(using: .utf8)
         let result = try? await session.data(for: req)
         let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
-        let body = result?.0.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
-        CallDebugLog.log("OcsApi", "joinCall http=\(status) body=\(body)")
+        var bodySnippet = ""
+        if let data = result?.0, let text = String(data: data, encoding: .utf8) {
+            bodySnippet = String(text.prefix(200))
+        }
+        CallDebugLog.log("OcsApi", "joinCall http=\(status) body=\(bodySnippet)")
     }
 
     func leaveCall(token: String) async {
