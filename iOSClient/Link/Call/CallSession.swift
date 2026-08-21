@@ -37,12 +37,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var mcuActive = false
     private var endedOnce = false
 
-    private let callFlags = 7
+    private let callFlags: Int
 
-    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks) {
+    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks, withVideo: Bool = true) {
         self.account = account
         self.token = token
         self.callbacks = callbacks
+        self.callFlags = withVideo ? 7 : 3 // FLAG_IN_CALL|WITH_AUDIO|WITH_VIDEO : IN_CALL|AUDIO
         self.api = LinkOcsApi(account: account)
         super.init()
     }

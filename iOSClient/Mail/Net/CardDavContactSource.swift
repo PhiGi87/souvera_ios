@@ -36,13 +36,23 @@ final class CardDavContactSource {
 
     // MARK: - Address book location
 
-    private func addressBookURL() -> URL? {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
+    /// DAV principal candidates: the full login (email) is the principal on
+    /// Souvera; some setups use the short userId instead. Both are tried.
+    private func principalCandidates() -> [String] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        var candidates = [tbl.user]
+        if !tbl.userId.isEmpty, tbl.userId != tbl.user {
+            candidates.append(tbl.userId)
+        }
+        return candidates.map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+    }
+
+    private func addressBookURLs() -> [URL] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        // The DAV principal on Souvera is the full login (email), not the
-        // short userId.
-        let principal = tbl.user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tbl.user
-        return URL(string: "\(root)/remote.php/dav/addressbooks/users/\(principal)/contacts/")
+        return principalCandidates().compactMap {
+            URL(string: "\(root)/remote.php/dav/addressbooks/users/\($0)/contacts/")
+        }
     }
 
     private func authorizedRequest(for url: URL, method: String, contentType: String? = nil) -> URLRequest {
@@ -62,14 +72,18 @@ final class CardDavContactSource {
     // MARK: - Reading
 
     func fetchCards(limit: Int = 500) async -> [CardDavCard] {
-        guard let url = addressBookURL() else { return [] }
-        var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
-        req.setValue("1", forHTTPHeaderField: "Depth")
-        req.httpBody = Self.reportBody.data(using: .utf8)
+        for url in addressBookURLs() {
+            var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
+            req.setValue("1", forHTTPHeaderField: "Depth")
+            req.httpBody = Self.reportBody.data(using: .utf8)
 
-        guard let (data, response) = try? await urlSession.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 207 else { return [] }
-        return Self.parseCards(from: data, limit: limit)
+            guard let (data, response) = try? await urlSession.data(for: req) else { continue }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            JmapLog.write("CardDAV addressbook-query \(url.absoluteString) -> \(status)")
+            guard status == 207 else { continue }
+            return Self.parseCards(from: data, limit: limit)
+        }
+        return []
     }
 
     /// Lightweight lookup used by the mail composer's recipient suggestions.
@@ -96,7 +110,7 @@ final class CardDavContactSource {
 
     @discardableResult
     func create(_ contact: ParsedContact) async -> CardDavCard? {
-        guard let base = addressBookURL() else { return nil }
+        guard let base = addressBookURLs().first else { return nil }
         let uid = contact.uid.isEmpty ? UUID().uuidString.lowercased() : contact.uid
         let href = "\(uid).vcf"
         guard let url = URL(string: href, relativeTo: base)?.absoluteURL else { return nil }
@@ -109,7 +123,7 @@ final class CardDavContactSource {
     }
 
     func update(_ card: CardDavCard, contact: ParsedContact) async -> Bool {
-        guard let base = addressBookURL(),
+        guard let base = addressBookURLs().first,
               let url = URL(string: card.href, relativeTo: base)?.absoluteURL else { return false }
         var req = authorizedRequest(for: url, method: "PUT", contentType: "text/vcard; charset=utf-8")
         if let etag = card.etag {
@@ -121,7 +135,7 @@ final class CardDavContactSource {
     }
 
     func delete(_ card: CardDavCard) async -> Bool {
-        guard let base = addressBookURL(),
+        guard let base = addressBookURLs().first,
               let url = URL(string: card.href, relativeTo: base)?.absoluteURL else { return false }
         var req = authorizedRequest(for: url, method: "DELETE")
         if let etag = card.etag {

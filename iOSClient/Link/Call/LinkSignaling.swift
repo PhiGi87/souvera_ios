@@ -66,8 +66,10 @@ struct TurnServer: Decodable {
 }
 
 /// Lightweight call-scoped logger; never logs SDP bodies or tickets.
+/// Also mirrored into the app's mail/dav log file for field diagnostics.
 enum CallDebugLog {
     static func log(_ tag: String, _ message: String) {
         nkLog(tag: "LINK-CALL", emoji: .debug, message: "[\(tag)] \(message)", consoleOnly: true)
+        JmapLog.write("[LINK-CALL] [\(tag)] \(message)")
     }
 }

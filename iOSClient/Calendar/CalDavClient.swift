@@ -30,13 +30,23 @@ final class CalDavClient {
 
     // MARK: - Calendar discovery
 
-    private func calendarHomeURL() -> URL? {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
+    /// DAV principal candidates: the full login (email) is the principal on
+    /// Souvera; some setups use the short userId instead. Both are tried.
+    private func principalCandidates() -> [String] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        var candidates = [tbl.user]
+        if !tbl.userId.isEmpty, tbl.userId != tbl.user {
+            candidates.append(tbl.userId)
+        }
+        return candidates.map { $0.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? $0 }
+    }
+
+    private func calendarHomeURLs() -> [URL] {
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        // The DAV principal on Souvera is the full login (email), not the
-        // short userId.
-        let principal = tbl.user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tbl.user
-        return URL(string: "\(root)/remote.php/dav/calendars/\(principal)/")
+        return principalCandidates().compactMap {
+            URL(string: "\(root)/remote.php/dav/calendars/\($0)/")
+        }
     }
 
     private func authorizedRequest(for url: URL, method: String, contentType: String? = nil) -> URLRequest {
@@ -54,14 +64,21 @@ final class CalDavClient {
     }
 
     func fetchCalendars() async -> [CalDavCalendar] {
-        guard let home = calendarHomeURL() else { return [] }
-        var req = authorizedRequest(for: home, method: "PROPFIND")
-        req.setValue("1", forHTTPHeaderField: "Depth")
-        req.httpBody = Self.propfindBody.data(using: .utf8)
-        guard let (data, response) = try? await urlSession.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 207,
-              let xml = String(data: data, encoding: .utf8) else { return [] }
+        for home in calendarHomeURLs() {
+            var req = authorizedRequest(for: home, method: "PROPFIND")
+            req.setValue("1", forHTTPHeaderField: "Depth")
+            req.httpBody = Self.propfindBody.data(using: .utf8)
+            guard let (data, response) = try? await urlSession.data(for: req) else { continue }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            JmapLog.write("CalDAV PROPFIND \(home.absoluteString) -> \(status)")
+            guard status == 207,
+                  let xml = String(data: data, encoding: .utf8) else { continue }
+            return Self.parseCalendars(from: xml)
+        }
+        return []
+    }
 
+    static func parseCalendars(from xml: String) -> [CalDavCalendar] {
         var calendars: [CalDavCalendar] = []
         let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
         guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
@@ -82,13 +99,15 @@ final class CalDavClient {
     // MARK: - Events for a time range
 
     func fetchEvents(calendarHref: String, start: Date, end: Date) async -> [CalDavEventEntry] {
-        guard let home = calendarHomeURL(),
+        guard let home = calendarHomeURLs().first,
               let url = URL(string: calendarHref, relativeTo: home)?.absoluteURL else { return [] }
         var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
         req.setValue("1", forHTTPHeaderField: "Depth")
         req.httpBody = Self.reportBody(start: start, end: end).data(using: .utf8)
-        guard let (data, response) = try? await urlSession.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 207,
+        guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(status)")
+        guard status == 207,
               let xml = String(data: data, encoding: .utf8) else { return [] }
 
         var events: [CalDavEventEntry] = []
@@ -118,7 +137,7 @@ final class CalDavClient {
 
     @discardableResult
     func createEvent(calendarHref: String, ics: String, uid: String) async -> CalDavEventEntry? {
-        guard let home = calendarHomeURL(),
+        guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: calendarHref, relativeTo: home)?.absoluteURL,
               let url = URL(string: "\(uid).ics", relativeTo: calendarURL)?.absoluteURL else { return nil }
         var req = authorizedRequest(for: url, method: "PUT", contentType: "text/calendar; charset=utf-8")
@@ -130,7 +149,7 @@ final class CalDavClient {
     }
 
     func updateEvent(_ entry: CalDavEventEntry, ics: String) async -> Bool {
-        guard let home = calendarHomeURL(),
+        guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,
               let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return false }
         var req = authorizedRequest(for: url, method: "PUT", contentType: "text/calendar; charset=utf-8")
@@ -143,7 +162,7 @@ final class CalDavClient {
     }
 
     func deleteEvent(_ entry: CalDavEventEntry) async -> Bool {
-        guard let home = calendarHomeURL(),
+        guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,
               let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return false }
         var req = authorizedRequest(for: url, method: "DELETE")

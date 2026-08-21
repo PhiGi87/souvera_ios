@@ -2,14 +2,25 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // File browser for attaching files from the user's Souvera/Nextcloud account
-// to a mail. Lists the WebDAV folder tree (readFolderAsync), lets the user
-// drill into folders and downloads the picked file into a temporary location.
+// to a mail or sharing them into a chat. Lists the WebDAV folder tree
+// (readFolderAsync), lets the user drill into folders and downloads the
+// picked file into a temporary location. The selection carries the server
+// fileId so chat shares can reference the original file.
 
 import SwiftUI
 import NextcloudKit
 
+/// A picked Souvera file: the local copy plus the server-side identity.
+struct NextcloudFileSelection {
+    let localURL: URL
+    let fileId: String
+    let name: String
+    let size: Int64
+    let mimeType: String
+}
+
 struct NextcloudFilePickerView: View {
-    let onSelect: (URL?) -> Void
+    let onSelect: (NextcloudFileSelection?) -> Void
     @Environment(\.dismiss) private var dismiss
 
     @State private var path = ""
@@ -133,7 +144,13 @@ struct NextcloudFilePickerView: View {
         } progressHandler: { _ in
         }
         if results.nkError == .success {
-            onSelect(tmp)
+            onSelect(NextcloudFileSelection(
+                localURL: tmp,
+                fileId: metadata.fileId,
+                name: metadata.fileName,
+                size: metadata.size,
+                mimeType: metadata.contentType.isEmpty ? "application/octet-stream" : metadata.contentType
+            ))
             dismiss()
         } else {
             errorMessage = results.nkError.errorDescription

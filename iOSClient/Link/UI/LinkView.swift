@@ -5,6 +5,7 @@
 // link/ui Compose screens (ConversationListScreen, ChatScreen) but idiomatic SwiftUI.
 
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Root Link screen; switches between the conversation list and an open chat.
 struct LinkView: View {
@@ -184,12 +185,41 @@ struct LinkChatView: View {
     let token: String
     let title: String
     @State private var draft = ""
+    @State private var showFilePicker = false
+    @State private var showNextcloudPicker = false
 
     var body: some View {
         VStack(spacing: 0) {
             messageList
             Divider()
             composer
+        }
+        .fileImporter(
+            isPresented: $showFilePicker,
+            allowedContentTypes: [.item],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case let .success(urls):
+                guard let url = urls.first else { return }
+                let didStart = url.startAccessingSecurityScopedResource()
+                let data = try? Data(contentsOf: url)
+                if didStart { url.stopAccessingSecurityScopedResource() }
+                guard let data else { return }
+                viewModel.sendAttachment(
+                    data: data,
+                    fileName: url.lastPathComponent,
+                    mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                )
+            case .failure:
+                break
+            }
+        }
+        .sheet(isPresented: $showNextcloudPicker) {
+            NextcloudFilePickerView { selection in
+                guard let selection else { return }
+                viewModel.shareAttachment(selection)
+            }
         }
     }
 
@@ -211,19 +241,46 @@ struct LinkChatView: View {
                     }
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
+                    // Force a fresh layout pass whenever the message set
+                    // changes - otherwise new messages sometimes do not
+                    // appear until the user interacts with the list.
+                    .id("stack_\(items.count)_\(items.last?.id ?? 0)")
                 }
                 .onChange(of: items.count) { _, _ in
-                    if let last = items.last { withAnimation { proxy.scrollTo(last.id, anchor: .bottom) } }
+                    scrollToBottom(proxy, items: items)
                 }
                 .onAppear {
-                    if let last = items.last { proxy.scrollTo(last.id, anchor: .bottom) }
+                    scrollToBottom(proxy, items: items)
                 }
             }
         }
     }
 
+    private func scrollToBottom(_ proxy: ScrollViewProxy, items: [LinkChatMessage]) {
+        guard let last = items.last else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+        }
+    }
+
     private var composer: some View {
         HStack(spacing: 8) {
+            Menu {
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label(NSLocalizedString("_link_attach_file_", comment: ""), systemImage: "doc.badge.plus")
+                }
+                Button {
+                    showNextcloudPicker = true
+                } label: {
+                    Label(NSLocalizedString("_link_share_file_", comment: ""), systemImage: "building.columns")
+                }
+            } label: {
+                Image(systemName: "paperclip")
+                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                    .frame(width: 30, height: 30)
+            }
             TextField(NSLocalizedString("_link_message_", comment: ""), text: $draft, axis: .vertical)
                 .textFieldStyle(.roundedBorder)
                 .lineLimit(1...5)

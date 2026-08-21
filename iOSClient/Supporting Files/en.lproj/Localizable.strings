@@ -908,3 +908,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_calendar_create_talk_"         = "Create Talk channel";
 "_calendar_open_talk_"           = "Open";
 "_contacts_directory_users_"     = "Souvera users";
+"_calendar_talk_error_"          = "Could not create the Talk channel. Please try again.";
+"_link_attach_file_"             = "Attach file";
+"_link_share_file_"              = "Share Souvera file";

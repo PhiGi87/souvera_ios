@@ -256,7 +256,8 @@ final class MailViewModel: ObservableObject {
                 return
             }
             // Offline: rebuild the folder list from the cache when possible.
-            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
+            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? ""),
+               isOfflineError(error) {
                 let boxes = cached.map { mailbox(from: $0) }
                 let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
                 allMailboxes = sorted
@@ -265,6 +266,7 @@ final class MailViewModel: ObservableObject {
                 if let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
                 return
             }
+            JmapLog.write("mailbox load failed: \(error.localizedDescription)")
             let summary = await jmapClient?.diagnosticSummary() ?? ""
             let message = error.localizedDescription + (summary.isEmpty ? "" : "\n\n\(summary)")
             mailboxes = .error(errorText(message))
@@ -446,17 +448,41 @@ final class MailViewModel: ObservableObject {
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: list, queryState: state)
             messages = .success(list.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
         } catch {
-            // Offline: show the last cached state.
-            if let snapshot = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {
+            // Only real connectivity problems count as "offline"; anything
+            // else surfaces with its actual error text.
+            if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id),
+               isOfflineError(error) {
                 let accId = mailbox.accountId
-                messages = .success(snapshot.emails.map {
+                messages = .success(cached.emails.map {
                     JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
                 })
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
                 return
             }
+            JmapLog.write("sync failed for \(mailbox.id): \(error.localizedDescription)")
             messages = .error(errorText(error.localizedDescription))
         }
+    }
+
+    /// True for network-level failures (no/slow connection), false for
+    /// protocol or server errors that should be shown as-is.
+    private func isOfflineError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .timedOut,
+                 .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+                 .internationalRoamingOff, .dataNotAllowed, .callIsActive:
+                return true
+            default:
+                return false
+            }
+        }
+        if let jmapError = error as? JmapException {
+            if case .protocolError(let message) = jmapError {
+                return message.contains("timed out")
+            }
+        }
+        return false
     }
 
     /// Pull-to-refresh: always a full query so read/unread states stay fresh.

@@ -123,13 +123,67 @@ actor LinkOcsApi {
     }
 
     func joinCall(token: String, flags: Int) async {
-        let req = signed(url: "\(base)/api/v4/call/\(token)?flags=\(flags)", method: "POST")
-        _ = try? await session.data(for: req)
+        // Talk expects form-encoded fields; recordingConsent is mandatory
+        // when the server enforces recording consent (otherwise 400
+        // {"error":"consent"} and no call is opened).
+        var req = signed(url: "\(base)/api/v4/call/\(token)", method: "POST")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "flags=\(flags)&silent=false&recordingConsent=true".data(using: .utf8)
+        let (data, response) = try? await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let body = data.flatMap { String(data: $0, encoding: .utf8) }?.prefix(200) ?? ""
+        CallDebugLog.log("OcsApi", "joinCall http=\(status) body=\(body)")
     }
 
     func leaveCall(token: String) async {
         let req = signed(url: "\(base)/api/v4/call/\(token)", method: "DELETE")
         _ = try? await session.data(for: req)
+    }
+
+    /// Uploads a local file into the chat (multipart POST).
+    func uploadFileToChat(token: String, data: Data, fileName: String, mimeType: String) async -> Bool {
+        guard let url = URL(string: "\(base)/api/v4/chat/\(token)") else { return false }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
+        req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        let boundary = "SouveraBoundary\(UUID().uuidString)"
+        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+
+        var body = Data()
+        func append(_ string: String) {
+            if let chunk = string.data(using: .utf8) { body.append(chunk) }
+        }
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"message\"\r\n\r\n\r\n")
+        append("--\(boundary)\r\n")
+        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n")
+        append("Content-Type: \(mimeType)\r\n\r\n")
+        body.append(data)
+        append("\r\n--\(boundary)--\r\n")
+        req.httpBody = body
+
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "uploadFileToChat http=\(status)")
+        return (200..<300).contains(status)
+    }
+
+    /// Shares an existing Souvera/Nextcloud file into the chat.
+    func shareFileToChat(token: String, fileId: String, name: String, size: Int64, mimeType: String) async -> Bool {
+        let metaData = "{\"type\":\"file\",\"id\":\"\(fileId)\",\"name\":\"\(name)\",\"size\":\(size),\"mimetype\":\"\(mimeType)\"}"
+        var components = URLComponents(string: "\(base)/api/v4/chat/\(token)/share")!
+        components.queryItems = [
+            URLQueryItem(name: "objectType", value: "file"),
+            URLQueryItem(name: "fileId", value: fileId),
+            URLQueryItem(name: "metaData", value: metaData),
+            URLQueryItem(name: "referenceId", value: UUID().uuidString)
+        ]
+        let req = signed(url: components.url?.absoluteString ?? "", method: "POST")
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "shareFileToChat http=\(status)")
+        return (200..<300).contains(status)
     }
 
     private struct JoinRoomData: Decodable { let sessionId: String? }

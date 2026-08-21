@@ -38,7 +38,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         setupVideoViews()
         setupControls()
 
-        let session = CallSession(account: account, token: token, callbacks: self)
+        let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn)
         self.session = session
         session.start()
 

@@ -248,7 +248,7 @@ private struct MailboxTreeRow: View {
         VStack(spacing: 0) {
             HStack(spacing: 0) {
                 if node.children.isEmpty {
-                    Color.clear.frame(width: 24, height: 1)
+                    Color.clear.frame(width: 28, height: 1)
                 } else {
                     Button {
                         if isExpanded {
@@ -258,9 +258,9 @@ private struct MailboxTreeRow: View {
                         }
                     } label: {
                         Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                            .font(.caption2)
+                            .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .frame(width: 24)
+                            .frame(width: 28, height: 40)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -268,12 +268,13 @@ private struct MailboxTreeRow: View {
                 Button {
                     viewModel.openMailbox(node.mailbox)
                 } label: {
-                    HStack {
+                    HStack(spacing: 8) {
                         Image(systemName: icon(for: node.mailbox.kind))
-                            .font(.footnote)
+                            .font(.body)
                             .foregroundStyle(Color(NCBrandColor.shared.customer))
-                            .frame(width: 20)
+                            .frame(width: 24)
                         Text(node.mailbox.displayName)
+                            .font(.body)
                         Spacer()
                         if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
                             Text("\(node.totalUnread)").foregroundStyle(.secondary)
@@ -282,10 +283,12 @@ private struct MailboxTreeRow: View {
                         }
                     }
                     .padding(.leading, CGFloat(depth) * 14)
+                    .frame(minHeight: 40)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
             }
+            .padding(.vertical, 2)
             if isExpanded {
                 ForEach(node.children) { child in
                     MailboxTreeRow(viewModel: viewModel, node: child, depth: depth + 1)
@@ -342,24 +345,24 @@ private struct MailMessageListView: View {
                 }
                 .listStyle(.plain)
                 .refreshable { await viewModel.refreshMessages() }
-                .sheet(item: Binding(
-                    get: { moveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
-                    set: { if $0 == nil { moveTarget = nil } }
-                )) { state in
-                    MailMovePickerView(
-                        title: state.messages.count == 1
-                            ? (state.messages.first?.subject.isEmpty == false ? state.messages.first!.subject : NSLocalizedString("_mail_no_subject_", comment: ""))
-                            : "\(state.messages.count)",
-                        mailboxes: state.mailboxes,
-                        onSelect: { target in
-                            viewModel.move(state.messages, to: target)
-                            editing = false
-                            selected.removeAll()
-                            moveTarget = nil
-                        }
-                    )
-                }
             }
+        }
+        .sheet(item: Binding(
+            get: { moveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
+            set: { if $0 == nil { moveTarget = nil } }
+        )) { state in
+            MailMovePickerView(
+                title: state.messages.count == 1
+                    ? (state.messages.first?.subject.isEmpty == false ? state.messages.first!.subject : NSLocalizedString("_mail_no_subject_", comment: ""))
+                    : "\(state.messages.count)",
+                mailboxes: state.mailboxes,
+                onSelect: { target in
+                    viewModel.move(state.messages, to: target)
+                    editing = false
+                    selected.removeAll()
+                    moveTarget = nil
+                }
+            )
         }
         .toolbar {
             ToolbarItemGroup(placement: .topBarTrailing) {
@@ -378,29 +381,40 @@ private struct MailMessageListView: View {
         }
         .safeAreaInset(edge: .bottom) {
             if editing && !selected.isEmpty {
-                HStack {
+                HStack(spacing: 0) {
                     Button {
-                        Task { await viewModel.setRead(selectedMessages, true) }
-                        selected.removeAll()
+                        let messages = selectedMessages
+                        Task {
+                            await viewModel.setRead(messages, true)
+                            selected.removeAll()
+                            editing = false
+                        }
                     } label: {
                         selectionAction(icon: "envelope.open", label: NSLocalizedString("_mail_mark_read_", comment: ""))
                     }
                     Button {
-                        Task { await viewModel.setRead(selectedMessages, false) }
-                        selected.removeAll()
+                        let messages = selectedMessages
+                        Task {
+                            await viewModel.setRead(messages, false)
+                            selected.removeAll()
+                            editing = false
+                        }
                     } label: {
                         selectionAction(icon: "envelope", label: NSLocalizedString("_mail_mark_unread_", comment: ""))
                     }
                     Button {
-                        if let first = selectedMessages.first {
-                            moveTarget = (selectedMessages, viewModel.availableMailboxes.filter { $0.accountId == first.accountId })
+                        let messages = selectedMessages
+                        if let first = messages.first {
+                            moveTarget = (messages, viewModel.availableMailboxes.filter { $0.accountId == first.accountId })
                         }
                     } label: {
                         selectionAction(icon: "folder", label: NSLocalizedString("_mail_move_", comment: ""))
                     }
                     Button(role: .destructive) {
-                        viewModel.delete(selectedMessages)
+                        let messages = selectedMessages
+                        viewModel.delete(messages)
                         selected.removeAll()
+                        editing = false
                     } label: {
                         selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
                     }
@@ -420,7 +434,8 @@ private struct MailMessageListView: View {
             Image(systemName: icon)
             Text(label).font(.caption2).lineLimit(1)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, minHeight: 44)
+        .contentShape(Rectangle())
     }
 
     private var selectedMessages: [MailMessage] {
@@ -834,8 +849,10 @@ struct MailComposeView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 if viewModel.fromAddresses.count > 1 {
-                    HStack {
-                        Text(NSLocalizedString("_mail_from_", comment: "")).foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Text(NSLocalizedString("_mail_from_", comment: ""))
+                            .foregroundStyle(.secondary)
+                            .frame(width: 64, alignment: .leading)
                         Picker("", selection: $selectedFromIndex) {
                             ForEach(Array(viewModel.fromAddresses.enumerated()), id: \.offset) { _, addr in
                                 Text(addr).tag(viewModel.fromAddresses.firstIndex(of: addr) ?? 0)
@@ -859,7 +876,9 @@ struct MailComposeView: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text(NSLocalizedString("_mail_subject_", comment: "")).foregroundStyle(.secondary)
+                    Text(NSLocalizedString("_mail_subject_", comment: ""))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 64, alignment: .leading)
                     TextField("", text: $subject)
                     if !showCcBcc {
                         Button {
@@ -867,6 +886,7 @@ struct MailComposeView: View {
                         } label: {
                             Image(systemName: "chevron.down.circle")
                                 .foregroundStyle(.secondary)
+                                .frame(width: 28, height: 28)
                         }
                     }
                 }
@@ -876,11 +896,19 @@ struct MailComposeView: View {
 
                 // The body fills all remaining space and grows with the
                 // text instead of scrolling inside a small box.
-                TextField(NSLocalizedString("_mail_message_", comment: ""), text: $bodyText, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
+                ScrollView {
+                    ZStack(alignment: .topLeading) {
+                        if bodyText.isEmpty {
+                            Text(NSLocalizedString("_mail_message_", comment: ""))
+                                .foregroundStyle(.tertiary)
+                                .padding(.top, 8)
+                        }
+                        AutoGrowingTextView(text: $bodyText)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 4)
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 attachmentsBar
             }
@@ -899,12 +927,12 @@ struct MailComposeView: View {
                 }
             }
             .sheet(isPresented: $showNextcloudPicker) {
-                NextcloudFilePickerView { url in
-                    guard let url else { return }
+                NextcloudFilePickerView { selection in
+                    guard let selection else { return }
                     attachments.append(OutgoingAttachment(
-                        name: url.lastPathComponent,
-                        mimeType: UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
-                        fileURL: url
+                        name: selection.name,
+                        mimeType: selection.mimeType,
+                        fileURL: selection.localURL
                     ))
                 }
             }
@@ -1001,9 +1029,11 @@ struct MailComposeView: View {
     }
 
     private func recipientField(label: String, text: Binding<String>, kind: RecipientFieldKind) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(label).foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 64, alignment: .leading)
                 TextField("", text: text)
                     .keyboardType(.emailAddress)
                     .autocapitalization(.none)
@@ -1028,8 +1058,11 @@ struct MailComposeView: View {
                 } label: {
                     Image(systemName: "person.crop.circle.badge.plus")
                         .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .frame(width: 28, height: 28)
                 }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
             if activeSuggestionField == kind && !suggestions.isEmpty {
                 ForEach(suggestions) { suggestion in
                     Button {
@@ -1043,8 +1076,12 @@ struct MailComposeView: View {
                                 Text(suggestion.email).font(.caption).foregroundStyle(.secondary)
                             }
                         }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
                 }
             }
         }
@@ -1103,6 +1140,48 @@ extension MailComposeView.RecipientFieldKind: Identifiable {
         case .to: return 0
         case .cc: return 1
         case .bcc: return 2
+        }
+    }
+}
+
+/// Auto-growing multi-line text editor for the mail body: always supports
+/// line breaks, grows with the content and lets the surrounding ScrollView
+/// handle scrolling once the text exceeds the available space.
+private struct AutoGrowingTextView: UIViewRepresentable {
+    @Binding var text: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let view = UITextView()
+        view.font = UIFont.preferredFont(forTextStyle: .body)
+        view.backgroundColor = .clear
+        view.isScrollEnabled = false
+        view.textContainerInset = .zero
+        view.textContainer.lineFragmentPadding = 0
+        view.delegate = context.coordinator
+        view.text = text
+        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return view
+    }
+
+    func updateUIView(_ uiView: UITextView, context: Context) {
+        if uiView.text != text {
+            uiView.text = text
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: AutoGrowingTextView
+
+        init(_ parent: AutoGrowingTextView) {
+            self.parent = parent
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
         }
     }
 }

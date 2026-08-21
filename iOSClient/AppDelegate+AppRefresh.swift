@@ -48,6 +48,7 @@ extension AppDelegate {
 
         let refreshTask = Task { () -> Bool in
             await NCAutoUpload.shared.autoUploadBackgroundSync()
+            await SouveraBackgroundSync.shared.syncNotifications()
             return !Task.isCancelled
         }
 

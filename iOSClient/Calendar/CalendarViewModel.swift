@@ -141,16 +141,21 @@ final class CalendarViewModel: ObservableObject {
     /// Creates a public Talk conversation named after the event, invites the
     /// attendees and stores the room on the event (X-SOUVERA-TALK-ROOM).
     func createTalkRoom(for event: CalendarEventModel) async -> Bool {
-        guard let account = LinkAccount.active() else { return false }
-        let api = LinkOcsApi(account: account)
-        guard let room = await api.createEventRoom(name: event.title) else { return false }
-        let attendeeIds = event.attendees.isEmpty ? [] : event.attendees
-        await api.addParticipants(token: room.token, userIds: attendeeIds)
-
+        guard let room = await createTalkRoomForDraft(name: event.title, attendees: event.attendees) else { return false }
         var draft = draft(from: event)
         draft.talkRoomToken = room.token
         draft.talkRoomName = room.name
         return await saveEvent(draft, existing: event)
+    }
+
+    /// Creates the Talk room without touching the event (used by the edit
+    /// sheet before the event is saved).
+    func createTalkRoomForDraft(name: String, attendees: [String]) async -> (token: String, name: String)? {
+        guard let account = LinkAccount.active() else { return nil }
+        let api = LinkOcsApi(account: account)
+        guard let room = await api.createEventRoom(name: name) else { return nil }
+        await api.addParticipants(token: room.token, userIds: attendees)
+        return room
     }
 
     func openTalkRoom(for event: CalendarEventModel) {

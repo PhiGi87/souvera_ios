@@ -138,6 +138,30 @@ final class LinkViewModel: ObservableObject {
         Task { await api.sendMessage(token: token, message: trimmed) }
     }
 
+    // MARK: - Attachments
+
+    /// Uploads a local file into the current chat.
+    func sendAttachment(data: Data, fileName: String, mimeType: String) {
+        guard let api else { return }
+        guard case let .chat(token, _) = route else { return }
+        Task { await api.uploadFileToChat(token: token, data: data, fileName: fileName, mimeType: mimeType) }
+    }
+
+    /// Shares an existing Souvera/Nextcloud file into the current chat.
+    func shareAttachment(_ selection: NextcloudFileSelection) {
+        guard let api else { return }
+        guard case let .chat(token, _) = route else { return }
+        Task {
+            await api.shareFileToChat(
+                token: token,
+                fileId: selection.fileId,
+                name: selection.name,
+                size: selection.size,
+                mimeType: selection.mimeType
+            )
+        }
+    }
+
     @discardableResult
     func back() -> Bool {
         if case .chat = route {

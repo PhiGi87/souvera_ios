@@ -35,6 +35,7 @@
 				47AD56AED61A4BEB8E552693 /* SouveraNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E383EDE411B4213968DFA1D /* SouveraNotesView.swift */; };
 		FEB0BBC090C539965F384ECE /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */; };
 		C8A6642D1A13458580290C32 /* ContactSuggestionSource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37269F52158C446D846629D3 /* ContactSuggestionSource.swift */; };
+		D18DDF2B943F4FC8929516C3 /* SouveraBackgroundSync.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026B76E49864477F8AF907B8 /* SouveraBackgroundSync.swift */; };
 		E4BB28D10EE24A19B208F3DD /* NextcloudDirectorySource.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8095B76DDF2A416C90389BF3 /* NextcloudDirectorySource.swift */; };
 		D17EB1F6D57E4DB1972BE8FB /* CalendarViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FACA7B85C04940FFB3BCBB88 /* CalendarViewModel.swift */; };
 		A41FBA061C7749258539945B /* SouveraCalendarModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F29AA3C350B44BB9E7EBCAE /* SouveraCalendarModels.swift */; };
@@ -1256,6 +1257,7 @@
 				2E383EDE411B4213968DFA1D /* SouveraNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Notes/SouveraNotesView.swift"; sourceTree = SOURCE_ROOT; };
 		FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/MailView.swift"; sourceTree = SOURCE_ROOT; };
 		37269F52158C446D846629D3 /* ContactSuggestionSource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/ContactSuggestionSource.swift"; sourceTree = SOURCE_ROOT; };
+		026B76E49864477F8AF907B8 /* SouveraBackgroundSync.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/SouveraBackgroundSync.swift"; sourceTree = SOURCE_ROOT; };
 		8095B76DDF2A416C90389BF3 /* NextcloudDirectorySource.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/NextcloudDirectorySource.swift"; sourceTree = SOURCE_ROOT; };
 		FACA7B85C04940FFB3BCBB88 /* CalendarViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Calendar/CalendarViewModel.swift"; sourceTree = SOURCE_ROOT; };
 		2F29AA3C350B44BB9E7EBCAE /* SouveraCalendarModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Calendar/SouveraCalendarModels.swift"; sourceTree = SOURCE_ROOT; };
@@ -2239,6 +2241,7 @@
 				FEA06F9E8C1C3A2DBCDA5C04 /* MailViewModel.swift */,
 				FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */,
 				37269F52158C446D846629D3 /* ContactSuggestionSource.swift */,
+				026B76E49864477F8AF907B8 /* SouveraBackgroundSync.swift */,
 				8095B76DDF2A416C90389BF3 /* NextcloudDirectorySource.swift */,
 				DA665EE4070B481D94841B80 /* NextcloudFilePickerView.swift */,
 				6851B1C149014F6997A7B0BE /* ContactPickerSheet.swift */,
@@ -4941,6 +4944,7 @@
 				D170BC925ED7D29598185E8A /* SouveraBuildInfo.swift in Sources */,
 				FEB0BBC090C539965F384ECE /* MailView.swift in Sources */,
 				C8A6642D1A13458580290C32 /* ContactSuggestionSource.swift in Sources */,
+				D18DDF2B943F4FC8929516C3 /* SouveraBackgroundSync.swift in Sources */,
 				E4BB28D10EE24A19B208F3DD /* NextcloudDirectorySource.swift in Sources */,
 				D17EB1F6D57E4DB1972BE8FB /* CalendarViewModel.swift in Sources */,
 				A41FBA061C7749258539945B /* SouveraCalendarModels.swift in Sources */,
