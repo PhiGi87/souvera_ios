@@ -54,6 +54,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             self.session = session
             session.start()
         }
+        // Initialzustand: Video nur senden, wenn der Anruf mit Video
+        // beantwortet wurde; der Toggle in der Leiste schaltet live um.
+        session?.setVideoEnabled(isVideoOn)
+        videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
 
         NotificationCenter.default.addObserver(self, selector: #selector(externalEnd), name: .linkEndCall, object: nil)
         loadParticipants()

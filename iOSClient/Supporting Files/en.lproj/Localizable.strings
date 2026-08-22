@@ -954,3 +954,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_settings_auto_refresh_off_"    = "Off";
 "_settings_auto_refresh_minutes_" = "%d min.";
 "_link_silent_call_"             = "Silent call";
+"_link_debug_"                    = "Debug";
+"_link_debug_simulate_call_audio_" = "Simulate incoming call (audio)";
+"_link_debug_simulate_call_video_" = "Simulate incoming call (video)";

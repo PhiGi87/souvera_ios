@@ -93,7 +93,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             guard let token = notification.userInfo?["token"] as? String, !token.isEmpty,
                   let account = LinkAccount.active(),
                   let root = UIApplication.shared.mainAppWindow?.rootViewController else { return }
-            let callVC = LinkCallViewController(account: account, token: token, title: NSLocalizedString("_link_", comment: ""))
+            let title = (notification.userInfo?["title"] as? String) ?? NSLocalizedString("_link_incoming_call_", comment: "")
+            let hasVideo = (notification.userInfo?["hasVideo"] as? Bool) ?? false
+            // Session zentral anlegen (wie beim ausgehenden Anruf), damit das
+            // "Zurück zum Anruf"-Banner und CallKit-Zustand funktionieren.
+            let session = LinkVoIPManager.shared.startIncomingCall(account: account, token: token, title: title, withVideo: hasVideo)
+            let callVC = LinkCallViewController(account: account, token: token, title: title, withVideo: hasVideo, session: session)
             root.present(callVC, animated: true)
         }
 

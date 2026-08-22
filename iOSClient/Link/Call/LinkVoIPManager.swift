@@ -30,6 +30,9 @@ final class LinkVoIPManager: NSObject {
 
     /// The current PushKit VoIP token as a lowercase hex string (never logged in full).
     private(set) var voipToken: String = ""
+    /// Call being offered via CallKit right now (set when reporting, consumed
+    /// on answer or cleared on decline).
+    private(set) var pendingIncomingCall: (token: String, title: String, hasVideo: Bool)?""
     /// The currently running outgoing call (owned by this manager so it can
     /// outlive the call UI when the user switches to the chat).
     private(set) var activeSession: CallSession?
@@ -67,6 +70,18 @@ final class LinkVoIPManager: NSObject {
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
     }
 
+    /// Starts an INCOMING call session (after the user accepted): same
+    /// lifecycle as outgoing calls so banners and CallKit stay in sync.
+    @discardableResult
+    func startIncomingCall(account: LinkAccount, token: String, title: String, withVideo: Bool) -> CallSession? {
+        let session = CallSession(account: account, token: token, callbacks: nil, withVideo: withVideo)
+        activeSession = session
+        activeCallInfo = (token, title, withVideo)
+        session.start()
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+        return session
+    }
+
     /// Adopts a session started by a call view controller so the call keeps
     /// running while the user switches to the chat.
     func takeOverCall(_ session: CallSession, token: String, title: String, withVideo: Bool) {
@@ -98,6 +113,15 @@ final class LinkVoIPManager: NSObject {
         }
         activeCalls.removeAll()
     }
+
+#if DEBUG
+    /// Simulates an incoming Talk call for UI testing (CallKit does not
+    /// deliver to the iOS simulator). Long-press the "+" in the Link tab.
+    func simulateIncomingCall(token: String, title: String, hasVideo: Bool) {
+        reportIncomingCall(roomToken: token, displayName: title, hasVideo: hasVideo) {}
+        CallDebugLog.log("LinkVoIPManager", "simulated incoming call token=\(token) title=\(title) video=\(hasVideo)")
+    }
+#endif
 
     // MARK: - Push-v2 VoIP registration
 
@@ -168,6 +192,7 @@ final class LinkVoIPManager: NSObject {
     private func reportIncomingCall(roomToken: String, displayName: String, hasVideo: Bool, completion: @escaping () -> Void) {
         let uuid = UUID()
         activeCalls[uuid] = roomToken
+        pendingIncomingCall = (roomToken, displayName, hasVideo)
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: displayName)
         update.hasVideo = hasVideo
@@ -188,12 +213,23 @@ final class LinkVoIPManager: NSObject {
                   let decrypted = NCPushNotificationEncryption.shared().decryptPushNotification(message, withDevicePrivateKey: privateKey),
                   let data = decrypted.data(using: .utf8),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
-            // Talk call payloads carry the conversation token in the rich-object parameters / id.
-            let token = (json["nid"].map { "\($0)" }) ?? ""
-            let roomToken = (json["id"] as? String) ?? token
-            let displayName = (json["subject"] as? String) ?? NSLocalizedString("_link_incoming_call_", comment: "")
+            // Für die Feld-Verifikation mit einem echten Anruf: komplettes
+            // entschlüsseltes JSON loggen (keine Secrets).
+            CallDebugLog.log("LinkVoIPManager", "decrypted call push: \(decrypted)")
+            let rich = json["subjectRichParameters"] as? [String: Any]
+            let callRich = rich?["call"] as? [String: Any]
+            // Talk liefert den Raum-Token in objectId; aeltere/andere
+            // Feldnamen werden toleriert.
+            let roomToken = (json["objectId"] as? String)
+                ?? (callRich?["id"] as? String)
+                ?? (json["id"] as? String)
+                ?? (json["nid"].map { "\($0)" } ?? "")
+            let displayName = (callRich?["name"] as? String)
+                ?? (json["subject"] as? String)
+                ?? NSLocalizedString("_link_incoming_call_", comment: "")
             let type = (json["type"] as? String) ?? ""
-            return (roomToken, displayName, type != "call-audio")
+            let hasVideo = type.contains("video")
+            return (roomToken, displayName, hasVideo)
         }
         return nil
     }
@@ -234,14 +270,26 @@ extension LinkVoIPManager: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         let roomToken = activeCalls[action.callUUID] ?? ""
+        activeCalls[action.callUUID] = nil
         action.fulfill()
         if !roomToken.isEmpty {
-            NotificationCenter.default.post(name: .linkAnswerCall, object: nil, userInfo: ["token": roomToken])
+            let pending = pendingIncomingCall
+            pendingIncomingCall = nil
+            NotificationCenter.default.post(
+                name: .linkAnswerCall,
+                object: nil,
+                userInfo: [
+                    "token": roomToken,
+                    "title": pending?.title ?? "",
+                    "hasVideo": pending?.hasVideo ?? false
+                ]
+            )
         }
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         activeCalls[action.callUUID] = nil
+        pendingIncomingCall = nil
         action.fulfill()
         NotificationCenter.default.post(name: .linkEndCall, object: nil)
     }

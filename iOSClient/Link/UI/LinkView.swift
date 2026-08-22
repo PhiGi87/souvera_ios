@@ -170,8 +170,35 @@ struct LinkConversationListView: View {
     @ObservedObject var viewModel: LinkViewModel
     @State private var searchQuery = ""
 
+#if DEBUG
+    /// Simuliert einen eingehenden Anruf (CallKit liefert im Simulator nicht).
+    private func simulateIncomingCall(video: Bool) {
+        var token = "debug-token"
+        var title = NSLocalizedString("_link_incoming_call_", comment: "")
+        if case let .success(rooms) = viewModel.conversations, let first = rooms.first {
+            token = first.token
+            title = first.displayName
+        }
+        LinkVoIPManager.shared.simulateIncomingCall(token: token, title: title, hasVideo: video)
+    }
+#endif
+
     var body: some View {
         List {
+#if DEBUG
+            Section(NSLocalizedString("_link_debug_", comment: "")) {
+                Button {
+                    simulateIncomingCall(video: false)
+                } label: {
+                    Label(NSLocalizedString("_link_debug_simulate_call_audio_", comment: ""), systemImage: "phone.fill")
+                }
+                Button {
+                    simulateIncomingCall(video: true)
+                } label: {
+                    Label(NSLocalizedString("_link_debug_simulate_call_video_", comment: ""), systemImage: "video.fill")
+                }
+            }
+#endif
             if !viewModel.userResults.isEmpty {
                 Section(NSLocalizedString("_link_start_conversation_", comment: "")) {
                     ForEach(viewModel.userResults) { suggestion in
