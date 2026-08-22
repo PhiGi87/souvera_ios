@@ -1172,3 +1172,8 @@ extension String {
         split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
     }
 }
+
+extension Notification.Name {
+    /// Ungelesen-Anzahl geändert (Mail-Tab-Badge); object = Int.
+    static let mailUnreadChanged = Notification.Name("mailUnreadChanged")
+}
