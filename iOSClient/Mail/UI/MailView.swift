@@ -583,6 +583,7 @@ private struct MailMessageListView: View {
         }
     }
 
+    @ViewBuilder
     private func row(_ message: MailMessage) -> some View {
         if editing {
             Button {
