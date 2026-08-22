@@ -96,44 +96,64 @@ struct ShieldView: View {
     }
 
     var body: some View {
+        decorated
+    }
+
+    /// Stufe 1: Basis-View + Overlay/Alert.
+    private var baseView: some View {
         VStack(spacing: 0) {
             header
             sectionContent
         }
-        .task {
-            await viewModel.loadAll()
-            mailboxPicker.mailboxes = viewModel.mailboxes
-            if let selected = mailboxPicker.selected {
-                viewModel.selectedMailbox = selected
-            }
-        }
-        .onChange(of: viewModel.mailboxes) { _, newValue in
-            mailboxPicker.mailboxes = newValue
-        }
-        .onChange(of: mailboxPicker.selected) { _, newValue in
-            viewModel.selectedMailbox = newValue
-        }
-        .onChange(of: addTrigger.fire) { _, fired in
-            if fired { handleAddFire() }
-        }
-        .onChange(of: section) { _, newValue in
-            addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
-        }
-        .onAppear {
-            addTrigger.showAdd = section == .whitelist || section == .blacklist
-        }
-        .sheet(item: $detailEntry) { entry in
-            ShieldDetailSheet(viewModel: viewModel, entry: entry)
-        }
         .alert(addEntryTitle, isPresented: $showAddEntry, actions: addEntryAlertActions) {
             Text(NSLocalizedString("_shield_entry_placeholder_", comment: ""))
-        }
-        .sheet(item: $releaseChoice) { request in
-            ShieldReleaseSheet(request: request, viewModel: viewModel)
         }
         .overlay(alignment: .bottom) {
             feedbackOverlay
         }
+    }
+
+    /// Stufe 2: Sheets.
+    private var withSheets: some View {
+        baseView
+            .sheet(item: $detailEntry) { entry in
+                ShieldDetailSheet(viewModel: viewModel, entry: entry)
+            }
+            .sheet(item: $releaseChoice) { request in
+                ShieldReleaseSheet(request: request, viewModel: viewModel)
+            }
+    }
+
+    /// Stufe 3: Verhalten (onChange/onAppear).
+    private var withBehavior: some View {
+        withSheets
+            .onChange(of: viewModel.mailboxes) { _, newValue in
+                mailboxPicker.mailboxes = newValue
+            }
+            .onChange(of: mailboxPicker.selected) { _, newValue in
+                viewModel.selectedMailbox = newValue
+            }
+            .onChange(of: addTrigger.fire) { _, fired in
+                if fired { handleAddFire() }
+            }
+            .onChange(of: section) { _, newValue in
+                addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
+            }
+            .onAppear {
+                addTrigger.showAdd = section == .whitelist || section == .blacklist
+            }
+    }
+
+    /// Stufe 4: Initial-Load.
+    private var decorated: some View {
+        withBehavior
+            .task {
+                await viewModel.loadAll()
+                mailboxPicker.mailboxes = viewModel.mailboxes
+                if let selected = mailboxPicker.selected {
+                    viewModel.selectedMailbox = selected
+                }
+            }
     }
 
     @ViewBuilder
