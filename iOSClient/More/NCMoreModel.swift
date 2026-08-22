@@ -44,7 +44,7 @@ final class NCMoreModel: ObservableObject {
     @Published var activeAccountDisplayName: String = ""
     @Published var activeAccountHost: String = ""
     @Published var activeAccountUser: String = ""
-    private var shieldAddVisibility: AnyCancellable?""
+    private var shieldAddVisibility: AnyCancellable?
     @Published var activeAvatar: UIImage?
     @Published var accountList: [AccountItem] = []
 
