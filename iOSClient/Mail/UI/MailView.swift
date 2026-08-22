@@ -230,6 +230,7 @@ struct MailSendBanner: View {
 
 private struct MailFolderListView: View {
     @ObservedObject var viewModel: MailViewModel
+    @State private var showScrollTop = false
 
     var body: some View {
         withDialogs
@@ -300,21 +301,33 @@ private struct MailFolderListView: View {
         .refreshable { await viewModel.loadMailboxes() }
         .overlay(alignment: .bottom) {
             let firstRowId = firstVisibleRowId(boxes)
-            if let position = viewModel.folderScrollPosition,
-               let firstId = firstRowId,
-               position != firstId {
+            if let firstId = firstRowId {
                 Button {
                     withAnimation { viewModel.folderScrollPosition = firstId }
                 } label: {
                     Image(systemName: "arrow.up")
-                        .font(.caption.bold())
+                        .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Color(NCBrandColor.shared.customer))
-                        .frame(width: 30, height: 30)
-                        .background(.regularMaterial, in: Circle())
-                        .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                        .frame(width: 44, height: 44)
+                        .background(.ultraThinMaterial, in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                        .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
                 }
+                .buttonStyle(.plain)
                 .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
                 .padding(.bottom, 16)
+                .opacity(showScrollTop ? 1 : 0)
+                .animation(.easeInOut(duration: 0.25), value: showScrollTop)
+            }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) { geometry in
+            geometry.contentOffset.y + geometry.contentInsets.top
+        } action: { _, newValue in
+            let visible = newValue > 120
+            if visible != showScrollTop {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    showScrollTop = visible
+                }
             }
         }
     }
@@ -468,6 +481,7 @@ private struct MailMessageListView: View {
     @State private var selected = Set<String>()
     @State private var moveTarget: ([MailMessage], [Mailbox])?
     @State private var showScrollTop = false
+    @State private var scrollOffset: CGFloat = 0
     @State private var blacklistTarget: [MailMessage]?
     @State private var showEmptyTrashConfirm = false
 
@@ -515,14 +529,13 @@ private struct MailMessageListView: View {
                             scrollTopButton(proxy: proxy, firstId: firstId)
                                 .padding(.bottom, 84)
                                 .opacity(showScrollTop ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.2), value: showScrollTop)
+                                .animation(.easeInOut(duration: 0.25), value: showScrollTop)
                         }
                     }
-                    .onChange(of: viewModel.messageScrollPosition) { _, position in
-                        updateScrollTop(sorted: sorted, position: position)
-                    }
-                    .onAppear {
-                        updateScrollTop(sorted: sorted, position: viewModel.messageScrollPosition)
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentOffset.y + geometry.contentInsets.top
+                    } action: { _, newValue in
+                        updateScrollTop(offset: newValue)
                     }
                 }
             }
@@ -716,26 +729,30 @@ private struct MailMessageListView: View {
         return true
     }
 
-    private func updateScrollTop(sorted: [MailMessage], position: String?) {
-        let atTop = position == nil || position == sorted.first?.id
-        withAnimation(.easeInOut(duration: 0.2)) {
-            showScrollTop = !atTop
+    private func updateScrollTop(offset: CGFloat) {
+        let visible = offset > 120
+        if visible != showScrollTop {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showScrollTop = visible
+            }
         }
     }
 
-    /// Dezenter Scroll-to-top-Button (Fade über `showScrollTop`).
+    /// Glass-Look-Scroll-to-top-Button (Fade über `showScrollTop`).
     @ViewBuilder
     private func scrollTopButton(proxy: ScrollViewProxy, firstId: String) -> some View {
         Button {
             withAnimation { proxy.scrollTo(firstId, anchor: .top) }
         } label: {
             Image(systemName: "arrow.up")
-                .font(.caption.bold())
+                .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(Color(NCBrandColor.shared.customer))
-                .frame(width: 30, height: 30)
-                .background(.regularMaterial, in: Circle())
-                .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
     }
 
