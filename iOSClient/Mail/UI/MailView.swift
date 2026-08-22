@@ -232,6 +232,11 @@ private struct MailFolderListView: View {
     @ObservedObject var viewModel: MailViewModel
 
     var body: some View {
+        withDialogs
+    }
+
+    /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
+    private var baseContent: some View {
         VStack(spacing: 0) {
             switch viewModel.mailboxes {
             case .loading:
@@ -467,6 +472,11 @@ private struct MailMessageListView: View {
     @State private var showEmptyTrashConfirm = false
 
     var body: some View {
+        withDialogs
+    }
+
+    /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
+    private var baseContent: some View {
         VStack(spacing: 0) {
             if let notice = viewModel.offlineNotice {
                 Text(notice)
@@ -623,6 +633,11 @@ private struct MailMessageListView: View {
                 .background(.bar)
             }
         }
+    }
+
+    /// Stufe 2: Verhalten + Dialoge.
+    private var withDialogs: some View {
+        baseContent
         .onChange(of: editing) { _, value in
             if !value { selected.removeAll() }
         }
@@ -813,6 +828,11 @@ private struct MailSearchView: View {
     @State private var query = ""
 
     var body: some View {
+        withDialogs
+    }
+
+    /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
+    private var baseContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
