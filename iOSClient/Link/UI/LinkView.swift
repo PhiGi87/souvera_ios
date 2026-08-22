@@ -600,7 +600,7 @@ struct LinkChatView: View {
         case let .success(items):
             ScrollViewReader { proxy in
                 List {
-                    ForEach(items.filter { $0.systemMessage != "message_deleted" }) { message in
+                    ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
                                 .id(message.id)
@@ -612,6 +612,7 @@ struct LinkChatView: View {
                                 viewModel: viewModel,
                                 message: message,
                                 isOwn: message.actorId == viewModel.currentUserId,
+                                showTime: showsTime(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
                                 onOpenFile: { info in
                                     Task {
@@ -640,6 +641,16 @@ struct LinkChatView: View {
                 }
             }
         }
+    }
+
+    /// Zeitstempel nur anzeigen, wenn seit der vorherigen Nachricht mehr als
+    /// zwei Minuten vergangen sind (Gruppierung gleicher Zeitstempel).
+    private func showsTime(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> Bool {
+        let visible = items.filter { $0.systemMessage != "message_deleted" }
+        guard let currentIndex = visible.firstIndex(where: { $0.id == message.id }),
+              currentIndex > 0 else { return true }
+        let previous = visible[currentIndex - 1]
+        return previous.isSystemMessage || (message.timestamp - previous.timestamp) > 120
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, items: [LinkChatMessage]) {
@@ -739,11 +750,25 @@ private struct LinkMessageRow: View {
     @ObservedObject var viewModel: LinkViewModel
     let message: LinkChatMessage
     let isOwn: Bool
+    var showTime: Bool = true
     let onStartEdit: () -> Void
     let onOpenFile: (LinkFileInfo) -> Void
 
+    private var messageTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
+    }
+
     var body: some View {
-        VStack(alignment: isOwn ? .trailing : .leading, spacing: 4) {
+        VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
+            if showTime {
+                Text(messageTime)
+                    .font(.system(size: 9))
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, isOwn ? 0 : 6)
+                    .padding(.trailing, isOwn ? 6 : 0)
+            }
             if let file = message.fileInfo() {
                 Button {
                     onOpenFile(file)
@@ -763,8 +788,13 @@ private struct LinkMessageRow: View {
                 }
                 .buttonStyle(.plain)
             }
-            LinkMessageBubble(message: message, isOwn: isOwn)
+            HStack(spacing: 0) {
+                if isOwn { Spacer(minLength: 40) }
+                LinkMessageBubble(message: message, isOwn: isOwn)
+                if !isOwn { Spacer(minLength: 40) }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
         .swipeActions(edge: .trailing) {
             if isOwn {
                 Button {
@@ -789,28 +819,18 @@ private struct LinkMessageBubble: View {
     let isOwn: Bool
 
     var body: some View {
-        HStack {
-            if isOwn { Spacer(minLength: 40) }
-            VStack(alignment: .leading, spacing: 2) {
-                if !isOwn {
-                    Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
-                }
-                Text(displayText)
+        VStack(alignment: .leading, spacing: 2) {
+            if !isOwn {
+                Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
-            .padding(.horizontal, 12).padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
-            )
-            .foregroundStyle(isOwn ? .white : .primary)
-            HStack(spacing: 6) {
-                Spacer(minLength: 0)
-                Text(messageTime)
-                    .font(.system(size: 9))
-                    .foregroundStyle(isOwn ? .white.opacity(0.7) : .secondary)
-            }
-            if !isOwn { Spacer(minLength: 40) }
+            Text(displayText)
         }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
+        )
+        .foregroundStyle(isOwn ? .white : .primary)
     }
 
     private var messageTime: String {

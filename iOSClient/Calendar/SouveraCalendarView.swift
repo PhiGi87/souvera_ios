@@ -54,20 +54,23 @@ struct SouveraCalendarView: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 0) {
-                Picker("", selection: $viewMode) {
-                    ForEach(CalendarViewMode.allCases) { mode in
-                        Text(mode.title).tag(mode)
+            GeometryReader { geometry in
+                let isWide = geometry.size.width > geometry.size.height
+                VStack(spacing: 0) {
+                    Picker("", selection: $viewMode) {
+                        ForEach(CalendarViewMode.allCases) { mode in
+                            Text(mode.title).tag(mode)
+                        }
                     }
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 6)
+                    .pickerStyle(.segmented)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, isWide ? 2 : 6)
 
-                if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                    content
-                } else {
-                    searchResults
+                    if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                        content(isWide: isWide)
+                    } else {
+                        searchResults
+                    }
                 }
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
@@ -139,30 +142,48 @@ struct SouveraCalendarView: View {
     }
 
     @ViewBuilder
-    private var content: some View {
+    private func content(isWide: Bool) -> some View {
         switch viewMode {
         case .month:
-            monthView
+            monthView(isWide: isWide)
         case .day:
-            dayView
+            dayView(isWide: isWide)
         case .threeDay:
-            threeDayView
+            threeDayView(isWide: isWide)
         }
     }
 
     // MARK: - Month
 
-    private var monthView: some View {
-        VStack(spacing: 0) {
-            monthSwitcher
-            monthGrid
-            Divider()
-            dayEventList
+    @ViewBuilder
+    private func monthView(isWide: Bool) -> some View {
+        if isWide {
+            // Apple-Stil: links kompakter Monatskalender, rechts die
+            // scrollbare Terminliste des gewählten Tages.
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    monthSwitcher(compact: true)
+                    monthGrid(compact: true)
+                    Spacer(minLength: 0)
+                }
+                .frame(maxWidth: .infinity)
+                Divider()
+                dayEventList
+                    .frame(maxWidth: .infinity)
+            }
+            .refreshable { await viewModel.load() }
+        } else {
+            VStack(spacing: 0) {
+                monthSwitcher(compact: false)
+                monthGrid(compact: false)
+                Divider()
+                dayEventList
+            }
+            .refreshable { await viewModel.load() }
         }
-        .refreshable { await viewModel.load() }
     }
 
-    private var monthSwitcher: some View {
+    private func monthSwitcher(compact: Bool) -> some View {
         HStack {
             Button {
                 viewModel.shiftMonth(by: -1)
@@ -174,7 +195,7 @@ struct SouveraCalendarView: View {
                 showMonthYearPicker = true
             } label: {
                 Text(viewModel.monthTitle)
-                    .font(.headline)
+                    .font(compact ? .subheadline.weight(.semibold) : .headline)
                     .foregroundStyle(.primary)
             }
             .buttonStyle(.plain)
@@ -185,8 +206,8 @@ struct SouveraCalendarView: View {
                 Image(systemName: "chevron.right")
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 8)
+        .padding(.horizontal, compact ? 8 : 20)
+        .padding(.vertical, compact ? 4 : 8)
     }
 
     private var weekdaySymbols: [String] {
@@ -196,22 +217,25 @@ struct SouveraCalendarView: View {
         return Array(symbols[first...] + symbols[..<first])
     }
 
-    private var monthGrid: some View {
+    private func monthGrid(compact: Bool) -> some View {
         let days = viewModel.monthDays
-        return LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+        return LazyVGrid(
+            columns: Array(repeating: GridItem(.flexible(), spacing: compact ? 2 : 4), count: 7),
+            spacing: compact ? 2 : 4
+        ) {
             ForEach(weekdaySymbols, id: \.self) { label in
-                Text(label).font(.caption2).foregroundStyle(.secondary)
+                Text(label).font(compact ? .system(size: 9) : .caption2).foregroundStyle(.secondary)
             }
             ForEach(days, id: \.self) { day in
-                dayCell(day)
+                dayCell(day, compact: compact)
             }
         }
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
+        .padding(.horizontal, compact ? 4 : 10)
+        .padding(.bottom, compact ? 4 : 8)
     }
 
     @ViewBuilder
-    private func dayCell(_ day: Date) -> some View {
+    private func dayCell(_ day: Date, compact: Bool = false) -> some View {
         let calendar = Calendar.current
         let inMonth = calendar.isDate(day, equalTo: viewModel.visibleMonth, toGranularity: .month)
         let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
@@ -226,11 +250,11 @@ struct SouveraCalendarView: View {
                 viewModel.ensureMonth(contains: day)
             }
         } label: {
-            VStack(spacing: 3) {
+            VStack(spacing: compact ? 1 : 3) {
                 Text("\(calendar.component(.day, from: day))")
-                    .font(.subheadline)
+                    .font(compact ? .caption : .subheadline)
                     .fontWeight(isToday ? .bold : .regular)
-                    .frame(width: 30, height: 30)
+                    .frame(width: compact ? 22 : 30, height: compact ? 22 : 30)
                     .background(
                         Circle()
                             .fill(isSelected ? Color(NCBrandColor.shared.customer) : .clear)
@@ -238,7 +262,7 @@ struct SouveraCalendarView: View {
                     .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color(NCBrandColor.shared.customer) : Color.primary) : Color.secondary))
                 Circle()
                     .fill(dayDotColor(day))
-                    .frame(width: 5, height: 5)
+                    .frame(width: compact ? 3 : 5, height: compact ? 3 : 5)
             }
         }
         .buttonStyle(.plain)
@@ -246,18 +270,19 @@ struct SouveraCalendarView: View {
 
     // MARK: - Day
 
-    private var dayView: some View {
+    private func dayView(isWide: Bool) -> some View {
         VStack(spacing: 0) {
-            dateOnlySwitcher(day: selectedDay)
+            dateOnlySwitcher(day: selectedDay, compact: isWide)
             Divider()
             TimelineDayView(
                 day: selectedDay,
                 events: viewModel.events(on: selectedDay),
                 showHourLabels: true,
-                hourHeight: 56,
+                hourHeight: isWide ? 44 : 56,
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
-                onCreate: createEventInSlot
+                onCreate: createEventInSlot,
+                bottomPadding: isWide ? 12 : 40
             )
             .refreshable { await viewModel.load() }
         }
@@ -267,7 +292,7 @@ struct SouveraCalendarView: View {
 
     /// Datum + Pfeile (der Wochentag kommt aus dem Timeline-Kopf, sonst
     /// stünde er doppelt da).
-    private func dateOnlySwitcher(day: Date) -> some View {
+    private func dateOnlySwitcher(day: Date, compact: Bool = false) -> some View {
         HStack {
             Button {
                 shiftSelectedDay(by: -1)
@@ -284,11 +309,11 @@ struct SouveraCalendarView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 8)
+        .padding(.vertical, compact ? 2 : 8)
     }
 
     /// Nur Pfeile (3-Tage-Ansicht: die Tagesköpfe zeigen Datum/Wochentag).
-    private func arrowsOnlySwitcher(step: Int) -> some View {
+    private func arrowsOnlySwitcher(step: Int, compact: Bool = false) -> some View {
         HStack {
             Button {
                 shiftSelectedDay(by: -step)
@@ -303,7 +328,7 @@ struct SouveraCalendarView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 8)
+        .padding(.vertical, compact ? 2 : 8)
     }
 
     /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter. Die
@@ -358,16 +383,17 @@ struct SouveraCalendarView: View {
 
     // MARK: - 3 days
 
-    private var threeDayView: some View {
+    private func threeDayView(isWide: Bool) -> some View {
         VStack(spacing: 0) {
-            arrowsOnlySwitcher(step: 3)
+            arrowsOnlySwitcher(step: 3, compact: isWide)
             Divider()
             ThreeDayTimelineView(
                 days: threeDayRange,
                 eventsProvider: { viewModel.events(on: $0) },
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
-                onCreate: createEventInSlot
+                onCreate: createEventInSlot,
+                compact: isWide
             )
         }
         .offset(x: swipeOffset)
@@ -517,6 +543,7 @@ private struct TimelineDayView: View {
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
     var onCreate: ((Date, Date) -> Void)? = nil
+    var bottomPadding: CGFloat = 40
 
     private let hours = Array(0..<24)
 
@@ -531,7 +558,7 @@ private struct TimelineDayView: View {
                         TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, onCreate: onCreate)
                     }
                 }
-                .padding(.bottom, 40)
+                .padding(.bottom, bottomPadding)
             }
             .onAppear {
                 let currentHour = Calendar.current.component(.hour, from: Date())
@@ -819,26 +846,28 @@ private struct ThreeDayTimelineView: View {
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
     var onCreate: ((Date, Date) -> Void)? = nil
+    var compact: Bool = false
 
     private let hours = Array(0..<24)
-    private let hourHeight: CGFloat = 44
+    private var hourHeight: CGFloat { compact ? 40 : 44 }
 
     var body: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
                 // Feste Tagesköpfe: bleiben beim Scrollen stehen.
                 HStack(alignment: .top, spacing: 0) {
-                    Color.clear.frame(width: 34, height: 40)
+                    Color.clear.frame(width: 34, height: compact ? 32 : 40)
                     ForEach(days, id: \.self) { day in
                         VStack(spacing: 1) {
                             Text(day.formatted(.dateTime.weekday(.abbreviated)))
-                                .font(.caption).fontWeight(.medium)
+                                .font(compact ? .system(size: 10) : .caption)
+                                .fontWeight(.medium)
                                 .foregroundStyle(.secondary)
                             Text("\(Calendar.current.component(.day, from: day))")
-                                .font(.headline)
+                                .font(compact ? .subheadline.weight(.semibold) : .headline)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 40)
+                        .frame(height: compact ? 32 : 40)
                     }
                 }
                 Divider()
@@ -867,7 +896,7 @@ private struct ThreeDayTimelineView: View {
                             .frame(maxWidth: .infinity)
                         }
                     }
-                    .padding(.bottom, 40)
+                    .padding(.bottom, compact ? 12 : 40)
                 }
             }
             .onAppear {
@@ -886,9 +915,6 @@ private struct CalendarEventDetailSheet: View {
     let event: CalendarEventModel
     let onEdit: (EventDraft) -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var creatingRoom = false
-    @State private var detailError: String?
-
     var body: some View {
         NavigationStack {
             List {
@@ -920,8 +946,8 @@ private struct CalendarEventDetailSheet: View {
                         Text(notes).textSelection(.enabled)
                     }
                 }
-                Section(NSLocalizedString("_calendar_talk_channel_", comment: "")) {
-                    if let roomName = event.talkRoomName {
+                if let roomName = event.talkRoomName {
+                    Section(NSLocalizedString("_calendar_talk_channel_", comment: "")) {
                         HStack {
                             Label(roomName, systemImage: "bubble.left.and.bubble.right")
                             Spacer()
@@ -929,26 +955,6 @@ private struct CalendarEventDetailSheet: View {
                                 viewModel.openTalkRoom(for: event)
                                 dismiss()
                             }
-                        }
-                    } else if creatingRoom {
-                        HStack {
-                            ProgressView()
-                            Text(NSLocalizedString("_calendar_create_talk_", comment: "")).foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Button {
-                            creatingRoom = true
-                            Task {
-                                let ok = await viewModel.createTalkRoom(for: event)
-                                creatingRoom = false
-                                if ok {
-                                    dismiss()
-                                } else {
-                                    detailError = NSLocalizedString("_calendar_talk_error_", comment: "")
-                                }
-                            }
-                        } label: {
-                            Label(NSLocalizedString("_calendar_create_talk_", comment: ""), systemImage: "plus.bubble")
                         }
                     }
                 }
@@ -975,14 +981,6 @@ private struct CalendarEventDetailSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
                 }
-            }
-            .alert(NSLocalizedString("_error_", comment: ""), isPresented: Binding(
-                get: { detailError != nil },
-                set: { if !$0 { detailError = nil } }
-            )) {
-                Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) { detailError = nil }
-            } message: {
-                Text(detailError ?? "")
             }
         }
     }

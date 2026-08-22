@@ -257,7 +257,10 @@ final class MailViewModel: ObservableObject {
     func updateUnreadBadge() {
         let count: Int
         if case let .success(boxes) = mailboxes {
-            count = boxes.reduce(0) { $0 + $1.unreadCount }
+            // Nur der Posteingang des eigenen Postfachs zählt.
+            count = boxes
+                .filter { $0.kind == .inbox && $0.namespace == .personal }
+                .reduce(0) { $0 + $1.unreadCount }
         } else {
             count = 0
         }
