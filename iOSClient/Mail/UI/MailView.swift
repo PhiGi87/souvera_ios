@@ -20,11 +20,13 @@ struct MailView: View {
                 .toolbar {
                     ToolbarItem(placement: .topBarLeading) {
                         AutoRefreshRingView(viewModel: viewModel)
-                    } toolbar }
+                    }
+                    toolbar
+                }
         }
         .onAppear { viewModel.start() }
         .overlay(alignment: .bottom) {
-            if let feedback = viewModel.sendFeedback {
+            if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
                 MailSendBanner(feedback: feedback)
                     .padding(.horizontal)
                     .padding(.bottom, 24)
@@ -36,6 +38,13 @@ struct MailView: View {
             Task {
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 viewModel.sendFeedback = nil
+            }
+        }
+        .onChange(of: viewModel.actionFeedback) { _, feedback in
+            guard feedback != nil else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                viewModel.actionFeedback = nil
             }
         }
         .sheet(item: Binding(
@@ -126,6 +135,12 @@ struct MailView: View {
                 } label: {
                     Image(systemName: "trash")
                 }
+                Button {
+                    Task { await viewModel.blacklistSenders([message]) }
+                } label: {
+                    Image(systemName: "exclamationmark.shield")
+                }
+                .accessibilityLabel(NSLocalizedString("_mail_blacklist_sender_", comment: ""))
             }
         }
         if isFolders {
@@ -548,6 +563,16 @@ private struct MailMessageListView: View {
                         editing = false
                     } label: {
                         selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
+                    }
+                    Button {
+                        let messages = selectedMessages
+                        Task {
+                            await viewModel.blacklistSenders(messages)
+                            selected.removeAll()
+                            editing = false
+                        }
+                    } label: {
+                        selectionAction(icon: "exclamationmark.shield", label: NSLocalizedString("_mail_blacklist_short_", comment: ""))
                     }
                 }
                 .padding(.vertical, 6)

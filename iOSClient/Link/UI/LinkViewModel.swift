@@ -37,6 +37,8 @@ final class LinkViewModel: ObservableObject {
     /// opened on the next appearance.
     static var pendingOpenRoom: (token: String, title: String)?
 
+    @Published var actionFeedback: LinkActionFeedback?
+
     @Published var route: LinkRoute = .home
     @Published var conversations: LinkUiState<[LinkConversation]> = .loading
     @Published var messages: LinkUiState<[LinkChatMessage]> = .loading
@@ -96,6 +98,17 @@ final class LinkViewModel: ObservableObject {
         let status = await api.deleteRoom(token: token)
         CallDebugLog.log("LinkViewModel", "deleteConversation \(token) -> \(status)")
         loadConversations()
+        if (200..<300).contains(status) {
+            actionFeedback = LinkActionFeedback(
+                success: true,
+                message: NSLocalizedString("_link_room_deleted_", comment: "")
+            )
+        } else {
+            actionFeedback = LinkActionFeedback(
+                success: false,
+                message: NSLocalizedString("_link_room_delete_failed_", comment: "")
+            )
+        }
     }
 
     func loadConversations() {
@@ -256,4 +269,10 @@ final class LinkViewModel: ObservableObject {
     }
 
     deinit { pollTask?.cancel() }
+}
+
+/// Kurzer Rückmelde-Hinweis für Link-Aktionen (Toast).
+struct LinkActionFeedback: Equatable {
+    let success: Bool
+    let message: String
 }

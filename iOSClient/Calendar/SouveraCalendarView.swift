@@ -80,6 +80,28 @@ struct SouveraCalendarView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             Task { await viewModel.load() }
         }
+        .overlay(alignment: .bottom) {
+            if let feedback = viewModel.actionFeedback {
+                HStack(spacing: 8) {
+                    Image(systemName: feedback.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(feedback.success ? .green : .red)
+                    Text(feedback.message).font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onChange(of: viewModel.actionFeedback) { _, feedback in
+            guard feedback != nil else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                viewModel.actionFeedback = nil
+            }
+        }
         .sheet(isPresented: $showCalendarPicker) {
             CalendarPickerSheet(viewModel: viewModel)
         }

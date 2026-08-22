@@ -57,6 +57,9 @@ final class MailViewModel: ObservableObject {
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
     @Published var messageScrollPosition: String?
+    /// Rückmeldung für Aktionen (z. B. Absender in die Blacklist) — wird wie
+    /// das Sende-Feedback als Banner angezeigt.
+    @Published var actionFeedback: MailSendFeedback?
     /// Zeitpunkt des nächsten automatischen Abrufs (für den Countdown-Ring
     /// in der Ordnerübersicht); nil = Auto-Refresh deaktiviert.
     @Published var nextAutoRefreshAt: Date?
@@ -413,6 +416,38 @@ final class MailViewModel: ObservableObject {
             return true
         default:
             return false
+        }
+    }
+
+    // MARK: - Shield Blacklist
+
+    /// Übernimmt die Absender der Nachrichten in die Shield-Blacklist.
+    func blacklistSenders(_ messages: [MailMessage]) async {
+        let addresses = Array(Set(messages.map { $0.fromAddress.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }))
+        guard !addresses.isEmpty else { return }
+        let api = ShieldApi()
+        var succeeded = 0
+        for address in addresses {
+            if await api.add(.blacklist, entry: address) {
+                succeeded += 1
+            }
+        }
+        if succeeded == addresses.count {
+            actionFeedback = MailSendFeedback(
+                success: true,
+                message: String(format: NSLocalizedString("_mail_blacklist_success_", comment: ""), succeeded)
+            )
+        } else if succeeded > 0 {
+            actionFeedback = MailSendFeedback(
+                success: true,
+                message: String(format: NSLocalizedString("_mail_blacklist_partial_", comment: ""), succeeded, addresses.count)
+            )
+        } else {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_blacklist_failed_", comment: "")
+            )
         }
     }
 

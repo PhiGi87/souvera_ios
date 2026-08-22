@@ -15,6 +15,12 @@ enum CalendarUiState<T> {
     case error(String)
 }
 
+/// Kurzer Rückmelde-Hinweis für Kalender-Aktionen (Toast).
+struct CalendarActionFeedback: Equatable {
+    let success: Bool
+    let message: String
+}
+
 @MainActor
 final class CalendarViewModel: ObservableObject {
     @Published var events: CalendarUiState<[CalendarEventModel]> = .loading
@@ -25,6 +31,7 @@ final class CalendarViewModel: ObservableObject {
     /// across launches until the user changes the selection.
     @Published var selectedCalendarHrefs: Set<String> = []
     @Published var customCalendarColors: [String: String] = [:]
+    @Published var actionFeedback: CalendarActionFeedback?
 
     private let client = CalDavClient()
     private var cachedEntries: [CalDavEventEntry] = []
@@ -251,6 +258,10 @@ final class CalendarViewModel: ObservableObject {
         }
         if ok {
             await load()
+            actionFeedback = CalendarActionFeedback(
+                success: true,
+                message: NSLocalizedString("_calendar_saved_", comment: "")
+            )
         }
         return ok
     }
@@ -261,6 +272,10 @@ final class CalendarViewModel: ObservableObject {
         let ok = await client.deleteEvent(entry)
         if ok {
             await load()
+            actionFeedback = CalendarActionFeedback(
+                success: true,
+                message: NSLocalizedString("_calendar_deleted_", comment: "")
+            )
         }
         return ok
     }
@@ -286,7 +301,19 @@ final class CalendarViewModel: ObservableObject {
         } else {
             draft.notes = draft.notes.isEmpty ? room.url : draft.notes + "\n\n" + room.url
         }
-        return await saveEvent(draft, existing: event)
+        let saved = await saveEvent(draft, existing: event)
+        if saved {
+            actionFeedback = CalendarActionFeedback(
+                success: true,
+                message: NSLocalizedString("_calendar_talk_created_", comment: "")
+            )
+        } else {
+            actionFeedback = CalendarActionFeedback(
+                success: false,
+                message: NSLocalizedString("_calendar_talk_error_", comment: "")
+            )
+        }
+        return saved
     }
 
     /// Creates the Talk room without touching the event (used by the edit
@@ -334,6 +361,10 @@ final class CalendarViewModel: ObservableObject {
         let api = LinkOcsApi(account: account)
         await api.deleteRoom(token: token)
         JmapLog.write("Calendar talk room deleted: \(token)")
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: NSLocalizedString("_calendar_talk_deleted_", comment: "")
+        )
     }
 
     func openTalkRoom(for event: CalendarEventModel) {
