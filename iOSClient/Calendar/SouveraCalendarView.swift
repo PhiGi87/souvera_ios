@@ -605,6 +605,9 @@ private struct TimelineColumn: View {
                             .padding(.top, hour == 0 ? 0 : hourHeight - 1)
                     }
                 }
+                if showsNowLine {
+                    nowLine
+                }
                 ForEach(timedEvents) { event in
                     eventBlock(event, containerWidth: geometry.size.width)
                 }
@@ -623,6 +626,28 @@ private struct TimelineColumn: View {
 
     private var timedEvents: [CalendarEventModel] {
         events.filter { !$0.allDay }.sorted { $0.start < $1.start }
+    }
+
+    /// Heutige Spalte bekommt eine rötliche Jetzt-Linie.
+    private var showsNowLine: Bool {
+        Calendar.current.isDateInToday(day)
+    }
+
+    private var nowLine: some View {
+        let calendar = Calendar.current
+        let now = Date()
+        let dayStart = calendar.startOfDay(for: day)
+        let minutes = max(0, min(24 * 60 - 1, calendar.dateComponents([.minute], from: dayStart, to: now).minute ?? 0))
+        let offsetY = CGFloat(minutes) / 60.0 * hourHeight
+        return HStack(spacing: 0) {
+            Circle()
+                .fill(Color.red)
+                .frame(width: 7, height: 7)
+            Rectangle()
+                .fill(Color.red.opacity(0.85))
+                .frame(height: 1.5)
+        }
+        .offset(y: offsetY - 3)
     }
 
     /// Spalten-Aufteilung für überlappende Termine (greedy).
