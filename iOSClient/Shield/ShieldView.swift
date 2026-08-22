@@ -125,39 +125,49 @@ struct ShieldView: View {
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
         }
-        .alert(addEntryTitle, isPresented: $showAddEntry) {
-            TextField(NSLocalizedString("_shield_entry_placeholder_", comment: ""), text: $addEntryText)
-                .keyboardType(.emailAddress)
-                .autocapitalization(.none)
-            Button(NSLocalizedString("_shield_add_entry_", comment: "")) {
-                let entry = addEntryText.trimmingCharacters(in: .whitespaces)
-                addEntryText = ""
-                guard !entry.isEmpty else { return }
-                Task { await viewModel.addEntry(addEntryList, entry: entry) }
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                addEntryText = ""
-            }
+        .alert(addEntryTitle, isPresented: $showAddEntry, actions: addEntryAlertActions) {
+            Text(NSLocalizedString("_shield_entry_placeholder_", comment: ""))
         }
         .sheet(item: $releaseChoice) { request in
             ShieldReleaseSheet(request: request, viewModel: viewModel)
         }
         .overlay(alignment: .bottom) {
-            if let feedback = viewModel.feedback {
-                HStack(spacing: 8) {
-                    Image(systemName: feedback.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .foregroundStyle(feedback.success ? .green : .red)
-                    Text(feedback.message).font(.subheadline)
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 10)
-                .background(.regularMaterial, in: Capsule())
-                .shadow(radius: 4)
-                .padding(.bottom, 20)
-                .task(id: feedback) {
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    viewModel.feedback = nil
-                }
+            feedbackOverlay
+        }
+    }
+
+    @ViewBuilder
+    private func addEntryAlertActions() -> some View {
+        TextField(NSLocalizedString("_shield_entry_placeholder_", comment: ""), text: $addEntryText)
+            .keyboardType(.emailAddress)
+            .autocapitalization(.none)
+        Button(NSLocalizedString("_shield_add_entry_", comment: "")) {
+            let entry = addEntryText.trimmingCharacters(in: .whitespaces)
+            addEntryText = ""
+            guard !entry.isEmpty else { return }
+            Task { await viewModel.addEntry(addEntryList, entry: entry) }
+        }
+        Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+            addEntryText = ""
+        }
+    }
+
+    @ViewBuilder
+    private var feedbackOverlay: some View {
+        if let feedback = viewModel.feedback {
+            HStack(spacing: 8) {
+                Image(systemName: feedback.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                    .foregroundStyle(feedback.success ? .green : .red)
+                Text(feedback.message).font(.subheadline)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(radius: 4)
+            .padding(.bottom, 20)
+            .task(id: feedback) {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                viewModel.feedback = nil
             }
         }
     }
