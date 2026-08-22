@@ -12,6 +12,7 @@ import FirebaseCrashlytics
 struct NCSettingsView: View {
     // State to control the visibility of the acknowledgements view
     @State private var showAcknowledgements = false
+    @State private var showLanguageRestart = false
     // State to control the visibility of the passcode view
     @State private var showPasscode = false
     // State to contorl the visibility of the change passcode view
@@ -214,6 +215,11 @@ struct NCSettingsView: View {
             // E2EEncryption` Section
             if capabilities.e2EEEnabled {
                 E2EESection(model: model)
+            }
+            .alert(NSLocalizedString("_settings_language_", comment: ""), isPresented: $showLanguageRestart) {
+                Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
+            } message: {
+                Text(NSLocalizedString("_language_restart_", comment: ""))
             }
             // `Advanced` Section
             Section {

@@ -166,33 +166,23 @@ struct LinkView: View {
         .sheet(isPresented: $showParticipants) {
             LinkParticipantsSheet(viewModel: viewModel)
         }
-        .confirmationDialog(
-            NSLocalizedString("_link_start_call_", comment: ""),
-            isPresented: Binding(
-                get: { startCallRequest != nil },
-                set: { if !$0 { startCallRequest = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(startCallRequest?.withVideo == true
-                   ? NSLocalizedString("_link_start_video_call_", comment: "")
-                   : NSLocalizedString("_link_start_audio_call_", comment: "")) {
-                if let request = startCallRequest {
-                    callContext = CallContext(token: request.token, title: request.title, withVideo: request.withVideo, silent: false)
-                }
-                startCallRequest = nil
+        .overlay {
+            if let request = startCallRequest {
+                CallStartOverlay(
+                    title: request.title,
+                    withVideo: request.withVideo,
+                    onStart: { silent in
+                        callContext = CallContext(
+                            token: request.token,
+                            title: request.title,
+                            withVideo: request.withVideo,
+                            silent: silent
+                        )
+                        startCallRequest = nil
+                    },
+                    onCancel: { startCallRequest = nil }
+                )
             }
-            Button(NSLocalizedString("_link_silent_call_", comment: "")) {
-                if let request = startCallRequest {
-                    callContext = CallContext(token: request.token, title: request.title, withVideo: request.withVideo, silent: true)
-                }
-                startCallRequest = nil
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                startCallRequest = nil
-            }
-        } message: {
-            Text(startCallRequest?.title ?? "")
         }
         .alert(NSLocalizedString("_link_create_channel_", comment: ""), isPresented: $showCreateChannel) {
             TextField(NSLocalizedString("_link_channel_name_", comment: ""), text: $channelName)
@@ -535,6 +525,7 @@ struct LinkChatView: View {
     @State private var showNextcloudPicker = false
     @State private var editingMessage: LinkChatMessage?
     @State private var previewURL: URL?
+    @State private var mentionSuggestions: [LinkParticipant] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -570,6 +561,33 @@ struct LinkChatView: View {
             }
         }
         .quickLookPreview($previewURL)
+        .onChange(of: draft) { _, _ in
+            updateMentions()
+        }
+    }
+
+    private func updateMentions() {
+        guard let lastAt = draft.lastIndex(of: "@") else {
+            mentionSuggestions = []
+            return
+        }
+        let fragment = String(draft[draft.index(after: lastAt)...])
+        guard !fragment.contains(" "), !fragment.contains("\n") else {
+            mentionSuggestions = []
+            return
+        }
+        let query = fragment.lowercased()
+        mentionSuggestions = viewModel.participants
+            .filter { $0.displayName.lowercased().contains(query) }
+            .prefix(5)
+            .map { $0 }
+    }
+
+    private func insertMention(_ participant: LinkParticipant) {
+        guard let lastAt = draft.lastIndex(of: "@") else { return }
+        let prefix = String(draft[..<lastAt])
+        draft = prefix + "@\"" + participant.displayName + "\" "
+        mentionSuggestions = []
     }
 
     @ViewBuilder
@@ -582,24 +600,32 @@ struct LinkChatView: View {
         case let .success(items):
             ScrollViewReader { proxy in
                 List {
-                    ForEach(items.filter { !$0.isSystemMessage }) { message in
-                        LinkMessageRow(
-                            viewModel: viewModel,
-                            message: message,
-                            isOwn: message.actorId == viewModel.currentUserId,
-                            onStartEdit: { editingMessage = message; draft = message.message },
-                            onOpenFile: { info in
-                                Task {
-                                    if let url = await viewModel.downloadAttachment(info) {
-                                        previewURL = url
+                    ForEach(items.filter { $0.systemMessage != "message_deleted" }) { message in
+                        if message.isSystemMessage {
+                            LinkSystemMessageRow(message: message)
+                                .id(message.id)
+                                .listRowSeparator(.hidden)
+                                .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
+                                .listRowBackground(Color.clear)
+                        } else {
+                            LinkMessageRow(
+                                viewModel: viewModel,
+                                message: message,
+                                isOwn: message.actorId == viewModel.currentUserId,
+                                onStartEdit: { editingMessage = message; draft = message.message },
+                                onOpenFile: { info in
+                                    Task {
+                                        if let url = await viewModel.downloadAttachment(info) {
+                                            previewURL = url
+                                        }
                                     }
                                 }
-                            }
-                        )
-                        .id(message.id)
-                        .listRowSeparator(.hidden)
-                        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
-                        .listRowBackground(Color.clear)
+                            )
+                            .id(message.id)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                            .listRowBackground(Color.clear)
+                        }
                     }
                 }
                 .listStyle(.plain)
@@ -626,6 +652,28 @@ struct LinkChatView: View {
 
     private var composer: some View {
         VStack(spacing: 0) {
+            if !mentionSuggestions.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(mentionSuggestions) { participant in
+                        Button {
+                            insertMention(participant)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: participant.actorType == "guests" ? "person.crop.circle.badge.questionmark" : "person.crop.circle")
+                                    .foregroundStyle(.secondary)
+                                Text(participant.displayName).font(.subheadline)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        Divider()
+                    }
+                }
+                .background(Color(.secondarySystemBackground))
+            }
             if editingMessage != nil {
                 HStack {
                     Text(NSLocalizedString("_link_edit_message_", comment: ""))
@@ -755,13 +803,42 @@ private struct LinkMessageBubble: View {
                     .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
             )
             .foregroundStyle(isOwn ? .white : .primary)
+            HStack(spacing: 6) {
+                Spacer(minLength: 0)
+                Text(messageTime)
+                    .font(.system(size: 9))
+                    .foregroundStyle(isOwn ? .white.opacity(0.7) : .secondary)
+            }
             if !isOwn { Spacer(minLength: 40) }
         }
+    }
+
+    private var messageTime: String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
     }
 
     private var displayText: String {
         if let file = message.fileName() { return "📎 \(file)" }
         return message.displayText()
+    }
+}
+
+/// Zentrierte graue Zeile für Systemnachrichten (Variablen ersetzt).
+private struct LinkSystemMessageRow: View {
+    let message: LinkChatMessage
+
+    var body: some View {
+        HStack {
+            Spacer()
+            Text(message.displayText())
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.vertical, 3)
+            Spacer()
+        }
     }
 }
 
@@ -878,6 +955,63 @@ struct LinkParticipantsSheet: View {
         case "federated_users": return "globe"
         case "emails": return "envelope"
         default: return "person.crop.circle"
+        }
+    }
+}
+
+/// Zentrales rundes Anruf-Overlay: normal starten oder stiller Anruf.
+struct CallStartOverlay: View {
+    let title: String
+    let withVideo: Bool
+    let onStart: (Bool) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { onCancel() }
+            VStack(spacing: 22) {
+                Text(title)
+                    .font(.headline)
+                    .multilineTextAlignment(.center)
+                HStack(spacing: 44) {
+                    Button {
+                        onStart(false)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: withVideo ? "video.fill" : "phone.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .background(Circle().fill(Color.green))
+                            Text(NSLocalizedString("_link_start_call_", comment: ""))
+                                .font(.caption)
+                        }
+                    }
+                    Button {
+                        onStart(true)
+                    } label: {
+                        VStack(spacing: 6) {
+                            Image(systemName: "bell.slash.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .background(Circle().fill(Color.orange))
+                            Text(NSLocalizedString("_link_silent_call_", comment: ""))
+                                .font(.caption)
+                        }
+                    }
+                }
+                Button(NSLocalizedString("_cancel_", comment: "")) {
+                    onCancel()
+                }
+                .foregroundStyle(.secondary)
+            }
+            .padding(26)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
+            .padding(32)
         }
     }
 }

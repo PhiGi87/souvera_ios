@@ -258,6 +258,7 @@ private struct MailFolderListView: View {
     }
 
     private func folderListContent(_ boxes: [Mailbox]) -> some View {
+        ScrollViewReader { proxy in
         List {
             ForEach(groups(boxes)) { group in
                 Section {
@@ -298,7 +299,7 @@ private struct MailFolderListView: View {
             let firstRowId = firstVisibleRowId(boxes)
             if let firstId = firstRowId {
                 Button {
-                    withAnimation { viewModel.folderScrollPosition = firstId }
+                    withAnimation { proxy.scrollTo(firstId, anchor: .top) }
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 17, weight: .semibold))
@@ -322,6 +323,7 @@ private struct MailFolderListView: View {
                     showScrollTop = visible
                 }
             }
+        }
         }
     }
 
@@ -533,36 +535,38 @@ private struct MailMessageListView: View {
                 }
             } else {
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    if viewModel.currentMailbox?.kind == .trash {
-                        Button {
-                            showEmptyTrashConfirm = true
-                        } label: {
-                            Image(systemName: "trash.slash")
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_trash_empty_", comment: ""))
-                    }
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
-                        ForEach(MailSortOrder.allCases) { order in
-                            Button {
-                                viewModel.sortOrder = order
-                            } label: {
-                                if viewModel.sortOrder == order {
-                                    Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
-                                } else {
-                                    Text(NSLocalizedString(order.titleKey, comment: ""))
+                        if !isEmptyList {
+                            Button { editing = true } label: {
+                                Label(NSLocalizedString("_edit_", comment: ""), systemImage: "checklist")
+                            }
+                        }
+                        Menu {
+                            ForEach(MailSortOrder.allCases) { order in
+                                Button {
+                                    viewModel.sortOrder = order
+                                } label: {
+                                    if viewModel.sortOrder == order {
+                                        Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
+                                    } else {
+                                        Text(NSLocalizedString(order.titleKey, comment: ""))
+                                    }
                                 }
+                            }
+                        } label: {
+                            Label(NSLocalizedString("_mail_sort_", comment: ""), systemImage: "arrow.up.arrow.down")
+                        }
+                        if viewModel.currentMailbox?.kind == .trash {
+                            Button {
+                                showEmptyTrashConfirm = true
+                            } label: {
+                                Label(NSLocalizedString("_mail_trash_empty_", comment: ""), systemImage: "trash.slash")
                             }
                         }
                     } label: {
-                        Image(systemName: "arrow.up.arrow.down")
+                        Image(systemName: "ellipsis.circle")
                     }
-                    .accessibilityLabel(NSLocalizedString("_mail_sort_", comment: ""))
-                    if !isEmptyList {
-                        Button { editing = true } label: { Image(systemName: "checklist") }
-                            .accessibilityLabel(NSLocalizedString("_edit_", comment: ""))
-                    }
+                    .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
@@ -1511,7 +1515,8 @@ struct AutoRefreshRingView: View {
                         .rotationEffect(.degrees(-90))
                         .animation(.linear(duration: 1), value: progress)
                 }
-                .frame(width: 16, height: 16)
+                .frame(width: 18, height: 18)
+                .frame(width: 24, height: 24, alignment: .center)
                 .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
             }
         }

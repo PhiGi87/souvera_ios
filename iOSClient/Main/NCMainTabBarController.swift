@@ -143,6 +143,7 @@ class NCMainTabBarController: UITabBarController {
         ) { [weak self] notification in
             let count = notification.object as? Int ?? 0
             self?.mailTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+            JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
         }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),

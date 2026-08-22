@@ -31,6 +31,28 @@ struct SouveraBuildInfo {
     }
 }
 
+/// In-App-Sprachwahl (System/Deutsch/English/Nederlands).
+enum SouveraLanguage {
+    static let defaultsKey = "AppleLanguages"
+    static let supportedCodes = ["de", "en", "nl"]
+
+    static var currentCode: String {
+        let languages = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
+        if let first = languages.first, supportedCodes.contains(first) {
+            return first
+        }
+        return "system"
+    }
+
+    static func set(_ code: String) {
+        if code == "system" {
+            UserDefaults.standard.removeObject(forKey: defaultsKey)
+        } else {
+            UserDefaults.standard.set([code], forKey: defaultsKey)
+        }
+    }
+}
+
 /// Background refresh interval setting: while the app is active, the mail and
 /// calendar modules re-sync automatically; the same interval is used as an
 /// advisory value for BGAppRefresh. Werte in Sekunden; 0 = aus.

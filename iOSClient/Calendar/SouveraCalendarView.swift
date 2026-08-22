@@ -261,6 +261,7 @@ struct SouveraCalendarView: View {
             )
             .refreshable { await viewModel.load() }
         }
+        .offset(x: swipeOffset)
         .gesture(horizontalSwipe(step: 1))
     }
 
@@ -305,15 +306,31 @@ struct SouveraCalendarView: View {
         .padding(.vertical, 8)
     }
 
-    /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter.
+    /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter. Die
+    /// Ansicht folgt dem Finger und federt beim Loslassen zurück bzw.
+    /// wechselt fließend den Tag (Apple-Stil).
+    @GestureState private var swipeOffset: CGFloat = 0
+
     private func horizontalSwipe(step: Int) -> some Gesture {
-        DragGesture(minimumDistance: 50)
+        DragGesture(minimumDistance: 20)
+            .updating($swipeOffset) { value, state, _ in
+                let h = value.translation.width
+                let v = value.translation.height
+                state = abs(h) > abs(v) ? h : 0
+            }
             .onEnded { value in
                 let h = value.translation.width
                 let v = value.translation.height
                 guard abs(h) > abs(v) else { return }
-                withAnimation {
-                    shiftSelectedDay(by: h < 0 ? step : -step)
+                let threshold: CGFloat = 90
+                if abs(h) >= threshold {
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        shiftSelectedDay(by: h < 0 ? step : -step)
+                    }
+                } else {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        // Nur zurückfedern - die Geste-State-Animierung erledigt das.
+                    }
                 }
             }
     }
@@ -353,6 +370,7 @@ struct SouveraCalendarView: View {
                 onCreate: createEventInSlot
             )
         }
+        .offset(x: swipeOffset)
         .refreshable { await viewModel.load() }
         .gesture(horizontalSwipe(step: 3))
     }
@@ -610,6 +628,19 @@ private struct TimelineColumn: View {
                 if showsNowLine {
                     nowLine
                 }
+                if let slot = dragSlot {
+                    let offsetY = CGFloat(slot.start) / 60.0 * hourHeight
+                    let height = CGFloat(max(slot.end - slot.start, 15)) / 60.0 * hourHeight
+                    Rectangle()
+                        .fill(Color(NCBrandColor.shared.customer).opacity(0.25))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(Color(NCBrandColor.shared.customer).opacity(0.6), lineWidth: 1)
+                        )
+                        .padding(.horizontal, 2)
+                        .offset(y: offsetY + 2)
+                        .frame(height: max(height - 4, 20), alignment: .top)
+                }
                 ForEach(timedEvents) { event in
                     eventBlock(event, containerWidth: geometry.size.width)
                 }
@@ -736,27 +767,42 @@ private struct TimelineColumn: View {
     }
 
     /// Tap auf die freie Fläche = Termin im Zeitslot erstellen; Ziehen wählt
-    /// den Slot-Bereich (min. 30 Minuten).
+    /// den Slot-Bereich. Zeiten rasten in 15-Minuten-Schritten ein
+    /// (Start abrunden, Ende aufrunden, mindestens 15 Minuten) und der Slot
+    /// wird während des Ziehens sichtbar markiert.
+    @GestureState private var dragSlot: (start: Int, end: Int)?
+
     private func createGesture() -> some Gesture {
         DragGesture(minimumDistance: 0)
+            .updating($dragSlot) { value, state, _ in
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let a = Self.snapDown(min(startMinute, endMinute))
+                let b = Self.snapUp(max(startMinute, endMinute))
+                state = (a, max(b, a + 15))
+            }
             .onEnded { value in
                 guard let onCreate else { return }
                 let calendar = Calendar.current
                 let dayStart = calendar.startOfDay(for: day)
-                func minute(for y: CGFloat) -> Int {
-                    let minutes = Int((y / hourHeight) * 60)
-                    return max(0, min(24 * 60 - 1, minutes))
-                }
-                let startMinute = minute(for: value.startLocation.y)
-                let endMinute = minute(for: value.location.y)
-                let a = min(startMinute, endMinute)
-                let b = max(startMinute, endMinute)
-                let slotDuration = max(30, b - a)
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let a = Self.snapDown(min(startMinute, endMinute))
+                let b = Self.snapUp(max(startMinute, endMinute))
+                let slotDuration = max(15, b - a)
                 guard let slotStart = calendar.date(byAdding: .minute, value: a, to: dayStart),
                       let slotEnd = calendar.date(byAdding: .minute, value: a + slotDuration, to: dayStart) else { return }
                 onCreate(slotStart, slotEnd)
             }
     }
+
+    private static func minute(for y: CGFloat, hourHeight: CGFloat) -> Int {
+        let minutes = Int((y / hourHeight) * 60)
+        return max(0, min(24 * 60 - 1, minutes))
+    }
+
+    private static func snapDown(_ minute: Int) -> Int { (minute / 15) * 15 }
+    private static func snapUp(_ minute: Int) -> Int { ((minute + 14) / 15) * 15 }
 
     private func timeText(_ event: CalendarEventModel) -> String {
         let formatter = DateFormatter()

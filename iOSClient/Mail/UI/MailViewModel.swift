@@ -250,6 +250,19 @@ final class MailViewModel: ObservableObject {
         } else {
             await loadMailboxesImap()
         }
+        updateUnreadBadge()
+    }
+
+    /// Ungelesen gesamt → Badge am Mail-Tab (NotificationCenter).
+    func updateUnreadBadge() {
+        let count: Int
+        if case let .success(boxes) = mailboxes {
+            count = boxes.reduce(0) { $0 + $1.unreadCount }
+        } else {
+            count = 0
+        }
+        JmapLog.write("Mail unread badge -> \(count)")
+        NotificationCenter.default.post(name: .mailUnreadChanged, object: count)
     }
 
     private func loadMailboxesImap() async {
