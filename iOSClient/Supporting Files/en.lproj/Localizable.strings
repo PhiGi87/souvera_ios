@@ -980,3 +980,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_calendar_talk_deleted_"         = "Talk channel deleted";
 "_link_room_deleted_"             = "Channel deleted";
 "_link_room_delete_failed_"       = "Channel could not be deleted (permission?)";
+"_mail_blacklist_confirm_title_"   = "Add to blacklist?";
+"_mail_blacklist_confirm_multi_"   = "%@ and %d more";
+"_link_chat_external_"             = "Chat with external user: %@";
+"_link_external_created_"          = "Conversation with %@ created";
+"_link_external_failed_"           = "External invitation failed";

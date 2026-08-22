@@ -74,12 +74,48 @@ final class LinkViewModel: ObservableObject {
         }
         Task {
             let results = await api.searchUsers(query: trimmed)
-            self.userResults = results
+            var all = results
+            // Unbekannte E-Mail-Adresse: externen Nutzer einladen anbieten
+            // (Federation, falls serverseitig aktiv, sonst Gast per E-Mail).
+            if trimmed.contains("@"),
+               !results.contains(where: { $0.id.lowercased() == trimmed.lowercased() }) {
+                let source = await api.isFederationOutgoingEnabled() ? "federated" : "email_guest"
+                all.append(LinkSuggestion(
+                    id: trimmed,
+                    label: String(format: NSLocalizedString("_link_chat_external_", comment: ""), trimmed),
+                    source: source
+                ))
+            }
+            self.userResults = all
         }
     }
 
     func startConversation(id: String, source: String, title: String) {
         guard let api else { return }
+        if source == "federated" || source == "email_guest" {
+            Task {
+                guard let token = await api.createGroupRoom(name: title) else {
+                    actionFeedback = LinkActionFeedback(
+                        success: false,
+                        message: NSLocalizedString("_link_external_failed_", comment: "")
+                    )
+                    return
+                }
+                if source == "federated" {
+                    await api.addParticipants(token: token, userIds: [], emails: [], federatedIds: [id])
+                } else {
+                    await api.addParticipants(token: token, userIds: [], emails: [id])
+                }
+                self.userResults = []
+                self.loadConversations()
+                self.openConversation(token: token, title: title)
+                actionFeedback = LinkActionFeedback(
+                    success: true,
+                    message: String(format: NSLocalizedString("_link_external_created_", comment: ""), title)
+                )
+            }
+            return
+        }
         let roomType = source == "groups" ? LinkRoomType.group.rawValue : LinkRoomType.oneToOne.rawValue
         Task {
             let token = await api.createConversation(invite: id, roomType: roomType)

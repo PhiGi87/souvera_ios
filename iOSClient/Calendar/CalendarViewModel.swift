@@ -36,7 +36,7 @@ final class CalendarViewModel: ObservableObject {
     private let client = CalDavClient()
     private var cachedEntries: [CalDavEventEntry] = []
     private var autoRefreshTask: Task<Void, Never>?
-    private var lastAutoRefresh: Date = .distantPast
+    private var lastAutoRefresh: Date = Date()
 
     /// Periodically reloads mail/calendar in the foreground according to the
     /// "Hintergrundaktualisierung" setting (30 s check granularity).

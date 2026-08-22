@@ -325,6 +325,15 @@ struct LinkConversationListView: View {
     }
 #endif
 
+    private func suggestionIcon(_ source: String) -> String {
+        switch source {
+        case "groups": return "person.3.fill"
+        case "federated": return "globe"
+        case "email_guest": return "envelope.badge.person.crop"
+        default: return "person.crop.circle"
+        }
+    }
+
     var body: some View {
         List {
 #if DEBUG
@@ -348,7 +357,7 @@ struct LinkConversationListView: View {
                             viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
                             searchQuery = ""
                         } label: {
-                            Label(suggestion.label, systemImage: suggestion.source == "groups" ? "person.3.fill" : "person.crop.circle")
+                            Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
                         }
                     }
                 }

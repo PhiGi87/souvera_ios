@@ -106,7 +106,7 @@ actor LinkOcsApi {
 
     /// Adds participants: internal Souvera users by user id (`source=users`),
     /// external guests by email (`source=emails`, Talk sends the invite).
-    func addParticipants(token: String, userIds: [String], emails: [String]) async {
+    func addParticipants(token: String, userIds: [String], emails: [String], federatedIds: [String] = []) async {
         for userId in userIds {
             let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId
             let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=users&newParticipant=\(encoded)", method: "POST")
@@ -115,6 +115,11 @@ actor LinkOcsApi {
         for email in emails {
             let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email
             let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=emails&newParticipant=\(encoded)", method: "POST")
+            _ = try? await session.data(for: req)
+        }
+        for federatedId in federatedIds {
+            let encoded = federatedId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? federatedId
+            let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=federated_users&newParticipant=\(encoded)", method: "POST")
             _ = try? await session.data(for: req)
         }
     }
@@ -135,6 +140,38 @@ actor LinkOcsApi {
     func setLobby(token: String, enabled: Bool) async {
         let req = signed(url: "\(base)/api/v4/room/\(token)/webinar/lobby?state=\(enabled ? 1 : 0)", method: "PUT")
         _ = try? await session.data(for: req)
+    }
+
+    // MARK: - Federation / externe Teilnehmer
+
+    /// Talk-Federation für ausgehende Einladungen aktiv? (einmalig gecacht)
+    private var federationEnabledCache: Bool?
+
+    func isFederationOutgoingEnabled() async -> Bool {
+        if let federationEnabledCache { return federationEnabledCache }
+        guard let body = await get("\(root)/ocs/v2.php/cloud/capabilities?format=json"),
+              let data = body.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = json["ocs"] as? [String: Any],
+              let capsData = ocs["data"] as? [String: Any],
+              let capabilities = capsData["capabilities"] as? [String: Any],
+              let spreed = capabilities["spreed"] as? [String: Any],
+              let config = spreed["config"] as? [String: Any],
+              let federation = config["federation"] as? [String: Any] else {
+            return false
+        }
+        federationEnabledCache = (federation["outgoing-enabled"] as? Bool) ?? false
+        return federationEnabledCache ?? false
+    }
+
+    /// Erstellt eine (öffentliche) Gruppenkonversation für externe Teilnehmer.
+    func createGroupRoom(name: String) async -> String? {
+        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        let req = signed(url: "\(base)/api/v4/room?roomType=3&roomName=\(encoded)", method: "POST")
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode ?? 500 < 300 else { return nil }
+        let env: OcsEnvelope<LinkConversation>? = try? decoder.decode(OcsEnvelope<LinkConversation>.self, from: data)
+        return env?.ocs.data?.token
     }
 
     // MARK: - Calls / signaling

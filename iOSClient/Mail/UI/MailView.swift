@@ -11,6 +11,7 @@ import WebKit
 struct MailView: View {
     @StateObject private var viewModel = MailViewModel()
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
+    @State private var blacklistTarget: [MailMessage]?
 
     var body: some View {
         NavigationStack {
@@ -18,10 +19,26 @@ struct MailView: View {
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        AutoRefreshRingView(viewModel: viewModel)
-                    }
                     toolbar
+                }
+                .confirmationDialog(
+                    NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+                    isPresented: Binding(
+                        get: { blacklistTarget != nil },
+                        set: { if !$0 { blacklistTarget = nil } }
+                    ),
+                    titleVisibility: .visible
+                ) {
+                    Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
+                        let target = blacklistTarget ?? []
+                        blacklistTarget = nil
+                        Task { await viewModel.blacklistSenders(target) }
+                    }
+                    Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                        blacklistTarget = nil
+                    }
+                } message: {
+                    Text(blacklistMessage)
                 }
         }
         .onAppear { viewModel.start() }
@@ -84,6 +101,17 @@ struct MailView: View {
         return false
     }
 
+    private var blacklistMessage: String {
+        let addresses = Array(Set((blacklistTarget ?? []).map { $0.fromAddress }
+            .filter { !$0.isEmpty }))
+        if addresses.isEmpty { return "" }
+        let preview = addresses.prefix(3).joined(separator: ", ")
+        if addresses.count > 3 {
+            return String(format: NSLocalizedString("_mail_blacklist_confirm_multi_", comment: ""), preview, addresses.count)
+        }
+        return preview
+    }
+
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         if !isFolders {
@@ -136,7 +164,7 @@ struct MailView: View {
                     Image(systemName: "trash")
                 }
                 Button {
-                    Task { await viewModel.blacklistSenders([message]) }
+                    blacklistTarget = [message]
                 } label: {
                     Image(systemName: "exclamationmark.shield")
                 }
@@ -144,6 +172,9 @@ struct MailView: View {
             }
         }
         if isFolders {
+            ToolbarItem(placement: .topBarLeading) {
+                AutoRefreshRingView(viewModel: viewModel)
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { viewModel.route = .search } label: { Image(systemName: "magnifyingglass") }
             }
@@ -565,12 +596,7 @@ private struct MailMessageListView: View {
                         selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
                     }
                     Button {
-                        let messages = selectedMessages
-                        Task {
-                            await viewModel.blacklistSenders(messages)
-                            selected.removeAll()
-                            editing = false
-                        }
+                        blacklistTarget = selectedMessages
                     } label: {
                         selectionAction(icon: "exclamationmark.shield", label: NSLocalizedString("_mail_blacklist_short_", comment: ""))
                     }

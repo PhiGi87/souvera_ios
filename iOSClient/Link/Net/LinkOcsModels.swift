@@ -166,6 +166,12 @@ struct LinkSuggestion: Decodable, Identifiable {
     let label: String
     let source: String
 
+    init(id: String, label: String, source: String) {
+        self.id = id
+        self.label = label
+        self.source = source
+    }
+
     enum CodingKeys: String, CodingKey { case id, label, source }
 
     init(from decoder: Decoder) throws {

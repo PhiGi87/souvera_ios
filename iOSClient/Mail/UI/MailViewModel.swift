@@ -114,7 +114,7 @@ final class MailViewModel: ObservableObject {
     }
 
     private var autoRefreshTask: Task<Void, Never>?
-    private var lastAutoRefresh: Date = .distantPast
+    private var lastAutoRefresh: Date = Date()
 
     /// Periodically refreshes the open mailbox in the foreground according to
     /// the "Hintergrundaktualisierung" setting. Publishes the next refresh
@@ -140,8 +140,13 @@ final class MailViewModel: ObservableObject {
                 if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
                     self.lastAutoRefresh = Date()
                     self.nextAutoRefreshAt = Date().addingTimeInterval(interval)
-                    guard self.currentMailbox != nil, self.composeContext == nil else { continue }
-                    await self.refreshMessages()
+                    guard self.composeContext == nil else { continue }
+                    if self.currentMailbox != nil {
+                        await self.refreshMessages()
+                    } else {
+                        // Ordnerübersicht: Postfächer (Ungelesen-Zähler) aktualisieren
+                        await self.loadMailboxes()
+                    }
                 }
             }
         }
