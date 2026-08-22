@@ -31,7 +31,7 @@ HISTORY_FILE="$HOME/.souvera-watcher.history"
 HISTORY_MAX=10
 WORK_DIR="${TMPDIR:-/tmp}/souvera-watcher"
 
-WATCHER_VERSION="5"
+WATCHER_VERSION="6"
 
 API="https://api.github.com"
 
@@ -49,7 +49,14 @@ DOUBLE=$(printf '%.0s═' $(seq 1 $WIDTH))
 
 INPLACE_ACTIVE=0
 
-inplace() { INPLACE_ACTIVE=1; printf '\r\033[2K%s' "$*"; }
+inplace() { # Text auf Terminalbreite kappen, sonst wrappt die Zeile und
+    # die Reste bleiben bei jedem Update sichtbar
+    local width text
+    width=$(tput cols 2>/dev/null || printf 80)
+    text=$(printf '%s' "$*" | cut -c1-$((width - 2)))
+    INPLACE_ACTIVE=1
+    printf '\r\033[2K%s' "$text"
+}
 
 nl_if_inplace() {
     if [ "$INPLACE_ACTIVE" = "1" ]; then
@@ -651,7 +658,7 @@ while true; do
             screen_runid=""
             screen_status=""
         else
-            inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] Historie · [r] aktualisieren · [x] frisch installieren · [q] Beenden"
+            inplace "  ⏳ $(dur $remaining) [h] Historie [r] Update [x] Frisch [q] Ende"
             k=$(read_key 5)
             case "$k" in
                 h|H)
@@ -683,7 +690,7 @@ while true; do
         inplace "  Status: läuft · Laufzeit: $(dur $elapsed)"
     else
         waited=$(( now_s - wait_started ))
-        inplace "  Kein neuer Run · Warte seit $(dur $waited) — [r] aktualisieren · [x] frisch installieren · [q] Beenden"
+        inplace "  ⏳ Kein neuer Run seit $(dur $waited) [r] Update [x] Frisch [q] Ende"
         k=$(read_key 5)
         case "$k" in
             r|R)
