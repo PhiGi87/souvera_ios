@@ -20,6 +20,7 @@ class NCMainTabBarController: UITabBarController {
         }
     }
     var availableNotifications: Bool = false
+    private weak var mailTabBarItem: UITabBarItem?
     var documentPickerViewController: NCDocumentPickerViewController?
     let navigationCollectionViewCommon = ThreadSafeArray<NavigationCollectionViewCommon>()
     private var previousIndex: Int?
@@ -134,6 +135,15 @@ class NCMainTabBarController: UITabBarController {
             imageName: "envelope.fill",
             tag: 100
         )
+        mailTabBarItem = mailController.tabBarItem
+        NotificationCenter.default.addObserver(
+            forName: .mailUnreadChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let count = notification.object as? Int ?? 0
+            self?.mailTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+        }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),
             titleKey: "_calendar_",

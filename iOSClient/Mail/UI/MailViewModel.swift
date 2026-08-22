@@ -449,6 +449,7 @@ final class MailViewModel: ObservableObject {
         )
         if ok {
             await syncMessages()
+            await loadMailboxes()
         }
     }
 
@@ -858,6 +859,7 @@ final class MailViewModel: ObservableObject {
     }
 
     private func afterListMutation(_ removedIds: [String]) {
+        Task { await loadMailboxes() }
         // Remove from the visible list (server confirms the change).
         if case var .success(list) = messages {
             list.removeAll { removedIds.contains($0.emailId) }
