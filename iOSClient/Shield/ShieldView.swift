@@ -26,20 +26,7 @@ struct ShieldView: View {
         return NSLocalizedString("_shield_add_whitelist_", comment: "")
     }
 
-    enum ShieldSection: String, CaseIterable, Identifiable {
-        case quarantine, whitelist, blacklist
-        var id: String { rawValue }
-
-        var titleKey: String {
-            switch self {
-            case .quarantine: return "_shield_quarantine_"
-            case .whitelist: return "_shield_whitelist_"
-            case .blacklist: return "_shield_blacklist_"
-            }
-        }
-    }
-
-    var body: some View {
+    private var header: some View {
         VStack(spacing: 0) {
             Picker("", selection: $section) {
                 ForEach(ShieldSection.allCases) { section in
@@ -67,12 +54,51 @@ struct ShieldView: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 4)
             }
+        }
+    }
 
-            switch section {
-            case .quarantine: quarantineSection
-            case .whitelist: listSection(kind: .whitelist, state: viewModel.whitelist)
-            case .blacklist: listSection(kind: .blacklist, state: viewModel.blacklist)
+    @ViewBuilder
+    private var sectionContent: some View {
+        switch section {
+        case .quarantine: quarantineSection
+        case .whitelist: listSection(kind: .whitelist, state: viewModel.whitelist)
+        case .blacklist: listSection(kind: .blacklist, state: viewModel.blacklist)
+        }
+    }
+
+    private func handleAddFire() {
+        addTrigger.fire = false
+        guard section == .whitelist || section == .blacklist else { return }
+        addEntryList = section == .blacklist ? .blacklist : .whitelist
+        guard viewModel.canAddEntry else {
+            if let personal = viewModel.personalMailbox {
+                viewModel.feedback = ShieldViewModel.ShieldFeedback(
+                    success: false,
+                    message: String(format: NSLocalizedString("_shield_add_personal_only_", comment: ""), personal)
+                )
             }
+            return
+        }
+        showAddEntry = true
+    }
+
+    enum ShieldSection: String, CaseIterable, Identifiable {
+        case quarantine, whitelist, blacklist
+        var id: String { rawValue }
+
+        var titleKey: String {
+            switch self {
+            case .quarantine: return "_shield_quarantine_"
+            case .whitelist: return "_shield_whitelist_"
+            case .blacklist: return "_shield_blacklist_"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+            sectionContent
         }
         .task {
             await viewModel.loadAll()
@@ -88,21 +114,7 @@ struct ShieldView: View {
             viewModel.selectedMailbox = newValue
         }
         .onChange(of: addTrigger.fire) { _, fired in
-            if fired {
-                addTrigger.fire = false
-                guard section == .whitelist || section == .blacklist else { return }
-                addEntryList = section == .blacklist ? .blacklist : .whitelist
-                guard viewModel.canAddEntry else {
-                    if let personal = viewModel.personalMailbox {
-                        viewModel.feedback = ShieldViewModel.ShieldFeedback(
-                            success: false,
-                            message: String(format: NSLocalizedString("_shield_add_personal_only_", comment: ""), personal)
-                        )
-                    }
-                    return
-                }
-                showAddEntry = true
-            }
+            if fired { handleAddFire() }
         }
         .onChange(of: section) { _, newValue in
             addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
