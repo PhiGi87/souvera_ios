@@ -130,13 +130,13 @@ actor MailImapClient {
         let result: MailResult<Void> = await run("Emptying mailbox failed") {
             try await self.withConnection { connection in
                 _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
-                let fromFirst = MessageIdentifierSetNonEmpty<SequenceNumber>(SequenceNumber(rawValue: 1)...)
+                let fromFirst = MessageIdentifierSetNonEmpty<SequenceNumber>(range: SequenceNumber(rawValue: 1)...)
                 _ = try await connection.send(.store(.set(fromFirst), [], .flags(.add(silent: true, list: [.deleted]))))
                 _ = try await connection.send(.expunge)
             }
         }
         if case .failure(let error) = result {
-            JmapLog.write("emptyMailbox imap failed: \(error.localizedDescription)")
+            JmapLog.write("emptyMailbox imap failed: \(error)")
             return false
         }
         return true
