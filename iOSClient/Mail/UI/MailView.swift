@@ -606,7 +606,6 @@ private struct MailMessageListView: View {
         return true
     }
 
-    @ViewBuilder
     /// Dezenter Scroll-to-top-Button (Fade über `showScrollTop`).
     @ViewBuilder
     private func scrollTopButton(proxy: ScrollViewProxy, firstId: String) -> some View {
