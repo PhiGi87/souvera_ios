@@ -10,7 +10,8 @@
 #   - On success: downloads "Souvera Simulator App", unzips, installs and
 #     launches it on a booted iPhone simulator (bundle id eu.souvera.app).
 #   - After finishing, the result screen stays for 15 minutes (or until a new
-#     run starts). [h] history, [r] reinstall the last successful run, [q] quit.
+#     run starts). [h] history, [r] update from the last successful run,
+#     [x] fresh install (wipes app data), [q] quit.
 #
 # Usage:  ./watch-simulator.sh
 # Optional env: GH_TOKEN (avoids API rate limits), REPO, BRANCH_PREFIX,
@@ -30,8 +31,7 @@ HISTORY_FILE="$HOME/.souvera-watcher.history"
 HISTORY_MAX=10
 WORK_DIR="${TMPDIR:-/tmp}/souvera-watcher"
 
-WATCHER_VERSION="3"
-WATCHER_SCRIPT_COMMIT="79358c2"
+WATCHER_VERSION="4"
 
 API="https://api.github.com"
 
@@ -104,6 +104,17 @@ ${C_RED}✗ $*$C_RESET"
     fi
     fail "$*"
     printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$HOME/.souvera-watcher.error" 2>/dev/null || true
+}
+
+last_install_line() {
+    [ -f "$HOME/.souvera-watcher.state" ] || { printf '%s' ""; return 0; }
+    local runid commit ts mode pretty label
+    IFS='|' read -r runid commit ts mode < "$HOME/.souvera-watcher.state"
+    [ -z "$ts" ] && { printf '%s' ""; return 0; }
+    pretty=$(python3 -c "import sys,datetime;print(datetime.datetime.fromtimestamp(int(sys.argv[1])).strftime('%d.%m. %H:%M'))" "$ts" 2>/dev/null)
+    [ -z "$pretty" ] && { printf '%s' ""; return 0; }
+    if [ "$mode" = "fresh" ]; then label="Frisch"; else label="Update"; fi
+    printf 'Letzte Installation: %s (Build %s, %s)' "$pretty" "$commit" "$label"
 }
 
 fail_tail() { # logfile label
@@ -290,8 +301,8 @@ spinner() { # pid label
 # Install phase
 # ---------------------------------------------------------------------------
 
-install_artifact() { # runid commit
-    local runid="$1" commit="$2" zip_url artifact_size start phase_start elapsed rate mb_total mb_done
+install_artifact() { # runid commit [fresh=0|1]
+    local runid="$1" commit="$2" fresh="${3:-0}" zip_url artifact_size start phase_start elapsed rate mb_total mb_done
     say "$LINE"
 
     info "⬇ Download: $ARTIFACT_NAME"
@@ -397,18 +408,27 @@ install_artifact() { # runid commit
         dim "Simulator läuft bereits: $booted"
     fi
 
-    phase_start=$(now)
-    info "⏳ Alte App entfernen"
-    ( xcrun simctl uninstall "$booted" "$APP_BUNDLE_ID" >/dev/null 2>&1; true ) &
-    spinner $! "Deinstalliere"
-    ok "App entfernt: $APP_BUNDLE_ID"
+    if [ "$fresh" = "1" ]; then
+        phase_start=$(now)
+        info "⏳ Frische Installation: alte App + Daten entfernen"
+        ( xcrun simctl uninstall "$booted" "$APP_BUNDLE_ID" >/dev/null 2>"$WORK_DIR/$runid/.uninstall-err"; true ) &
+        spinner $! "Deinstalliere"
+        note_ok "Alte App entfernt (Daten gelöscht): $APP_BUNDLE_ID"
+    else
+        dim "Update-Modus: bestehende App + Daten bleiben erhalten"
+    fi
 
     phase_start=$(now)
     info "⏳ Installieren: Souvera.app (Commit $commit)"
     ( xcrun simctl install "$booted" "$app_path" >/dev/null 2>"$WORK_DIR/$runid/.install-err" ) &
     spinner $! "Installiere"
     if xcrun simctl install "$booted" "$app_path" >/dev/null 2>"$WORK_DIR/$runid/.install-err"; then
-        note_ok "Installiert: Build $commit in $(dur $(($(now) - phase_start)))"
+        note_ok "Installiert: Build $commit um $(date '+%H:%M') (in $(dur $(($(now) - phase_start))))"
+        if [ "$fresh" = "1" ]; then
+            printf '%s|%s|%s|fresh\n' "$runid" "$commit" "$(now)" > "$HOME/.souvera-watcher.state"
+        else
+            printf '%s|%s|%s|update\n' "$runid" "$commit" "$(now)" > "$HOME/.souvera-watcher.state"
+        fi
     else
         fail_tail "$WORK_DIR/$runid/.install-err" "Installation fehlgeschlagen"
         return 1
@@ -437,7 +457,7 @@ render_screen() { # runid commit branch status conclusion started updated
     clear 2>/dev/null || true
     INPLACE_ACTIVE=0
     say "$DOUBLE"
-    printf '%s Souvera Watcher v%s (Skript %s)%s\n' "$C_BOLD" "$WATCHER_VERSION" "$WATCHER_SCRIPT_COMMIT" "$C_RESET"
+    printf '%s Souvera Watcher v%s%s\n' "$C_BOLD" "$WATCHER_VERSION" "$C_RESET"
     if [ -z "$runid" ]; then
         info "Kein Run gefunden."
     else
@@ -449,6 +469,9 @@ render_screen() { # runid commit branch status conclusion started updated
             [ "$d" -gt 0 ] 2>/dev/null && printf '   Dauer: %s' "$(dur $d)"
         fi
         say ""
+        local li
+        li=$(last_install_line)
+        [ -n "$li" ] && dim "$li"
         local head
         head=$(latest_head "$branch")
         if [ -n "$head" ] && [ "$head" != "$commit" ]; then
@@ -474,8 +497,8 @@ last_success() { # -> "runid commit" oder ""
     load_history | awk -F'|' '$1 == "success" { print $2 " " $3; exit }'
 }
 
-reinstall() {
-    local entry runid commit
+reinstall() { # [fresh=0|1]
+    local fresh="${1:-0}" entry runid commit
     entry=$(last_success)
     if [ -z "$entry" ]; then
         info "Kein erfolgreicher Run in der Historie (Artifakte bleiben 14 Tage erhalten)."
@@ -484,8 +507,12 @@ reinstall() {
     runid=${entry%% *}
     commit=${entry#* }
     hold_note=""
-    info "▶ Erneute Installation: Run $runid (Commit $commit)"
-    if install_artifact "$runid" "$commit"; then
+    if [ "$fresh" = "1" ]; then
+        info "▶ Frische Installation (löscht App-Daten): Run $runid (Commit $commit)"
+    else
+        info "▶ Aktualisierung: Run $runid (Commit $commit)"
+    fi
+    if install_artifact "$runid" "$commit" "$fresh"; then
         note_ok "Reinstallation abgeschlossen (Build $commit)"
         return 0
     fi
@@ -499,8 +526,8 @@ on_exit() {
     if [ "$code" -ne 0 ]; then
         stty sane 2>/dev/null
         nl_if_inplace
-        printf '%s✗ Watcher v%s (Skript %s) wurde unerwartet beendet (Exit %s).%s\n' \
-            "$C_RED" "$WATCHER_VERSION" "$WATCHER_SCRIPT_COMMIT" "$code" "$C_RESET"
+        printf '%s✗ Watcher v%s wurde unerwartet beendet (Exit %s).%s\n' \
+            "$C_RED" "$WATCHER_VERSION" "$code" "$C_RESET"
         printf '  Bitte diese Zeile + die angezeigte Version melden. Details: ~/.souvera-watcher.error\n'
     fi
     exit "$code"
@@ -519,6 +546,7 @@ fi
 last_runid=""
 last_status=""
 processed_runid=""
+seen_in_progress_runid=""
 last_poll=0
 status_mode=""     # "" = watch, "done" = Abschluss-Screen
 hold_deadline=0
@@ -561,34 +589,44 @@ while true; do
         started=$(printf '%s' "$run" | cut -d'|' -f6)
         updated=$(printf '%s' "$run" | cut -d'|' -f8)
 
+        # Live beobachtet: läuft der Run gerade?
+        if [ -n "$runid" ] && [ "$status" != "completed" ]; then
+            seen_in_progress_runid="$runid"
+        fi
+
         # Zustandswechsel (neuer Run oder Statuswechsel)?
         if [ "$runid|$status" != "$screen_runid|$screen_status" ]; then
-            # Abschluss genau einmal verarbeiten
+            # Abschluss genau einmal verarbeiten - ABER nur, wenn der Run zuvor
+            # live in_progress war. Ein schon beim ersten Anblick abgeschlossener
+            # Run (z. B. nach leerer/verspäteter API-Antwort) wird nur angezeigt,
+            # nie automatisch installiert.
             if [ -n "$runid" ] && [ "$status" = "completed" ] && [ "$processed_runid" != "$runid" ]; then
-                case "$conclusion" in
-                    success)
-                        ok "Build fertig (Commit $commit) — Installation wird vorbereitet …"
-                        total_start=$(now)
-                        if install_artifact "$runid" "$commit"; then
-                            note_ok "Fertig in $(dur $(($(now) - total_start)))"
-                            save_history "success" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                        else
-                            note_fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
+                if [ "$seen_in_progress_runid" = "$runid" ]; then
+                    case "$conclusion" in
+                        success)
+                            ok "Build fertig (Commit $commit) — Installation wird vorbereitet …"
+                            total_start=$(now)
+                            if install_artifact "$runid" "$commit"; then
+                                note_ok "Fertig in $(dur $(($(now) - total_start)))"
+                                save_history "success" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                            else
+                                note_fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
+                                save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                            fi
+                            ;;
+                        failure)
+                            fail "Build fehlgeschlagen — Log: https://github.com/$REPO/actions/runs/$runid"
                             save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                        fi
-                        ;;
-                    failure)
-                        fail "Build fehlgeschlagen — Log: https://github.com/$REPO/actions/runs/$runid"
-                        save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                        ;;
-                    cancelled|skipped)
-                        info "Run abgebrochen/übersprungen"
-                        save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                        ;;
-                esac
+                            ;;
+                        cancelled|skipped)
+                            info "Run abgebrochen/übersprungen"
+                            save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                            ;;
+                    esac
+                    status_mode="done"
+                    hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                fi
                 processed_runid="$runid"
-                status_mode="done"
-                hold_deadline=$(( $(now) + HOLD_SECONDS ))
             fi
 
             render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
@@ -613,7 +651,7 @@ while true; do
             screen_runid=""
             screen_status=""
         else
-            inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] Historie · [r] erneut installieren · [q] Beenden"
+            inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] Historie · [r] aktualisieren · [x] frisch installieren · [q] Beenden"
             k=$(read_key 5)
             case "$k" in
                 h|H)
@@ -624,7 +662,14 @@ while true; do
                     screen_status="$status"
                     ;;
                 r|R)
-                    if reinstall; then
+                    if reinstall 0; then
+                        render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+                        printf '%s\n' "$hold_note"
+                        hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                    fi
+                    ;;
+                x|X)
+                    if reinstall 1; then
                         render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
                         printf '%s\n' "$hold_note"
                         hold_deadline=$(( $(now) + HOLD_SECONDS ))
@@ -638,11 +683,19 @@ while true; do
         inplace "  Status: läuft · Laufzeit: $(dur $elapsed)"
     else
         waited=$(( now_s - wait_started ))
-        inplace "  Kein neuer Run · Warte seit $(dur $waited) — [r] erneut installieren · [q] Beenden"
+        inplace "  Kein neuer Run · Warte seit $(dur $waited) — [r] aktualisieren · [x] frisch installieren · [q] Beenden"
         k=$(read_key 5)
         case "$k" in
             r|R)
-                if reinstall; then
+                if reinstall 0; then
+                    status_mode="done"
+                    hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                    render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+                    printf '%s\n' "$hold_note"
+                fi
+                ;;
+            x|X)
+                if reinstall 1; then
                     status_mode="done"
                     hold_deadline=$(( $(now) + HOLD_SECONDS ))
                     render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
