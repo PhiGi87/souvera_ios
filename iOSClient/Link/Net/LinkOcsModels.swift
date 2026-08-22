@@ -4,6 +4,7 @@
 // Ported from souvera_android link/net/OcsModels.kt — the Nextcloud Talk ("Link") OCS API model layer.
 
 import Foundation
+import SwiftUI
 
 /// Generic Nextcloud OCS v2 response envelope: `{ocs: {meta, data}}`.
 struct OcsEnvelope<T: Decodable>: Decodable {

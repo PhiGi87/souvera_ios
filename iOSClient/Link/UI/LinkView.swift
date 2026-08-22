@@ -627,14 +627,14 @@ struct LinkChatView: View {
                                 isOwn: message.actorId == viewModel.currentUserId,
                                 showTime: showsTime(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
-                                onLongPress: { target in reactionTarget = target },
                                 onOpenFile: { info in
                                     Task {
                                         if let url = await viewModel.downloadAttachment(info) {
                                             previewURL = url
                                         }
                                     }
-                                }
+                                },
+                                onLongPress: { target in reactionTarget = target }
                             )
                             .id(message.id)
                             .listRowSeparator(.hidden)
