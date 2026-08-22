@@ -10,7 +10,7 @@
 #   - On success: downloads "Souvera Simulator App", unzips, installs and
 #     launches it on a booted iPhone simulator (bundle id eu.souvera.app).
 #   - After finishing, the result screen stays for 15 minutes (or until a new
-#     run starts). [h] returns to the history view, [q] quits.
+#     run starts). [h] history, [r] reinstall the last successful run, [q] quit.
 #
 # Usage:  ./watch-simulator.sh
 # Optional env: GH_TOKEN (avoids API rate limits), REPO, BRANCH_PREFIX,
@@ -44,11 +44,23 @@ WIDTH=78
 LINE=$(printf '%.0s─' $(seq 1 $WIDTH))
 DOUBLE=$(printf '%.0s═' $(seq 1 $WIDTH))
 
-say()  { printf '%s\n' "$*"; }
-ok()   { printf '%s✓ %s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
-fail() { printf '%s✗ %s%s\n' "$C_RED" "$*" "$C_RESET"; }
-info() { printf '%s%s%s\n' "$C_YELLOW" "$*" "$C_RESET"; }
-dim()  { printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
+INPLACE_ACTIVE=0
+
+inplace() { INPLACE_ACTIVE=1; printf '\033[2K\r%s' "$*"; }
+
+nl_if_inplace() {
+    if [ "$INPLACE_ACTIVE" = "1" ]; then
+        printf '\n'
+        INPLACE_ACTIVE=0
+    fi
+    return 0
+}
+
+say()  { nl_if_inplace; printf '%s\n' "$*"; }
+ok()   { nl_if_inplace; printf '%s✓ %s%s\n' "$C_GREEN" "$*" "$C_RESET"; }
+fail() { nl_if_inplace; printf '%s✗ %s%s\n' "$C_RED" "$*" "$C_RESET"; }
+info() { nl_if_inplace; printf '%s%s%s\n' "$C_YELLOW" "$*" "$C_RESET"; }
+dim()  { nl_if_inplace; printf '%s%s%s\n' "$C_DIM" "$*" "$C_RESET"; }
 
 now() { date +%s; }
 
@@ -63,10 +75,34 @@ dur() { # seconds -> MM:SS
     fi
 }
 
-inplace() { printf '\033[2K\r%s' "$*"; }
-
 mb() { # bytes -> "12,3 MB"
     awk -v b="$1" 'BEGIN { printf "%.1f", b / 1048576 }'
+}
+
+# Ergebniszeilen für den Hold-Screen (bleiben nach dem Neuzeichnen sichtbar)
+hold_note=""
+
+note_ok() {
+    hold_note="${hold_note}${hold_note:+
+}$C_GREEN✓ $*$C_RESET"
+    ok "$*"
+}
+
+note_fail() {
+    hold_note="${hold_note}${hold_note:+
+}$C_RED✗ $*$C_RESET"
+    fail "$*"
+    printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$HOME/.souvera-watcher.error" 2>/dev/null || true
+}
+
+fail_tail() { # logfile label
+    local logfile="$1" label="$2" snippet
+    snippet=$(tail -n 3 "$logfile" 2>/dev/null | tr '\n' ' ' | tr -s ' ' | cut -c1-220)
+    if [ -n "$snippet" ]; then
+        note_fail "$label — $snippet"
+    else
+        note_fail "$label"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -153,7 +189,7 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     print(""); sys.exit(0)
-print((d.get("sha") or "")[:8])
+print((d.get("sha") or "")[:7])
 '
 }
 
@@ -179,7 +215,7 @@ for run in d.get("workflow_runs", []):
     break
 if not best:
     print(""); sys.exit(0)
-sha = (best.get("head_sha") or "")[:8]
+sha = (best.get("head_sha") or "")[:7]
 started = best.get("run_started_at") or best.get("created_at") or ""
 created = best.get("created_at") or ""
 updated = best.get("updated_at") or ""
@@ -270,7 +306,7 @@ install_artifact() { # runid commit
     phase_start=$(now)
     # Eigene Progressbar: curl -# zeichnet nur auf einem TTY, daher
     # streamen wir und malen die Bar anhand der Dateigröße selbst.
-    curl "${curl_args[@]}" -s -o "$WORK_DIR/$runid/artifact.zip" "$zip_url" &
+    curl "${curl_args[@]}" -sS -o "$WORK_DIR/$runid/artifact.zip" "$zip_url" 2>"$WORK_DIR/$runid/.curl-err" &
     cpid=$!
     while kill -0 "$cpid" 2>/dev/null; do
         size=$(stat -f%z "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || stat -c%s "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || printf 0)
@@ -283,7 +319,7 @@ install_artifact() { # runid commit
             bar=$(printf '%.0s#' $(seq 1 "$filled"))
             empty=$(printf '%.0s-' $(seq 1 $(( 40 - filled ))))
             rate=$(( size / elapsed ))
-            inplace "  [$bar$empty] $pct%%  $(mb "$size")/$(mb "$artifact_size") MB  ($(mb "$rate") MB/s)"
+            inplace "  [$bar$empty] $pct%  $(mb "$size")/$(mb "$artifact_size") MB  ($(mb "$rate") MB/s)"
         else
             inplace "  ⬇ lädt … $(mb "$size") MB  ($(dur $elapsed))"
         fi
@@ -291,14 +327,14 @@ install_artifact() { # runid commit
     done
     wait "$cpid"
     rc=$?
-    printf '\n'
+    nl_if_inplace
     if [ "$rc" -eq 0 ] && [ -s "$WORK_DIR/$runid/artifact.zip" ]; then
         elapsed=$(($(now) - phase_start))
         [ "$elapsed" -le 0 ] 2>/dev/null && elapsed=1
         size=$(stat -f%z "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || stat -c%s "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || printf 0)
-        ok "Download: $(mb "$size")/$(mb "$artifact_size") MB in $(dur $elapsed) ($(mb $(( size / elapsed ))) MB/s)"
+        note_ok "Download: $(mb "$size")/$(mb "$artifact_size") MB in $(dur $elapsed) ($(mb $(( size / elapsed ))) MB/s)"
     else
-        fail "Download fehlgeschlagen (rc=$rc)"
+        fail_tail "$WORK_DIR/$runid/.curl-err" "Download fehlgeschlagen (rc=$rc)"
         return 1
     fi
 
@@ -306,21 +342,24 @@ install_artifact() { # runid commit
 
     phase_start=$(now)
     info "⏳ Entpacken: Souvera.app"
-    ( cd "$WORK_DIR/$runid" && unzip -o -q artifact.zip >/dev/null 2>&1 ) &
+    ( cd "$WORK_DIR/$runid" && unzip -o -q artifact.zip >/dev/null 2>"$WORK_DIR/$runid/.unzip1-err" ) &
     spinner $! "Entpacke (1/2)"
     # GitHub packt das Artefakt (Souvera.app.zip) selbst noch einmal in ein
     # Zip: daher ggf. ein zweites Mal entpacken.
     if [ ! -d "$WORK_DIR/$runid/Souvera.app" ] && [ -f "$WORK_DIR/$runid/Souvera.app.zip" ]; then
-        ( cd "$WORK_DIR/$runid" && unzip -o -q Souvera.app.zip >/dev/null 2>&1 ) &
+        ( cd "$WORK_DIR/$runid" && unzip -o -q Souvera.app.zip >/dev/null 2>"$WORK_DIR/$runid/.unzip2-err" ) &
         spinner $! "Entpacke (2/2)"
     fi
     local app_path="$WORK_DIR/$runid/Souvera.app"
     if [ -d "$app_path" ]; then
         local files
         files=$(find "$app_path" -type f | wc -l | tr -d ' ')
-        ok "Entpackt: $files Dateien in $(dur $(($(now) - phase_start)))"
+        note_ok "Entpackt: $files Dateien in $(dur $(($(now) - phase_start)))"
     else
-        fail "Souvera.app wurde im Archiv nicht gefunden (Artifakt enthält: $(ls "$WORK_DIR/$runid" | tr '\n' ' '))"
+        local errfile="$WORK_DIR/$runid/.unzip2-err"
+        [ -s "$errfile" ] || errfile="$WORK_DIR/$runid/.unzip1-err"
+        fail_tail "$errfile" "Entpacken fehlgeschlagen"
+        note_fail "Archiv enthält: $(ls "$WORK_DIR/$runid" | tr '\n' ' ')"
         return 1
     fi
 
@@ -331,15 +370,16 @@ install_artifact() { # runid commit
     if [ -z "$booted" ]; then
         phase_start=$(now)
         info "⏳ Simulator '$SIMULATOR' booten"
-        ( xcrun simctl boot "$SIMULATOR" >/dev/null 2>&1 ) &
+        ( xcrun simctl boot "$SIMULATOR" >/dev/null 2>"$WORK_DIR/$runid/.boot-err" ) &
         spinner $! "Boote"
         sleep 2
         booted=$(xcrun simctl list devices booted 2>/dev/null | awk -F'[(]' '/Booted/{print $2; exit}' | cut -d')' -f1)
         if [ -z "$booted" ]; then
-            fail "Kein Simulator konnte gebootet werden"
+            fail_tail "$WORK_DIR/$runid/.boot-err" "Simulator '$SIMULATOR' konnte nicht gebootet werden"
+            note_fail "Verfügbare Geräte: $(xcrun simctl list devices available 2>/dev/null | grep -E 'iPhone|iPad' | head -6 | tr '\n' ';' | cut -c1-260)"
             return 1
         fi
-        ok "Simulator gebootet: $booted"
+        note_ok "Simulator gebootet: $booted"
     else
         dim "Simulator läuft bereits: $booted"
     fi
@@ -352,21 +392,21 @@ install_artifact() { # runid commit
 
     phase_start=$(now)
     info "⏳ Installieren: Souvera.app (Commit $commit)"
-    ( xcrun simctl install "$booted" "$app_path" >/dev/null 2>&1 ) &
+    ( xcrun simctl install "$booted" "$app_path" >/dev/null 2>"$WORK_DIR/$runid/.install-err" ) &
     spinner $! "Installiere"
-    if xcrun simctl install "$booted" "$app_path" >/dev/null 2>&1; then
-        ok "Installiert: Build $commit in $(dur $(($(now) - phase_start)))"
+    if xcrun simctl install "$booted" "$app_path" >/dev/null 2>"$WORK_DIR/$runid/.install-err"; then
+        note_ok "Installiert: Build $commit in $(dur $(($(now) - phase_start)))"
     else
-        fail "Installation fehlgeschlagen"
+        fail_tail "$WORK_DIR/$runid/.install-err" "Installation fehlgeschlagen"
         return 1
     fi
 
     phase_start=$(now)
     info "▶ Launch: $APP_BUNDLE_ID"
-    if xcrun simctl launch "$booted" "$APP_BUNDLE_ID" >/dev/null 2>&1; then
-        ok "App gestartet ($(dur $(($(now) - phase_start))))"
+    if xcrun simctl launch "$booted" "$APP_BUNDLE_ID" >/dev/null 2>"$WORK_DIR/$runid/.launch-err"; then
+        note_ok "App gestartet ($(dur $(($(now) - phase_start))))"
     else
-        fail "Launch fehlgeschlagen"
+        fail_tail "$WORK_DIR/$runid/.launch-err" "Launch fehlgeschlagen"
         return 1
     fi
     say "$LINE"
@@ -382,6 +422,7 @@ install_artifact() { # runid commit
 render_screen() { # runid commit branch status conclusion started updated
     local runid="$1" commit="$2" branch="$3" status="$4" conclusion="$5" started="$6" updated="$7"
     clear 2>/dev/null || true
+    INPLACE_ACTIVE=0
     say "$DOUBLE"
     printf '%s Souvera Watcher%s\n' "$C_BOLD" "$C_RESET"
     if [ -z "$runid" ]; then
@@ -413,8 +454,32 @@ render_screen() { # runid commit branch status conclusion started updated
 }
 
 # ---------------------------------------------------------------------------
-# Main loop
-# ---------------------------------------------------------------------------# ---------------------------------------------------------------------------
+# Reinstall
+# ---------------------------------------------------------------------------
+
+last_success() { # -> "runid commit" oder ""
+    load_history | awk -F'|' '$1 == "success" { print $2 " " $3; exit }'
+}
+
+reinstall() {
+    local entry runid commit
+    entry=$(last_success)
+    if [ -z "$entry" ]; then
+        info "Kein erfolgreicher Run in der Historie (Artifakte bleiben 14 Tage erhalten)."
+        return 1
+    fi
+    runid=${entry%% *}
+    commit=${entry#* }
+    hold_note=""
+    info "▶ Erneute Installation: Run $runid (Commit $commit)"
+    if install_artifact "$runid" "$commit"; then
+        note_ok "Reinstallation abgeschlossen (Build $commit)"
+        return 0
+    fi
+    return 1
+}
+
+# ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
 
@@ -477,10 +542,10 @@ while true; do
                         ok "Build fertig (Commit $commit) — Installation wird vorbereitet …"
                         total_start=$(now)
                         if install_artifact "$runid" "$commit"; then
-                            ok "Fertig in $(dur $(($(now) - total_start)))"
+                            note_ok "Fertig in $(dur $(($(now) - total_start)))"
                             save_history "success" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
                         else
-                            fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
+                            note_fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
                             save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
                         fi
                         ;;
@@ -502,6 +567,9 @@ while true; do
             screen_runid="$runid"
             screen_status="$status"
             wait_started=$now_s
+            if [ "$status_mode" = "done" ] && [ -n "$hold_note" ]; then
+                printf '%s\n' "$hold_note"
+            fi
             if [ -n "$runid" ] && [ "$status" != "completed" ]; then
                 status_mode=""
             fi
@@ -517,14 +585,22 @@ while true; do
             screen_runid=""
             screen_status=""
         else
-            inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] sofort · [q] beenden"
+            inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] Historie · [r] erneut installieren · [q] Beenden"
             k=$(read_key 5)
             case "$k" in
                 h|H)
                     status_mode=""
+                    hold_note=""
                     render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
                     screen_runid="$runid"
                     screen_status="$status"
+                    ;;
+                r|R)
+                    if reinstall; then
+                        render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+                        printf '%s\n' "$hold_note"
+                        hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                    fi
                     ;;
                 q|Q) printf '\n'; exit 0 ;;
             esac
@@ -534,7 +610,19 @@ while true; do
         inplace "  Status: läuft · Laufzeit: $(dur $elapsed)"
     else
         waited=$(( now_s - wait_started ))
-        inplace "  Kein neuer Run · Warte seit $(dur $waited)"
+        inplace "  Kein neuer Run · Warte seit $(dur $waited) — [r] erneut installieren · [q] Beenden"
+        k=$(read_key 5)
+        case "$k" in
+            r|R)
+                if reinstall; then
+                    status_mode="done"
+                    hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                    render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+                    printf '%s\n' "$hold_note"
+                fi
+                ;;
+            q|Q) printf '\n'; exit 0 ;;
+        esac
     fi
 
     sleep 1
