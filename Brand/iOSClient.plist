@@ -37,6 +37,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>souvera</string>
+				<string>nc</string>
 			</array>
 		</dict>
 	</array>

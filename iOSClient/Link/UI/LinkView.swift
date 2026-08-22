@@ -13,6 +13,9 @@ struct LinkView: View {
     @State private var callContext: CallContext?
     @State private var showCallBanner = false
     @State private var returnToCall = false
+#if DEBUG
+    @State private var simulatedIncoming: SimulatedCall?
+#endif
 
     struct CallContext: Identifiable {
         let token: String
@@ -68,6 +71,20 @@ struct LinkView: View {
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
             showCallBanner = LinkVoIPManager.shared.activeCallInfo != nil
         }
+        .onReceive(NotificationCenter.default.publisher(for: .linkCallUIClose)) { _ in
+            // Wichtig: die Cover-Items leeren, sonst bleibt nach dem Auflegen
+            // ein weisser Cover-Bildschirm zurück.
+            callContext = nil
+            returnToCall = false
+        }
+#if DEBUG
+        .onReceive(NotificationCenter.default.publisher(for: .linkSimulateIncomingCall)) { notification in
+            guard let token = notification.userInfo?["token"] as? String else { return }
+            let title = (notification.userInfo?["title"] as? String) ?? NSLocalizedString("_link_incoming_call_", comment: "")
+            let hasVideo = (notification.userInfo?["hasVideo"] as? Bool) ?? false
+            simulatedIncoming = SimulatedCall(token: token, title: title, hasVideo: hasVideo)
+        }
+#endif
         .overlay(alignment: .top) {
             if showCallBanner, let info = LinkVoIPManager.shared.activeCallInfo {
                 activeCallBanner(title: info.title)
@@ -99,7 +116,38 @@ struct LinkView: View {
                 .ignoresSafeArea()
             }
         }
+#if DEBUG
+        .fullScreenCover(item: $simulatedIncoming) { call in
+            IncomingCallOverlayView(
+                title: call.title,
+                hasVideo: call.hasVideo,
+                onAccept: {
+                    simulatedIncoming = nil
+                    guard let account = LinkAccount.active() else { return }
+                    _ = LinkVoIPManager.shared.startIncomingCall(
+                        account: account,
+                        token: call.token,
+                        title: call.title,
+                        withVideo: call.hasVideo
+                    )
+                    returnToCall = true
+                },
+                onDecline: {
+                    simulatedIncoming = nil
+                }
+            )
+        }
+#endif
     }
+
+#if DEBUG
+    private struct SimulatedCall: Identifiable {
+        let token: String
+        let title: String
+        let hasVideo: Bool
+        var id: String { token }
+    }
+#endif
 
     /// Green banner shown while a call is running without its own UI.
     private func activeCallBanner(title: String) -> some View {
@@ -164,6 +212,73 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
 
     func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}
 }
+
+#if DEBUG
+/// Full-screen incoming call overlay for the simulator (CallKit cannot show
+/// incoming calls there): accept starts the call session, decline dismisses.
+struct IncomingCallOverlayView: View {
+    let title: String
+    let hasVideo: Bool
+    let onAccept: () -> Void
+    let onDecline: () -> Void
+
+    var body: some View {
+        ZStack {
+            LinearGradient(
+                colors: [Color(red: 0.12, green: 0.14, blue: 0.2), Color.black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+
+            VStack(spacing: 28) {
+                Spacer()
+                Text(NSLocalizedString("_link_incoming_call_", comment: ""))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(title)
+                    .font(.title2.bold())
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                if hasVideo {
+                    Label(NSLocalizedString("_link_video_call_", comment: ""), systemImage: "video.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+
+                HStack(spacing: 60) {
+                    Button(action: onDecline) {
+                        VStack(spacing: 6) {
+                            Image(systemName: "phone.down.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .background(Circle().fill(Color.red))
+                            Text(NSLocalizedString("_link_decline_", comment: ""))
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    Button(action: onAccept) {
+                        VStack(spacing: 6) {
+                            Image(systemName: "phone.fill")
+                                .font(.title2)
+                                .foregroundStyle(.white)
+                                .frame(width: 64, height: 64)
+                                .background(Circle().fill(Color.green))
+                            Text(NSLocalizedString("_link_accept_", comment: ""))
+                                .font(.caption)
+                                .foregroundStyle(.white)
+                        }
+                    }
+                }
+                .padding(.bottom, 80)
+            }
+        }
+    }
+}
+#endif
 
 /// The list of conversations with a "start new conversation" search bar.
 struct LinkConversationListView: View {

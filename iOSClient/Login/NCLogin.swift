@@ -297,8 +297,27 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
     }
 
     @IBAction func actionQRCode(_ sender: Any) {
+#if targetEnvironment(simulator)
+        // Der Simulator hat keine Kamera: QR-Inhalt manuell einfügen
+        // (z. B. aus dem Nextcloud-Desktop-Client kopiert).
+        let alert = UIAlertController(
+            title: NSLocalizedString("_qr_code_", comment: ""),
+            message: NSLocalizedString("_qr_code_simulator_hint_", comment: ""),
+            preferredStyle: .alert
+        )
+        alert.addTextField { textField in
+            textField.placeholder = "nc://login/user:…&password:…&server:…"
+            textField.autocorrectionType = .no
+        }
+        alert.addAction(UIAlertAction(title: NSLocalizedString("_ok_", comment: ""), style: .default) { [weak self] _ in
+            self?.dismissQRCode(alert.textFields?.first?.text, metadataType: nil)
+        })
+        alert.addAction(UIAlertAction(title: NSLocalizedString("_cancel_", comment: ""), style: .cancel))
+        present(alert, animated: true)
+#else
         let qrCode = NCLoginQRCode(delegate: self)
         qrCode.scan()
+#endif
     }
 
     @IBAction func actionCertificate(_ sender: Any) {
@@ -414,31 +433,45 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         QRCodeCheck = true
 
         Task { @MainActor in
-            let protocolLogin = NCBrandOptions.shared.webLoginAutenticationProtocol + "login/"
-            let protocolLoginOneTime = NCBrandOptions.shared.webLoginAutenticationProtocol + "onetime-login/"
+            // Klassisches Nextcloud-Protokoll (nc://login/…, nc://onetime-login/…).
+            // Ein Souvera-Desktop-Client mit eigenem Präfix wird ebenfalls
+            // akzeptiert - das klassische Verhalten bleibt unangetastet.
+            let acceptedProtocols = [
+                NCBrandOptions.shared.webLoginAutenticationProtocol,
+                "souvera-login://"
+            ]
             var parameters: String = ""
+            var matchedOneTime = false
+            var matchedProtocol: String?
 
-            if value.hasPrefix(protocolLoginOneTime) {
-                parameters = value.replacingOccurrences(of: protocolLoginOneTime, with: "")
-            } else if value.hasPrefix(protocolLogin) {
-                parameters = value.replacingOccurrences(of: protocolLogin, with: "")
-            } else {
-                QRCodeCheck = false
-                return
+            for proto in acceptedProtocols {
+                let loginPrefix = proto + "login/"
+                let oneTimePrefix = proto + "onetime-login/"
+                if value.hasPrefix(oneTimePrefix) {
+                    parameters = value.replacingOccurrences(of: oneTimePrefix, with: "")
+                    matchedOneTime = true
+                    matchedProtocol = proto
+                    break
+                } else if value.hasPrefix(loginPrefix) {
+                    parameters = value.replacingOccurrences(of: loginPrefix, with: "")
+                    matchedProtocol = proto
+                    break
+                }
             }
 
-            guard parameters.contains("user:"),
+            guard matchedProtocol != nil, parameters.contains("user:"),
                   parameters.contains("password:"),
                   parameters.contains("server:") else {
                 QRCodeCheck = false
                 return
             }
+            JmapLog.write("QR login: protocol=\(matchedProtocol ?? "-") oneTime=\(matchedOneTime)")
             let parametersArray = parameters.components(separatedBy: "&")
             let user = parametersArray[0].replacingOccurrences(of: "user:", with: "")
             let password = parametersArray[1].replacingOccurrences(of: "password:", with: "")
             let server = parametersArray[2].replacingOccurrences(of: "server:", with: "")
 
-            if value.hasPrefix(protocolLoginOneTime) {
+            if matchedOneTime {
                 let results = await NextcloudKit.shared.getAppPasswordOnetimeAsync(url: server, user: user, onetimeToken: password)
                 if results.error == .success, let token = results.token {
                     await createAccount(urlBase: server, user: user, password: token)
@@ -447,7 +480,7 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
                     await showErrorBanner(windowScene: windowScene, text: results.error.errorDescription, errorCode: results.error.errorCode)
                     dismiss(animated: true, completion: nil)
                 }
-            } else if value.hasPrefix(protocolLogin) {
+            } else {
                 await self.createAccount(urlBase: server, user: user, password: password)
             }
         }

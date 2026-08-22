@@ -15,7 +15,6 @@ final class SouveraBackgroundSync {
     private init() {}
 
     private let notificationCenter = UNUserNotificationCenter.current()
-    private let notifiedEventsKey = "souveraNotifiedEvents"
 
     func syncNotifications() async {
         guard NCManageDatabase.shared.getActiveTableAccount() != nil else { return }
@@ -99,30 +98,8 @@ final class SouveraBackgroundSync {
             }
         }
 
-        var notified = UserDefaults.standard.dictionary(forKey: notifiedEventsKey) as? [String: Double] ?? [:]
-        for event in upcoming where event.start > now {
-            let key = "\(event.uid)|\(Int(event.start.timeIntervalSince1970))"
-            guard notified[key] == nil else { continue }
-
-            let content = UNMutableNotificationContent()
-            content.title = event.title
-            content.body = event.allDay
-                ? NSLocalizedString("_calendar_all_day_", comment: "")
-                : DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .short)
-            content.sound = .default
-
-            // Fire ten minutes before the event (or immediately when it is
-            // already close).
-            let fireDate = max(now.addingTimeInterval(5), event.start.addingTimeInterval(-10 * 60))
-            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: fireDate.timeIntervalSinceNow, repeats: false)
-            let request = UNNotificationRequest(identifier: "event_\(key)", content: content, trigger: trigger)
-            try? await notificationCenter.add(request)
-
-            notified[key] = now.timeIntervalSince1970
-        }
-        // Keep the registry small: drop entries older than a week.
-        let cutoff = now.timeIntervalSince1970 - 7 * 86400
-        notified = notified.filter { $0.value > cutoff }
-        UserDefaults.standard.set(notified, forKey: notifiedEventsKey)
+        // Erinnerungen anhand der VALARM-Daten der Termine planen (bis zu 64
+        // kommende Notifications); Termine ohne Erinnerung bleiben still.
+        SouveraReminderScheduler.schedule(for: upcoming)
     }
 }

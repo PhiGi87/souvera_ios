@@ -207,6 +207,7 @@ final class CalendarViewModel: ObservableObject {
             entries += await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
         }
         JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched")
+        JmapLog.write("Calendar selection: \(selectedCalendarHrefs.sorted().joined(separator: ", "))")
 
         if entries.isEmpty, let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
             entries = cached
@@ -231,13 +232,19 @@ final class CalendarViewModel: ObservableObject {
 
     func saveEvent(_ draft: EventDraft, existing: CalendarEventModel?) async -> Bool {
         let ics = ICSParser.buildICS(draft)
+        let interesting = ics.components(separatedBy: "\r\n")
+            .filter { $0.hasPrefix("LOCATION") || $0.hasPrefix("X-SOUVERA") || $0.hasPrefix("DESCRIPTION") || $0.hasPrefix("BEGIN:VALARM") || $0.hasPrefix("TRIGGER") }
+            .joined(separator: " | ")
+        JmapLog.write("Calendar saveEvent existing=\(existing != nil) talk=\(draft.talkRoomToken ?? "-") \n\(interesting)")
         let ok: Bool
         if let existing {
             let entry = cachedEntries.first(where: { $0.href == existing.href })
                 ?? CalDavEventEntry(calendarHref: existing.calendarHref, href: existing.href, etag: existing.etag, ics: ics)
             ok = await client.updateEvent(entry, ics: ics)
         } else {
-            let targetCalendar = calendars.first?.href ?? ""
+            let targetCalendar = calendars.first(where: { !$0.href.contains("deck") })?.href
+                ?? calendars.first?.href
+                ?? ""
             guard !targetCalendar.isEmpty else { return false }
             let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
             ok = await client.createEvent(calendarHref: targetCalendar, ics: ics, uid: uid) != nil
@@ -318,6 +325,15 @@ final class CalendarViewModel: ObservableObject {
         let root = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let url = "\(root)/index.php/call/\(room.token)"
         return (room.token, room.name, url)
+    }
+
+    /// Deletes a Talk conversation (used when the user removes the link from
+    /// an event).
+    func deleteTalkRoom(token: String) async {
+        guard let account = LinkAccount.active() else { return }
+        let api = LinkOcsApi(account: account)
+        await api.deleteRoom(token: token)
+        JmapLog.write("Calendar talk room deleted: \(token)")
     }
 
     func openTalkRoom(for event: CalendarEventModel) {

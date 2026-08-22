@@ -108,6 +108,32 @@ final class ShieldViewModel: ObservableObject {
         if ok { await loadAll() }
     }
 
+    /// Freigeben + Absender whitelisten (nur Spam-Quarantäne).
+    func releaseWithWhitelist(ids: [String], entry: String) async {
+        let address = Self.plainAddress(entry)
+        guard !address.isEmpty else {
+            feedback = ShieldFeedback(success: false, message: NSLocalizedString("_shield_action_failed_", comment: ""))
+            return
+        }
+        let ok = await api.releaseWhitelist(ids: ids, email: selectedMailbox, entry: address)
+        feedback = ShieldFeedback(
+            success: ok,
+            message: ok
+                ? NSLocalizedString("_shield_released_whitelisted_", comment: "")
+                : NSLocalizedString("_shield_action_failed_", comment: "")
+        )
+        if ok { await loadAll() }
+    }
+
+    /// Zieht aus "Name <mail@example.org>" die reine Adresse.
+    static func plainAddress(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let open = trimmed.lastIndex(of: "<"), let close = trimmed.firstIndex(of: ">"), open < close {
+            return String(trimmed[trimmed.index(after: open)..<close]).trimmingCharacters(in: .whitespaces)
+        }
+        return trimmed
+    }
+
     func delete(_ kind: ShieldApi.QuarantineKind, ids: [String]) async {
         let ok = await api.delete(kind, ids: ids, email: selectedMailbox)
         feedback = ShieldFeedback(

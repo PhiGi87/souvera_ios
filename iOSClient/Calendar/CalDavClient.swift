@@ -158,8 +158,16 @@ final class CalDavClient {
             req.setValue(etag, forHTTPHeaderField: "If-Match")
         }
         req.httpBody = ics.data(using: .utf8)
-        guard let (_, response) = try? await urlSession.data(for: req) else { return false }
-        return (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
+        guard let (data, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("CalDAV updateEvent \(url.absoluteString) -> Transportfehler")
+            return false
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        if !(200..<300).contains(status) {
+            let body = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            JmapLog.write("CalDAV updateEvent \(url.absoluteString) -> \(status) \(body)")
+        }
+        return (200..<300).contains(status)
     }
 
     func deleteEvent(_ entry: CalDavEventEntry) async -> Bool {
@@ -206,6 +214,9 @@ final class CalDavClient {
           <c:filter>
             <c:comp-filter name="VCALENDAR">
               <c:comp-filter name="VEVENT">
+                <c:time-range start="\(startText)" end="\(endText)"/>
+              </c:comp-filter>
+              <c:comp-filter name="VTODO">
                 <c:time-range start="\(startText)" end="\(endText)"/>
               </c:comp-filter>
             </c:comp-filter>

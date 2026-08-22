@@ -169,12 +169,18 @@ final class CallSession: NSObject, HpbSignalingListener {
     func hangup() {
         if endedOnce { return }
         endedOnce = true
-        CallDebugLog.log("CallSession", "hangup")
+        CallDebugLog.log("CallSession", "hangup start")
         Task { await api.leaveCall(token: token) }
         signaling?.close()
         peers.values.forEach { $0.close() }
         peers.removeAll()
-        webRtc.dispose()
+        // dispose() ist teuer und darf den Main-Thread nicht blockieren
+        // (sonst bleibt die UI weiss, wenn der Cover geschlossen wird).
+        let webRtcDispose = webRtc
+        DispatchQueue.global(qos: .userInitiated).async {
+            webRtcDispose.dispose()
+            CallDebugLog.log("CallSession", "webRtc disposed")
+        }
 
         // Deactivate the call audio session - leaving it active keeps iOS in
         // a dead "call running" state (status bar, routing, mic).
@@ -191,6 +197,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         // disappear everywhere - a user-initiated hangup must behave
         // exactly like a remote end.
         LinkVoIPManager.shared.callSessionDidEnd(self)
+        NotificationCenter.default.post(name: .linkCallUIClose, object: nil)
+        CallDebugLog.log("CallSession", "hangup done")
     }
 
     // MARK: - Peer helpers

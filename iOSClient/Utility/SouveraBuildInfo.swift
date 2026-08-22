@@ -36,7 +36,7 @@ struct SouveraBuildInfo {
 /// advisory value for BGAppRefresh. 0 = off.
 enum SouveraAutoRefresh {
     static let defaultsKey = "souvera_auto_refresh_minutes"
-    static let presets: [Int] = [0, 15, 30, 60]
+    static let presets: [Int] = [0, 2, 5, 15, 60]
 
     static var intervalMinutes: Int {
         UserDefaults.standard.integer(forKey: defaultsKey)

@@ -115,11 +115,16 @@ final class LinkVoIPManager: NSObject {
     }
 
 #if DEBUG
-    /// Simulates an incoming Talk call for UI testing (CallKit does not
-    /// deliver to the iOS simulator). Long-press the "+" in the Link tab.
+    /// Simulates an incoming Talk call for UI testing (CallKit cannot show
+    /// incoming calls in the iOS simulator, so the app presents its own
+    /// full-screen accept/decline overlay instead).
     func simulateIncomingCall(token: String, title: String, hasVideo: Bool) {
-        reportIncomingCall(roomToken: token, displayName: title, hasVideo: hasVideo) {}
         CallDebugLog.log("LinkVoIPManager", "simulated incoming call token=\(token) title=\(title) video=\(hasVideo)")
+        NotificationCenter.default.post(
+            name: .linkSimulateIncomingCall,
+            object: nil,
+            userInfo: ["token": token, "title": title, "hasVideo": hasVideo]
+        )
     }
 #endif
 
@@ -301,4 +306,9 @@ extension LinkVoIPManager: CXProviderDelegate {
 extension Notification.Name {
     static let linkAnswerCall = Notification.Name("linkAnswerCall")
     static let linkEndCall = Notification.Name("linkEndCall")
+    /// Die Call-UI wurde beendet: SwiftUI muss die fullScreenCover-Items
+    /// leeren, sonst bleibt ein weisser Cover zurück.
+    static let linkCallUIClose = Notification.Name("linkCallUIClose")
+    /// Simulierter eingehender Anruf (DEBUG, Simulator).
+    static let linkSimulateIncomingCall = Notification.Name("linkSimulateIncomingCall")
 }

@@ -13,18 +13,20 @@ enum SouveraReminderScheduler {
     private static let prefix = "eventreminder_"
 
     /// Replaces all pending event reminders with notifications for the given
-    /// events (limited to events starting within the next 7 days).
+    /// events. iOS allows a maximum of 64 pending local notifications, so the
+    /// soonest reminders win; every calendar load / background sync refills
+    /// the queue (notifications fire even when the app is not running).
     static func schedule(for events: [CalendarEventModel]) {
         let center = UNUserNotificationCenter.current()
+        center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         center.getPendingNotificationRequests { existing in
             let stale = existing.filter { $0.identifier.hasPrefix(prefix) }
             center.removePendingNotificationRequests(withIdentifiers: stale.map(\.identifier))
 
             let now = Date()
-            let horizon = now.addingTimeInterval(7 * 86400)
-            var scheduled = 0
+            var pending: [(fireDate: Date, request: UNNotificationRequest)] = []
             for event in events {
-                guard event.start > now, event.start <= horizon, !event.reminders.isEmpty else { continue }
+                guard event.start > now, !event.reminders.isEmpty else { continue }
                 for minutes in event.reminders {
                     let fireDate = event.start.addingTimeInterval(-Double(minutes) * 60)
                     guard fireDate > now else { continue }
@@ -39,13 +41,15 @@ enum SouveraReminderScheduler {
                         content: content,
                         trigger: trigger
                     )
-                    center.add(request)
-                    scheduled += 1
+                    pending.append((fireDate, request))
                 }
             }
-            if scheduled > 0 {
-                JmapLog.write("Calendar reminders: scheduled \(scheduled) notifications")
+            pending.sort { $0.fireDate < $1.fireDate }
+            let scheduled = min(pending.count, 64)
+            for item in pending.prefix(64) {
+                center.add(item.request)
             }
+            JmapLog.write("Calendar reminders: scheduled \(scheduled) of \(pending.count) notifications (max 64)")
         }
     }
 }

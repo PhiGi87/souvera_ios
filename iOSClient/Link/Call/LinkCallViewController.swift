@@ -202,6 +202,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         session?.hangup()
     }
 
+    private func closeCallUI() {
+        guard !isBeingDismissed else { return }
+        NotificationCenter.default.post(name: .linkCallUIClose, object: nil)
+        dismiss(animated: true)
+    }
+
     // MARK: - CallSessionCallbacks
 
     func onLocalVideo(track: RTCVideoTrack) {
@@ -224,7 +230,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     func onEnded() {
         DispatchQueue.main.async {
-            self.dismiss(animated: true)
+            self.closeCallUI()
         }
     }
 

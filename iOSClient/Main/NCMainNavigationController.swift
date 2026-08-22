@@ -171,9 +171,11 @@ class NCMainNavigationController: UINavigationController, UINavigationController
                 let capabilities = await NKCapabilities.shared.getCapabilities(for: account)
                 let session = NCSession.shared.getSession(account: account)
 
-                // Notification
-                //
-                if capabilities.notification.count == 0 {
+                // Notification: die Glocke zeigen, wenn die Instanz die
+                // Notifications-App aktiviert hat ODER ein APNs-Token
+                // registriert ist (Push ist dann auf jeden Fall sinnvoll).
+                let hasApnsToken = !NCPreferences().deviceTokenPushNotification.isEmpty
+                if capabilities.notification.count == 0 && !hasApnsToken {
                     self.controller?.availableNotifications = false
                 } else {
                     _ = await NextcloudKit.shared.getNotificationsAsync(account: account) { task in

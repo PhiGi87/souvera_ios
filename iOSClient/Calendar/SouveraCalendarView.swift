@@ -354,6 +354,11 @@ private struct CalendarEventRow: View {
             RoundedRectangle(cornerRadius: 3)
                 .fill(color)
                 .frame(width: 4)
+            if event.isTask {
+                Image(systemName: "checklist")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(event.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
                 Text(timeLabel).font(.caption).foregroundStyle(.secondary)
@@ -622,6 +627,7 @@ private struct CalendarEventDetailSheet: View {
     let onEdit: (EventDraft) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var creatingRoom = false
+    @State private var detailError: String?
 
     var body: some View {
         NavigationStack {
@@ -633,6 +639,13 @@ private struct CalendarEventDetailSheet: View {
                     Label(dateLabel, systemImage: "clock")
                     if let location = event.location, !location.isEmpty {
                         Label(location, systemImage: "mappin")
+                    }
+                }
+                if !event.reminders.isEmpty {
+                    Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
+                        ForEach(event.reminders.sorted(), id: \.self) { minutes in
+                            Label(CalendarReminderText.label(minutes: minutes), systemImage: "bell")
+                        }
                     }
                 }
                 if !event.attendees.isEmpty {
@@ -666,26 +679,33 @@ private struct CalendarEventDetailSheet: View {
                         Button {
                             creatingRoom = true
                             Task {
-                                _ = await viewModel.createTalkRoom(for: event)
-                                dismiss()
+                                let ok = await viewModel.createTalkRoom(for: event)
+                                creatingRoom = false
+                                if ok {
+                                    dismiss()
+                                } else {
+                                    detailError = NSLocalizedString("_calendar_talk_error_", comment: "")
+                                }
                             }
                         } label: {
                             Label(NSLocalizedString("_calendar_create_talk_", comment: ""), systemImage: "plus.bubble")
                         }
                     }
                 }
-                Section {
-                    Button {
-                        onEdit(viewModel.draft(from: event))
-                        dismiss()
-                    } label: {
-                        Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
-                    }
-                    Button(role: .destructive) {
-                        Task { _ = await viewModel.deleteEvent(event) }
-                        dismiss()
-                    } label: {
-                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                if !event.isTask {
+                    Section {
+                        Button {
+                            onEdit(viewModel.draft(from: event))
+                            dismiss()
+                        } label: {
+                            Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            Task { _ = await viewModel.deleteEvent(event) }
+                            dismiss()
+                        } label: {
+                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        }
                     }
                 }
             }
@@ -695,6 +715,14 @@ private struct CalendarEventDetailSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
                 }
+            }
+            .alert(NSLocalizedString("_error_", comment: ""), isPresented: Binding(
+                get: { detailError != nil },
+                set: { if !$0 { detailError = nil } }
+            )) {
+                Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) { detailError = nil }
+            } message: {
+                Text(detailError ?? "")
             }
         }
     }
@@ -717,7 +745,17 @@ private struct CalendarEventEditSheet: View {
     @ObservedObject var viewModel: CalendarViewModel
     @State var draft: EventDraft
     let existing: CalendarEventModel?
+    /// Talk-Token, mit dem das Sheet geöffnet wurde - wird der Link entfernt,
+    /// löschen wir nach dem Speichern den zugehörigen Channel.
+    @State private var originalTalkToken: String?
     @Environment(\.dismiss) private var dismiss
+
+    init(viewModel: CalendarViewModel, draft: EventDraft, existing: CalendarEventModel?) {
+        self.viewModel = viewModel
+        self.existing = existing
+        _draft = State(initialValue: draft)
+        _originalTalkToken = State(initialValue: draft.talkRoomToken)
+    }
     @State private var saving = false
     @State private var errorMessage: String?
     @State private var attendeeInput = ""
@@ -754,7 +792,7 @@ private struct CalendarEventEditSheet: View {
                         }
                     }
                     Menu {
-                        ForEach(reminderPresets, id: \.self) { minutes in
+                        ForEach(CalendarReminderText.presets, id: \.self) { minutes in
                             Button(reminderLabel(minutes)) {
                                 if !draft.reminders.contains(minutes) {
                                     draft.reminders.append(minutes)
@@ -823,8 +861,7 @@ private struct CalendarEventEditSheet: View {
                             Label(roomName, systemImage: "bubble.left.and.bubble.right")
                             Spacer()
                             Button {
-                                draft.talkRoomToken = nil
-                                draft.talkRoomName = nil
+                                removeTalkLinkFromDraft()
                             } label: {
                                 Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                             }
@@ -891,6 +928,11 @@ private struct CalendarEventEditSheet: View {
                             Task {
                                 let ok = await viewModel.saveEvent(draft, existing: existing)
                                 if ok {
+                                    if let original = originalTalkToken,
+                                       !original.isEmpty,
+                                       draft.talkRoomToken == nil {
+                                        await viewModel.deleteTalkRoom(token: original)
+                                    }
                                     dismiss()
                                 } else {
                                     saving = false
@@ -905,21 +947,26 @@ private struct CalendarEventEditSheet: View {
         }
     }
 
-    private let reminderPresets = [0, 5, 10, 15, 30, 60, 120, 1440]
-
     private func reminderLabel(_ minutes: Int) -> String {
-        if minutes <= 0 {
-            return NSLocalizedString("_calendar_reminder_at_start_", comment: "")
+        CalendarReminderText.label(minutes: minutes)
+    }
+
+    private func removeTalkLinkFromDraft() {
+        let token = draft.talkRoomToken
+        draft.talkRoomToken = nil
+        draft.talkRoomName = nil
+        // Auch die im Standardfeld gespeicherte URL (LOCATION/DESCRIPTION)
+        // entfernen, damit der Link wirklich aus dem Termin verschwindet.
+        if let token, !token.isEmpty {
+            let suffix = "/call/\(token)"
+            if draft.location.contains(suffix) {
+                draft.location = ""
+            }
+            draft.notes = draft.notes
+                .components(separatedBy: .newlines)
+                .filter { !$0.contains(suffix) }
+                .joined(separator: "\n")
         }
-        if minutes % 1440 == 0 {
-            let days = minutes / 1440
-            let key = days == 1 ? "_calendar_reminder_day_before_" : "_calendar_reminder_days_before_"
-            return String(format: NSLocalizedString(key, comment: ""), days)
-        }
-        if minutes % 60 == 0 {
-            return String(format: NSLocalizedString("_calendar_reminder_hours_before_", comment: ""), minutes / 60)
-        }
-        return String(format: NSLocalizedString("_calendar_reminder_minutes_before_", comment: ""), minutes)
     }
 
     private func addAttendee(_ email: String) {
@@ -947,16 +994,25 @@ private struct CalendarPickerSheet: View {
             List {
                 ForEach(viewModel.calendars, id: \.href) { calendar in
                     HStack(spacing: 12) {
-                        Circle()
-                            .fill(viewModel.color(for: calendar) ?? Color(NCBrandColor.shared.customer))
-                            .frame(width: 14, height: 14)
-                        Text(calendar.displayName)
-                            .lineLimit(1)
-                        Spacer()
-                        if viewModel.isSelected(calendar) {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        Button {
+                            viewModel.toggleCalendar(calendar)
+                            Task { await viewModel.load() }
+                        } label: {
+                            HStack(spacing: 12) {
+                                Circle()
+                                    .fill(viewModel.color(for: calendar) ?? Color(NCBrandColor.shared.customer))
+                                    .frame(width: 14, height: 14)
+                                Text(calendar.displayName)
+                                    .lineLimit(1)
+                                Spacer()
+                                if viewModel.isSelected(calendar) {
+                                    Image(systemName: "checkmark")
+                                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                }
+                            }
+                            .contentShape(Rectangle())
                         }
+                        .buttonStyle(.plain)
                         Menu {
                             Button {
                                 viewModel.setCustomColor("", for: calendar)
@@ -976,11 +1032,6 @@ private struct CalendarPickerSheet: View {
                                 .foregroundStyle(.secondary)
                                 .frame(width: 28, height: 28)
                         }
-                    }
-                    .contentShape(Rectangle())
-                    .onTapGesture {
-                        viewModel.toggleCalendar(calendar)
-                        Task { await viewModel.load() }
                     }
                 }
             }

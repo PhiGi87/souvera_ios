@@ -16,6 +16,7 @@ struct ShieldView: View {
     @State private var showAddEntry = false
     @State private var addEntryText = ""
     @State private var addEntryList: ShieldApi.ListKind = .whitelist
+    @State private var releaseChoice: ShieldSpamEntry?
 
     enum ShieldSection: String, CaseIterable, Identifiable {
         case quarantine, whitelist, blacklist
@@ -95,6 +96,34 @@ struct ShieldView: View {
                 addEntryText = ""
             }
         }
+        .confirmationDialog(
+            NSLocalizedString("_shield_release_", comment: ""),
+            isPresented: Binding(
+                get: { releaseChoice != nil },
+                set: { if !$0 { releaseChoice = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_shield_release_only_", comment: "")) {
+                if let entry = releaseChoice {
+                    Task { await viewModel.release(.spam, ids: [entry.id]) }
+                }
+                releaseChoice = nil
+            }
+            Button(NSLocalizedString("_shield_release_whitelist_", comment: "")) {
+                if let entry = releaseChoice {
+                    Task { await viewModel.releaseWithWhitelist(ids: [entry.id], entry: entry.sender) }
+                }
+                releaseChoice = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                releaseChoice = nil
+            }
+        } message: {
+            Text(releaseChoice?.subject.isEmpty == false
+                 ? releaseChoice!.subject
+                 : (releaseChoice?.sender ?? ""))
+        }
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.feedback {
                 HStack(spacing: 8) {
@@ -164,7 +193,7 @@ struct ShieldView: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .leading) {
                         Button {
-                            Task { await viewModel.release(.spam, ids: [entry.id]) }
+                            releaseChoice = entry
                         } label: {
                             Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
                         }
@@ -272,6 +301,7 @@ private struct ShieldDetailSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var detail: [String: Any]?
     @State private var loading = true
+    @State private var showReleaseChoice = false
 
     var body: some View {
         NavigationStack {
@@ -300,10 +330,7 @@ private struct ShieldDetailSheet: View {
                         }
                         Section {
                             Button {
-                                Task {
-                                    await viewModel.release(.spam, ids: [entry.id])
-                                    dismiss()
-                                }
+                                showReleaseChoice = true
                             } label: {
                                 Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
                             }
@@ -328,6 +355,27 @@ private struct ShieldDetailSheet: View {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
                 }
             }
+        }
+        .confirmationDialog(
+            NSLocalizedString("_shield_release_", comment: ""),
+            isPresented: $showReleaseChoice,
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_shield_release_only_", comment: "")) {
+                Task {
+                    await viewModel.release(.spam, ids: [entry.id])
+                    dismiss()
+                }
+            }
+            Button(NSLocalizedString("_shield_release_whitelist_", comment: "")) {
+                Task {
+                    await viewModel.releaseWithWhitelist(ids: [entry.id], entry: entry.sender)
+                    dismiss()
+                }
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+        } message: {
+            Text(entry.subject.isEmpty ? entry.sender : entry.subject)
         }
         .task {
             detail = await viewModel.spamDetail(id: entry.id)

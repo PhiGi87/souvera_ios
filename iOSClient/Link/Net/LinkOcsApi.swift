@@ -119,6 +119,15 @@ actor LinkOcsApi {
         }
     }
 
+    /// Deletes a conversation completely (used when the Talk link is removed
+    /// from a calendar event).
+    func deleteRoom(token: String) async {
+        let req = signed(url: "\(base)/api/v4/room/\(token)", method: "DELETE")
+        let result = try? await session.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "deleteRoom \(token) -> \(status)")
+    }
+
     /// Enables or disables the lobby for non-moderators (Talk stores this as
     /// lobbyState). Used when external guests join an event room.
     func setLobby(token: String, enabled: Bool) async {

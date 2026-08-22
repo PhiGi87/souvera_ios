@@ -78,7 +78,7 @@ final class NCBrandOptions: @unchecked Sendable {
 
     var linkLoginHost: String = "https://souvera.eu"
     var linkloginPreferredProviders: String = "https://souvera.eu"
-    var webLoginAutenticationProtocol: String = "souvera-login://"                             // example "abc://"
+    var webLoginAutenticationProtocol: String = "nc://"                                       // classic Nextcloud login callback scheme
     var privacy: String = "https://souvera.eu/privacy"
     var sourceCode: String = "https://souvera.work"
     var mobileconfig: String = "/remote.php/dav/provisioning/apple-provisioning.mobileconfig"

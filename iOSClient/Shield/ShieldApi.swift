@@ -201,6 +201,15 @@ final class ShieldApi {
         return ok(await request(path, method: "POST", form: form))
     }
 
+    /// Kombi-Aktion (souvera_shield >= 4.0.57): Nachricht freigeben UND den
+    /// Absender in die Whitelist aller Identitäten aufnehmen. Benötigt die
+    /// Absender-Adresse als Pflichtfeld "entry".
+    func releaseWhitelist(ids: [String], email: String?, entry: String) async -> Bool {
+        var form = ["ids": ids.joined(separator: ","), "entry": entry]
+        if let email { form["email"] = email }
+        return ok(await request("api/quarantine/release-whitelist", method: "POST", form: form))
+    }
+
     func delete(_ kind: QuarantineKind, ids: [String], email: String? = nil) async -> Bool {
         let path: String
         switch kind {

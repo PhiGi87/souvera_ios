@@ -22,6 +22,8 @@ struct CalendarEventModel: Identifiable {
     let href: String
     let etag: String?
     let reminders: [Int]
+    /// Deck-Kalender liefern VTODO-Aufgaben (Karten/Stacks): read-only.
+    let isTask: Bool
 }
 
 struct EventDraft {
@@ -38,13 +40,41 @@ struct EventDraft {
     var reminders: [Int] = [15]
 }
 
+/// Localized labels for calendar reminders (shared between detail, edit
+/// sheet and pickers).
+enum CalendarReminderText {
+    static let presets = [0, 5, 10, 15, 30, 60, 120, 1440]
+
+    static func label(minutes: Int) -> String {
+        if minutes <= 0 {
+            return NSLocalizedString("_calendar_reminder_at_start_", comment: "")
+        }
+        if minutes % 1440 == 0 {
+            let days = minutes / 1440
+            let key = days == 1 ? "_calendar_reminder_day_before_" : "_calendar_reminder_days_before_"
+            return String(format: NSLocalizedString(key, comment: ""), days)
+        }
+        if minutes % 60 == 0 {
+            return String(format: NSLocalizedString("_calendar_reminder_hours_before_", comment: ""), minutes / 60)
+        }
+        return String(format: NSLocalizedString("_calendar_reminder_minutes_before_", comment: ""), minutes)
+    }
+}
+
 enum ICSParser {
 
     static func parseEvents(_ ics: String, calendarHref: String, href: String, etag: String?) -> [CalendarEventModel] {
         var events: [CalendarEventModel] = []
-        let blocks = ics.components(separatedBy: "BEGIN:VEVENT")
-        for block in blocks.dropFirst() {
-            let body = block.components(separatedBy: "END:VEVENT").first ?? block
+        // Deck-Kalender speichern Karten/Stacks als VTODO - beide Objekttypen
+        // einsammeln und VTODO als Aufgaben (read-only) markieren.
+        var blocks: [(body: String, isTask: Bool)] = []
+        for chunk in ics.components(separatedBy: "BEGIN:VEVENT").dropFirst() {
+            blocks.append((chunk.components(separatedBy: "END:VEVENT").first ?? chunk, false))
+        }
+        for chunk in ics.components(separatedBy: "BEGIN:VTODO").dropFirst() {
+            blocks.append((chunk.components(separatedBy: "END:VTODO").first ?? chunk, true))
+        }
+        for (body, isTask) in blocks {
             var uid = ""
             var title = ""
             var location: String?
@@ -59,6 +89,7 @@ enum ICSParser {
             var startDay: Date?
             var endDay: Date?
             var inTimeZone = false
+            var inAlarm = false
             var reminders: [Int] = []
 
             for rawLine in body.components(separatedBy: .newlines) {
@@ -75,7 +106,28 @@ enum ICSParser {
                     continue
                 }
                 if inTimeZone { continue }
+                // VALARM blocks carry their own DESCRIPTION/DESCRIPTION text
+                // that must not overwrite the event fields - only TRIGGER
+                // lines are of interest.
+                if line.hasPrefix("BEGIN:VALARM") {
+                    inAlarm = true
+                    continue
+                }
+                if line.hasPrefix("END:VALARM") {
+                    inAlarm = false
+                    continue
+                }
                 guard let colon = line.firstIndex(of: ":") else { continue }
+                if inAlarm {
+                    let alarmKey = String(line[line.startIndex..<colon]).uppercased()
+                    if alarmKey.hasPrefix("TRIGGER") {
+                        let alarmValue = String(line[line.index(after: colon)...])
+                        if let minutes = parseTriggerMinutes(alarmValue) {
+                            reminders.append(minutes)
+                        }
+                    }
+                    continue
+                }
                 let rawKey = String(line[line.startIndex..<colon])
                 let keyPart = rawKey.uppercased()
                 let rawValue = String(line[line.index(after: colon)...])
@@ -111,12 +163,15 @@ enum ICSParser {
                     } else {
                         end = parseDateTime(value, tzid: extractTzid(rawKey))
                     }
+                } else if keyPart.hasPrefix("DUE") {
+                    if keyPart.contains("VALUE=DATE") {
+                        allDay = true
+                        endDay = parseDateOnly(value)
+                    } else {
+                        end = parseDateTime(value, tzid: extractTzid(rawKey))
+                    }
                 } else if keyPart == "DURATION" {
                     duration = parseDuration(value)
-                } else if keyPart.hasPrefix("TRIGGER") {
-                    if let minutes = parseTriggerMinutes(value) {
-                        reminders.append(minutes)
-                    }
                 }
             }
 
@@ -134,9 +189,17 @@ enum ICSParser {
                 }
             }
 
+            if isTask && start == nil && startDay == nil && end == nil && endDay == nil {
+                // Stack ohne Datum: nicht im Kalender anzeigen
+                continue
+            }
             var resolvedStart = start ?? startDay ?? Date.distantPast
             var resolvedEnd = end ?? endDay
                 ?? (duration.map { resolvedStart.addingTimeInterval($0) } ?? resolvedStart.addingTimeInterval(3600))
+            if isTask && start == nil && startDay == nil {
+                // Nur Fälligkeitsdatum vorhanden: Aufgabe zum Fälligkeitszeitpunkt zeigen
+                resolvedStart = resolvedEnd
+            }
             if allDay, endDay == nil, duration == nil {
                 resolvedEnd = resolvedStart.addingTimeInterval(86400)
             }
@@ -159,7 +222,8 @@ enum ICSParser {
                 calendarHref: calendarHref,
                 href: href,
                 etag: etag,
-                reminders: reminders.sorted()
+                reminders: reminders.sorted(),
+                isTask: isTask
             ))
         }
         return events
@@ -330,7 +394,7 @@ enum ICSParser {
             case "D": minutes += number * 24 * 60
             case "H": minutes += number * 60
             case "M": minutes += number
-            case "S": minutes += max(1, Int(ceil(Double(number) / 60.0)))
+            case "S": minutes += number > 0 ? max(1, Int(ceil(Double(number) / 60.0))) : 0
             default: break
             }
         }

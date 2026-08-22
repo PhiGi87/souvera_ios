@@ -437,9 +437,12 @@ private struct MailMessageListView: View {
                     }
                 }
                 .overlay(alignment: .bottom) {
-                    if viewModel.messageScrollPosition != nil, let firstId = viewModel.sortMessages(items).first?.id {
+                    let sorted = viewModel.sortMessages(items)
+                    if let position = viewModel.messageScrollPosition,
+                       let firstId = sorted.first?.id,
+                       position != firstId {
                         Button {
-                            withAnimation { viewModel.messageScrollPosition = firstId }
+                            withAnimation { proxy.scrollTo(firstId, anchor: .top) }
                         } label: {
                             Image(systemName: "arrow.up")
                                 .font(.subheadline.bold())
