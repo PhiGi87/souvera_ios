@@ -31,7 +31,7 @@ HISTORY_FILE="$HOME/.souvera-watcher.history"
 HISTORY_MAX=10
 WORK_DIR="${TMPDIR:-/tmp}/souvera-watcher"
 
-WATCHER_VERSION="4"
+WATCHER_VERSION="5"
 
 API="https://api.github.com"
 
@@ -49,7 +49,7 @@ DOUBLE=$(printf '%.0s═' $(seq 1 $WIDTH))
 
 INPLACE_ACTIVE=0
 
-inplace() { INPLACE_ACTIVE=1; printf '\033[2K\r%s' "$*"; }
+inplace() { INPLACE_ACTIVE=1; printf '\r\033[2K%s' "$*"; }
 
 nl_if_inplace() {
     if [ "$INPLACE_ACTIVE" = "1" ]; then
