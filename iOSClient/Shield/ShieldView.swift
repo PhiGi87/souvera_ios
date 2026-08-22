@@ -19,6 +19,13 @@ struct ShieldView: View {
     @State private var addEntryList: ShieldApi.ListKind = .whitelist
     @State private var releaseChoice: ShieldReleaseRequest?
 
+    private var addEntryTitle: String {
+        if addEntryList == .blacklist {
+            return NSLocalizedString("_shield_add_blacklist_", comment: "")
+        }
+        return NSLocalizedString("_shield_add_whitelist_", comment: "")
+    }
+
     enum ShieldSection: String, CaseIterable, Identifiable {
         case quarantine, whitelist, blacklist
         var id: String { rawValue }
@@ -106,9 +113,7 @@ struct ShieldView: View {
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
         }
-        .alert(addEntryList == .blacklist
-               ? NSLocalizedString("_shield_add_blacklist_", comment: "")
-               : NSLocalizedString("_shield_add_whitelist_", comment: ""), isPresented: $showAddEntry) {
+        .alert(addEntryTitle, isPresented: $showAddEntry) {
             TextField(NSLocalizedString("_shield_entry_placeholder_", comment: ""), text: $addEntryText)
                 .keyboardType(.emailAddress)
                 .autocapitalization(.none)

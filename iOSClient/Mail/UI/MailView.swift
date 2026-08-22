@@ -455,6 +455,7 @@ private struct MailMessageListView: View {
     @State private var selected = Set<String>()
     @State private var moveTarget: ([MailMessage], [Mailbox])?
     @State private var showScrollTop = false
+    @State private var blacklistTarget: [MailMessage]?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -499,14 +500,10 @@ private struct MailMessageListView: View {
                         }
                     }
                     .onChange(of: viewModel.messageScrollPosition) { _, position in
-                        let atTop = position == nil || position == sorted.first?.id
-                        withAnimation(.easeInOut(duration: 0.2)) {
-                            showScrollTop = !atTop
-                        }
+                        updateScrollTop(sorted: sorted, position: position)
                     }
                     .onAppear {
-                        let position = viewModel.messageScrollPosition
-                        showScrollTop = position != nil && position != sorted.first?.id
+                        updateScrollTop(sorted: sorted, position: viewModel.messageScrollPosition)
                     }
                 }
             }
@@ -612,6 +609,36 @@ private struct MailMessageListView: View {
         .onChange(of: editing) { _, value in
             if !value { selected.removeAll() }
         }
+        .confirmationDialog(
+            NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+            isPresented: Binding(
+                get: { blacklistTarget != nil },
+                set: { if !$0 { blacklistTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
+                let target = blacklistTarget ?? []
+                blacklistTarget = nil
+                Task { await viewModel.blacklistSenders(target) }
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                blacklistTarget = nil
+            }
+        } message: {
+            Text(blacklistConfirmMessage)
+        }
+    }
+
+    private var blacklistConfirmMessage: String {
+        let addresses = Array(Set((blacklistTarget ?? []).map { $0.fromAddress }
+            .filter { !$0.isEmpty }))
+        if addresses.isEmpty { return "" }
+        let preview = addresses.prefix(3).joined(separator: ", ")
+        if addresses.count > 3 {
+            return String(format: NSLocalizedString("_mail_blacklist_confirm_multi_", comment: ""), preview, addresses.count)
+        }
+        return preview
     }
 
     private func selectionAction(icon: String, label: String) -> some View {
@@ -633,6 +660,13 @@ private struct MailMessageListView: View {
     private var isEmptyList: Bool {
         if case let .success(items) = viewModel.messages { return items.isEmpty }
         return true
+    }
+
+    private func updateScrollTop(sorted: [MailMessage], position: String?) {
+        let atTop = position == nil || position == sorted.first?.id
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showScrollTop = !atTop
+        }
     }
 
     /// Dezenter Scroll-to-top-Button (Fade über `showScrollTop`).
