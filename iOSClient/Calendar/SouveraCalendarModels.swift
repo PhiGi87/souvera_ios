@@ -113,9 +113,23 @@ enum ICSParser {
                     }
                 } else if keyPart == "DURATION" {
                     duration = parseDuration(value)
-                } else if keyPart == "TRIGGER" {
+                } else if keyPart.hasPrefix("TRIGGER") {
                     if let minutes = parseTriggerMinutes(value) {
                         reminders.append(minutes)
+                    }
+                }
+            }
+
+            // Talk room created by the Nextcloud Calendar web UI stores the
+            // room URL in LOCATION/DESCRIPTION instead of a custom property:
+            // extract the token from /call/<token>.
+            if talkRoomToken == nil {
+                let urlSource = [location, notes].compactMap { $0 }.joined(separator: "\n")
+                if let callRange = urlSource.range(of: "/call/([a-z0-9]+)", options: .regularExpression) {
+                    var raw = String(urlSource[callRange])
+                    raw.removeFirst("/call/".count)
+                    if !raw.isEmpty {
+                        talkRoomToken = raw
                     }
                 }
             }
@@ -239,6 +253,23 @@ enum ICSParser {
             formatter.timeZone = TimeZone(identifier: tzid) ?? .current
             formatter.locale = Locale(identifier: "en_US_POSIX")
             if let date = formatter.date(from: value) { return date }
+        }
+        // UTC times written with a trailing Z (basic format "20260824T080000Z"
+        // as used by our own serializer and by sabre for some events):
+        // parse explicitly, Foundation's ISO8601DateFormatter refuses the
+        // basic (dash-less) format and the local fallback below would
+        // otherwise misinterpret the value or return nil.
+        if value.hasSuffix("Z") {
+            let utc = DateFormatter()
+            utc.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+            utc.timeZone = TimeZone(secondsFromGMT: 0)
+            utc.locale = Locale(identifier: "en_US_POSIX")
+            if let date = utc.date(from: value) { return date }
+            let iso = ISO8601DateFormatter()
+            iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            if let date = iso.date(from: value) { return date }
+            iso.formatOptions = [.withInternetDateTime]
+            if let date = iso.date(from: value) { return date }
         }
         let cleaned = value.replacingOccurrences(of: "Z", with: "+00:00")
         let formatter = ISO8601DateFormatter()

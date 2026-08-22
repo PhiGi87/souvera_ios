@@ -1,5 +1,5 @@
 # SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-app_identifier("eu.souvera.workspace")
+app_identifier("eu.souvera.app")
 team_id("S76D7JCS9V")

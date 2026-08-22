@@ -81,12 +81,22 @@ actor LinkOcsApi {
         return env?.ocs.data?.token
     }
 
-    /// Creates a public group conversation with the given name (used for the
-    /// calendar's "create Talk channel for this event" action). Returns the
-    /// conversation token and display name.
-    func createEventRoom(name: String) async -> (token: String, name: String)? {
-        let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
-        let req = signed(url: "\(base)/api/v4/room?roomType=3&roomName=\(encoded)", method: "POST")
+    /// Creates a public group conversation for a calendar event (mirrors the
+    /// Nextcloud Calendar web app): room name = event title, the conversation
+    /// is linked to the event via Talk's object reference (objectType=event,
+    /// objectId=event UID) and the event notes become the room description.
+    /// Returns the conversation token and display name.
+    func createEventRoom(name: String, objectId: String, description: String) async -> (token: String, name: String)? {
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "roomType", value: "3"),
+            URLQueryItem(name: "roomName", value: name),
+            URLQueryItem(name: "objectType", value: "event"),
+            URLQueryItem(name: "objectId", value: objectId),
+            URLQueryItem(name: "description", value: description)
+        ]
+        guard let query = components.query else { return nil }
+        let req = signed(url: "\(base)/api/v4/room?\(query)", method: "POST")
         guard let (data, response) = try? await session.data(for: req),
               (response as? HTTPURLResponse)?.statusCode ?? 500 < 300 else { return nil }
         let env: OcsEnvelope<LinkConversation>? = try? decoder.decode(OcsEnvelope<LinkConversation>.self, from: data)
@@ -94,13 +104,26 @@ actor LinkOcsApi {
         return (token, env?.ocs.data?.displayName ?? name)
     }
 
-    /// Adds users (email/user ids) to a conversation.
-    func addParticipants(token: String, userIds: [String]) async {
+    /// Adds participants: internal Souvera users by user id (`source=users`),
+    /// external guests by email (`source=emails`, Talk sends the invite).
+    func addParticipants(token: String, userIds: [String], emails: [String]) async {
         for userId in userIds {
             let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId
             let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=users&newParticipant=\(encoded)", method: "POST")
             _ = try? await session.data(for: req)
         }
+        for email in emails {
+            let encoded = email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email
+            let req = signed(url: "\(base)/api/v4/room/\(token)/participants?source=emails&newParticipant=\(encoded)", method: "POST")
+            _ = try? await session.data(for: req)
+        }
+    }
+
+    /// Enables or disables the lobby for non-moderators (Talk stores this as
+    /// lobbyState). Used when external guests join an event room.
+    func setLobby(token: String, enabled: Bool) async {
+        let req = signed(url: "\(base)/api/v4/room/\(token)/webinar/lobby?state=\(enabled ? 1 : 0)", method: "PUT")
+        _ = try? await session.data(for: req)
     }
 
     // MARK: - Calls / signaling
@@ -122,13 +145,14 @@ actor LinkOcsApi {
         return env?.ocs.data?.sessionId
     }
 
-    func joinCall(token: String, flags: Int) async {
+    func joinCall(token: String, flags: Int, silent: Bool = false) async {
         // Talk expects form-encoded fields; recordingConsent is mandatory
         // when the server enforces recording consent (otherwise 400
-        // {"error":"consent"} and no call is opened).
+        // {"error":"consent"} and no call is opened). A silent join does not
+        // ring the other participants.
         var req = signed(url: "\(base)/api/v4/call/\(token)", method: "POST")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = "flags=\(flags)&silent=false&recordingConsent=true".data(using: .utf8)
+        req.httpBody = "flags=\(flags)&silent=\(silent ? "true" : "false")&recordingConsent=true".data(using: .utf8)
         let result = try? await session.data(for: req)
         let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
         var bodySnippet = ""

@@ -60,26 +60,34 @@ struct NCMoreView: View {
                 Label(NSLocalizedString("_account_settings_", comment: ""), systemImage: "gear")
             }
         } label: {
-            HStack(spacing: 12) {
+            HStack(spacing: 14) {
                 if let avatar = model.activeAvatar {
                     Image(uiImage: avatar)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
-                        .frame(width: 44, height: 44)
+                        .frame(width: 52, height: 52)
                         .clipShape(Circle())
+                        .overlay(Circle().stroke(Color(NCBrandColor.shared.customer).opacity(0.4), lineWidth: 2))
                 } else {
                     Circle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(width: 44, height: 44)
+                        .fill(LinearGradient(
+                            colors: [Color(NCBrandColor.shared.customer).opacity(0.35), Color.gray.opacity(0.25)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ))
+                        .frame(width: 52, height: 52)
                         .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
                 }
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(alignment: .leading, spacing: 3) {
                     Text(model.activeAccountDisplayName)
                         .font(.headline)
                         .foregroundStyle(.primary)
                         .lineLimit(1)
-                    if !model.activeAccountHost.isEmpty {
-                        Text(model.activeAccountHost)
+                    HStack(spacing: 4) {
+                        Image(systemName: "envelope.fill")
+                            .font(.system(size: 9))
+                            .foregroundStyle(.secondary)
+                        Text(model.activeAccountUser.isEmpty ? model.activeAccountHost : model.activeAccountUser)
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
@@ -90,6 +98,23 @@ struct NCMoreView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            .padding(14)
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color(NCBrandColor.shared.customer).opacity(0.14),
+                        Color(.secondarySystemGroupedBackground)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                ),
+                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color(NCBrandColor.shared.customer).opacity(0.25), lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
             .contentShape(Rectangle())
         }
     }

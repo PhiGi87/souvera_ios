@@ -66,7 +66,7 @@ final class NCBrandOptions: @unchecked Sendable {
     var textCopyrightNextcloudServer: String = "Souvera Workspace Server %@"
     var loginBaseUrl: String = "https://workspace.souvera.eu"
 
-    /// Souvera push proxy (Nextcloud Push v2 compatible: APNs, production mode, topic "eu.souvera.workspace").
+    /// Souvera push proxy (Nextcloud Push v2 compatible: APNs, production mode, topic "eu.souvera.app").
     /// Hard-fixed production default — do not point this at the official Nextcloud proxy.
     static let SOUVERA_PUSH_PROXY_URL = "https://push.souvera.eu"
     var pushNotificationServerProxy: String = ""
@@ -88,8 +88,8 @@ final class NCBrandOptions: @unchecked Sendable {
     var folderDefaultAutoUpload: String = "Photos"
 
     // Capabilities Group
-    var capabilitiesGroup: String = "group.eu.souvera.workspace"
-    var capabilitiesGroupApps: String = "group.eu.souvera.workspace.apps"
+    var capabilitiesGroup: String = "group.eu.souvera.app"
+    var capabilitiesGroupApps: String = "group.eu.souvera.app.apps"
 
     // BRAND ONLY
     var use_AppConfig: Bool = false                                                         // Don't touch me !!

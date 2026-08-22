@@ -18,7 +18,8 @@ struct LinkView: View {
         let token: String
         let title: String
         let withVideo: Bool
-        var id: String { "\(token)|\(withVideo)" }
+        let silent: Bool
+        var id: String { "\(token)|\(withVideo)|\(silent)" }
     }
 
     var body: some View {
@@ -37,15 +38,22 @@ struct LinkView: View {
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             Button {
-                                callContext = CallContext(token: token, title: title, withVideo: false)
+                                callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
                             } label: {
                                 Image(systemName: "phone.fill").foregroundStyle(.green)
                             }
                             Button {
-                                callContext = CallContext(token: token, title: title, withVideo: true)
+                                callContext = CallContext(token: token, title: title, withVideo: true, silent: false)
                             } label: {
                                 Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
                             }
+                            Button {
+                                // Stiller Anruf: niemand im Kanal wird angeklingelt
+                                callContext = CallContext(token: token, title: title, withVideo: false, silent: true)
+                            } label: {
+                                Image(systemName: "bell.slash.fill").foregroundStyle(.orange)
+                            }
+                            .accessibilityLabel(NSLocalizedString("_link_silent_call_", comment: ""))
                         }
                     }
                 }
@@ -71,7 +79,8 @@ struct LinkView: View {
                     account: account,
                     token: context.token,
                     title: context.title,
-                    withVideo: context.withVideo
+                    withVideo: context.withVideo,
+                    silent: context.silent
                 )
                 .ignoresSafeArea()
             }
@@ -146,10 +155,11 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
     let token: String
     let title: String
     let withVideo: Bool
+    var silent: Bool = false
     var session: CallSession? = nil
 
     func makeUIViewController(context: Context) -> LinkCallViewController {
-        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo, session: session)
+        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo, silent: silent, session: session)
     }
 
     func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}

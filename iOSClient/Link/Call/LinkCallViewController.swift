@@ -24,12 +24,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     private var attachedSession: CallSession?
     private var isSpeakerOn = false
+    private let silent: Bool
 
-    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true, session: CallSession? = nil) {
+    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true, silent: Bool = false, session: CallSession? = nil) {
         self.account = account
         self.token = token
         self.title_ = title
         self.isVideoOn = withVideo
+        self.silent = silent
         self.attachedSession = session
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
@@ -48,7 +50,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             self.session = attached
             attached.reattach(callbacks: self)
         } else {
-            let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn)
+            let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn, silent: silent)
             self.session = session
             session.start()
         }

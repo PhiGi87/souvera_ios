@@ -27,9 +27,9 @@ final class NCGlobal: Sendable {
 
     // Service
     //
-    let metadataKeyedUnarchiver                     = "eu.souvera.workspace.metadata"
-    let refreshTask                                 = "eu.souvera.workspace.refreshTask"
-    let processingTask                              = "eu.souvera.workspace.processingTask"
+    let metadataKeyedUnarchiver                     = "eu.souvera.app.metadata"
+    let refreshTask                                 = "eu.souvera.app.refreshTask"
+    let processingTask                              = "eu.souvera.app.processingTask"
 
     // App
     //
@@ -361,7 +361,7 @@ final class NCGlobal: Sendable {
 
     // DRAG & DROP
     //
-    let metadataOcIdDataRepresentation      = "eu.souvera.workspace.ocId"
+    let metadataOcIdDataRepresentation      = "eu.souvera.app.ocId"
 
     // GROUP AMIN
     //

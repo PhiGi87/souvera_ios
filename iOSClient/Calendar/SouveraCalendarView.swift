@@ -75,6 +75,7 @@ struct SouveraCalendarView: View {
         .onAppear {
             selectedDay = Date()
             Task { await viewModel.load() }
+            viewModel.startAutoRefresh()
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             Task { await viewModel.load() }
@@ -839,10 +840,21 @@ private struct CalendarEventEditSheet: View {
                             Task {
                                 if let room = await viewModel.createTalkRoomForDraft(
                                     name: draft.title.isEmpty ? NSLocalizedString("_calendar_new_event_", comment: "") : draft.title,
-                                    attendees: draft.attendees
+                                    attendees: draft.attendees,
+                                    eventUid: draft.uid,
+                                    notes: draft.notes
                                 ) {
                                     draft.talkRoomToken = room.token
                                     draft.talkRoomName = room.name
+                                    // Store the join link in the standard fields, exactly
+                                    // like the Nextcloud Calendar web app: LOCATION when
+                                    // free, otherwise appended to the DESCRIPTION - so
+                                    // invitation mails carry the link too.
+                                    if draft.location.trimmingCharacters(in: .whitespaces).isEmpty {
+                                        draft.location = room.url
+                                    } else {
+                                        draft.notes = draft.notes.isEmpty ? room.url : draft.notes + "\n\n" + room.url
+                                    }
                                 } else {
                                     errorMessage = NSLocalizedString("_calendar_talk_error_", comment: "")
                                 }

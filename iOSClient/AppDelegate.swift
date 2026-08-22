@@ -25,7 +25,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     var loginFlowV2Endpoint = ""
     var loginFlowV2Login = ""
 
-    let backgroundQueue = DispatchQueue(label: "eu.souvera.workspace.bgTaskQueue")
+    let backgroundQueue = DispatchQueue(label: "eu.souvera.app.bgTaskQueue")
     let global = NCGlobal.shared
 
     var bgTask: UIBackgroundTaskIdentifier = .invalid

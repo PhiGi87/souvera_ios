@@ -385,7 +385,7 @@ final class NCLivePhoto {
                 )
             )
 
-            let completionQueue = DispatchQueue(label: "eu.souvera.workspace.livephoto.finish")
+            let completionQueue = DispatchQueue(label: "eu.souvera.app.livephoto.finish")
             let completionQueueBox = UnsafeSendableBox(completionQueue)
 
             let state = LivePhotoWritingState(audioPresent: audioReader != nil)
@@ -405,7 +405,7 @@ final class NCLivePhoto {
             }
 
             if videoReader.startReading() {
-                videoWriterInput.requestMediaDataWhenReady(on: DispatchQueue(label: "eu.souvera.workspace.livephoto.videoWriterInputQueue")) {
+                videoWriterInput.requestMediaDataWhenReady(on: DispatchQueue(label: "eu.souvera.app.livephoto.videoWriterInputQueue")) {
                     while videoWriterInputBox.value.isReadyForMoreMediaData {
                         if let sampleBuffer = videoReaderOutputBox.value.copyNextSampleBuffer() {
                             let currentFrameCount = stateBox.value.incrementVideoFrameCount()
@@ -440,7 +440,7 @@ final class NCLivePhoto {
 
             if let audioReaderBox, let audioReaderOutputBox, let audioWriterInputBox {
                 if audioReaderBox.value.startReading() {
-                    audioWriterInputBox.value.requestMediaDataWhenReady(on: DispatchQueue(label: "eu.souvera.workspace.livephoto.audioWriterInputQueue")) {
+                    audioWriterInputBox.value.requestMediaDataWhenReady(on: DispatchQueue(label: "eu.souvera.app.livephoto.audioWriterInputQueue")) {
                         while audioWriterInputBox.value.isReadyForMoreMediaData {
                             guard let sampleBuffer = audioReaderOutputBox.value.copyNextSampleBuffer() else {
                                 audioWriterInputBox.value.markAsFinished()

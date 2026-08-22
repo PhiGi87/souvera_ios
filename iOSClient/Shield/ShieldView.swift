@@ -8,6 +8,7 @@ import SwiftUI
 
 struct ShieldView: View {
     @StateObject private var viewModel = ShieldViewModel()
+    @ObservedObject var mailboxPicker: ShieldMailboxPicker
     @State private var section: ShieldSection = .quarantine
     @State private var quarantineKind: ShieldApi.QuarantineKind = .spam
     @State private var detailEntry: ShieldSpamEntry?
@@ -40,6 +41,15 @@ struct ShieldView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
 
+            if let mailbox = viewModel.selectedMailbox {
+                Label(mailbox, systemImage: "tray")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 4)
+            }
+
             if !viewModel.warnings.isEmpty {
                 Text(viewModel.warnings.joined(separator: "\n"))
                     .font(.caption)
@@ -55,7 +65,19 @@ struct ShieldView: View {
             case .blacklist: listSection(kind: .blacklist, state: viewModel.blacklist)
             }
         }
-        .task { await viewModel.loadAll() }
+        .task {
+            await viewModel.loadAll()
+            mailboxPicker.mailboxes = viewModel.mailboxes
+            if let selected = mailboxPicker.selected {
+                viewModel.selectedMailbox = selected
+            }
+        }
+        .onChange(of: viewModel.mailboxes) { _, newValue in
+            mailboxPicker.mailboxes = newValue
+        }
+        .onChange(of: mailboxPicker.selected) { _, newValue in
+            viewModel.selectedMailbox = newValue
+        }
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
         }
@@ -122,12 +144,13 @@ struct ShieldView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(entries):
-            if entries.isEmpty {
+            let filtered = viewModel.filteredSpam()
+            if filtered.isEmpty {
                 Spacer()
                 Text(NSLocalizedString("_shield_empty_", comment: "")).foregroundStyle(.secondary)
                 Spacer()
             } else {
-                List(entries) { entry in
+                List(filtered) { entry in
                     Button {
                         detailEntry = entry
                     } label: {
@@ -169,12 +192,13 @@ struct ShieldView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(entries):
-            if entries.isEmpty {
+            let filtered = viewModel.filteredGeneric(state)
+            if filtered.isEmpty {
                 Spacer()
                 Text(NSLocalizedString("_shield_empty_", comment: "")).foregroundStyle(.secondary)
                 Spacer()
             } else {
-                List(entries) { entry in
+                List(filtered) { entry in
                     VStack(alignment: .leading, spacing: 3) {
                         Text(entry.displayTitle).font(.subheadline).lineLimit(1)
                         Text(entry.displaySubtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)

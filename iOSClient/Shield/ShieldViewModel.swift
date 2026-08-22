@@ -23,8 +23,24 @@ final class ShieldViewModel: ObservableObject {
     @Published var blacklist: ShieldUiState<[String]> = .loading
     @Published var warnings: [String] = []
     @Published var feedback: ShieldFeedback?
+    /// All mailboxes (pmails) discovered in the quarantine lists.
+    @Published var mailboxes: [String] = []
+    /// Selected mailbox filter; nil shows all mailboxes.
+    @Published var selectedMailbox: String?
 
     private let api = ShieldApi()
+
+    func filteredSpam() -> [ShieldSpamEntry] {
+        guard case let .success(all) = spamQuarantine else { return [] }
+        guard let selectedMailbox else { return all }
+        return all.filter { $0.mailbox == selectedMailbox }
+    }
+
+    func filteredGeneric(_ state: ShieldUiState<[ShieldGenericEntry]>) -> [ShieldGenericEntry] {
+        guard case let .success(all) = state else { return [] }
+        guard let selectedMailbox else { return all }
+        return all.filter { $0.mailbox == selectedMailbox }
+    }
 
     struct ShieldFeedback: Equatable {
         let success: Bool
@@ -34,21 +50,32 @@ final class ShieldViewModel: ObservableObject {
     func loadAll() async {
         warnings = []
 
+        var discovered: [String] = []
         if let result = await api.quarantineList(.spam) {
             warnings += result.warnings
-            spamQuarantine = .success(result.data.compactMap { ShieldSpamEntry.from($0) })
+            let entries = result.data.compactMap { ShieldSpamEntry.from($0) }
+            discovered += entries.compactMap(\.mailbox)
+            spamQuarantine = .success(entries)
         } else {
             spamQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         if let result = await api.quarantineList(.file) {
-            fileQuarantine = .success(result.data.compactMap { ShieldGenericEntry.from($0) })
+            let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
+            discovered += entries.compactMap(\.mailbox)
+            fileQuarantine = .success(entries)
         } else {
             fileQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         if let result = await api.quarantineList(.virus) {
-            virusQuarantine = .success(result.data.compactMap { ShieldGenericEntry.from($0) })
+            let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
+            discovered += entries.compactMap(\.mailbox)
+            virusQuarantine = .success(entries)
         } else {
             virusQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
+        }
+        mailboxes = Array(Set(discovered)).sorted()
+        if let selected = selectedMailbox, !mailboxes.contains(selected) {
+            selectedMailbox = nil
         }
         if let result = await api.list(.whitelist) {
             warnings += result.warnings
@@ -67,11 +94,11 @@ final class ShieldViewModel: ObservableObject {
     // MARK: - Quarantine actions
 
     func spamDetail(id: String) async -> [String: Any]? {
-        await api.spamMessageDetail(id: id)
+        await api.spamMessageDetail(id: id, email: selectedMailbox)
     }
 
     func release(_ kind: ShieldApi.QuarantineKind, ids: [String]) async {
-        let ok = await api.release(kind, ids: ids)
+        let ok = await api.release(kind, ids: ids, email: selectedMailbox)
         feedback = ShieldFeedback(
             success: ok,
             message: ok
@@ -82,7 +109,7 @@ final class ShieldViewModel: ObservableObject {
     }
 
     func delete(_ kind: ShieldApi.QuarantineKind, ids: [String]) async {
-        let ok = await api.delete(kind, ids: ids)
+        let ok = await api.delete(kind, ids: ids, email: selectedMailbox)
         feedback = ShieldFeedback(
             success: ok,
             message: ok

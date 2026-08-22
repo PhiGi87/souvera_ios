@@ -5759,7 +5759,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/Notification_Service_Extension.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.Notification-Service-Extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.Notification-Service-Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5775,7 +5775,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "92ad63bd-2f25-4caf-b585-cec027653e5c";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera NSE App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(SRCROOT)/Brand/Notification_Service_Extension.entitlements";
 				DEAD_CODE_STRIPPING = YES;
@@ -5786,7 +5786,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/Notification_Service_Extension.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.Notification-Service-Extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.Notification-Service-Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5808,7 +5808,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5833,7 +5833,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Tests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5879,7 +5879,7 @@
 				MTL_FAST_MATH = YES;
 				OTHER_CFLAGS = "-v";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.UITests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5924,7 +5924,7 @@
 				MTL_FAST_MATH = YES;
 				OTHER_CFLAGS = "-v";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.UITests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.UITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -5973,7 +5973,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.IntegrationTests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.IntegrationTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6017,7 +6017,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.IntegrationTests;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.IntegrationTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6050,7 +6050,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.File-Provider-Extension-UI";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.File-Provider-Extension-UI";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6065,7 +6065,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "2c3bb195-92d0-409f-9d54-520fb9f3905a";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera FPE-UI App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(SRCROOT)/Brand/File_Provider_Extension_UI.entitlements";
 				DEAD_CODE_STRIPPING = YES;
@@ -6080,7 +6080,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.File-Provider-Extension-UI";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.File-Provider-Extension-UI";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6103,7 +6103,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/Share.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Share;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -6119,7 +6119,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "b5d83aaf-b7e5-4a53-ace2-190931484cb9";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera Share App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(SRCROOT)/Brand/Share.entitlements";
 				DEAD_CODE_STRIPPING = YES;
@@ -6130,7 +6130,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/Share.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Share;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Share;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphonesimulator iphoneos";
 				SUPPORTS_MACCATALYST = NO;
@@ -6163,7 +6163,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Widget;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6180,7 +6180,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "b61f3cba-0640-43d4-9cc3-25353e37dc03";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera Widget App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
@@ -6200,7 +6200,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.Widget;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.Widget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6226,7 +6226,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/File_Provider_Extension.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.File-Provider-Extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.File-Provider-Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6241,7 +6241,7 @@
 			buildSettings = {
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "abefe876-e737-45ff-905e-3c92bbd68b57";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera FPE App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				CODE_SIGN_ENTITLEMENTS = "$(SRCROOT)/Brand/File_Provider_Extension.entitlements";
 				DEAD_CODE_STRIPPING = YES;
@@ -6252,7 +6252,7 @@
 				);
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/File_Provider_Extension.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.File-Provider-Extension";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.File-Provider-Extension";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6275,7 +6275,7 @@
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/iOSClient.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
@@ -6292,7 +6292,7 @@
 				PRODUCT_NAME = Souvera;
 				CODE_SIGN_IDENTITY = "Apple Distribution: Host-On Service Provider GmbH (S76D7JCS9V)";
 				CODE_SIGN_STYLE = Manual;
-				PROVISIONING_PROFILE_SPECIFIER = "23e565bc-e37a-4daa-886c-36f75bb5056a";
+				PROVISIONING_PROFILE_SPECIFIER = "Souvera App Store";
 				ALWAYS_SEARCH_USER_PATHS = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
@@ -6301,7 +6301,7 @@
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INFOPLIST_FILE = "$(SRCROOT)/Brand/iOSClient.plist";
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
 				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = YES;
@@ -6340,7 +6340,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.Action-Assistant";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.Action-Assistant";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -6379,7 +6379,7 @@
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
-				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.workspace.Action-Assistant";
+				PRODUCT_BUNDLE_IDENTIFIER = "eu.souvera.app.Action-Assistant";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -6419,7 +6419,7 @@
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.WidgetDashboardIntentHandler;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.WidgetDashboardIntentHandler;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;
@@ -6461,7 +6461,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				OTHER_LDFLAGS = "";
-				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.workspace.WidgetDashboardIntentHandler;
+				PRODUCT_BUNDLE_IDENTIFIER = eu.souvera.app.WidgetDashboardIntentHandler;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
 				SUPPORTS_MACCATALYST = NO;

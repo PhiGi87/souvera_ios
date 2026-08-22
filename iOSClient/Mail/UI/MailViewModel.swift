@@ -93,6 +93,7 @@ final class MailViewModel: ObservableObject {
 
     func start() {
         if imapClient != nil || jmapClient != nil { return }
+        startAutoRefresh()
         Task {
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
@@ -103,6 +104,28 @@ final class MailViewModel: ObservableObject {
             await loadMailboxes()
             await loadAliases()
             await loadIdentities()
+        }
+    }
+
+    private var autoRefreshTask: Task<Void, Never>?
+    private var lastAutoRefresh: Date = .distantPast
+
+    /// Periodically refreshes the open mailbox in the foreground according to
+    /// the "Hintergrundaktualisierung" setting (30 s check granularity).
+    func startAutoRefresh() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                guard let interval = SouveraAutoRefresh.interval else { continue }
+                if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
+                    self.lastAutoRefresh = Date()
+                    guard self.currentMailbox != nil, self.composeContext == nil else { continue }
+                    await self.refreshMessages()
+                }
+            }
         }
     }
 
@@ -529,6 +552,7 @@ final class MailViewModel: ObservableObject {
 
     func openMessage(_ message: MailMessage, fromSearch: Bool = false) {
         cameFromSearch = fromSearch
+        messageScrollPosition = message.id
         route = .detail(message: message)
         body = .loading
         Task {

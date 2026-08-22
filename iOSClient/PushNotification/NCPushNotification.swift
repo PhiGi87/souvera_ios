@@ -68,8 +68,15 @@ class NCPushNotification {
         let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
         let options = NKRequestOptions(customUserAgent: userAgent)
 
+        // Combined "normal voip" token: the push proxy routes alert pushes to
+        // the normal APNs token and voip pushes to the PushKit token. Single
+        // fallback works too (only one half present at the time).
+        let combinedToken = SouveraPushRegistrar.combinedToken(
+            normal: preferences.deviceTokenPushNotification,
+            voip: LinkVoIPManager.shared.voipToken
+        )
         let responsePushProxy = await NextcloudKit.shared.subscribingPushProxyAsync(proxyServerUrl: proxyServerUrl,
-                                                                                    pushToken: preferences.deviceTokenPushNotification,
+                                                                                    pushToken: combinedToken,
                                                                                     deviceIdentifier: deviceIdentifier,
                                                                                     signature: signature,
                                                                                     publicKey: subscribingPublicKey,

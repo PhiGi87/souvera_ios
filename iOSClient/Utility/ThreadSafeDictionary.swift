@@ -8,7 +8,7 @@ import Foundation
 /// Safe for non-async code. Iteration should be done on an immutable snapshot for index stability.
 public final class ThreadSafeDictionary<Key: Hashable, Value>: Collection {
     private var storage: [Key: Value]
-    private let queue = DispatchQueue(label: "eu.souvera.workspace.ThreadSafeDictionary", attributes: .concurrent)
+    private let queue = DispatchQueue(label: "eu.souvera.app.ThreadSafeDictionary", attributes: .concurrent)
 
     /// Creates a new thread-safe dictionary.
     /// - Parameter initial: Initial key/value pairs.

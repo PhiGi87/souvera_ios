@@ -28,6 +28,26 @@ final class CalendarViewModel: ObservableObject {
 
     private let client = CalDavClient()
     private var cachedEntries: [CalDavEventEntry] = []
+    private var autoRefreshTask: Task<Void, Never>?
+    private var lastAutoRefresh: Date = .distantPast
+
+    /// Periodically reloads mail/calendar in the foreground according to the
+    /// "Hintergrundaktualisierung" setting (30 s check granularity).
+    func startAutoRefresh() {
+        autoRefreshTask?.cancel()
+        autoRefreshTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { return }
+                guard let self else { return }
+                guard let interval = SouveraAutoRefresh.interval else { continue }
+                if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
+                    self.lastAutoRefresh = Date()
+                    await self.load()
+                }
+            }
+        }
+    }
 
     private var accountKey: String {
         NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"
@@ -154,7 +174,6 @@ final class CalendarViewModel: ObservableObject {
     }
 
     func load() async {
-        events = .loading
         offlineNotice = nil
 
         let calendar = Calendar.current
@@ -164,10 +183,23 @@ final class CalendarViewModel: ObservableObject {
         let start = calendar.date(byAdding: .day, value: -1, to: monthInterval.start) ?? monthInterval.start
         let end = calendar.date(byAdding: .day, value: 1, to: (calendar.date(byAdding: .month, value: 1, to: monthInterval.start) ?? monthInterval.start.addingTimeInterval(31 * 86400))) ?? Date.distantFuture
 
+        // Sofortige Anzeige aus dem Monats-Cache, statt eines leeren
+        // Lade-Screens während der Server-Abfrage.
+        if case .loading = events {
+            if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
+                events = .success(Self.parseEntries(cached).sorted { $0.start < $1.start })
+            }
+        }
+
         let discovered = await client.fetchCalendars()
         if !discovered.isEmpty {
             calendars = discovered
             restoreSelection(discovered)
+            Self.saveCachedCalendars(discovered)
+        } else if calendars.isEmpty, let cachedCalendars = Self.loadCachedCalendars(), !cachedCalendars.isEmpty {
+            // Server nicht erreichbar: Kalenderliste aus dem Cache.
+            calendars = cachedCalendars
+            restoreSelection(cachedCalendars)
         }
 
         var entries: [CalDavEventEntry] = []
@@ -176,19 +208,22 @@ final class CalendarViewModel: ObservableObject {
         }
         JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched")
 
-        if entries.isEmpty, let cached = Self.loadCachedEntries(), !cached.isEmpty {
+        if entries.isEmpty, let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
             entries = cached
             offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
         }
 
         cachedEntries = entries
-        Self.saveCachedEntries(entries)
+        Self.saveCachedEntries(entries, month: visibleMonth)
 
-        var all: [CalendarEventModel] = []
-        for entry in entries {
-            all += ICSParser.parseEvents(entry.ics, calendarHref: entry.calendarHref, href: entry.href, etag: entry.etag)
-        }
+        let all = Self.parseEntries(entries)
         events = .success(all.sorted { $0.start < $1.start })
+        for event in all.prefix(12) {
+            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid)")
+        }
+        if all.count > 12 {
+            JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")
+        }
         SouveraReminderScheduler.schedule(for: all)
     }
 
@@ -228,21 +263,61 @@ final class CalendarViewModel: ObservableObject {
     /// Creates a public Talk conversation named after the event, invites the
     /// attendees and stores the room on the event (X-SOUVERA-TALK-ROOM).
     func createTalkRoom(for event: CalendarEventModel) async -> Bool {
-        guard let room = await createTalkRoomForDraft(name: event.title, attendees: event.attendees) else { return false }
+        guard let room = await createTalkRoomForDraft(
+            name: event.title,
+            attendees: event.attendees,
+            eventUid: event.uid,
+            notes: event.description ?? ""
+        ) else { return false }
         var draft = draft(from: event)
         draft.talkRoomToken = room.token
         draft.talkRoomName = room.name
+        // Link im Standardfeld ablegen (wie NC-Web-UI), damit er mit dem
+        // Termin und den Einladungen mitwandert.
+        if draft.location.trimmingCharacters(in: .whitespaces).isEmpty {
+            draft.location = room.url
+        } else {
+            draft.notes = draft.notes.isEmpty ? room.url : draft.notes + "\n\n" + room.url
+        }
         return await saveEvent(draft, existing: event)
     }
 
     /// Creates the Talk room without touching the event (used by the edit
     /// sheet before the event is saved).
-    func createTalkRoomForDraft(name: String, attendees: [String]) async -> (token: String, name: String)? {
+    func createTalkRoomForDraft(name: String, attendees: [String], eventUid: String, notes: String) async -> (token: String, name: String, url: String)? {
         guard let account = LinkAccount.active() else { return nil }
         let api = LinkOcsApi(account: account)
-        guard let room = await api.createEventRoom(name: name) else { return nil }
-        await api.addParticipants(token: room.token, userIds: attendees)
-        return room
+        let objectId = eventUid.isEmpty ? UUID().uuidString.lowercased() : eventUid
+        guard let room = await api.createEventRoom(name: name, objectId: objectId, description: notes) else { return nil }
+
+        // Split attendees into internal Souvera users (resolved via the
+        // instance directory) and external guests (invited by email).
+        let directory = NextcloudDirectorySource()
+        var internalUsers: [String] = []
+        var externalEmails: [String] = []
+        for attendee in attendees {
+            let trimmed = attendee.trimmingCharacters(in: .whitespaces).lowercased()
+            guard trimmed.contains("@") else { continue }
+            let found = await directory.searchUsers(trimmed, limit: 5)
+            let isInternal = found.contains { $0.id.lowercased() == trimmed || $0.email.lowercased() == trimmed }
+            if isInternal {
+                internalUsers.append(trimmed)
+            } else {
+                externalEmails.append(trimmed)
+            }
+        }
+        await api.addParticipants(token: room.token, userIds: internalUsers, emails: externalEmails)
+
+        // Public room with external guests: keep them in the lobby until a
+        // moderator lets them in.
+        if !externalEmails.isEmpty {
+            await api.setLobby(token: room.token, enabled: true)
+            JmapLog.write("Calendar talk room \(room.token): lobby enabled for \(externalEmails.count) external guest(s)")
+        }
+
+        let root = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let url = "\(root)/index.php/call/\(room.token)"
+        return (room.token, room.name, url)
     }
 
     func openTalkRoom(for event: CalendarEventModel) {
@@ -271,24 +346,52 @@ final class CalendarViewModel: ObservableObject {
 
     // MARK: - Cache
 
-    private static var cacheKey: String { "calendar_events" }
+    private static func cacheKey(for month: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM"
+        return "calendar_events_" + formatter.string(from: month)
+    }
 
-    private static func saveCachedEntries(_ entries: [CalDavEventEntry]) {
+    private static func saveCachedEntries(_ entries: [CalDavEventEntry], month: Date) {
         let array: [[String: Any]] = entries.map { entry in
             var dict: [String: Any] = ["calendarHref": entry.calendarHref, "href": entry.href, "ics": entry.ics]
             dict["etag"] = entry.etag ?? ""
             return dict
         }
-        MailCache.saveJSON(array, key: cacheKey)
+        MailCache.saveJSON(array, key: cacheKey(for: month))
     }
 
-    private static func loadCachedEntries() -> [CalDavEventEntry]? {
-        guard let array = MailCache.loadJSON(key: cacheKey) as? [[String: Any]] else { return nil }
+    private static func loadCachedEntries(month: Date) -> [CalDavEventEntry]? {
+        guard let array = MailCache.loadJSON(key: cacheKey(for: month)) as? [[String: Any]] else { return nil }
         return array.compactMap { dict in
             guard let href = dict["href"] as? String,
                   let calendarHref = dict["calendarHref"] as? String,
                   let ics = dict["ics"] as? String else { return nil }
             return CalDavEventEntry(calendarHref: calendarHref, href: href, etag: dict["etag"] as? String, ics: ics)
+        }
+    }
+
+    private static func parseEntries(_ entries: [CalDavEventEntry]) -> [CalendarEventModel] {
+        var all: [CalendarEventModel] = []
+        for entry in entries {
+            all += ICSParser.parseEvents(entry.ics, calendarHref: entry.calendarHref, href: entry.href, etag: entry.etag)
+        }
+        return all
+    }
+
+    private static var calendarListCacheKey: String { "calendar_list_cache" }
+
+    private static func saveCachedCalendars(_ calendars: [CalDavCalendar]) {
+        let array: [[String: Any]] = calendars.map { ["href": $0.href, "displayName": $0.displayName, "color": $0.color ?? ""] }
+        MailCache.saveJSON(array, key: calendarListCacheKey)
+    }
+
+    private static func loadCachedCalendars() -> [CalDavCalendar]? {
+        guard let array = MailCache.loadJSON(key: calendarListCacheKey) as? [[String: Any]] else { return nil }
+        return array.compactMap { dict in
+            guard let href = dict["href"] as? String,
+                  let displayName = dict["displayName"] as? String else { return nil }
+            return CalDavCalendar(href: href, displayName: displayName, color: dict["color"] as? String)
         }
     }
 }

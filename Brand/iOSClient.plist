@@ -4,8 +4,8 @@
 <dict>
 	<key>BGTaskSchedulerPermittedIdentifiers</key>
 	<array>
-		<string>eu.souvera.workspace.refreshTask</string>
-		<string>eu.souvera.workspace.processingTask</string>
+		<string>eu.souvera.app.refreshTask</string>
+		<string>eu.souvera.app.processingTask</string>
 	</array>
 	<key>CFBundleAllowMixedLocalizations</key>
 	<true/>
@@ -33,7 +33,7 @@
 			<key>CFBundleTypeRole</key>
 			<string>Editor</string>
 			<key>CFBundleURLName</key>
-			<string>eu.souvera.workspace</string>
+			<string>eu.souvera.app</string>
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>souvera</string>

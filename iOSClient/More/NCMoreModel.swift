@@ -42,6 +42,7 @@ final class NCMoreModel: ObservableObject {
     // Account menu state (top-left of the More screen).
     @Published var activeAccountDisplayName: String = ""
     @Published var activeAccountHost: String = ""
+    @Published var activeAccountUser: String = ""
     @Published var activeAvatar: UIImage?
     @Published var accountList: [AccountItem] = []
 
@@ -442,7 +443,34 @@ final class NCMoreModel: ObservableObject {
             pushHosted(SouveraContactsView(addTrigger: trigger), title: NSLocalizedString("_contacts_", comment: ""), trailing: [addButton])
 
         case .shield:
-            pushHosted(ShieldView(), title: NSLocalizedString("_shield_", comment: ""), trailing: [])
+            let mailboxPicker = ShieldMailboxPicker()
+            let mailboxButton = UIBarButtonItem(
+                image: UIImage(systemName: "tray.full"),
+                style: .plain,
+                target: nil,
+                action: nil
+            )
+            mailboxButton.menu = UIMenu(
+                title: NSLocalizedString("_shield_mailbox_filter_", comment: ""),
+                children: [
+                    UIDeferredMenuElement.uncached { completion in
+                        var items: [UIMenuElement] = [
+                            UIAction(
+                                title: NSLocalizedString("_shield_all_mailboxes_", comment: ""),
+                                state: mailboxPicker.selected == nil ? .on : .off
+                            ) { _ in mailboxPicker.selected = nil }
+                        ]
+                        for mailbox in mailboxPicker.mailboxes {
+                            items.append(UIAction(
+                                title: mailbox,
+                                state: mailboxPicker.selected == mailbox ? .on : .off
+                            ) { _ in mailboxPicker.selected = mailbox })
+                        }
+                        completion(items)
+                    }
+                ]
+            )
+            pushHosted(ShieldView(mailboxPicker: mailboxPicker), title: NSLocalizedString("_shield_", comment: ""), trailing: [mailboxButton])
 
         case .none:
             break
@@ -472,6 +500,7 @@ final class NCMoreModel: ObservableObject {
         if let active = accounts.first(where: { $0.account == account }) {
             activeAccountDisplayName = active.alias.isEmpty ? active.displayName : active.alias
             activeAccountHost = URL(string: active.urlBase)?.host ?? ""
+            activeAccountUser = active.user""
             activeAvatar = utility.loadUserImage(for: active.user, displayName: active.displayName, urlBase: active.urlBase)
         }
     }
@@ -510,7 +539,7 @@ final class NCMoreModel: ObservableObject {
         guard let navigationController = controller?.currentNavigationController() else {
             return
         }
-        let hosting = UIHostingController(rootView: view)
+        let hosting = NCHostedController(rootView: view)
         hosting.title = title
         hosting.navigationItem.rightBarButtonItems = trailing ?? []
         navigationController.pushViewController(hosting, animated: true)
@@ -731,3 +760,17 @@ final class NCMoreModel: ObservableObject {
 final class ContactAddTrigger: ObservableObject {
     @Published var fire = false
 }
+
+/// Mailbox filter shared between the Shield host-bar menu and the SwiftUI
+/// shield screen (nil = all mailboxes).
+final class ShieldMailboxPicker: ObservableObject {
+    @Published var mailboxes: [String] = []
+    @Published var selected: String?
+}
+
+/// Marker for screens pushed from the More tab that manage their own
+/// navigation-bar items: the More navigation controller skips its default
+/// bell/assistant/transfers items for them.
+protocol NCHostedScreen: AnyObject {}
+
+final class NCHostedController<Content: View>: UIHostingController<Content>, NCHostedScreen {}

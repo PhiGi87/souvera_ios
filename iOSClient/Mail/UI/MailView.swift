@@ -173,10 +173,6 @@ private struct MailFolderListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Mail via \(viewModel.transportLabel) · \(SouveraBuildInfo.label)")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .padding(.vertical, 4)
             switch viewModel.mailboxes {
             case .loading:
                 Spacer()
@@ -427,15 +423,17 @@ private struct MailMessageListView: View {
                     List {
                         ForEach(viewModel.sortMessages(items)) { message in
                             row(message)
+                                .id(message.id)
                         }
                     }
                     .listStyle(.plain)
                     .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
                     .refreshable { await viewModel.refreshMessages() }
+                    .onChange(of: items.count) { _, _ in
+                        restoreScroll(proxy)
+                    }
                     .onAppear {
-                        if let position = viewModel.messageScrollPosition {
-                            proxy.scrollTo(position, anchor: .top)
-                        }
+                        restoreScroll(proxy)
                     }
                 }
                 .overlay(alignment: .bottom) {
@@ -576,6 +574,15 @@ private struct MailMessageListView: View {
     }
 
     @ViewBuilder
+    private func restoreScroll(_ proxy: ScrollViewProxy) {
+        guard let position = viewModel.messageScrollPosition else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            withAnimation {
+                proxy.scrollTo(position, anchor: .top)
+            }
+        }
+    }
+
     private func row(_ message: MailMessage) -> some View {
         if editing {
             Button {
@@ -760,12 +767,19 @@ private struct MailDetailView: View {
     @State private var previewURL: URL?
     @State private var downloadingIds: Set<String> = []
     @State private var moveTarget: ([MailMessage], [Mailbox])?
+    @State private var htmlHeight: CGFloat = 120
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider()
-            bodyArea
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                header
+                Divider()
+                    .padding(.vertical, 12)
+                bodyArea
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 12)
+            .padding(.bottom, 24)
         }
         .quickLookPreview($previewURL)
         .sheet(item: Binding(
@@ -800,7 +814,6 @@ private struct MailDetailView: View {
                 Spacer()
             }
             if case let .success(body) = viewModel.body, !body.attachments.isEmpty {
-                Divider()
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
                         ForEach(body.attachments) { att in
@@ -810,7 +823,6 @@ private struct MailDetailView: View {
                 }
             }
         }
-        .padding()
     }
 
     private func attachmentChip(_ att: AttachmentMeta) -> some View {
@@ -845,43 +857,69 @@ private struct MailDetailView: View {
     private var bodyArea: some View {
         switch viewModel.body {
         case .loading:
-            Spacer()
-            ProgressView()
-            Spacer()
+            HStack {
+                Spacer()
+                ProgressView()
+                Spacer()
+            }
+            .padding(.vertical, 24)
         case let .error(m):
-            Spacer()
-            Text(m).foregroundStyle(.secondary).padding()
-            Spacer()
+            Text(m).foregroundStyle(.secondary).padding(.vertical, 12)
         case let .success(body):
             if let html = body.html, !html.isEmpty {
-                // HTML fills the entire remaining area and scrolls itself.
-                MailHtmlView(html: html)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                // Self-sizing web view: the content flows directly below the
+                // header (same margins, one scrollable column).
+                MailHtmlView(html: html, height: $htmlHeight)
+                    .frame(height: max(htmlHeight, 120))
             } else {
-                ScrollView {
-                    Text(body.plainText ?? "")
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding()
-                }
+                Text(body.plainText ?? "")
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.vertical, 4)
             }
         }
     }
 }
 
-/// Renders an HTML email body in a WKWebView.
+/// Renders an HTML email body in a self-sizing WKWebView (its scroll view is
+/// disabled; the surrounding ScrollView scrolls everything as one column).
 private struct MailHtmlView: UIViewRepresentable {
     let html: String
+    @Binding var height: CGFloat
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.isOpaque = false
+        webView.scrollView.isScrollEnabled = false
+        webView.navigationDelegate = context.coordinator
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        let wrapped = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px'>\(html)</body></html>"
+        guard !context.coordinator.loaded else { return }
+        context.coordinator.loaded = true
+        let wrapped = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px;margin:0'>\(html)</body></html>"
         webView.loadHTMLString(wrapped, baseURL: nil)
+    }
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        private let parent: MailHtmlView
+        var loaded = false
+
+        init(_ parent: MailHtmlView) {
+            self.parent = parent
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            webView.evaluateJavaScript("document.documentElement.scrollHeight") { value, _ in
+                guard let value = value as? NSNumber else { return }
+                DispatchQueue.main.async {
+                    self.parent.height = CGFloat(value.doubleValue)
+                }
+            }
+        }
     }
 }
 
@@ -987,7 +1025,7 @@ struct MailComposeView: View {
 
                 attachmentsBar
             }
-            .navigationTitle(NSLocalizedString("_mail_compose_", comment: ""))
+            .navigationTitle(composeTitle)
             .navigationBarTitleDisplayMode(.inline)
             .fileImporter(
                 isPresented: $showFilePicker,
@@ -1189,6 +1227,15 @@ struct MailComposeView: View {
 
     /// Copies picked files into the app's temporary directory so they stay
     /// readable after the picker's security-scoped access ends.
+
+    private var composeTitle: String {
+        switch context.mode {
+        case .new: return NSLocalizedString("_mail_compose_", comment: "")
+        case .reply: return NSLocalizedString("_mail_reply_", comment: "")
+        case .replyAll: return NSLocalizedString("_mail_reply_all_", comment: "")
+        case .forward: return NSLocalizedString("_mail_forward_", comment: "")
+        }
+    }
     private func importFiles(_ urls: [URL]) {
         for url in urls {
             let didStart = url.startAccessingSecurityScopedResource()

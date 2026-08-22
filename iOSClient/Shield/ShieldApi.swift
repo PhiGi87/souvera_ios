@@ -17,6 +17,8 @@ struct ShieldSpamEntry: Identifiable {
     let spamLevel: Int
     let time: Date
     let seen: Bool
+    /// Mailbox (pmail) this entry belongs to - used for the mailbox filter.
+    let mailbox: String?
 
     static func from(_ json: [String: Any]) -> ShieldSpamEntry? {
         guard let id = json["id"] as? String else { return nil }
@@ -29,7 +31,8 @@ struct ShieldSpamEntry: Identifiable {
             bytes: (json["bytes"] as? NSNumber)?.int64Value ?? 0,
             spamLevel: (json["spamlevel"] as? NSNumber)?.intValue ?? 0,
             time: Date(timeIntervalSince1970: (json["time"] as? NSNumber)?.doubleValue ?? 0),
-            seen: ((json["seen"] as? NSNumber)?.intValue ?? 0) != 0
+            seen: ((json["seen"] as? NSNumber)?.intValue ?? 0) != 0,
+            mailbox: (json["_pmail"] as? String) ?? (json["pmail"] as? String)
         )
     }
 }
@@ -45,6 +48,11 @@ struct ShieldGenericEntry: Identifiable {
             ?? fields["filename"] as? String
             ?? fields["subject"] as? String
             ?? (fields["id"] as? String ?? "")
+    }
+
+    /// Mailbox (pmail) this entry belongs to - used for the mailbox filter.
+    var mailbox: String? {
+        (fields["_pmail"] as? String) ?? (fields["pmail"] as? String)
     }
 
     var displaySubtitle: String {
@@ -95,12 +103,36 @@ final class ShieldApi {
         return "Basic \(Data(raw.utf8).base64EncodedString())"
     }
 
-    private func request(_ path: String, method: String = "GET", form: [String: String] = [:]) async -> (status: Int, json: [String: Any]?, body: String)? {
+    /// Session-bound CSRF token (the POST routes of the shield app reject
+    /// requests without it with 412 even for Basic auth). Fetched once from
+    /// the shield page; refreshed automatically after a 412.
+    private var requestToken: String?
+
+    private func ensureRequestToken() async -> String? {
+        if let requestToken { return requestToken }
+        guard let root, let url = URL(string: "\(root)/index.php/apps/souvera_shield/") else { return nil }
+        var req = URLRequest(url: url)
+        if let authHeader {
+            req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        }
+        guard let (data, _) = try? await urlSession.data(for: req),
+              let html = String(data: data, encoding: .utf8),
+              let start = html.range(of: #"data-requesttoken=""#) else { return nil }
+        let rest = html[start.upperBound...]
+        guard let end = rest.firstIndex(of: "\"") else { return nil }
+        requestToken = String(rest[..<end])
+        return requestToken
+    }
+
+    private func perform(_ path: String, method: String, form: [String: String]) async -> (status: Int, json: [String: Any]?, body: String)? {
         guard let root, let url = URL(string: "\(root)/apps/souvera_shield/\(path)") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
         if let authHeader {
             req.setValue(authHeader, forHTTPHeaderField: "Authorization")
+        }
+        if method == "POST", let token = await ensureRequestToken() {
+            req.setValue(token, forHTTPHeaderField: "requesttoken")
         }
         if !form.isEmpty {
             var components = URLComponents()
@@ -113,9 +145,19 @@ final class ShieldApi {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let body = String(data: data.prefix(500), encoding: .utf8) ?? ""
         if !(200..<300).contains(status) {
-            NSLog("ShieldApiLog %@ %@ -> %d %@", method, path, status, body)
+            JmapLog.write("ShieldApiLog \(method) \(path) -> \(status) \(body)")
         }
         return (status, json, body)
+    }
+
+    private func request(_ path: String, method: String = "GET", form: [String: String] = [:]) async -> (status: Int, json: [String: Any]?, body: String)? {
+        let first = await perform(path, method: method, form: form)
+        // CSRF token expired? Refresh once and retry POSTs.
+        if method == "POST", let first, first.status == 412 {
+            requestToken = nil
+            return await perform(path, method: method, form: form)
+        }
+        return first
     }
 
     private func ok(_ result: (status: Int, json: [String: Any]?, body: String)?) -> Bool {
@@ -138,29 +180,37 @@ final class ShieldApi {
         return ShieldListResult(data: data, warnings: warnings)
     }
 
-    func spamMessageDetail(id: String) async -> [String: Any]? {
-        let result = await request("api/quarantine/view?id=\(id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id)")
+    func spamMessageDetail(id: String, email: String? = nil) async -> [String: Any]? {
+        var query = "id=\(id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id)"
+        if let email {
+            query += "&email=\(email.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? email)"
+        }
+        let result = await request("api/quarantine/view?\(query)")
         return result?.json
     }
 
-    func release(_ kind: QuarantineKind, ids: [String]) async -> Bool {
+    func release(_ kind: QuarantineKind, ids: [String], email: String? = nil) async -> Bool {
         let path: String
         switch kind {
         case .spam: path = "api/quarantine/release"
         case .file: path = "api/file_quarantine/release"
         case .virus: path = "api/virus_quarantine/release"
         }
-        return ok(await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]))
+        var form = ["ids": ids.joined(separator: ",")]
+        if let email { form["email"] = email }
+        return ok(await request(path, method: "POST", form: form))
     }
 
-    func delete(_ kind: QuarantineKind, ids: [String]) async -> Bool {
+    func delete(_ kind: QuarantineKind, ids: [String], email: String? = nil) async -> Bool {
         let path: String
         switch kind {
         case .spam: path = "api/quarantine/delete"
         case .file: path = "api/file_quarantine/delete"
         case .virus: path = "api/virus_quarantine/delete"
         }
-        return ok(await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]))
+        var form = ["ids": ids.joined(separator: ",")]
+        if let email { form["email"] = email }
+        return ok(await request(path, method: "POST", form: form))
     }
 
     // MARK: - Whitelist / Blacklist

@@ -30,3 +30,33 @@ struct SouveraBuildInfo {
         return parts.joined(separator: " · ")
     }
 }
+
+/// Background refresh interval setting: while the app is active, the mail and
+/// calendar modules re-sync automatically; the same interval is used as an
+/// advisory value for BGAppRefresh. 0 = off.
+enum SouveraAutoRefresh {
+    static let defaultsKey = "souvera_auto_refresh_minutes"
+    static let presets: [Int] = [0, 15, 30, 60]
+
+    static var intervalMinutes: Int {
+        UserDefaults.standard.integer(forKey: defaultsKey)
+    }
+
+    static var interval: TimeInterval? {
+        let minutes = intervalMinutes
+        return minutes > 0 ? TimeInterval(minutes * 60) : nil
+    }
+
+    static func set(minutes: Int) {
+        UserDefaults.standard.set(minutes, forKey: defaultsKey)
+    }
+}
+
+/// Builds the combined "normal voip" push token string understood by the
+/// Nextcloud push proxy (both halves separated by a single space).
+enum SouveraPushRegistrar {
+    static func combinedToken(normal: String, voip: String) -> String {
+        let parts = [normal, voip].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return parts.joined(separator: " ")
+    }
+}

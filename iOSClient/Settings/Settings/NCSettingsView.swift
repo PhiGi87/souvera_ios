@@ -125,6 +125,21 @@ struct NCSettingsView: View {
             }
 
             // Display
+            // Auto-Refresh (Mail & Kalender)
+            Section(header: Text(NSLocalizedString("_settings_auto_refresh_", comment: "")).font(.headline), content: {
+                Picker(NSLocalizedString("_settings_auto_refresh_interval_", comment: ""), selection: Binding(
+                    get: { SouveraAutoRefresh.intervalMinutes },
+                    set: { SouveraAutoRefresh.set(minutes: $0) }
+                )) {
+                    ForEach(SouveraAutoRefresh.presets, id: \.self) { minutes in
+                        Text(minutes == 0
+                             ? NSLocalizedString("_settings_auto_refresh_off_", comment: "")
+                             : String(format: NSLocalizedString("_settings_auto_refresh_minutes_", comment: ""), minutes))
+                            .tag(minutes)
+                    }
+                }
+                .pickerStyle(.segmented)
+            })
             Section(header: Text(NSLocalizedString("_display_", comment: "")).font(.headline), content: {
                 NavigationLink(destination: LazyView {
                     NCDisplayView(model: NCDisplayModel(controller: model.controller))

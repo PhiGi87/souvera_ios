@@ -5,7 +5,7 @@
 //
 // - Generates a PushKit VoIP token and registers it Nextcloud-push-v2-compatibly with the Souvera
 //   push proxy (https://push.souvera.eu). The proxy automatically targets the VoIP APNs topic
-//   `eu.souvera.workspace.voip` for call notifications; the device only supplies the VoIP token
+//   `eu.souvera.app.voip` for call notifications; the device only supplies the VoIP token
 //   plus the existing device public key + signature that NCPushNotification already provisioned.
 // - On an incoming VoIP push, decrypts the payload with the account's device private key (same E2E
 //   material as normal notifications) and reports the call to CallKit so iOS rings even when the app
@@ -143,8 +143,12 @@ final class LinkVoIPManager: NSObject {
 
                 let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
                 let options = NKRequestOptions(customUserAgent: userAgent)
+                let combined = SouveraPushRegistrar.combinedToken(
+                    normal: NCPreferences().deviceTokenPushNotification,
+                    voip: voipToken
+                )
                 let responseProxy = await NextcloudKit.shared.subscribingPushProxyAsync(proxyServerUrl: proxyServerUrl,
-                                                                                        pushToken: voipToken,
+                                                                                        pushToken: combined,
                                                                                         deviceIdentifier: deviceIdentifier,
                                                                                         signature: signature,
                                                                                         publicKey: subscribingPublicKey,

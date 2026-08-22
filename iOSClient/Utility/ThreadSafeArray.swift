@@ -9,7 +9,7 @@ import UIKit
 public class ThreadSafeArray<Element> {
 
     private var array = [Element]()
-    private let queue = DispatchQueue(label: "eu.souvera.workspace.ThreadSafeArray", attributes: .concurrent)
+    private let queue = DispatchQueue(label: "eu.souvera.app.ThreadSafeArray", attributes: .concurrent)
 
     public init() { }
 

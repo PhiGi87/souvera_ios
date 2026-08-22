@@ -15,7 +15,7 @@ final class NCManageDatabaseCore {
     let realmQueue: DispatchQueue
 
     init() {
-        let queue = DispatchQueue(label: "eu.souvera.workspace.realmQueue", qos: .userInitiated)
+        let queue = DispatchQueue(label: "eu.souvera.app.realmQueue", qos: .userInitiated)
         queue.setSpecific(key: NCManageDatabaseCore.realmQueueKey, value: ())
         self.realmQueue = queue
     }

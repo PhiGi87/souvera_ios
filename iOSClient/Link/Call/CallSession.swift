@@ -36,14 +36,16 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var ownSessionId = ""
     private var mcuActive = false
     private var endedOnce = false
+    private let silent: Bool
     private var publisherCreated = false
 
     private let callFlags: Int
 
-    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks?, withVideo: Bool = true) {
+    init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks?, withVideo: Bool = true, silent: Bool = false) {
         self.account = account
         self.token = token
         self.callbacks = callbacks
+        self.silent = silent
         self.callFlags = withVideo ? 7 : 3 // FLAG_IN_CALL|WITH_AUDIO|WITH_VIDEO : IN_CALL|AUDIO
         self.api = LinkOcsApi(account: account)
         super.init()
@@ -92,7 +94,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// The signaling room join is confirmed - now open the call via OCS.
     func onRoomJoined() {
         Task {
-            await api.joinCall(token: token, flags: callFlags)
+            await api.joinCall(token: token, flags: callFlags, silent: silent)
             CallDebugLog.log("CallSession", "joinCall sent flags=\(callFlags) (after room join)")
         }
     }
@@ -185,6 +187,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         LinkVoIPManager.shared.callEndedByApp()
 
         callbacks?.onEnded()
+        // Clear the shared call state so banners ("Zurück zum Anruf")
+        // disappear everywhere - a user-initiated hangup must behave
+        // exactly like a remote end.
+        LinkVoIPManager.shared.callSessionDidEnd(self)
     }
 
     // MARK: - Peer helpers
@@ -239,6 +245,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// running session and re-emits the active tracks.
     func reattach(callbacks: CallSessionCallbacks) {
         self.callbacks = callbacks
+        self.silent = silent
         if let local = localVideo { callbacks.onLocalVideo(track: local) }
         for track in remoteVideoTracks { callbacks.onRemoteVideo(track: track) }
     }

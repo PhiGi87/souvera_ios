@@ -326,6 +326,13 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // Read current items from trailingItemGroups
         // ---------------------------------------------------------
 
+        // SwiftUI screens pushed from the More tab (contacts, shield, ...)
+        // manage their own trailing items - keep the default
+        // bell/assistant/transfers buttons off them.
+        if topViewController is NCHostedScreen {
+            return
+        }
+
         let currentItems: [UIBarButtonItem] = topViewController.navigationItem.trailingItemGroups.flatMap { $0.barButtonItems }
 
         let currentTags = currentItems.map { $0.tag }

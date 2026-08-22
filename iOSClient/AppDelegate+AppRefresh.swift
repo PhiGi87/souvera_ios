@@ -15,7 +15,8 @@ extension AppDelegate {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: global.refreshTask)
 
         let request = BGAppRefreshTaskRequest(identifier: global.refreshTask)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: 60)
+        let interval = SouveraAutoRefresh.interval ?? 60
+        request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
 
         do {
             try BGTaskScheduler.shared.submit(request)

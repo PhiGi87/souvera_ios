@@ -445,7 +445,7 @@ actor JmapClient {
 
 /// Debug log written to <Documents>/souvera-mail.log in the app container,
 /// independent of the NextcloudKit log level. Inspect with:
-///   tail -100 "$(xcrun simctl get_app_container booted eu.souvera.workspace data)/Documents/souvera-mail.log"
+///   tail -100 "$(xcrun simctl get_app_container booted eu.souvera.app data)/Documents/souvera-mail.log"
 enum JmapLog {
     private static let timestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
