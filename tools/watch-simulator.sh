@@ -83,14 +83,22 @@ mb() { # bytes -> "12,3 MB"
 hold_note=""
 
 note_ok() {
-    hold_note="${hold_note}${hold_note:+
-}$C_GREEN✓ $*$C_RESET"
+    if [ -n "$hold_note" ]; then
+        hold_note="$hold_note
+$C_GREEN✓ $*$C_RESET"
+    else
+        hold_note="$C_GREEN✓ $*$C_RESET"
+    fi
     ok "$*"
 }
 
 note_fail() {
-    hold_note="${hold_note}${hold_note:+
-}$C_RED✗ $*$C_RESET"
+    if [ -n "$hold_note" ]; then
+        hold_note="$hold_note
+$C_RED✗ $*$C_RESET"
+    else
+        hold_note="$C_RED✗ $*$C_RESET"
+    fi
     fail "$*"
     printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$HOME/.souvera-watcher.error" 2>/dev/null || true
 }
@@ -182,8 +190,10 @@ render_history() {
 # Runs API
 # ---------------------------------------------------------------------------
 
-latest_head() { # -> "sha8" des Branch-HEAD
-    api_get "$API/repos/$REPO/commits/$BRANCH" | python3 -c '
+latest_head() { # branch -> "sha7" des Branch-HEAD
+    local branch="${1:-}"
+    [ -z "$branch" ] && { printf '%s' ""; return 0; }
+    api_get "$API/repos/$REPO/commits/$branch" | python3 -c '
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -437,7 +447,7 @@ render_screen() { # runid commit branch status conclusion started updated
         fi
         say ""
         local head
-        head=$(latest_head)
+        head=$(latest_head "$branch")
         if [ -n "$head" ] && [ "$head" != "$commit" ]; then
             dim "Branch-HEAD:  $head (Skript-Commit ohne CI-Run)"
         fi
