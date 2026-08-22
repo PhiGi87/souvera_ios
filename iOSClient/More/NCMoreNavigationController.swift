@@ -16,23 +16,29 @@ class NCMoreNavigationController: NCMainNavigationController {
             // Gepushte Module: Standard-Optik, kein blaues Header-Erbe.
             setNavigationBarAppearance()
             viewController.navigationItem.leftBarButtonItem = nil
+            navigationBar.overrideUserInterfaceStyle = .unspecified
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
             }
         }
     }
 
-    /// Blauer Gradient-Header mit Souvera-Logo links (hell/dunkel identisch).
+    /// Blauer Gradient-Header mit Souvera-Logo links (hell/dunkel identisch,
+    /// deckend - kein Liquid-Glass-Effekt auf iOS 26).
     private func applySouveraHeader(_ viewController: UIViewController) {
+        guard let gradient = Self.souveraGradientImage() else { return }
         let appearance = UINavigationBarAppearance()
-        appearance.configureWithTransparentBackground()
-        appearance.backgroundImage = Self.souveraGradientImage()
+        appearance.configureWithOpaqueBackground()
+        appearance.backgroundImage = gradient
+        appearance.backgroundColor = UIColor(patternImage: gradient)
+        appearance.shadowColor = .clear
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
         navigationBar.standardAppearance = appearance
         navigationBar.scrollEdgeAppearance = appearance
         navigationBar.compactAppearance = appearance
         navigationBar.compactScrollEdgeAppearance = appearance
         navigationBar.tintColor = .white
+        navigationBar.overrideUserInterfaceStyle = .light
 
         viewController.navigationItem.title = ""
         // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen

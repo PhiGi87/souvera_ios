@@ -76,12 +76,11 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
-      - name: Stamp git commit into Info.plist
+      - name: Compute build timestamp (JJJJMMDDHHMM)
         run: |
-          SHA=$(git rev-parse --short HEAD)
-          /usr/libexec/PlistBuddy -c "Delete :SouveraGitCommit" Brand/iOSClient.plist 2>/dev/null || true
-          /usr/libexec/PlistBuddy -c "Add :SouveraGitCommit string $SHA" Brand/iOSClient.plist
-          echo "Stamped commit $SHA"
+          TS=$(date +%Y%m%d%H%M)
+          echo "Build timestamp: $TS"
+          echo "BUILD_TS=$TS" >> "$GITHUB_ENV"
 
       - name: Setup Ruby and fastlane
         uses: ruby/setup-ruby@v1
@@ -157,14 +156,8 @@ jobs:
           fi
           rm -f ~/certs/souvera.p12
 
-      # Apple requires a strictly increasing bundle version per TestFlight
-      # upload: only run when a TestFlight upload was requested.
-      - name: Bump build number
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.upload_testflight == 'true'
-        env:
-          ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
-          ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: bundle exec fastlane bump_build_number
+      # Build-Nummer kommt als Zeitstempel aus dem CI-Schritt
+      # (CURRENT_PROJECT_VERSION=JJJJMMDDHHMM) - monoton steigend.
 
       # Cache key must ignore the build number (it changes on upload runs) but
       # still track dependency/pbxproj changes.
@@ -207,6 +200,7 @@ jobs:
             -derivedDataPath "$DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            CURRENT_PROJECT_VERSION="${{ env.BUILD_TS }}" \
             2>&1 | tee archive.log
           ARCHIVE_EXIT=${PIPESTATUS[0]}
           set -e
@@ -311,6 +305,12 @@ jobs:
         with:
           xcode-version: ${{ env.XCODE_VERSION }}
 
+      - name: Compute build timestamp (JJJJMMDDHHMM)
+        run: |
+          TS=$(date +%Y%m%d%H%M)
+          echo "Build timestamp: $TS"
+          echo "BUILD_TS=$TS" >> "$GITHUB_ENV"
+
       - name: Stamp git commit into Info.plist
         run: |
           SHA=$(git rev-parse --short HEAD)
@@ -343,6 +343,7 @@ jobs:
             -derivedDataPath "$SIM_DERIVED_DATA" \
             -skipPackagePluginValidation \
             COMPILER_INDEX_STORE_ENABLE=NO \
+            CURRENT_PROJECT_VERSION="${{ env.BUILD_TS }}" \
             2>&1 | tee sim-build.log
           SIM_EXIT=${PIPESTATUS[0]}
           set -e

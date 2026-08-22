@@ -526,12 +526,24 @@ struct LinkChatView: View {
     @State private var editingMessage: LinkChatMessage?
     @State private var previewURL: URL?
     @State private var mentionSuggestions: [LinkParticipant] = []
+    @State private var reactionTarget: LinkChatMessage?
 
     var body: some View {
         VStack(spacing: 0) {
             messageList
             Divider()
             composer
+        }
+        .overlay {
+            if let target = reactionTarget {
+                EmojiReactionOverlay(
+                    onPick: { emoji in
+                        viewModel.toggleReaction(message: target, emoji: emoji)
+                        reactionTarget = nil
+                    },
+                    onCancel: { reactionTarget = nil }
+                )
+            }
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -586,7 +598,8 @@ struct LinkChatView: View {
     private func insertMention(_ participant: LinkParticipant) {
         guard let lastAt = draft.lastIndex(of: "@") else { return }
         let prefix = String(draft[..<lastAt])
-        draft = prefix + "@\"" + participant.displayName + "\" "
+        let displayName = participant.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        draft = prefix + "@\"" + displayName + "\" "
         mentionSuggestions = []
     }
 
@@ -614,6 +627,7 @@ struct LinkChatView: View {
                                 isOwn: message.actorId == viewModel.currentUserId,
                                 showTime: showsTime(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
+                                onLongPress: { target in reactionTarget = target },
                                 onOpenFile: { info in
                                     Task {
                                         if let url = await viewModel.downloadAttachment(info) {
@@ -643,14 +657,20 @@ struct LinkChatView: View {
         }
     }
 
-    /// Zeitstempel nur anzeigen, wenn seit der vorherigen Nachricht mehr als
-    /// zwei Minuten vergangen sind (Gruppierung gleicher Zeitstempel).
+    /// Zeitstempel minutengenau gruppieren: nur bei Minutenwechsel anzeigen.
     private func showsTime(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> Bool {
         let visible = items.filter { $0.systemMessage != "message_deleted" }
         guard let currentIndex = visible.firstIndex(where: { $0.id == message.id }),
               currentIndex > 0 else { return true }
         let previous = visible[currentIndex - 1]
-        return previous.isSystemMessage || (message.timestamp - previous.timestamp) > 120
+        guard !previous.isSystemMessage else { return true }
+        return minuteStamp(message) != minuteStamp(previous)
+    }
+
+    private func minuteStamp(_ message: LinkChatMessage) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMddHHmm"
+        return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
     }
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, items: [LinkChatMessage]) {
@@ -753,6 +773,7 @@ private struct LinkMessageRow: View {
     var showTime: Bool = true
     let onStartEdit: () -> Void
     let onOpenFile: (LinkFileInfo) -> Void
+    var onLongPress: (LinkChatMessage) -> Void = { _ in }
 
     private var messageTime: String {
         let formatter = DateFormatter()
@@ -793,6 +814,27 @@ private struct LinkMessageRow: View {
                 LinkMessageBubble(message: message, isOwn: isOwn)
                 if !isOwn { Spacer(minLength: 40) }
             }
+            .onLongPressGesture {
+                onLongPress(message)
+            }
+            if !message.reactions.isEmpty {
+                HStack(spacing: 4) {
+                    ForEach(message.reactions.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, count in
+                        Text("\(emoji) \(count)")
+                            .font(.caption2)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule().fill(message.reactionsSelf.contains(emoji)
+                                    ? Color.orange.opacity(0.35)
+                                    : Color(.secondarySystemBackground))
+                            )
+                            .overlay(
+                                Capsule().stroke(message.reactionsSelf.contains(emoji) ? Color.orange : .clear, lineWidth: 1)
+                            )
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
         .swipeActions(edge: .trailing) {
@@ -823,7 +865,11 @@ private struct LinkMessageBubble: View {
             if !isOwn {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
-            Text(displayText)
+            if message.fileName() != nil {
+                Text(displayText)
+            } else {
+                Text(message.attributedDisplayText())
+            }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
         .background(
@@ -1032,6 +1078,38 @@ struct CallStartOverlay: View {
             .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .shadow(color: .black.opacity(0.2), radius: 20, y: 8)
             .padding(32)
+        }
+    }
+}
+
+/// Emoji-Auswahl für Reaktionen (langes Drücken auf eine Nachricht).
+struct EmojiReactionOverlay: View {
+    let onPick: (String) -> Void
+    let onCancel: () -> Void
+
+    private let emojis = ["👍", "❤️", "😂", "🎉", "😮", "😢", "🙏", "🔥"]
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { onCancel() }
+            HStack(spacing: 10) {
+                ForEach(emojis, id: \.self) { emoji in
+                    Button {
+                        onPick(emoji)
+                    } label: {
+                        Text(emoji)
+                            .font(.system(size: 26))
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color(.secondarySystemBackground)))
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(.regularMaterial, in: Capsule())
+            .shadow(color: .black.opacity(0.2), radius: 16, y: 6)
         }
     }
 }

@@ -88,9 +88,13 @@ struct LinkChatMessage: Decodable, Identifiable {
     let systemMessage: String
     /// Rich-object parameters; kept as raw JSON so we can pull out shared-file names.
     let messageParameters: [String: LinkRichObject]?
+    /// Emoji-Reaktionen: Emoji -> Anzahl.
+    var reactions: [String: Int] = [:]
+    /// Emojis, mit denen der aktuelle Nutzer selbst reagiert hat.
+    var reactionsSelf: [String] = []
 
     enum CodingKeys: String, CodingKey {
-        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters
+        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf
     }
 
     init(from decoder: Decoder) throws {
@@ -105,6 +109,9 @@ struct LinkChatMessage: Decodable, Identifiable {
         systemMessage = (try? c.decode(String.self, forKey: .systemMessage)) ?? ""
         // messageParameters can be `[]` (empty array) or an object; tolerate both.
         messageParameters = try? c.decode([String: LinkRichObject].self, forKey: .messageParameters)
+        // reactions kann ein Objekt oder `[]` sein; tolerant dekodieren.
+        reactions = (try? c.decode([String: Int].self, forKey: .reactions)) ?? [:]
+        reactionsSelf = (try? c.decode([String].self, forKey: .reactionsSelf)) ?? []
     }
 
     /// File name if this message is a shared file (Talk puts a `file` rich-object parameter), else nil.
@@ -124,6 +131,33 @@ struct LinkChatMessage: Decodable, Identifiable {
     }
 
     var isSystemMessage: Bool { !systemMessage.isEmpty }
+
+    /// AttributedString für die Bubble: {mention-...}-Platzhalter werden als
+    /// @Name mit hellem Orangen-Hintergrund (Pill) gerendert, alle anderen
+    /// Platzhalter als Klartext ersetzt.
+    func attributedDisplayText() -> AttributedString {
+        var output = AttributedString()
+        var remaining = Substring(message)
+        while let open = remaining.firstIndex(of: "{") {
+            output += AttributedString(String(remaining[..<open]))
+            if let close = remaining[open...].firstIndex(of: "}") {
+                let key = String(remaining[remaining.index(after: open)..<close])
+                let name = messageParameters?[key]?.name ?? messageParameters?[key]?.id ?? key
+                var piece = AttributedString(key.hasPrefix("mention-") ? "@\(name)" : name)
+                if key.hasPrefix("mention-") {
+                    piece.foregroundColor = .orange
+                    piece.backgroundColor = Color.orange.opacity(0.22)
+                }
+                output += piece
+                remaining = remaining[remaining.index(after: close)...]
+            } else {
+                output += AttributedString(String(remaining[open...]))
+                remaining = ""
+            }
+        }
+        output += AttributedString(String(remaining))
+        return output
+    }
 
     /// Systemnachrichten kommen mit Platzhaltern wie {user1} - hier werden
     /// sie durch die Namen aus den messageParameters ersetzt.

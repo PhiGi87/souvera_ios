@@ -97,7 +97,7 @@ struct MailView: View {
     private var navigationTitle: String {
         switch viewModel.route {
         case .folders: return NSLocalizedString("_mail_", comment: "")
-        case let .messages(mailbox): return mailbox.displayName
+        case .messages: return 
         case .detail: return ""
         case .compose: return NSLocalizedString("_mail_compose_", comment: "")
         case .search: return NSLocalizedString("_mail_search_", comment: "")
@@ -125,6 +125,15 @@ struct MailView: View {
         if !isFolders {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: { Image(systemName: "chevron.backward") }
+            }
+        }
+        if case let .messages(mailbox) = viewModel.route {
+            // Ordnername linksbündig neben dem Zurück-Pfeil (nicht zentriert).
+            ToolbarItem(placement: .topBarLeading) {
+                Text(mailbox.displayName)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .padding(.leading, 6)
             }
         }
         if case let .detail(message) = viewModel.route {

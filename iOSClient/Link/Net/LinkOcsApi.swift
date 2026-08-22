@@ -164,6 +164,30 @@ actor LinkOcsApi {
         return federationEnabledCache ?? false
     }
 
+    /// Emoji-Reaktion auf eine Nachricht setzen.
+    func addReaction(token: String, messageId: Int64, emoji: String) async -> Bool {
+        var req = signed(url: "\(base)/api/v1/reaction/\(token)/\(messageId)", method: "POST")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let encoded = emoji.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? emoji
+        req.httpBody = "reaction=\(encoded)".data(using: .utf8)
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "addReaction \(messageId) \(emoji) -> \(status)")
+        return (200..<300).contains(status)
+    }
+
+    /// Emoji-Reaktion entfernen.
+    func removeReaction(token: String, messageId: Int64, emoji: String) async -> Bool {
+        var req = signed(url: "\(base)/api/v1/reaction/\(token)/\(messageId)", method: "DELETE")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let encoded = emoji.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? emoji
+        req.httpBody = "reaction=\(encoded)".data(using: .utf8)
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "removeReaction \(messageId) \(emoji) -> \(status)")
+        return (200..<300).contains(status)
+    }
+
     /// Teilnehmer einer Konversation auflisten.
     func listParticipants(token: String) async -> [LinkParticipant] {
         guard let body = await get("\(base)/api/v4/room/\(token)/participants") else { return [] }

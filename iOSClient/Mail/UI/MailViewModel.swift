@@ -253,6 +253,15 @@ final class MailViewModel: ObservableObject {
         updateUnreadBadge()
     }
 
+    /// Sofortiger Badge-Zähler (persönlicher Posteingang).
+    @Published private(set) var personalInboxUnread: Int = 0
+
+    private func postUnreadBadge(_ count: Int) {
+        personalInboxUnread = max(0, count)
+        JmapLog.write("Mail unread badge -> \(personalInboxUnread)")
+        NotificationCenter.default.post(name: .mailUnreadChanged, object: personalInboxUnread)
+    }
+
     /// Ungelesen gesamt → Badge am Mail-Tab (NotificationCenter).
     func updateUnreadBadge() {
         let count: Int
@@ -262,10 +271,9 @@ final class MailViewModel: ObservableObject {
                 .filter { $0.kind == .inbox && $0.namespace == .personal }
                 .reduce(0) { $0 + $1.unreadCount }
         } else {
-            count = 0
+            count = personalInboxUnread
         }
-        JmapLog.write("Mail unread badge -> \(count)")
-        NotificationCenter.default.post(name: .mailUnreadChanged, object: count)
+        postUnreadBadge(count)
     }
 
     private func loadMailboxesImap() async {
@@ -749,6 +757,19 @@ final class MailViewModel: ObservableObject {
                 applyLocalKeyword(message, keyword: "$seen", value: read)
             }
         }
+        // Badge sofort lokal anpassen (ohne auf den Server-Roundtrip zu warten).
+        if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal {
+            var delta = 0
+            for message in messagesToMark {
+                if read && !message.isRead { delta -= 1 }
+                if !read && message.isRead { delta += 1 }
+            }
+            if delta != 0 {
+                postUnreadBadge(personalInboxUnread + delta)
+            }
+        }
+        // Server-Abgleich korrigiert anschließend eventuelle Drift.
+        Task { await loadMailboxes() }
     }
 
     func toggleFlagged(_ message: MailMessage) {
@@ -875,6 +896,16 @@ final class MailViewModel: ObservableObject {
     }
 
     private func afterListMutation(_ removedIds: [String]) {
+        // Badge sofort: entfernte ungelesene Nachrichten des Posteingangs abziehen.
+        if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
+           case let .success(list) = messages {
+            let unreadRemoved = list
+                .filter { removedIds.contains($0.emailId) && !$0.isRead }
+                .count
+            if unreadRemoved > 0 {
+                postUnreadBadge(personalInboxUnread - unreadRemoved)
+            }
+        }
         Task { await loadMailboxes() }
         // Remove from the visible list (server confirms the change).
         if case var .success(list) = messages {

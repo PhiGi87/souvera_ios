@@ -168,6 +168,47 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Toggelt eine Emoji-Reaktion (optimistisch lokal, Server bestätigt).
+    func toggleReaction(message: LinkChatMessage, emoji: String) {
+        guard let api, case let .chat(token, _) = route else { return }
+        let removing = message.reactionsSelf.contains(emoji)
+        // Optimistisches Update der lokalen Nachricht.
+        applyReactionLocally(messageId: message.id, emoji: emoji, removing: removing)
+        Task {
+            let ok = removing
+                ? await api.removeReaction(token: token, messageId: message.id, emoji: emoji)
+                : await api.addReaction(token: token, messageId: message.id, emoji: emoji)
+            if !ok {
+                // Rollback + Reload zur Konsistenz.
+                applyReactionLocally(messageId: message.id, emoji: emoji, removing: !removing)
+                reloadMessages(token: token)
+            }
+        }
+    }
+
+    private func applyReactionLocally(messageId: Int64, emoji: String, removing: Bool) {
+        guard case var .success(list) = messages else { return }
+        guard let index = list.firstIndex(where: { $0.id == messageId }) else { return }
+        var message = list[index]
+        let currentCount = message.reactions[emoji] ?? 0
+        if removing {
+            let newCount = max(0, currentCount - 1)
+            if newCount > 0 {
+                message.reactions[emoji] = newCount
+            } else {
+                message.reactions.removeValue(forKey: emoji)
+            }
+            message.reactionsSelf.removeAll { $0 == emoji }
+        } else {
+            message.reactions[emoji] = currentCount + 1
+            if !message.reactionsSelf.contains(emoji) {
+                message.reactionsSelf.append(emoji)
+            }
+        }
+        list[index] = message
+        messages = .success(list)
+    }
+
     func startConversation(id: String, source: String, title: String) {
         guard let api else { return }
         if source == "federated" || source == "email_guest" {

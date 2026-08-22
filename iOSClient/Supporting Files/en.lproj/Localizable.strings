@@ -1019,3 +1019,4 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_settings_language_"             = "Language";
 "_language_system_"               = "System";
 "_language_restart_"              = "The language change takes effect after restarting the app.";
+"_intro_about_souvera_"           = "About Souvera Workspace";

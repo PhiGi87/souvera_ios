@@ -28,6 +28,7 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        buttonSignUp.setTitle(NSLocalizedString("_intro_about_souvera_", comment: ""), for: .normal)
 
         let isTooLight = NCBrandColor.shared.customer.isTooLight()
         let isTooDark = NCBrandColor.shared.customer.isTooDark()
@@ -171,12 +172,9 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
     }
 
     @IBAction func signupWithProvider(_ sender: Any) {
-        let loginProvider = NCLoginProvider()
-        loginProvider.controller = self.controller
-        loginProvider.initialURLString = NCBrandOptions.shared.linkloginPreferredProviders
-        loginProvider.presentingViewController = self
-        loginProvider.startAuthentication()
-        self.activeLoginProvider = loginProvider
+        // Der Button ist jetzt "Über Souvera Workspace" und öffnet souvera.eu.
+        guard let url = URL(string: "https://souvera.eu") else { return }
+        UIApplication.shared.open(url)
     }
 
     @IBAction func host(_ sender: Any) {
