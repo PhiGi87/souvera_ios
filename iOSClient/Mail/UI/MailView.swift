@@ -435,24 +435,8 @@ private struct MailMessageListView: View {
                     .onAppear {
                         restoreScroll(proxy)
                     }
-                }
-                .overlay(alignment: .bottom) {
-                    let sorted = viewModel.sortMessages(items)
-                    if let position = viewModel.messageScrollPosition,
-                       let firstId = sorted.first?.id,
-                       position != firstId {
-                        Button {
-                            withAnimation { proxy.scrollTo(firstId, anchor: .top) }
-                        } label: {
-                            Image(systemName: "arrow.up")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(Color.white)
-                                .frame(width: 36, height: 36)
-                                .background(Circle().fill(Color(NCBrandColor.shared.customer)))
-                                .shadow(radius: 3)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-                        .padding(.bottom, 10)
+                    .overlay(alignment: .bottom) {
+                        scrollTopButton(proxy: proxy, items: items)
                     }
                 }
             }
@@ -583,6 +567,28 @@ private struct MailMessageListView: View {
             withAnimation {
                 proxy.scrollTo(position, anchor: .top)
             }
+        }
+    }
+
+    /// Scroll-to-top button: only visible when the list is NOT at the top.
+    @ViewBuilder
+    private func scrollTopButton(proxy: ScrollViewProxy, items: [MailMessage]) -> some View {
+        let sorted = viewModel.sortMessages(items)
+        if let position = viewModel.messageScrollPosition,
+           let firstId = sorted.first?.id,
+           position != firstId {
+            Button {
+                withAnimation { proxy.scrollTo(firstId, anchor: .top) }
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.subheadline.bold())
+                    .foregroundStyle(Color.white)
+                    .frame(width: 36, height: 36)
+                    .background(Circle().fill(Color(NCBrandColor.shared.customer)))
+                    .shadow(radius: 3)
+            }
+            .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+            .padding(.bottom, 10)
         }
     }
 
