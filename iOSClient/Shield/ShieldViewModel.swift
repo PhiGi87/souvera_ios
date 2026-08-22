@@ -86,6 +86,12 @@ final class ShieldViewModel: ObservableObject {
             virusQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         mailboxes = Array(Set(discovered)).sorted()
+        // Das persönliche Postfach muss immer auswählbar sein - auch wenn es
+        // gerade keine Quarantäne-Einträge hat (sonst verschwindet es aus der
+        // Liste und das Hinzufügen von Whitelist/Blacklist wird unmöglich).
+        if let personalMailbox, !mailboxes.contains(personalMailbox) {
+            mailboxes.insert(personalMailbox, at: 0)
+        }
         if let selected = selectedMailbox, !mailboxes.contains(selected) {
             selectedMailbox = nil
         }

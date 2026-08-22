@@ -71,7 +71,9 @@ class NCMoreNavigationController: NCMainNavigationController {
 
         // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
         // Header. titleView bekommt auf iOS 26 KEINE Button-Kapsel (anders
-        // als leftBarButtonItem-CustomViews).
+        // als leftBarButtonItem-CustomViews). Der Container wird über die
+        // volle Balkenbreite gezogen, sodass das Logo links in einer Flucht
+        // mit dem Listen-Rand darunter steht.
         let imageView = UIImageView(image: UIImage(named: "souveraLogo"))
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
@@ -79,9 +81,9 @@ class NCMoreNavigationController: NCMainNavigationController {
         container.autoresizingMask = [.flexibleWidth, .flexibleLeftMargin]
         container.addSubview(imageView)
         NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
             imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 24),
+            imageView.heightAnchor.constraint(equalToConstant: 28),
             imageView.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor)
         ])
         viewController.navigationItem.titleView = container

@@ -172,11 +172,12 @@ struct LinkChatMessage: Decodable, Identifiable {
         return output
     }
 
-    /// Systemnachrichten kommen mit Platzhaltern wie {user1} - hier werden
-    /// sie durch die Namen aus den messageParameters ersetzt.
+    /// Platzhalter wie {user1} oder {mention-user1} werden durch die Namen
+    /// aus den messageParameters ersetzt (Systemnachrichten UND normale
+    /// Nachrichten - sonst zeigt z. B. die Kanal-Vorschau rohe Platzhalter).
     func displayText() -> String {
         var text = message
-        if isSystemMessage, let params = messageParameters, !params.isEmpty {
+        if let params = messageParameters, !params.isEmpty {
             for (key, object) in params {
                 let name = object.name ?? object.id ?? ""
                 if !name.isEmpty {

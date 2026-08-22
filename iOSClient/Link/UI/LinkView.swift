@@ -834,14 +834,13 @@ private struct LinkMessageRow: View {
             HStack(spacing: 0) {
                 if isOwn { Spacer(minLength: 40) }
                 LinkMessageBubble(message: message, isOwn: isOwn)
-                    .overlay(alignment: .bottomTrailing) {
-                        // Reaktionen am unteren rechten Bubble-Rand, leicht
-                        // überlappend (WhatsApp-Stil): etwas nach rechts
-                        // eingerückt und halb über die Unterkante gehängt,
+                    .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
+                        // Reaktionen leicht überlappend am unteren Bubble-Rand,
+                        // etwas eingerückt (nicht ganz bündig mit der Kante),
                         // ohne den Nachrichtentext zu verdecken.
                         if !message.reactions.isEmpty {
                             reactionPills(message: message)
-                                .offset(x: 8, y: 10)
+                                .offset(x: isOwn ? -6 : 6, y: 10)
                         }
                     }
                 if !isOwn { Spacer(minLength: 40) }
