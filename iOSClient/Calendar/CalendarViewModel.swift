@@ -56,6 +56,10 @@ final class CalendarViewModel: ObservableObject {
         }
     }
 
+    /// In dieser Sitzung abgewählte Kalender: werden von restoreSelection
+    /// nie wieder automatisch aktiviert.
+    private var sessionDeselectedHrefs: Set<String> = []
+
     private var accountKey: String {
         NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"
     }
@@ -70,10 +74,14 @@ final class CalendarViewModel: ObservableObject {
     func toggleCalendar(_ calendar: CalDavCalendar) {
         if selectedCalendarHrefs.contains(calendar.href) {
             selectedCalendarHrefs.remove(calendar.href)
+            sessionDeselectedHrefs.insert(calendar.href)
         } else {
             selectedCalendarHrefs.insert(calendar.href)
+            sessionDeselectedHrefs.remove(calendar.href)
         }
         persistSelection()
+        let persisted = UserDefaults.standard.stringArray(forKey: selectionDefaultsKey)?.count ?? -1
+        JmapLog.write("Calendar toggle: \(calendar.displayName) -> selected=\(selectedCalendarHrefs.count) persisted=\(persisted)")
     }
 
     func color(for calendar: CalDavCalendar) -> Color? {
@@ -107,6 +115,11 @@ final class CalendarViewModel: ObservableObject {
         } else {
             selectedCalendarHrefs = Set(discovered.map(\.href))
         }
+        // Sitzungs-Schutz: in dieser Sitzung abgewählte Kalender bleiben aus.
+        if !sessionDeselectedHrefs.isEmpty {
+            selectedCalendarHrefs.subtract(sessionDeselectedHrefs)
+        }
+        JmapLog.write("Calendar restore: stored=\(stored?.count ?? -1) result=\(selectedCalendarHrefs.count)")
     }
 
     var monthTitle: String {
@@ -238,7 +251,7 @@ final class CalendarViewModel: ObservableObject {
         let all = Self.parseEntries(entries)
         events = .success(all.sorted { $0.start < $1.start })
         for event in all.prefix(12) {
-            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid)")
+            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
         }
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")

@@ -159,6 +159,7 @@ struct SouveraCalendarView: View {
             Divider()
             dayEventList
         }
+        .refreshable { await viewModel.load() }
     }
 
     private var monthSwitcher: some View {
@@ -352,6 +353,7 @@ struct SouveraCalendarView: View {
                 onCreate: createEventInSlot
             )
         }
+        .refreshable { await viewModel.load() }
         .gesture(horizontalSwipe(step: 3))
     }
 
@@ -1250,6 +1252,14 @@ private struct CalendarPickerSheet: View {
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        Task { await viewModel.load() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .accessibilityLabel(NSLocalizedString("_calendar_refresh_", comment: ""))
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
                 }

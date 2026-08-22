@@ -1014,3 +1014,4 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_start_video_call_"            = "Start video call";
 "_calendar_month_year_picker_"       = "Select month";
 "_mail_sort_"                      = "Sort";
+"_calendar_refresh_"              = "Refresh";

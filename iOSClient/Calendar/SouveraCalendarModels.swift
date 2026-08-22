@@ -412,7 +412,10 @@ enum ICSParser {
             }
         }
         if !current.isEmpty { flush(current) }
-        return negative ? -minutes : minutes
+        // "-PT15M" bedeutet 15 Minuten VOR dem Termin - unser Modell zählt
+        // positive Minuten "vorher"; Nach-Termin-Trigger werden auf 0 geklemmt.
+        let beforeMinutes = negative ? minutes : -minutes
+        return max(0, beforeMinutes)
     }
 
     private static func parseDateOnly(_ value: String) -> Date? {
