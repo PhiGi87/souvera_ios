@@ -35,9 +35,20 @@ class NCMoreNavigationController: NCMainNavigationController {
         navigationBar.tintColor = .white
 
         viewController.navigationItem.title = ""
-        let lockup = UIHostingController(rootView: SouveraBrandLockup())
-        lockup.view.backgroundColor = .clear
-        viewController.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: lockup.view)
+        // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
+        // Header - kein Kapsel-/Button-Look.
+        let imageView = UIImageView(image: UIImage(named: "souveraLogo"))
+        imageView.contentMode = .scaleAspectFit
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        let container = UIView()
+        container.addSubview(imageView)
+        NSLayoutConstraint.activate([
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            imageView.heightAnchor.constraint(equalToConstant: 24)
+        ])
+        viewController.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: container)
     }
 
     /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Balkenbild.
@@ -96,22 +107,5 @@ class NCMoreNavigationController: NCMainNavigationController {
         } else {
             return nil
         }
-    }
-}
-
-/// Marken-Lockup für den blauen Header: kleines App-Icon + weißer Name.
-struct SouveraBrandLockup: View {
-    var body: some View {
-        HStack(spacing: 6) {
-            Image("souveraMark")
-                .resizable()
-                .aspectRatio(contentMode: .fit)
-                .frame(width: 24, height: 24)
-                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-            Text("Souvera")
-                .font(.headline)
-                .foregroundStyle(.white)
-        }
-        .fixedSize()
     }
 }
