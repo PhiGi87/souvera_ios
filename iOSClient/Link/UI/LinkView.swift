@@ -845,6 +845,9 @@ private struct LinkMessageRow: View {
                     }
                 if !isOwn { Spacer(minLength: 40) }
             }
+            // Mit Reaktionen hängen die Pills über die Unterkante - der
+            // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
+            .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
             .onLongPressGesture {
                 onLongPress(message)
             }

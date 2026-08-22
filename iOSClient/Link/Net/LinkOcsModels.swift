@@ -5,6 +5,7 @@
 
 import Foundation
 import SwiftUI
+import UIKit
 
 /// Generic Nextcloud OCS v2 response envelope: `{ocs: {meta, data}}`.
 struct OcsEnvelope<T: Decodable>: Decodable {
@@ -158,7 +159,11 @@ struct LinkChatMessage: Decodable, Identifiable {
                 let name = messageParameters?[key]?.name ?? messageParameters?[key]?.id ?? legacyMentions[key] ?? key
                 var piece = AttributedString(key.hasPrefix("mention-") ? "@\(name)" : name)
                 if key.hasPrefix("mention-") {
-                    piece.foregroundColor = .orange
+                    // Schrift je nach Modus: hell = schwarz, dunkel = orange
+                    // (orange auf hellem Grund wäre zu kontrastarm).
+                    piece.foregroundColor = Color(uiColor: UIColor { trait in
+                        trait.userInterfaceStyle == .dark ? .systemOrange : .black
+                    })
                     piece.backgroundColor = Color.orange.opacity(0.22)
                 }
                 output += piece

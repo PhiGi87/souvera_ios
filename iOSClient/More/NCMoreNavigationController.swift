@@ -6,6 +6,16 @@ import UIKit
 import SwiftUI
 
 class NCMoreNavigationController: NCMainNavigationController {
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        // Klassische UIKit-Optik statt Liquid Glass: verhindert die
+        // Glaskapseln um Bar-Items und lässt das Logo linksbündig als
+        // plain CustomView auf dem blauen Header sitzen.
+        if #available(iOS 26.0, *) {
+            navigationBar.preferredBehavioralStyle = .pad
+        }
+    }
+
     override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
         super.navigationController(navigationController, willShow: viewController, animated: animated)
 
@@ -25,24 +35,10 @@ class NCMoreNavigationController: NCMainNavigationController {
             // Gepushte Module: Standard-Optik, kein blaues Header-Erbe.
             setNavigationBarAppearance()
             viewController.navigationItem.leftBarButtonItem = nil
-            viewController.navigationItem.titleView = nil
             navigationBar.overrideUserInterfaceStyle = .unspecified
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
             }
-        }
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        guard let root = viewControllers.first,
-              root === topViewController,
-              let titleView = root.navigationItem.titleView else { return }
-        // Logo-Behälter über die volle Balkenbreite ziehen (linksbündiges
-        // Logo trotz zentrierter titleView-Position).
-        let width = max(0, navigationBar.bounds.width - 32)
-        if abs(titleView.bounds.width - width) > 1 || titleView.bounds.width == 0 {
-            titleView.frame = CGRect(x: 0, y: 0, width: width, height: 44)
         }
     }
 
@@ -67,26 +63,22 @@ class NCMoreNavigationController: NCMainNavigationController {
         navigationBar.overrideUserInterfaceStyle = .light
 
         viewController.navigationItem.title = ""
-        viewController.navigationItem.leftBarButtonItem = nil
-
         // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
-        // Header. titleView bekommt auf iOS 26 KEINE Button-Kapsel (anders
-        // als leftBarButtonItem-CustomViews). Der Container wird über die
-        // volle Balkenbreite gezogen, sodass das Logo links in einer Flucht
-        // mit dem Listen-Rand darunter steht.
+        // Header - links an der nativen Leading-Kante (bündig mit der
+        // Menüliste darunter). Dank preferredBehavioralStyle = .pad gibt es
+        // keine Glaskapsel um das CustomView.
         let imageView = UIImageView(image: UIImage(named: "souveraLogo"))
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        let container = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 44))
-        container.autoresizingMask = [.flexibleWidth, .flexibleLeftMargin]
+        let container = UIView()
         container.addSubview(imageView)
         NSLayoutConstraint.activate([
             imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
             imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 28),
-            imageView.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor)
+            imageView.heightAnchor.constraint(equalToConstant: 32)
         ])
-        viewController.navigationItem.titleView = container
+        viewController.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: container)
     }
 
     /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Kachelbild.
