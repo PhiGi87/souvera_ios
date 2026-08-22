@@ -30,6 +30,9 @@ HISTORY_FILE="$HOME/.souvera-watcher.history"
 HISTORY_MAX=10
 WORK_DIR="${TMPDIR:-/tmp}/souvera-watcher"
 
+WATCHER_VERSION="3"
+WATCHER_SCRIPT_COMMIT="79358c2"
+
 API="https://api.github.com"
 
 # Colors (only on a terminal)
@@ -85,9 +88,9 @@ hold_note=""
 note_ok() {
     if [ -n "$hold_note" ]; then
         hold_note="$hold_note
-$C_GREEN✓ $*$C_RESET"
+${C_GREEN}✓ $*$C_RESET"
     else
-        hold_note="$C_GREEN✓ $*$C_RESET"
+        hold_note="${C_GREEN}✓ $*$C_RESET"
     fi
     ok "$*"
 }
@@ -95,9 +98,9 @@ $C_GREEN✓ $*$C_RESET"
 note_fail() {
     if [ -n "$hold_note" ]; then
         hold_note="$hold_note
-$C_RED✗ $*$C_RESET"
+${C_RED}✗ $*$C_RESET"
     else
-        hold_note="$C_RED✗ $*$C_RESET"
+        hold_note="${C_RED}✗ $*$C_RESET"
     fi
     fail "$*"
     printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$HOME/.souvera-watcher.error" 2>/dev/null || true
@@ -434,7 +437,7 @@ render_screen() { # runid commit branch status conclusion started updated
     clear 2>/dev/null || true
     INPLACE_ACTIVE=0
     say "$DOUBLE"
-    printf '%s Souvera Watcher%s\n' "$C_BOLD" "$C_RESET"
+    printf '%s Souvera Watcher v%s (Skript %s)%s\n' "$C_BOLD" "$WATCHER_VERSION" "$WATCHER_SCRIPT_COMMIT" "$C_RESET"
     if [ -z "$runid" ]; then
         info "Kein Run gefunden."
     else
@@ -489,6 +492,20 @@ reinstall() {
     return 1
 }
 
+# Wird bei jedem Skript-Ende aufgerufen: bei unerwartetem Abbruch eine
+# Version + Exit-Code Meldung, damit Fehlerberichte zuordenbar sind.
+on_exit() {
+    local code=$?
+    if [ "$code" -ne 0 ]; then
+        stty sane 2>/dev/null
+        nl_if_inplace
+        printf '%s✗ Watcher v%s (Skript %s) wurde unerwartet beendet (Exit %s).%s\n' \
+            "$C_RED" "$WATCHER_VERSION" "$WATCHER_SCRIPT_COMMIT" "$code" "$C_RESET"
+        printf '  Bitte diese Zeile + die angezeigte Version melden. Details: ~/.souvera-watcher.error\n'
+    fi
+    exit "$code"
+}
+
 # ---------------------------------------------------------------------------
 # Main loop
 # ---------------------------------------------------------------------------
@@ -527,6 +544,7 @@ screen_status="$status"
 wait_started=$(now)
 
 trap 'printf "\n"; stty sane 2>/dev/null; exit 0' INT TERM
+trap on_exit EXIT
 
 while true; do
     now_s=$(now)
