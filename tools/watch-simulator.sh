@@ -65,6 +65,10 @@ dur() { # seconds -> MM:SS
 
 inplace() { printf '\033[2K\r%s' "$*"; }
 
+mb() { # bytes -> "12,3 MB"
+    awk -v b="$1" 'BEGIN { printf "%.1f", b / 1048576 }'
+}
+
 # ---------------------------------------------------------------------------
 # JSON helpers (python3 required)
 # ---------------------------------------------------------------------------
@@ -253,18 +257,37 @@ install_artifact() { # runid commit
     [ -n "$TOKEN" ] && curl_args+=(-H "Authorization: Bearer $TOKEN")
 
     phase_start=$(now)
-    # Progressbar: curl -# schreibt in-place auf stderr
-    if curl "${curl_args[@]}" -# -o "$WORK_DIR/$runid/artifact.zip" "$zip_url" 2>"$WORK_DIR/$runid/.progress"; then
-        printf '\n'
-        elapsed=$(($(now) - phase_start))
-        elapsed=${elapsed:-1}
+    # Eigene Progressbar: curl -# zeichnet nur auf einem TTY, daher
+    # streamen wir und malen die Bar anhand der Dateigröße selbst.
+    curl "${curl_args[@]}" -s -o "$WORK_DIR/$runid/artifact.zip" "$zip_url" &
+    cpid=$!
+    while kill -0 "$cpid" 2>/dev/null; do
         size=$(stat -f%z "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || stat -c%s "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || printf 0)
-        mb_done=$(python3 -c "print(f'{$size/1048576:.1f}')" 2>/dev/null || printf '?')
-        mb_total=$(python3 -c "print(f'{$artifact_size/1048576:.1f}')" 2>/dev/null || printf '?')
-        rate=$(python3 -c "print(f'{$size/$elapsed/1048576:.1f}')" 2>/dev/null || printf '?')
-        ok "Download: $mb_done/$mb_total MB in $(dur $elapsed) ($rate MB/s)"
+        elapsed=$(($(now) - phase_start))
+        [ "$elapsed" -le 0 ] 2>/dev/null && elapsed=1
+        if [ "${artifact_size:-0}" -gt 0 ] && [ "$size" -gt 0 ] 2>/dev/null; then
+            pct=$(( size * 100 / artifact_size ))
+            [ "$pct" -gt 100 ] && pct=100
+            filled=$(( pct * 40 / 100 ))
+            bar=$(printf '%.0s#' $(seq 1 "$filled"))
+            empty=$(printf '%.0s-' $(seq 1 $(( 40 - filled ))))
+            rate=$(( size / elapsed ))
+            inplace "  [$bar$empty] $pct%%  $(mb "$size")/$(mb "$artifact_size") MB  ($(mb "$rate") MB/s)"
+        else
+            inplace "  ⬇ lädt … $(mb "$size") MB  ($(dur $elapsed))"
+        fi
+        sleep 0.2
+    done
+    wait "$cpid"
+    rc=$?
+    printf '\n'
+    if [ "$rc" -eq 0 ] && [ -s "$WORK_DIR/$runid/artifact.zip" ]; then
+        elapsed=$(($(now) - phase_start))
+        [ "$elapsed" -le 0 ] 2>/dev/null && elapsed=1
+        size=$(stat -f%z "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || stat -c%s "$WORK_DIR/$runid/artifact.zip" 2>/dev/null || printf 0)
+        ok "Download: $(mb "$size")/$(mb "$artifact_size") MB in $(dur $elapsed) ($(mb $(( size / elapsed ))) MB/s)"
     else
-        fail "Download fehlgeschlagen (HTTP-Status siehe letzte Zeilen)"
+        fail "Download fehlgeschlagen (rc=$rc)"
         return 1
     fi
 
