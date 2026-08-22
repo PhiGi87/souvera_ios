@@ -146,6 +146,17 @@ render_history() {
 # Runs API
 # ---------------------------------------------------------------------------
 
+latest_head() { # -> "sha8" des Branch-HEAD
+    api_get "$API/repos/$REPO/commits/$BRANCH" | python3 -c '
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    print(""); sys.exit(0)
+print((d.get("sha") or "")[:8])
+'
+}
+
 latest_run() { # -> "runid|commit|branch|status|conclusion|started|created"
     api_get "$API/repos/$REPO/actions/runs?per_page=3" | python3 -c '
 import sys, json
@@ -296,14 +307,20 @@ install_artifact() { # runid commit
     phase_start=$(now)
     info "⏳ Entpacken: Souvera.app"
     ( cd "$WORK_DIR/$runid" && unzip -o -q artifact.zip >/dev/null 2>&1 ) &
-    spinner $! "Entpacke"
+    spinner $! "Entpacke (1/2)"
+    # GitHub packt das Artefakt (Souvera.app.zip) selbst noch einmal in ein
+    # Zip: daher ggf. ein zweites Mal entpacken.
+    if [ ! -d "$WORK_DIR/$runid/Souvera.app" ] && [ -f "$WORK_DIR/$runid/Souvera.app.zip" ]; then
+        ( cd "$WORK_DIR/$runid" && unzip -o -q Souvera.app.zip >/dev/null 2>&1 ) &
+        spinner $! "Entpacke (2/2)"
+    fi
     local app_path="$WORK_DIR/$runid/Souvera.app"
     if [ -d "$app_path" ]; then
         local files
         files=$(find "$app_path" -type f | wc -l | tr -d ' ')
         ok "Entpackt: $files Dateien in $(dur $(($(now) - phase_start)))"
     else
-        fail "Souvera.app wurde im Archiv nicht gefunden"
+        fail "Souvera.app wurde im Archiv nicht gefunden (Artifakt enthält: $(ls "$WORK_DIR/$runid" | tr '\n' ' '))"
         return 1
     fi
 
@@ -378,6 +395,11 @@ render_screen() { # runid commit branch status conclusion started updated
             [ "$d" -gt 0 ] 2>/dev/null && printf '   Dauer: %s' "$(dur $d)"
         fi
         say ""
+        local head
+        head=$(latest_head)
+        if [ -n "$head" ] && [ "$head" != "$commit" ]; then
+            dim "Branch-HEAD:  $head (Skript-Commit ohne CI-Run)"
+        fi
     fi
     say "$LINE"
     local hist
