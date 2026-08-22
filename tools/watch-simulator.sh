@@ -167,11 +167,12 @@ if not best:
 sha = (best.get("head_sha") or "")[:8]
 started = best.get("run_started_at") or best.get("created_at") or ""
 created = best.get("created_at") or ""
+updated = best.get("updated_at") or ""
 rid = best.get("id") or ""
 branch = best.get("head_branch") or ""
 status = best.get("status") or ""
 conclusion = best.get("conclusion") or ""
-print("|".join([str(rid), sha, branch, status, conclusion, started, created]))
+print("|".join([str(rid), sha, branch, status, conclusion, started, created, updated]))
 ' "$BRANCH_PREFIX" "$WORKFLOW_NAME"
 }
 
@@ -336,22 +337,24 @@ install_artifact() { # runid commit
 # Screens
 # ---------------------------------------------------------------------------
 
-overview_block() { # runid commit branch status conclusion started
-    local runid="$1" commit="$2" branch="$3" status="$4" conclusion="$5" started="$6"
+# Zeichnet den KOMPLETTEN statischen Block (nur bei Zustandswechseln).
+# Laufende Infos stehen in der letzten Zeile und werden in place aktualisiert.
+render_screen() { # runid commit branch status conclusion started updated
+    local runid="$1" commit="$2" branch="$3" status="$4" conclusion="$5" started="$6" updated="$7"
+    clear 2>/dev/null || true
     say "$DOUBLE"
     printf '%s Souvera Watcher%s\n' "$C_BOLD" "$C_RESET"
     if [ -z "$runid" ]; then
         info "Kein Run gefunden."
     else
-        local st_label st_color
-        case "$status:$conclusion" in
-            completed:success) st_label="✓ Erfolg (abgeschlossen)"; st_color="$C_GREEN" ;;
-            completed:failure) st_label="✗ Fehlgeschlagen"; st_color="$C_RED" ;;
-            completed:*)       st_label="• $conclusion"; st_color="$C_YELLOW" ;;
-            *)                 st_label="läuft"; st_color="$C_YELLOW" ;;
-        esac
-        printf 'Run:      %s  Commit: %s  Branch: %s\n' "$runid" "$commit" "$branch"
-        printf 'Status:   %s%s%s   Gestartet: %s\n' "$st_color" "$st_label" "$C_RESET" "$(pretty_started "$started")"
+        printf 'Letzter Run:  %s  Commit: %s  Branch: %s\n' "$runid" "$commit" "$branch"
+        printf 'Gestartet:    %s' "$(pretty_started "$started")"
+        if [ "$status" = "completed" ]; then
+            local d
+            d=$(( $(epoch_of "$updated") - $(epoch_of "$started") ))
+            [ "$d" -gt 0 ] 2>/dev/null && printf '   Dauer: %s' "$(dur $d)"
+        fi
+        say ""
     fi
     say "$LINE"
     local hist
@@ -359,8 +362,9 @@ overview_block() { # runid commit branch status conclusion started
     if [ -n "$hist" ]; then
         printf '%sLetzte Runs:%s\n' "$C_BOLD" "$C_RESET"
         printf '%s\n' "$hist"
-        say "$LINE"
     fi
+    say "$LINE"
+    say "$DOUBLE"
 }
 
 # ---------------------------------------------------------------------------
@@ -376,14 +380,16 @@ if [ -z "$TOKEN" ]; then
 fi
 
 last_runid=""
-last_created=""
-last_block_shown=0
+last_status=""
+processed_runid=""
 last_poll=0
 status_mode=""     # "" = watch, "done" = Abschluss-Screen
 hold_deadline=0
-watcher_started=$(now)
+screen_runid="__none__"
+screen_status="__none__"
+wait_started=0
 
-# Einmalige API-Abfrage beim Start: letzten Run + Historie anzeigen
+# Einmalige Abfrage beim Start: letzten Run laden und statischen Block zeichnen
 run=$(latest_run)
 runid=$(printf '%s' "$run" | cut -d'|' -f1)
 commit=$(printf '%s' "$run" | cut -d'|' -f2)
@@ -391,20 +397,21 @@ branch=$(printf '%s' "$run" | cut -d'|' -f3)
 status=$(printf '%s' "$run" | cut -d'|' -f4)
 conclusion=$(printf '%s' "$run" | cut -d'|' -f5)
 started=$(printf '%s' "$run" | cut -d'|' -f6)
+updated=$(printf '%s' "$run" | cut -d'|' -f8)
 last_runid="$runid"
-last_created=$(printf '%s' "$run" | cut -d'|' -f7)
+last_status="$status"
 last_poll=$(now)
-
-clear 2>/dev/null || true
-overview_block "$runid" "$commit" "$branch" "$status" "$conclusion" "$started"
-last_block_shown=$(now)
+render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+screen_runid="$runid"
+screen_status="$status"
+wait_started=$(now)
 
 trap 'printf "\n"; stty sane 2>/dev/null; exit 0' INT TERM
 
 while true; do
     now_s=$(now)
 
-    # API nur im Poll-Takt abfragen (Rate-Limit-schonend)
+    # API nur im Poll-Takt abfragen
     if [ $(( now_s - last_poll )) -ge "$POLL_SECONDS" ]; then
         last_poll=$now_s
         run=$(latest_run)
@@ -414,92 +421,75 @@ while true; do
         status=$(printf '%s' "$run" | cut -d'|' -f4)
         conclusion=$(printf '%s' "$run" | cut -d'|' -f5)
         started=$(printf '%s' "$run" | cut -d'|' -f6)
-        created=$(printf '%s' "$run" | cut -d'|' -f7)
+        updated=$(printf '%s' "$run" | cut -d'|' -f8)
 
-        # Neuer Run? (andere ID oder gleiche ID mit neuem created_at = Re-Run)
-        is_new=0
-        if [ -n "$runid" ]; then
-            if [ "$runid" != "$last_runid" ] || [ "$created" != "$last_created" ]; then
-                is_new=1
-            fi
-        fi
-        if [ "$is_new" = "1" ]; then
-            clear 2>/dev/null || true
-            overview_block "$runid" "$commit" "$branch" "$status" "$conclusion" "$started"
-            last_runid="$runid"
-            last_created="$created"
-            last_block_shown=$now_s
-            status_mode=""
-        fi
-
-        # Abschluss verarbeiten (einmal pro Run)
-        if [ -n "$runid" ] && [ "$status" = "completed" ] && [ "$status_mode" != "done" ]; then
-            case "$conclusion" in
-                success)
-                    ok "Build fertig (Commit $commit) — Installation wird vorbereitet …"
-                    total_start=$(now)
-                    if install_artifact "$runid" "$commit"; then
-                        ok "Fertig in $(dur $(($(now) - total_start)))"
-                        save_history "success" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                    else
-                        fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
+        # Zustandswechsel (neuer Run oder Statuswechsel)?
+        if [ "$runid|$status" != "$screen_runid|$screen_status" ]; then
+            # Abschluss genau einmal verarbeiten
+            if [ -n "$runid" ] && [ "$status" = "completed" ] && [ "$processed_runid" != "$runid" ]; then
+                case "$conclusion" in
+                    success)
+                        ok "Build fertig (Commit $commit) — Installation wird vorbereitet …"
+                        total_start=$(now)
+                        if install_artifact "$runid" "$commit"; then
+                            ok "Fertig in $(dur $(($(now) - total_start)))"
+                            save_history "success" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                        else
+                            fail "Installation fehlgeschlagen — nächster Run wird beobachtet"
+                            save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                        fi
+                        ;;
+                    failure)
+                        fail "Build fehlgeschlagen — Log: https://github.com/$REPO/actions/runs/$runid"
                         save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                    fi
-                    ;;
-                failure)
-                    fail "Build fehlgeschlagen — Log: https://github.com/$REPO/actions/runs/$runid"
-                    save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                    ;;
-                cancelled|skipped)
-                    info "Run abgebrochen/übersprungen"
-                    save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
-                    ;;
-            esac
-            say "$DOUBLE"
-            dim "[h] Historie · [q] Beenden"
-            status_mode="done"
-            hold_deadline=$(( $(now) + HOLD_SECONDS ))
+                        ;;
+                    cancelled|skipped)
+                        info "Run abgebrochen/übersprungen"
+                        save_history "failure" "$runid" "$commit" "$(pretty_started "$started")" "$(dur $(($(now) - $(epoch_of "$started"))))"
+                        ;;
+                esac
+                processed_runid="$runid"
+                status_mode="done"
+                hold_deadline=$(( $(now) + HOLD_SECONDS ))
+            fi
+
+            render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+            screen_runid="$runid"
+            screen_status="$status"
+            wait_started=$now_s
+            if [ -n "$runid" ] && [ "$status" != "completed" ]; then
+                status_mode=""
+            fi
         fi
     fi
 
-    # ---- Abschluss-Screen: 15 Minuten halten (Countdown in place) ----
+    # ---- Dynamische letzte Zeile (in place, keine neuen Zeilen) ----
     if [ "$status_mode" = "done" ]; then
         remaining=$(( hold_deadline - now_s ))
         if [ "$remaining" -le 0 ]; then
             status_mode=""
-            clear 2>/dev/null || true
-            overview_block "" "" "" "" "" ""
-            last_block_shown=$now_s
+            render_screen "" "" "" "" "" "" ""
+            screen_runid=""
+            screen_status=""
         else
             inplace "  Zurück zur Übersicht in $(dur $remaining) — [h] sofort · [q] beenden"
             k=$(read_key 5)
             case "$k" in
                 h|H)
                     status_mode=""
-                    clear 2>/dev/null || true
-                    overview_block "" "" "" "" "" ""
-                    last_block_shown=$now_s
+                    render_screen "$runid" "$commit" "$branch" "$status" "$conclusion" "$started" "$updated"
+                    screen_runid="$runid"
+                    screen_status="$status"
                     ;;
                 q|Q) printf '\n'; exit 0 ;;
             esac
-            sleep 1
-            continue
         fi
-    fi
-
-    # ---- Watch-Modus ----
-    if [ -n "$runid" ]; then
-        if [ "$status" != "completed" ]; then
-            elapsed=$(( now_s - $(epoch_of "$started") ))
-            inplace "  Status: läuft · Laufzeit: $(dur $elapsed)"
-            sleep 1
-            continue
-        fi
+    elif [ -n "$runid" ] && [ "$status" != "completed" ]; then
+        elapsed=$(( now_s - $(epoch_of "$started") ))
+        inplace "  Status: läuft · Laufzeit: $(dur $elapsed)"
     else
-        waited=$(( now_s - last_block_shown ))
-        inplace "  Warte auf neuen Run (${BRANCH_PREFIX}…) — seit $(dur $waited)"
-        sleep 1
-        continue
+        waited=$(( now_s - wait_started ))
+        inplace "  Kein neuer Run · Warte seit $(dur $waited)"
     fi
 
     sleep 1
