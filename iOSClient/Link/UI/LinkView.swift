@@ -13,6 +13,9 @@ struct LinkView: View {
     @State private var callContext: CallContext?
     @State private var showCallBanner = false
     @State private var returnToCall = false
+    @State private var showCreateChannel = false
+    @State private var channelName = ""
+    @State private var showAddParticipant = false
 #if DEBUG
     @State private var simulatedIncoming: SimulatedCall?
 #endif
@@ -37,6 +40,16 @@ struct LinkView: View {
                                 viewModel.back()
                             } label: {
                                 Image(systemName: "chevron.backward")
+                            }
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            if viewModel.currentRoom?.canManage == true {
+                                Button {
+                                    showAddParticipant = true
+                                } label: {
+                                    Image(systemName: "person.badge.plus")
+                                }
+                                .accessibilityLabel(NSLocalizedString("_link_add_participant_", comment: ""))
                             }
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
