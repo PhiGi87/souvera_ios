@@ -90,6 +90,49 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Erstellt einen eigenen freien Channel (Gruppenkonversation).
+    func createChannel(name: String) {
+        guard let api else { return }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        Task {
+            guard let token = await api.createGroupRoom(name: trimmed) else {
+                actionFeedback = LinkActionFeedback(
+                    success: false,
+                    message: NSLocalizedString("_link_channel_create_failed_", comment: "")
+                )
+                return
+            }
+            loadConversations()
+            openConversation(token: token, title: trimmed)
+            actionFeedback = LinkActionFeedback(
+                success: true,
+                message: NSLocalizedString("_link_channel_created_", comment: "")
+            )
+        }
+    }
+
+    /// Fügt dem geöffneten Channel einen Teilnehmer hinzu (nur mit
+    /// Owner-/Moderator-Recht; die Oberfläche blendet den Button sonst aus).
+    func addParticipant(_ suggestion: LinkSuggestion) {
+        guard let api, let room = currentRoom else { return }
+        Task {
+            switch suggestion.source {
+            case "federated":
+                await api.addParticipants(token: room.token, userIds: [], emails: [], federatedIds: [suggestion.id])
+            case "email_guest":
+                await api.addParticipants(token: room.token, userIds: [], emails: [suggestion.id])
+            default:
+                await api.addParticipants(token: room.token, userIds: [suggestion.id], emails: [])
+            }
+            userResults = []
+            actionFeedback = LinkActionFeedback(
+                success: true,
+                message: String(format: NSLocalizedString("_link_participant_added_", comment: ""), suggestion.label)
+            )
+        }
+    }
+
     func startConversation(id: String, source: String, title: String) {
         guard let api else { return }
         if source == "federated" || source == "email_guest" {
@@ -155,8 +198,13 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    @Published var currentRoom: LinkConversation?
+
     func openConversation(token: String, title: String) {
         route = .chat(token: token, title: title)
+        if case let .success(rooms) = conversations {
+            currentRoom = rooms.first(where: { $0.token == token })
+        }
         messages = .loading
         lastMessageId = 0
         pollTask?.cancel()

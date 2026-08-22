@@ -39,6 +39,8 @@ struct LinkConversation: Decodable, Identifiable {
 
     /// Nur Owner/Moderatoren dürfen einen Channel löschen.
     var canDelete: Bool { participantType == 1 || participantType == 2 }
+    /// Teilnehmer hinzufügen erfordert ebenfalls Owner-/Moderator-Recht.
+    var canManage: Bool { participantType == 1 || participantType == 2 }
 
     enum CodingKeys: String, CodingKey {
         case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType

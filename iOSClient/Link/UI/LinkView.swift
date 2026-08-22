@@ -59,6 +59,17 @@ struct LinkView: View {
                             .accessibilityLabel(NSLocalizedString("_link_silent_call_", comment: ""))
                         }
                     }
+                    if case .home = viewModel.route {
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                channelName = ""
+                                showCreateChannel = true
+                            } label: {
+                                Image(systemName: "plus")
+                            }
+                            .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
+                        }
+                    }
                 }
         }
         .onAppear {
@@ -137,6 +148,16 @@ struct LinkView: View {
                 )
                 .ignoresSafeArea()
             }
+        }
+        .sheet(isPresented: $showAddParticipant) {
+            LinkAddParticipantSheet(viewModel: viewModel)
+        }
+        .alert(NSLocalizedString("_link_create_channel_", comment: ""), isPresented: $showCreateChannel) {
+            TextField(NSLocalizedString("_link_channel_name_", comment: ""), text: $channelName)
+            Button(NSLocalizedString("_link_create_channel_", comment: "")) {
+                viewModel.createChannel(name: channelName)
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
         }
 #if DEBUG
         .fullScreenCover(item: $simulatedIncoming) { call in
@@ -696,5 +717,57 @@ private struct LinkMessageBubble: View {
     private var displayText: String {
         if let file = message.fileName() { return "📎 \(file)" }
         return message.displayText()
+    }
+}
+
+/// Sucht Personen/Gruppen und fügt sie dem geöffneten Channel hinzu
+/// (externe E-Mail-Adressen werden als Gast/Federation angeboten).
+struct LinkAddParticipantSheet: View {
+    @ObservedObject var viewModel: LinkViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                        TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $query)
+                            .textFieldStyle(.plain)
+                            .autocorrectionDisabled()
+                    }
+                }
+                Section {
+                    ForEach(viewModel.userResults) { suggestion in
+                        Button {
+                            viewModel.addParticipant(suggestion)
+                            dismiss()
+                        } label: {
+                            Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
+                        }
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_link_add_participant_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
+        }
+        .onChange(of: query) { _, newValue in
+            viewModel.searchUsers(query: newValue)
+        }
+    }
+
+    private func suggestionIcon(_ source: String) -> String {
+        switch source {
+        case "groups": return "person.3.fill"
+        case "federated": return "globe"
+        case "email_guest": return "envelope.badge.person.crop"
+        default: return "person.crop.circle"
+        }
     }
 }
