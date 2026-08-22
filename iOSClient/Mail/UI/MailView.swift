@@ -121,22 +121,26 @@ struct MailView: View {
         }
         if case let .detail(message) = viewModel.route {
             ToolbarItemGroup(placement: .topBarTrailing) {
+                // Schnellaktion Antworten + EIN Sammelmenü für alles Weitere -
+                // mehrere Trailing-Items würden von iOS in ein automatisches
+                // "..."-Menü gekippt (Verschachtelung "..." > "...").
                 Button {
                     viewModel.startCompose(mode: .reply, message: message)
                 } label: {
                     Image(systemName: "arrowshape.turn.up.left")
                 }
-                Button {
-                    viewModel.startCompose(mode: .replyAll, message: message)
-                } label: {
-                    Image(systemName: "arrowshape.turn.up.left.2")
-                }
-                Button {
-                    viewModel.startCompose(mode: .forward, message: message)
-                } label: {
-                    Image(systemName: "arrowshape.turn.up.right")
-                }
+                .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
                 Menu {
+                    Button {
+                        viewModel.startCompose(mode: .replyAll, message: message)
+                    } label: {
+                        Label(NSLocalizedString("_mail_reply_all_", comment: ""), systemImage: "arrowshape.turn.up.left.2")
+                    }
+                    Button {
+                        viewModel.startCompose(mode: .forward, message: message)
+                    } label: {
+                        Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+                    }
                     Button {
                         Task { await viewModel.setRead([message], !message.isRead) }
                     } label: {
@@ -155,20 +159,19 @@ struct MailView: View {
                     } label: {
                         Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
                     }
+                    Button {
+                        blacklistTarget = [message]
+                    } label: {
+                        Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
+                    }
+                    Button(role: .destructive) {
+                        viewModel.delete([message])
+                    } label: {
+                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                    }
                 } label: {
                     Image(systemName: "ellipsis.circle")
                 }
-                Button(role: .destructive) {
-                    viewModel.delete([message])
-                } label: {
-                    Image(systemName: "trash")
-                }
-                Button {
-                    blacklistTarget = [message]
-                } label: {
-                    Image(systemName: "exclamationmark.shield")
-                }
-                .accessibilityLabel(NSLocalizedString("_mail_blacklist_sender_", comment: ""))
             }
         }
         if isFolders {
