@@ -31,11 +31,17 @@ struct LinkConversation: Decodable, Identifiable {
     let lastActivity: TimeInterval
     /// `lastMessage` is a chat-message object, or `[]`/absent when none — decoded loosely.
     let lastMessage: LinkChatMessage?
+    /// Talk participant type: 1 = owner, 2 = moderator, 3 = user, 4 = guest.
+    /// Löschen einer Konversation erfordert Owner oder Moderator.
+    let participantType: Int
 
     var id: String { token }
 
+    /// Nur Owner/Moderatoren dürfen einen Channel löschen.
+    var canDelete: Bool { participantType == 1 || participantType == 2 }
+
     enum CodingKeys: String, CodingKey {
-        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage
+        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType
     }
 
     init(from decoder: Decoder) throws {
@@ -48,6 +54,7 @@ struct LinkConversation: Decodable, Identifiable {
         lastActivity = (try? c.decode(TimeInterval.self, forKey: .lastActivity)) ?? 0
         // Server sends `[]` when there is no last message; that fails object decoding, so tolerate it.
         lastMessage = try? c.decode(LinkChatMessage.self, forKey: .lastMessage)
+        participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
     }
 
     /// Last message preview text; falls back to a file marker for shared files.

@@ -17,7 +17,10 @@ struct MailView: View {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbar { toolbar }
+                .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        AutoRefreshRingView(viewModel: viewModel)
+                    } toolbar }
         }
         .onAppear { viewModel.start() }
         .overlay(alignment: .bottom) {
@@ -193,17 +196,10 @@ private struct MailFolderListView: View {
 
     @ViewBuilder
     private func folderList(_ boxes: [Mailbox]) -> some View {
-        ScrollViewReader { proxy in
-            folderListContent(boxes, proxy: proxy)
-                .onAppear {
-                    if let position = viewModel.folderScrollPosition {
-                        proxy.scrollTo(position, anchor: .top)
-                    }
-                }
-        }
+        folderListContent(boxes)
     }
 
-    private func folderListContent(_ boxes: [Mailbox], proxy: ScrollViewProxy) -> some View {
+    private func folderListContent(_ boxes: [Mailbox]) -> some View {
         List {
             ForEach(groups(boxes)) { group in
                 Section {
@@ -241,21 +237,35 @@ private struct MailFolderListView: View {
         .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
         .refreshable { await viewModel.loadMailboxes() }
         .overlay(alignment: .bottom) {
-            if viewModel.folderScrollPosition != nil, let firstId = boxes.first?.id {
+            let firstRowId = firstVisibleRowId(boxes)
+            if let position = viewModel.folderScrollPosition,
+               let firstId = firstRowId,
+               position != firstId {
                 Button {
                     withAnimation { viewModel.folderScrollPosition = firstId }
                 } label: {
                     Image(systemName: "arrow.up")
-                        .font(.subheadline.bold())
-                        .foregroundStyle(Color.white)
-                        .frame(width: 36, height: 36)
-                        .background(Circle().fill(Color(NCBrandColor.shared.customer)))
-                        .shadow(radius: 3)
+                        .font(.caption.bold())
+                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .frame(width: 30, height: 30)
+                        .background(.regularMaterial, in: Circle())
+                        .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
                 }
                 .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-                .padding(.bottom, 10)
+                .padding(.bottom, 16)
             }
         }
+    }
+
+    /// Erste sichtbare Ordnerzeile (erste aufgeklappte Gruppe).
+    private func firstVisibleRowId(_ boxes: [Mailbox]) -> String? {
+        for group in groups(boxes) {
+            if viewModel.collapsedGroupIds.contains(group.id) { continue }
+            if let first = visibleRows(for: viewModel.mailboxTree(for: group.folders)).first {
+                return first.id
+            }
+        }
+        return nil
     }
 
     private struct VisibleTreeRow: Identifiable {
@@ -395,6 +405,7 @@ private struct MailMessageListView: View {
     @State private var editing = false
     @State private var selected = Set<String>()
     @State private var moveTarget: ([MailMessage], [Mailbox])?
+    @State private var showScrollTop = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -419,9 +430,10 @@ private struct MailMessageListView: View {
                 .padding()
                 Spacer()
             case let .success(items):
+                let sorted = viewModel.sortMessages(items)
                 ScrollViewReader { proxy in
                     List {
-                        ForEach(viewModel.sortMessages(items)) { message in
+                        ForEach(sorted) { message in
                             row(message)
                                 .id(message.id)
                         }
@@ -429,14 +441,23 @@ private struct MailMessageListView: View {
                     .listStyle(.plain)
                     .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
                     .refreshable { await viewModel.refreshMessages() }
-                    .onChange(of: items.count) { _, _ in
-                        restoreScroll(proxy)
+                    .overlay(alignment: .bottom) {
+                        if let firstId = sorted.first?.id {
+                            scrollTopButton(proxy: proxy, firstId: firstId)
+                                .padding(.bottom, 84)
+                                .opacity(showScrollTop ? 1 : 0)
+                                .animation(.easeInOut(duration: 0.2), value: showScrollTop)
+                        }
+                    }
+                    .onChange(of: viewModel.messageScrollPosition) { _, position in
+                        let atTop = position == nil || position == sorted.first?.id
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            showScrollTop = !atTop
+                        }
                     }
                     .onAppear {
-                        restoreScroll(proxy)
-                    }
-                    .overlay(alignment: .bottom) {
-                        scrollTopButton(proxy: proxy, items: items)
+                        let position = viewModel.messageScrollPosition
+                        showScrollTop = position != nil && position != sorted.first?.id
                     }
                 }
             }
@@ -561,35 +582,20 @@ private struct MailMessageListView: View {
     }
 
     @ViewBuilder
-    private func restoreScroll(_ proxy: ScrollViewProxy) {
-        guard let position = viewModel.messageScrollPosition else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            withAnimation {
-                proxy.scrollTo(position, anchor: .top)
-            }
-        }
-    }
-
-    /// Scroll-to-top button: only visible when the list is NOT at the top.
+    /// Dezenter Scroll-to-top-Button (Fade über `showScrollTop`).
     @ViewBuilder
-    private func scrollTopButton(proxy: ScrollViewProxy, items: [MailMessage]) -> some View {
-        let sorted = viewModel.sortMessages(items)
-        if let position = viewModel.messageScrollPosition,
-           let firstId = sorted.first?.id,
-           position != firstId {
-            Button {
-                withAnimation { proxy.scrollTo(firstId, anchor: .top) }
-            } label: {
-                Image(systemName: "arrow.up")
-                    .font(.subheadline.bold())
-                    .foregroundStyle(Color.white)
-                    .frame(width: 36, height: 36)
-                    .background(Circle().fill(Color(NCBrandColor.shared.customer)))
-                    .shadow(radius: 3)
-            }
-            .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-            .padding(.bottom, 10)
+    private func scrollTopButton(proxy: ScrollViewProxy, firstId: String) -> some View {
+        Button {
+            withAnimation { proxy.scrollTo(firstId, anchor: .top) }
+        } label: {
+            Image(systemName: "arrow.up")
+                .font(.caption.bold())
+                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                .frame(width: 30, height: 30)
+                .background(.regularMaterial, in: Circle())
+                .shadow(color: .black.opacity(0.15), radius: 3, y: 1)
         }
+        .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
     }
 
     @ViewBuilder
@@ -1314,6 +1320,33 @@ private struct AutoGrowingTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+        }
+    }
+}
+
+/// Rückwärts laufender Countdown-Ring für den nächsten automatischen
+/// Abruf (Kreis leert sich bis zum Abruf, dann startet er neu).
+struct AutoRefreshRingView: View {
+    @ObservedObject var viewModel: MailViewModel
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { _ in
+            if let nextAt = viewModel.nextAutoRefreshAt,
+               let interval = SouveraAutoRefresh.interval, interval > 0 {
+                let remaining = max(0, nextAt.timeIntervalSinceNow)
+                let progress = remaining / interval
+                ZStack {
+                    Circle()
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
+                    Circle()
+                        .trim(from: 0, to: min(1, progress))
+                        .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                        .animation(.linear(duration: 1), value: progress)
+                }
+                .frame(width: 16, height: 16)
+                .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
+            }
         }
     }
 }

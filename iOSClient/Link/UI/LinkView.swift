@@ -190,7 +190,9 @@ struct LinkView: View {
     private var content: some View {
         switch viewModel.route {
         case .home:
-            LinkConversationListView(viewModel: viewModel)
+            LinkConversationListView(viewModel: viewModel) { room in
+                callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+            }
         case let .chat(token, title):
             LinkChatView(viewModel: viewModel, token: token, title: title)
         }
@@ -284,6 +286,9 @@ struct IncomingCallOverlayView: View {
 struct LinkConversationListView: View {
     @ObservedObject var viewModel: LinkViewModel
     @State private var searchQuery = ""
+    @State private var deleteRoom: LinkConversation?
+    /// Startet einen direkten Audio-Call für den Raum (vom Eltern-View).
+    var onCall: (LinkConversation) -> Void = { _ in }
 
 #if DEBUG
     /// Simuliert einen eingehenden Anruf (CallKit liefert im Simulator nicht).
@@ -343,6 +348,23 @@ struct LinkConversationListView: View {
                             LinkConversationRow(room: room)
                         }
                         .buttonStyle(.plain)
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                onCall(room)
+                            } label: {
+                                Label(NSLocalizedString("_link_swipe_call_", comment: ""), systemImage: "phone.fill")
+                            }
+                            .tint(.green)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            if room.canDelete {
+                                Button(role: .destructive) {
+                                    deleteRoom = room
+                                } label: {
+                                    Label(NSLocalizedString("_link_delete_room_", comment: ""), systemImage: "trash")
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -353,6 +375,27 @@ struct LinkConversationListView: View {
             viewModel.searchUsers(query: newValue)
         }
         .refreshable { viewModel.loadConversations() }
+        .confirmationDialog(
+            NSLocalizedString("_link_delete_room_", comment: ""),
+            isPresented: Binding(
+                get: { deleteRoom != nil },
+                set: { if !$0 { deleteRoom = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_delete_", comment: ""), role: .destructive) {
+                if let room = deleteRoom {
+                    Task { await viewModel.deleteConversation(token: room.token) }
+                }
+                deleteRoom = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                deleteRoom = nil
+            }
+        } message: {
+            Text(NSLocalizedString("_link_delete_room_confirm_", comment: ""))
+                + Text("\n\"") + Text(deleteRoom?.displayName ?? "") + Text("\"")
+        }
     }
 }
 

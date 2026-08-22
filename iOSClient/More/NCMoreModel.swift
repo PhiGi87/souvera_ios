@@ -444,6 +444,14 @@ final class NCMoreModel: ObservableObject {
 
         case .shield:
             let mailboxPicker = ShieldMailboxPicker()
+            let addTrigger = ShieldAddTrigger()
+            let addButton = UIBarButtonItem(
+                image: UIImage(systemName: "plus"),
+                style: .plain,
+                target: nil,
+                action: nil
+            )
+            addButton.primaryAction = UIAction { _ in addTrigger.fire = true }
             let mailboxButton = UIBarButtonItem(
                 image: UIImage(systemName: "tray.full"),
                 style: .plain,
@@ -470,7 +478,7 @@ final class NCMoreModel: ObservableObject {
                     }
                 ]
             )
-            pushHosted(ShieldView(mailboxPicker: mailboxPicker), title: NSLocalizedString("_shield_", comment: ""), trailing: [mailboxButton])
+            pushHosted(ShieldView(mailboxPicker: mailboxPicker, addTrigger: addTrigger), title: NSLocalizedString("_shield_", comment: ""), trailing: [addButton, mailboxButton])
 
         case .none:
             break
@@ -766,6 +774,11 @@ final class ContactAddTrigger: ObservableObject {
 final class ShieldMailboxPicker: ObservableObject {
     @Published var mailboxes: [String] = []
     @Published var selected: String?
+}
+
+/// Fires a one-shot "add entry" request from the Shield host bar.
+final class ShieldAddTrigger: ObservableObject {
+    @Published var fire = false
 }
 
 /// Marker for screens pushed from the More tab that manage their own

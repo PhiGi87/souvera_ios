@@ -106,7 +106,11 @@ final class CalDavClient {
               let url = URL(string: calendarHref, relativeTo: home)?.absoluteURL else { return [] }
         var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
         req.setValue("1", forHTTPHeaderField: "Depth")
-        req.httpBody = Self.reportBody(start: start, end: end).data(using: .utf8)
+        // Deck-Kalender speichern VTODO (Karten/Stacks), normale Kalender
+        // VEVENT. Ein kombinierter Filter wäre laut Sabre eine UND-Bedingung
+        // und würde überall 0 Objekte liefern - daher je Kalender wählen.
+        let todoOnly = calendarHref.contains("deck")
+        req.httpBody = Self.reportBody(start: start, end: end, todoOnly: todoOnly).data(using: .utf8)
         guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 207,
@@ -197,13 +201,14 @@ final class CalDavClient {
         """
     }
 
-    private static func reportBody(start: Date, end: Date) -> String {
+    private static func reportBody(start: Date, end: Date, todoOnly: Bool) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.locale = Locale(identifier: "en_US_POSIX")
         let startText = formatter.string(from: start)
         let endText = formatter.string(from: end)
+        let component = todoOnly ? "VTODO" : "VEVENT"
         return """
         <?xml version="1.0" encoding="UTF-8"?>
         <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
@@ -213,10 +218,7 @@ final class CalDavClient {
           </d:prop>
           <c:filter>
             <c:comp-filter name="VCALENDAR">
-              <c:comp-filter name="VEVENT">
-                <c:time-range start="\(startText)" end="\(endText)"/>
-              </c:comp-filter>
-              <c:comp-filter name="VTODO">
+              <c:comp-filter name="\(component)">
                 <c:time-range start="\(startText)" end="\(endText)"/>
               </c:comp-filter>
             </c:comp-filter>

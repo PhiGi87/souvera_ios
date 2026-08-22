@@ -89,6 +89,15 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Löscht eine Konversation komplett (nur mit Owner-/Moderator-Recht;
+    /// die Oberfläche blendet den Swipe sonst aus).
+    func deleteConversation(token: String) async {
+        guard let api else { return }
+        let status = await api.deleteRoom(token: token)
+        CallDebugLog.log("LinkViewModel", "deleteConversation \(token) -> \(status)")
+        loadConversations()
+    }
+
     func loadConversations() {
         guard let api else { return }
         Task {

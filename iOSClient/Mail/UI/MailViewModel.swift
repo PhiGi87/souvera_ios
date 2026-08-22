@@ -57,6 +57,9 @@ final class MailViewModel: ObservableObject {
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
     @Published var messageScrollPosition: String?
+    /// Zeitpunkt des nächsten automatischen Abrufs (für den Countdown-Ring
+    /// in der Ordnerübersicht); nil = Auto-Refresh deaktiviert.
+    @Published var nextAutoRefreshAt: Date?
     @Published var sortOrder: MailSortOrder = .dateDesc
 
     private var imapClient: MailImapClient?
@@ -111,17 +114,29 @@ final class MailViewModel: ObservableObject {
     private var lastAutoRefresh: Date = .distantPast
 
     /// Periodically refreshes the open mailbox in the foreground according to
-    /// the "Hintergrundaktualisierung" setting (30 s check granularity).
+    /// the "Hintergrundaktualisierung" setting. Publishes the next refresh
+    /// time so the folder list can render a countdown ring.
     func startAutoRefresh() {
         autoRefreshTask?.cancel()
         autoRefreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
-                guard !Task.isCancelled else { return }
                 guard let self else { return }
-                guard let interval = SouveraAutoRefresh.interval else { continue }
+                guard let interval = SouveraAutoRefresh.interval else {
+                    if self.nextAutoRefreshAt != nil {
+                        self.nextAutoRefreshAt = nil
+                    }
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    continue
+                }
+                let next = self.lastAutoRefresh.addingTimeInterval(interval)
+                if self.nextAutoRefreshAt != next {
+                    self.nextAutoRefreshAt = next
+                }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                guard !Task.isCancelled else { return }
                 if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
                     self.lastAutoRefresh = Date()
+                    self.nextAutoRefreshAt = Date().addingTimeInterval(interval)
                     guard self.currentMailbox != nil, self.composeContext == nil else { continue }
                     await self.refreshMessages()
                 }

@@ -9,6 +9,7 @@ import SwiftUI
 struct ShieldView: View {
     @StateObject private var viewModel = ShieldViewModel()
     @ObservedObject var mailboxPicker: ShieldMailboxPicker
+    @ObservedObject var addTrigger: ShieldAddTrigger
     @State private var section: ShieldSection = .quarantine
     @State private var quarantineKind: ShieldApi.QuarantineKind = .spam
     @State private var detailEntry: ShieldSpamEntry?
@@ -16,7 +17,7 @@ struct ShieldView: View {
     @State private var showAddEntry = false
     @State private var addEntryText = ""
     @State private var addEntryList: ShieldApi.ListKind = .whitelist
-    @State private var releaseChoice: ShieldSpamEntry?
+    @State private var releaseChoice: ShieldReleaseRequest?
 
     enum ShieldSection: String, CaseIterable, Identifiable {
         case quarantine, whitelist, blacklist
@@ -79,6 +80,13 @@ struct ShieldView: View {
         .onChange(of: mailboxPicker.selected) { _, newValue in
             viewModel.selectedMailbox = newValue
         }
+        .onChange(of: addTrigger.fire) { _, fired in
+            if fired {
+                addTrigger.fire = false
+                addEntryList = section == .blacklist ? .blacklist : .whitelist
+                showAddEntry = true
+            }
+        }
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
         }
@@ -96,33 +104,8 @@ struct ShieldView: View {
                 addEntryText = ""
             }
         }
-        .confirmationDialog(
-            NSLocalizedString("_shield_release_", comment: ""),
-            isPresented: Binding(
-                get: { releaseChoice != nil },
-                set: { if !$0 { releaseChoice = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(NSLocalizedString("_shield_release_only_", comment: "")) {
-                if let entry = releaseChoice {
-                    Task { await viewModel.release(.spam, ids: [entry.id]) }
-                }
-                releaseChoice = nil
-            }
-            Button(NSLocalizedString("_shield_release_whitelist_", comment: "")) {
-                if let entry = releaseChoice {
-                    Task { await viewModel.releaseWithWhitelist(ids: [entry.id], entry: entry.sender) }
-                }
-                releaseChoice = nil
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                releaseChoice = nil
-            }
-        } message: {
-            Text(releaseChoice?.subject.isEmpty == false
-                 ? releaseChoice!.subject
-                 : (releaseChoice?.sender ?? ""))
+        .sheet(item: $releaseChoice) { request in
+            ShieldReleaseSheet(request: request, viewModel: viewModel)
         }
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.feedback {
@@ -193,7 +176,12 @@ struct ShieldView: View {
                     .buttonStyle(.plain)
                     .swipeActions(edge: .leading) {
                         Button {
-                            releaseChoice = entry
+                            releaseChoice = ShieldReleaseRequest(
+                                id: entry.id,
+                                title: entry.subject.isEmpty ? entry.sender : entry.subject,
+                                sender: entry.sender,
+                                kind: .spam
+                            )
                         } label: {
                             Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
                         }
@@ -234,7 +222,12 @@ struct ShieldView: View {
                     }
                     .swipeActions(edge: .leading) {
                         Button {
-                            Task { await viewModel.release(kind, ids: [entry.id]) }
+                            releaseChoice = ShieldReleaseRequest(
+                                id: entry.id,
+                                title: entry.displayTitle,
+                                sender: "",
+                                kind: kind
+                            )
                         } label: {
                             Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
                         }
@@ -278,18 +271,6 @@ struct ShieldView: View {
             }
             .listStyle(.plain)
             .refreshable { await viewModel.loadAll() }
-            .safeAreaInset(edge: .bottom) {
-                Button {
-                    addEntryList = kind
-                    showAddEntry = true
-                } label: {
-                    Label(NSLocalizedString("_shield_add_entry_", comment: ""), systemImage: "plus.circle.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
-            }
         }
     }
 }
@@ -356,30 +337,88 @@ private struct ShieldDetailSheet: View {
                 }
             }
         }
-        .confirmationDialog(
-            NSLocalizedString("_shield_release_", comment: ""),
-            isPresented: $showReleaseChoice,
-            titleVisibility: .visible
-        ) {
-            Button(NSLocalizedString("_shield_release_only_", comment: "")) {
-                Task {
-                    await viewModel.release(.spam, ids: [entry.id])
-                    dismiss()
-                }
-            }
-            Button(NSLocalizedString("_shield_release_whitelist_", comment: "")) {
-                Task {
-                    await viewModel.releaseWithWhitelist(ids: [entry.id], entry: entry.sender)
-                    dismiss()
-                }
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
-        } message: {
-            Text(entry.subject.isEmpty ? entry.sender : entry.subject)
+        .sheet(isPresented: $showReleaseChoice) {
+            ShieldReleaseSheet(
+                request: ShieldReleaseRequest(
+                    id: entry.id,
+                    title: entry.subject.isEmpty ? entry.sender : entry.subject,
+                    sender: entry.sender,
+                    kind: .spam
+                ),
+                viewModel: viewModel,
+                onDone: { dismiss() }
+            )
         }
         .task {
             detail = await viewModel.spamDetail(id: entry.id)
             loading = false
         }
+    }
+}
+
+/// Kompakte Overlay-Karte für "Zustellen": deutlich umrandet, Betreff als
+/// Titel und zwei Aktionen (nur zustellen / zustellen + Whitelist).
+/// Eine Zustellen-Anfrage aus der Quarantäne-Übersicht oder dem Detail.
+struct ShieldReleaseRequest: Identifiable {
+    let id: String
+    let title: String
+    let sender: String
+    let kind: ShieldApi.QuarantineKind
+    /// Whitelist-Option existiert serverseitig nur für die Spam-Quarantäne.
+    var allowsWhitelist: Bool { kind == .spam }
+}
+
+private struct ShieldReleaseSheet: View {
+    let request: ShieldReleaseRequest
+    @ObservedObject var viewModel: ShieldViewModel
+    var onDone: (() -> Void)? = nil
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Text(NSLocalizedString("_shield_release_", comment: ""))
+                .font(.headline)
+            Text(request.title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .lineLimit(3)
+            Button {
+                Task {
+                    await viewModel.release(request.kind, ids: [request.id])
+                    onDone?()
+                    dismiss()
+                }
+            } label: {
+                Label(NSLocalizedString("_shield_release_only_", comment: ""), systemImage: "paperplane.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+            if request.allowsWhitelist, !request.sender.isEmpty {
+                Button {
+                    Task {
+                        await viewModel.releaseWithWhitelist(ids: [request.id], entry: request.sender)
+                        onDone?()
+                        dismiss()
+                    }
+                } label: {
+                    Label(NSLocalizedString("_shield_release_whitelist_", comment: ""), systemImage: "checkmark.shield.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                dismiss()
+            }
+        }
+        .padding(18)
+        .overlay(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+        )
+        .padding(14)
+        .presentationDetents([.height(request.allowsWhitelist ? 330 : 240)])
+        .presentationDragIndicator(.visible)
     }
 }

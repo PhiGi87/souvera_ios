@@ -39,7 +39,11 @@ enum SouveraAutoRefresh {
     static let presets: [Int] = [0, 2, 5, 15, 60]
 
     static var intervalMinutes: Int {
-        UserDefaults.standard.integer(forKey: defaultsKey)
+        // Standard 5 Minuten, solange der User nichts geändert hat.
+        if UserDefaults.standard.object(forKey: defaultsKey) == nil {
+            return 5
+        }
+        return UserDefaults.standard.integer(forKey: defaultsKey)
     }
 
     static var interval: TimeInterval? {
