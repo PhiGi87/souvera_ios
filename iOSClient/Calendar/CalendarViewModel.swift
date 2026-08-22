@@ -189,6 +189,7 @@ final class CalendarViewModel: ObservableObject {
             all += ICSParser.parseEvents(entry.ics, calendarHref: entry.calendarHref, href: entry.href, etag: entry.etag)
         }
         events = .success(all.sorted { $0.start < $1.start })
+        SouveraReminderScheduler.schedule(for: all)
     }
 
     // MARK: - Mutations
@@ -264,6 +265,7 @@ final class CalendarViewModel: ObservableObject {
         draft.attendees = event.attendees
         draft.talkRoomToken = event.talkRoomToken
         draft.talkRoomName = event.talkRoomName
+        draft.reminders = event.reminders
         return draft
     }
 

@@ -21,6 +21,7 @@ struct CalendarEventModel: Identifiable {
     let calendarHref: String
     let href: String
     let etag: String?
+    let reminders: [Int]
 }
 
 struct EventDraft {
@@ -34,6 +35,7 @@ struct EventDraft {
     var attendees: [String] = []
     var talkRoomToken: String?
     var talkRoomName: String?
+    var reminders: [Int] = [15]
 }
 
 enum ICSParser {
@@ -57,6 +59,7 @@ enum ICSParser {
             var startDay: Date?
             var endDay: Date?
             var inTimeZone = false
+            var reminders: [Int] = []
 
             for rawLine in body.components(separatedBy: .newlines) {
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
@@ -110,6 +113,10 @@ enum ICSParser {
                     }
                 } else if keyPart == "DURATION" {
                     duration = parseDuration(value)
+                } else if keyPart == "TRIGGER" {
+                    if let minutes = parseTriggerMinutes(value) {
+                        reminders.append(minutes)
+                    }
                 }
             }
 
@@ -137,7 +144,8 @@ enum ICSParser {
                 talkRoomName: talkRoomName,
                 calendarHref: calendarHref,
                 href: href,
-                etag: etag
+                etag: etag,
+                reminders: reminders.sorted()
             ))
         }
         return events
@@ -193,6 +201,13 @@ enum ICSParser {
         }
         if let roomName = draft.talkRoomName, !roomName.isEmpty {
             lines.append("X-SOUVERA-TALK-ROOM-NAME:\(escape(roomName))")
+        }
+        for minutes in draft.reminders.sorted() {
+            lines.append("BEGIN:VALARM")
+            lines.append("ACTION:DISPLAY")
+            lines.append("DESCRIPTION:\(escape(draft.title))")
+            lines.append(minutes <= 0 ? "TRIGGER:PT0S" : "TRIGGER:-PT\(minutes)M")
+            lines.append("END:VALARM")
         }
         lines.append("END:VEVENT")
         lines.append("END:VCALENDAR")
@@ -263,6 +278,46 @@ enum ICSParser {
             sign = -1
         }
         return sign * (group(2) * 86400 + group(3) * 3600 + group(4) * 60 + group(5))
+    }
+
+    /// Parses a VALARM TRIGGER like "-PT15M", "-PT1H" or "PT0S" into minutes.
+    private static func parseTriggerMinutes(_ value: String) -> Int? {
+        let text = value.trimmingCharacters(in: .whitespaces)
+        let negative = text.hasPrefix("-")
+        var body = text
+        if body.hasPrefix("-") || body.hasPrefix("+") {
+            body = String(body.dropFirst())
+        }
+        guard body.hasPrefix("P") else { return nil }
+        var rest = String(body.dropFirst())
+        var minutes = 0
+        var inTimePart = false
+        var current = ""
+        func flush(_ token: String) {
+            guard let number = Int(token.dropLast()) else { return }
+            switch token.last {
+            case "D": minutes += number * 24 * 60
+            case "H": minutes += number * 60
+            case "M": minutes += number
+            case "S": minutes += max(1, Int(ceil(Double(number) / 60.0)))
+            default: break
+            }
+        }
+        for character in rest {
+            if character == "T" {
+                inTimePart = true
+                continue
+            }
+            if character.isNumber {
+                current.append(character)
+            } else {
+                current.append(character)
+                flush(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { flush(current) }
+        return negative ? -minutes : minutes
     }
 
     private static func parseDateOnly(_ value: String) -> Date? {

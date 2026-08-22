@@ -739,6 +739,31 @@ private struct CalendarEventEditSheet: View {
                 Section {
                     TextField(NSLocalizedString("_calendar_location_", comment: ""), text: $draft.location)
                 }
+                Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
+                    ForEach(draft.reminders.sorted(), id: \.self) { minutes in
+                        HStack {
+                            Label(reminderLabel(minutes), systemImage: "bell")
+                                .font(.subheadline)
+                            Spacer()
+                            Button {
+                                draft.reminders.removeAll { $0 == minutes }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Menu {
+                        ForEach(reminderPresets, id: \.self) { minutes in
+                            Button(reminderLabel(minutes)) {
+                                if !draft.reminders.contains(minutes) {
+                                    draft.reminders.append(minutes)
+                                }
+                            }
+                        }
+                    } label: {
+                        Label(NSLocalizedString("_calendar_reminder_add_", comment: ""), systemImage: "plus.bell")
+                    }
+                }
                 Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
                     ForEach(draft.attendees, id: \.self) { attendee in
                         HStack {
@@ -866,6 +891,23 @@ private struct CalendarEventEditSheet: View {
                 }
             }
         }
+    }
+
+    private let reminderPresets = [0, 5, 10, 15, 30, 60, 120, 1440]
+
+    private func reminderLabel(_ minutes: Int) -> String {
+        if minutes <= 0 {
+            return NSLocalizedString("_calendar_reminder_at_start_", comment: "")
+        }
+        if minutes % 1440 == 0 {
+            let days = minutes / 1440
+            let key = days == 1 ? "_calendar_reminder_day_before_" : "_calendar_reminder_days_before_"
+            return String(format: NSLocalizedString(key, comment: ""), days)
+        }
+        if minutes % 60 == 0 {
+            return String(format: NSLocalizedString("_calendar_reminder_hours_before_", comment: ""), minutes / 60)
+        }
+        return String(format: NSLocalizedString("_calendar_reminder_minutes_before_", comment: ""), minutes)
     }
 
     private func addAttendee(_ email: String) {

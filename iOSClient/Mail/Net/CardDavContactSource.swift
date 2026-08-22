@@ -142,13 +142,10 @@ final class CardDavContactSource {
 
     static func parseAddressBookURLs(from xml: String, base: URL) -> [URL] {
         var urls: [URL] = []
-        let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
-        guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
-        for match in regex.matches(in: xml, range: NSRange(location: 0, length: (xml as NSString).length)) {
-            guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
-            let block = String(xml[blockRange])
-            guard block.localizedCaseInsensitiveContains("addressbook"),
-                  let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block) else { continue }
+        for response in DavMultistatusParser().parse(xml) {
+            let resourcetype = response["resourcetype"] ?? ""
+            guard resourcetype.localizedCaseInsensitiveContains("addressbook"),
+                  let href = response["href"] else { continue }
             // Sabre returns absolute paths; resolve them against the address
             // book home so URLSession gets a full URL (relative URLs fail
             // silently).
@@ -314,41 +311,13 @@ final class CardDavContactSource {
     static func parseCards(from data: Data, limit: Int) -> [CardDavCard] {
         guard let xml = String(data: data, encoding: .utf8) else { return [] }
         var cards: [CardDavCard] = []
-        let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
-        guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
-        let ns = xml as NSString
-        for match in regex.matches(in: xml, range: NSRange(location: 0, length: ns.length)) {
-            guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
-            let block = String(xml[blockRange])
-            let href = firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block)
-            let etag = firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?getetag>([^<]+)</(?:[A-Za-z0-9_]+:)?getetag>"#, in: block)
-            guard let addressData = firstMatch(
-                pattern: #"<(?:[A-Za-z0-9_]+:)?address-data[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?address-data>"#,
-                in: block
-            ) else { continue }
-            let vcard = addressData
-                // Numeric character entities first - sabre encodes vCard
-                // line endings as &#13; which would otherwise glue all
-                // lines together into a single unparseable line.
-                .replacingOccurrences(of: "&#13;", with: "\n")
-                .replacingOccurrences(of: "&#10;", with: "\n")
-                .replacingOccurrences(of: "&#x0D;", with: "\n")
-                .replacingOccurrences(of: "&#x0A;", with: "\n")
-                .replacingOccurrences(of: "&lt;", with: "<")
-                .replacingOccurrences(of: "&gt;", with: ">")
-                .replacingOccurrences(of: "&quot;", with: "\"")
-                .replacingOccurrences(of: "&apos;", with: "'")
-                .replacingOccurrences(of: "&amp;", with: "&")
-            cards.append(CardDavCard(href: href ?? "", etag: etag, vcard: vcard))
+        for response in DavMultistatusParser().parse(xml) {
+            // XMLParser already decoded the entities (&#13; line endings,
+            // &amp;, ...) - the vCard text is plain now.
+            guard let vcard = response["address-data"], !vcard.isEmpty else { continue }
+            cards.append(CardDavCard(href: response["href"] ?? "", etag: response["etag"], vcard: vcard))
             if cards.count >= limit { break }
         }
         return cards
-    }
-
-    private static func firstMatch(pattern: String, in text: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
     }
 }

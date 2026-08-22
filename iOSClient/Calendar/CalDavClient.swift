@@ -82,25 +82,18 @@ final class CalDavClient {
 
     static func parseCalendars(from xml: String) -> [CalDavCalendar] {
         var calendars: [CalDavCalendar] = []
-        let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
-        guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
-        for match in regex.matches(in: xml, range: NSRange(location: 0, length: (xml as NSString).length)) {
-            guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
-            let block = String(xml[blockRange])
+        for response in DavMultistatusParser().parse(xml) {
             // Only collections whose resourcetype contains <calendar/> are
             // real VEVENT calendars (skips the home, scheduling inbox/outbox,
             // trashbin and Deck boards).
-            let resourcetype = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?resourcetype[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?resourcetype>"#, in: block) ?? ""
+            let resourcetype = response["resourcetype"] ?? ""
             guard resourcetype.localizedCaseInsensitiveContains("calendar") else { continue }
-            guard let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block),
-                  !href.isEmpty else { continue }
-            let name = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?displayname>([^<]*)</(?:[A-Za-z0-9_]+:)?displayname>"#, in: block)
-                ?? (href as NSString).lastPathComponent
-            let color = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?calendar-color[^>]*>([^<]*)</(?:[A-Za-z0-9_]+:)?calendar-color>"#, in: block)
+            guard let href = response["href"], !href.isEmpty else { continue }
+            let name = response["displayname"]
             calendars.append(CalDavCalendar(
                 href: href,
-                displayName: name.isEmpty ? (href as NSString).lastPathComponent : name,
-                color: (color?.isEmpty == false) ? color : nil
+                displayName: (name?.isEmpty == false) ? name! : (href as NSString).lastPathComponent,
+                color: response["color"]
             ))
         }
         return calendars
@@ -124,24 +117,18 @@ final class CalDavClient {
         JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(status), \(data.count) bytes")
 
         var events: [CalDavEventEntry] = []
-        let responsePattern = #"<(?:[A-Za-z0-9_]+:)?response[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?response>"#
-        guard let regex = try? NSRegularExpression(pattern: responsePattern, options: [.dotMatchesLineSeparators]) else { return [] }
-        for match in regex.matches(in: xml, range: NSRange(location: 0, length: (xml as NSString).length)) {
-            guard let blockRange = Range(match.range(at: 1), in: xml) else { continue }
-            let block = String(xml[blockRange])
-            guard let ics = Self.firstMatch(
-                pattern: #"<(?:[A-Za-z0-9_]+:)?calendar-data[^>]*>(.*?)</(?:[A-Za-z0-9_]+:)?calendar-data>"#,
-                in: block
-            ) else { continue }
-            let href = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?href>([^<]+)</(?:[A-Za-z0-9_]+:)?href>"#, in: block) ?? ""
-            let etag = Self.firstMatch(pattern: #"<(?:[A-Za-z0-9_]+:)?getetag>([^<]+)</(?:[A-Za-z0-9_]+:)?getetag>"#, in: block)
-            let vcalendar = ics
-                .replacingOccurrences(of: "&lt;", with: "<")
-                .replacingOccurrences(of: "&gt;", with: ">")
-                .replacingOccurrences(of: "&quot;", with: "\"")
-                .replacingOccurrences(of: "&apos;", with: "'")
-                .replacingOccurrences(of: "&amp;", with: "&")
-            events.append(CalDavEventEntry(calendarHref: calendarHref, href: href, etag: etag, ics: vcalendar))
+        for response in DavMultistatusParser().parse(xml) {
+            // XMLParser already decoded the entities (&#13;, &amp;, ...).
+            guard let vcalendar = response["calendar-data"], !vcalendar.isEmpty else { continue }
+            events.append(CalDavEventEntry(
+                calendarHref: calendarHref,
+                href: response["href"] ?? "",
+                etag: response["etag"],
+                ics: vcalendar
+            ))
+        }
+        if events.isEmpty, !xml.isEmpty {
+            JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> 0 events; response prefix: \(xml.prefix(300))")
         }
         JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(events.count) events parsed")
         return events
@@ -227,10 +214,70 @@ final class CalDavClient {
         """
     }
 
-    private static func firstMatch(pattern: String, in text: String) -> String? {
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(in: text, range: NSRange(location: 0, length: (text as NSString).length)),
-              let range = Range(match.range(at: 1), in: text) else { return nil }
-        return String(text[range])
+}
+
+// MARK: - Shared multistatus parser (Foundation XMLParser)
+
+/// Parses DAV multistatus responses with XMLParser (deterministic, decodes
+/// XML entities like &#13; automatically). Each `<response>` block becomes a
+/// dictionary with href, etag, displayname, color, address-data/calendar-data
+/// and a resourcetype marker string.
+final class DavMultistatusParser: NSObject, XMLParserDelegate {
+    private var responses: [[String: String]] = []
+    private var currentResponse: [String: String]?
+    private var currentElement = ""
+    private var currentValue = ""
+
+    func parse(_ xml: String) -> [[String: String]] {
+        responses = []
+        currentResponse = nil
+        currentElement = ""
+        currentValue = ""
+        let parser = XMLParser(data: Data(xml.utf8))
+        parser.delegate = self
+        parser.shouldProcessNamespaces = false
+        parser.parse()
+        return responses
+    }
+
+    func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String: String] = [:]) {
+        let local = Self.localName(elementName)
+        if local == "response" {
+            currentResponse = [:]
+        }
+        currentElement = local
+        currentValue = ""
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        currentValue += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        let local = Self.localName(elementName)
+        defer { currentValue = "" }
+        guard var response = currentResponse else { return }
+        let value = currentValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        switch local {
+        case "href": if !value.isEmpty { response["href"] = value }
+        case "getetag": if !value.isEmpty { response["etag"] = value }
+        case "displayname": response["displayname"] = value
+        case "calendar-color": if !value.isEmpty { response["color"] = value }
+        case "address-data": response["address-data"] = value
+        case "calendar-data": response["calendar-data"] = value
+        case "collection", "calendar", "schedule-inbox", "schedule-outbox", "trash-bin", "addressbook":
+            response["resourcetype"] = (response["resourcetype"] ?? "") + local + ";"
+        default: break
+        }
+        if local == "response" {
+            responses.append(response)
+            currentResponse = nil
+        } else {
+            currentResponse = response
+        }
+    }
+
+    private static func localName(_ elementName: String) -> String {
+        (elementName as NSString).components(separatedBy: ":").last ?? elementName
     }
 }

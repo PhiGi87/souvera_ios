@@ -197,6 +197,17 @@ private struct MailFolderListView: View {
 
     @ViewBuilder
     private func folderList(_ boxes: [Mailbox]) -> some View {
+        ScrollViewReader { proxy in
+            folderListContent(boxes, proxy: proxy)
+                .onAppear {
+                    if let position = viewModel.folderScrollPosition {
+                        proxy.scrollTo(position, anchor: .top)
+                    }
+                }
+        }
+    }
+
+    private func folderListContent(_ boxes: [Mailbox], proxy: ScrollViewProxy) -> some View {
         List {
             ForEach(groups(boxes)) { group in
                 Section {
@@ -412,14 +423,21 @@ private struct MailMessageListView: View {
                 .padding()
                 Spacer()
             case let .success(items):
-                List {
-                    ForEach(viewModel.sortMessages(items)) { message in
-                        row(message)
+                ScrollViewReader { proxy in
+                    List {
+                        ForEach(viewModel.sortMessages(items)) { message in
+                            row(message)
+                        }
+                    }
+                    .listStyle(.plain)
+                    .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
+                    .refreshable { await viewModel.refreshMessages() }
+                    .onAppear {
+                        if let position = viewModel.messageScrollPosition {
+                            proxy.scrollTo(position, anchor: .top)
+                        }
                     }
                 }
-                .listStyle(.plain)
-                .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
-                .refreshable { await viewModel.refreshMessages() }
                 .overlay(alignment: .bottom) {
                     if viewModel.messageScrollPosition != nil, let firstId = viewModel.sortMessages(items).first?.id {
                         Button {
@@ -726,7 +744,7 @@ private struct MailRowContent: View {
                     Text(message.displayFrom).fontWeight(message.isRead ? .regular : .semibold).lineLimit(1)
                     Spacer()
                     if message.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption2) }
-                    Text(message.dateSent, style: .date).font(.caption2).foregroundStyle(.secondary)
+                    Text(MailDateFormatter.listLabel(for: message.dateSent)).font(.caption2).foregroundStyle(.secondary)
                 }
                 Text(message.subject.isEmpty ? NSLocalizedString("_mail_no_subject_", comment: "") : message.subject)
                     .font(.subheadline).lineLimit(1).foregroundStyle(message.isRead ? .secondary : .primary)
@@ -773,7 +791,7 @@ private struct MailDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(message.displayFrom).fontWeight(.medium)
-                    Text(message.dateSent, style: .date).font(.caption).foregroundStyle(.secondary)
+                    Text(MailDateFormatter.detailLabel(for: message.dateSent)).font(.caption).foregroundStyle(.secondary)
                     if !message.toAddresses.isEmpty {
                         Text("\(NSLocalizedString("_mail_to_", comment: "")): \(message.toAddresses)")
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(1)

@@ -292,32 +292,29 @@ struct LinkChatView: View {
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
             ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(spacing: 6) {
-                        ForEach(items.filter { !$0.isSystemMessage }) { message in
-                            LinkMessageRow(
-                                viewModel: viewModel,
-                                message: message,
-                                isOwn: message.actorId == viewModel.currentUserId,
-                                onStartEdit: { editingMessage = message; draft = message.message },
-                                onOpenFile: { info in
-                                    Task {
-                                        if let url = await viewModel.downloadAttachment(info) {
-                                            previewURL = url
-                                        }
+                List {
+                    ForEach(items.filter { !$0.isSystemMessage }) { message in
+                        LinkMessageRow(
+                            viewModel: viewModel,
+                            message: message,
+                            isOwn: message.actorId == viewModel.currentUserId,
+                            onStartEdit: { editingMessage = message; draft = message.message },
+                            onOpenFile: { info in
+                                Task {
+                                    if let url = await viewModel.downloadAttachment(info) {
+                                        previewURL = url
                                     }
                                 }
-                            )
-                            .id(message.id)
-                        }
+                            }
+                        )
+                        .id(message.id)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
+                        .listRowBackground(Color.clear)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    // Force a fresh layout pass whenever the message set
-                    // changes - otherwise new messages sometimes do not
-                    // appear until the user interacts with the list.
-                    .id("stack_\(items.count)_\(items.last?.id ?? 0)")
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
                 .onChange(of: items.count) { _, _ in
                     scrollToBottom(proxy, items: items)
                 }

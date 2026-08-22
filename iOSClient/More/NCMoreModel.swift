@@ -431,10 +431,18 @@ final class NCMoreModel: ObservableObject {
             pushStoryboardTab(identifier: "NCActivityNavigationController")
 
         case .contacts:
-            pushHosted(SouveraContactsView(), title: NSLocalizedString("_contacts_", comment: ""))
+            let trigger = ContactAddTrigger()
+            let addButton = UIBarButtonItem(
+                image: UIImage(systemName: "person.badge.plus"),
+                style: .plain,
+                target: nil,
+                action: nil
+            )
+            addButton.primaryAction = UIAction { _ in trigger.fire = true }
+            pushHosted(SouveraContactsView(addTrigger: trigger), title: NSLocalizedString("_contacts_", comment: ""), trailing: [addButton])
 
         case .shield:
-            pushHosted(ShieldView(), title: NSLocalizedString("_shield_", comment: ""))
+            pushHosted(ShieldView(), title: NSLocalizedString("_shield_", comment: ""), trailing: [])
 
         case .none:
             break
@@ -495,13 +503,16 @@ final class NCMoreModel: ObservableObject {
         }
     }
 
-    /// Pushes a SwiftUI screen onto the More navigation stack.
-    private func pushHosted<Content: View>(_ view: Content, title: String) {
+    /// Pushes a SwiftUI screen onto the More navigation stack. The host bar
+    /// keeps the back button and title; trailing items are replaced with the
+    /// provided ones (empty clears inherited bell/transfers buttons).
+    private func pushHosted<Content: View>(_ view: Content, title: String, trailing: [UIBarButtonItem]? = nil) {
         guard let navigationController = controller?.currentNavigationController() else {
             return
         }
         let hosting = UIHostingController(rootView: view)
         hosting.title = title
+        hosting.navigationItem.rightBarButtonItems = trailing ?? []
         navigationController.pushViewController(hosting, animated: true)
     }
 
@@ -713,4 +724,10 @@ final class NCMoreModel: ObservableObject {
 
         UIApplication.shared.open(url)
     }
+}
+
+/// Fires a one-shot "add contact" request from the host navigation bar into
+/// the SwiftUI contacts screen.
+final class ContactAddTrigger: ObservableObject {
+    @Published var fire = false
 }

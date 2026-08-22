@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SouveraContactsView: View {
     @StateObject private var viewModel = ContactsViewModel()
+    @ObservedObject var addTrigger: ContactAddTrigger
     @State private var searchQuery = ""
     @State private var detailEntry: ContactsViewModel.ContactEntry?
     @State private var directoryDetail: RecipientSuggestion?
@@ -17,21 +18,14 @@ struct SouveraContactsView: View {
     @State private var searchTask: Task<Void, Never>?
 
     var body: some View {
-        NavigationStack {
-            content
-                .navigationTitle(NSLocalizedString("_contacts_", comment: ""))
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button {
-                            editDraft = (ContactDraft(), nil)
-                        } label: {
-                            Image(systemName: "person.badge.plus")
-                        }
-                    }
-                }
-        }
+        content
         .task { await viewModel.load() }
+        .onChange(of: addTrigger.fire) { _, fired in
+            if fired {
+                addTrigger.fire = false
+                editDraft = (ContactDraft(), nil)
+            }
+        }
         .sheet(item: $directoryDetail) { user in
             DirectoryUserDetailSheet(user: user)
         }
@@ -57,6 +51,15 @@ struct SouveraContactsView: View {
     @ViewBuilder
     private var content: some View {
         VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(NSLocalizedString("_mail_search_contacts_", comment: ""), text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            Divider()
             if let notice = viewModel.offlineNotice {
                 Text(notice)
                     .font(.caption)
@@ -146,7 +149,6 @@ struct SouveraContactsView: View {
                 }
             }
         }
-        .searchable(text: $searchQuery, prompt: Text(NSLocalizedString("_mail_search_contacts_", comment: "")))
         .onChange(of: searchQuery) { _, newValue in
             searchTask?.cancel()
             searchTask = Task {

@@ -55,8 +55,6 @@ struct ShieldView: View {
             case .blacklist: listSection(kind: .blacklist, state: viewModel.blacklist)
             }
         }
-        .navigationTitle(NSLocalizedString("_shield_", comment: ""))
-        .navigationBarTitleDisplayMode(.inline)
         .task { await viewModel.loadAll() }
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
@@ -257,20 +255,21 @@ private struct ShieldDetailSheet: View {
                 if loading {
                     ProgressView()
                 } else if let detail {
+                    let payload = detail["data"] as? [String: Any] ?? detail
                     List {
                         Section(NSLocalizedString("_shield_spam_", comment: "")) {
-                            Text(entry.subject).font(.headline)
-                            if let from = detail["from"] as? String, !from.isEmpty {
-                                Text(from).font(.subheadline)
+                            Text((payload["subject"] as? String) ?? entry.subject).font(.headline)
+                            if let sender = payload["envelope_sender"] as? String, !sender.isEmpty {
+                                Text(sender).font(.subheadline)
                             }
                             Text(entry.time.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        if let message = detail["message"] as? String, !message.isEmpty {
+                        if let message = payload["content"] as? String, !message.isEmpty {
                             Section {
                                 Text(message).textSelection(.enabled).font(.subheadline)
                             }
-                        } else if let preview = detail["preview"] as? String, !preview.isEmpty {
+                        } else if let preview = payload["preview"] as? String, !preview.isEmpty {
                             Section {
                                 Text(preview).textSelection(.enabled).font(.subheadline)
                             }

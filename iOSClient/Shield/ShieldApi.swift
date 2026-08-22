@@ -95,7 +95,7 @@ final class ShieldApi {
         return "Basic \(Data(raw.utf8).base64EncodedString())"
     }
 
-    private func request(_ path: String, method: String = "GET", form: [String: String] = [:]) async -> (status: Int, json: [String: Any])? {
+    private func request(_ path: String, method: String = "GET", form: [String: String] = [:]) async -> (status: Int, json: [String: Any]?, body: String)? {
         guard let root, let url = URL(string: "\(root)/apps/souvera_shield/\(path)") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
@@ -108,9 +108,19 @@ final class ShieldApi {
             req.httpBody = components.query?.data(using: .utf8)
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         }
-        guard let (data, response) = try? await urlSession.data(for: req),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        return ((response as? HTTPURLResponse)?.statusCode ?? -1, json)
+        guard let (data, response) = try? await urlSession.data(for: req) else { return nil }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let body = String(data: data.prefix(500), encoding: .utf8) ?? ""
+        if !(200..<300).contains(status) {
+            NSLog("ShieldApiLog %@ %@ -> %d %@", method, path, status, body)
+        }
+        return (status, json, body)
+    }
+
+    private func ok(_ result: (status: Int, json: [String: Any]?, body: String)?) -> Bool {
+        guard let result else { return false }
+        return (200..<300).contains(result.status)
     }
 
     // MARK: - Quarantines
@@ -123,8 +133,8 @@ final class ShieldApi {
         case .virus: path = "api/virus_quarantine"
         }
         guard let result = await request(path) else { return nil }
-        let data = (result.json["data"] as? [[String: Any]]) ?? []
-        let warnings = (result.json["warnings"] as? [String]) ?? []
+        let data = (result.json?["data"] as? [[String: Any]]) ?? []
+        let warnings = (result.json?["warnings"] as? [String]) ?? []
         return ShieldListResult(data: data, warnings: warnings)
     }
 
@@ -140,8 +150,7 @@ final class ShieldApi {
         case .file: path = "api/file_quarantine/release"
         case .virus: path = "api/virus_quarantine/release"
         }
-        guard let result = await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]) else { return false }
-        return (200..<300).contains(result.status)
+        return ok(await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]))
     }
 
     func delete(_ kind: QuarantineKind, ids: [String]) async -> Bool {
@@ -151,8 +160,7 @@ final class ShieldApi {
         case .file: path = "api/file_quarantine/delete"
         case .virus: path = "api/virus_quarantine/delete"
         }
-        guard let result = await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]) else { return false }
-        return (200..<300).contains(result.status)
+        return ok(await request(path, method: "POST", form: ["ids": ids.joined(separator: ",")]))
     }
 
     // MARK: - Whitelist / Blacklist
@@ -160,20 +168,18 @@ final class ShieldApi {
     func list(_ kind: ListKind) async -> ShieldListResult? {
         let path = kind == .whitelist ? "api/whitelist" : "api/blacklist"
         guard let result = await request(path) else { return nil }
-        let data = (result.json["data"] as? [String])?.map { ["value": $0] } ?? []
-        let warnings = (result.json["warnings"] as? [String]) ?? []
+        let data = (result.json?["data"] as? [String])?.map { ["value": $0] } ?? []
+        let warnings = (result.json?["warnings"] as? [String]) ?? []
         return ShieldListResult(data: data, warnings: warnings)
     }
 
     func add(_ kind: ListKind, entry: String) async -> Bool {
         let path = kind == .whitelist ? "api/whitelist" : "api/blacklist"
-        guard let result = await request(path, method: "POST", form: ["entry": entry]) else { return false }
-        return (200..<300).contains(result.status)
+        return ok(await request(path, method: "POST", form: ["entry": entry]))
     }
 
     func remove(_ kind: ListKind, entry: String) async -> Bool {
         let path = kind == .whitelist ? "api/whitelist/remove" : "api/blacklist/remove"
-        guard let result = await request(path, method: "POST", form: ["entry": entry]) else { return false }
-        return (200..<300).contains(result.status)
+        return ok(await request(path, method: "POST", form: ["entry": entry]))
     }
 }
