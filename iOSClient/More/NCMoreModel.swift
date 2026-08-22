@@ -500,7 +500,7 @@ final class NCMoreModel: ObservableObject {
         if let active = accounts.first(where: { $0.account == account }) {
             activeAccountDisplayName = active.alias.isEmpty ? active.displayName : active.alias
             activeAccountHost = URL(string: active.urlBase)?.host ?? ""
-            activeAccountUser = active.user""
+            activeAccountUser = active.user
             activeAvatar = utility.loadUserImage(for: active.user, displayName: active.displayName, urlBase: active.urlBase)
         }
     }
