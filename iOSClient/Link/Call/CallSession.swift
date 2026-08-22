@@ -245,7 +245,6 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// running session and re-emits the active tracks.
     func reattach(callbacks: CallSessionCallbacks) {
         self.callbacks = callbacks
-        self.silent = silent
         if let local = localVideo { callbacks.onLocalVideo(track: local) }
         for track in remoteVideoTracks { callbacks.onRemoteVideo(track: track) }
     }
