@@ -233,11 +233,6 @@ private struct MailFolderListView: View {
     @State private var showScrollTop = false
 
     var body: some View {
-        withDialogs
-    }
-
-    /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
-    private var baseContent: some View {
         VStack(spacing: 0) {
             switch viewModel.mailboxes {
             case .loading:
@@ -511,35 +506,10 @@ private struct MailMessageListView: View {
                 .padding()
                 Spacer()
             case let .success(items):
-                let sorted = viewModel.sortMessages(items)
-                ScrollViewReader { proxy in
-                    List {
-                        ForEach(sorted) { message in
-                            row(message)
-                                .id(message.id)
-                        }
-                    }
-                    .listStyle(.plain)
-                    .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
-                    .refreshable { await viewModel.refreshMessages() }
-                    .overlay(alignment: .bottom) {
-                        if let firstId = sorted.first?.id {
-                            scrollTopButton(proxy: proxy, firstId: firstId)
-                                .padding(.bottom, 84)
-                                .opacity(showScrollTop ? 1 : 0)
-                                .animation(.easeInOut(duration: 0.25), value: showScrollTop)
-                        }
-                    }
-                    .scrollTopObserver { offset in
-                        updateScrollTop(offset: offset)
-                    }
-                }
+                messageList(items: items)
             }
         }
-        .sheet(item: Binding(
-            get: { moveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
-            set: { if $0 == nil { moveTarget = nil } }
-        )) { state in
+        .sheet(item: moveSheetBinding) { state in
             MailMovePickerView(
                 title: state.messages.count == 1
                     ? (state.messages.first?.subject.isEmpty == false ? state.messages.first!.subject : NSLocalizedString("_mail_no_subject_", comment: ""))
@@ -699,6 +669,41 @@ private struct MailMessageListView: View {
         } message: {
             Text(blacklistConfirmMessage)
         }
+    }
+
+    /// Die Nachrichtenliste als eigene Funktion (hält den Body klein).
+    @ViewBuilder
+    private func messageList(items: [MailMessage]) -> some View {
+        let sorted = viewModel.sortMessages(items)
+        ScrollViewReader { proxy in
+            List {
+                ForEach(sorted) { message in
+                    row(message)
+                        .id(message.id)
+                }
+            }
+            .listStyle(.plain)
+            .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
+            .refreshable { await viewModel.refreshMessages() }
+            .overlay(alignment: .bottom) {
+                if let firstId = sorted.first?.id {
+                    scrollTopButton(proxy: proxy, firstId: firstId)
+                        .padding(.bottom, 84)
+                        .opacity(showScrollTop ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.25), value: showScrollTop)
+                }
+            }
+            .scrollTopObserver { offset in
+                updateScrollTop(offset: offset)
+            }
+        }
+    }
+
+    private var moveSheetBinding: Binding<MoveSheetState?> {
+        Binding(
+            get: { moveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
+            set: { if $0 == nil { moveTarget = nil } }
+        )
     }
 
     private var blacklistConfirmMessage: String {
