@@ -69,7 +69,7 @@ final class MailViewModel: ObservableObject {
     private var jmapClient: JmapClient?
     private var jmapApi: JmapApi?
     private var mailAccount: MailAccount?
-    private var currentMailbox: Mailbox?
+    var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
     private var queryStates: [String: String] = [:]
     private var identityId: String?

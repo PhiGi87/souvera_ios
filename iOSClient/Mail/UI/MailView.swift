@@ -320,10 +320,8 @@ private struct MailFolderListView: View {
                 .animation(.easeInOut(duration: 0.25), value: showScrollTop)
             }
         }
-        .onScrollGeometryChange(for: CGFloat.self) { geometry in
-            geometry.contentOffset.y + geometry.contentInsets.top
-        } action: { _, newValue in
-            let visible = newValue > 120
+        .scrollTopObserver { offset in
+            let visible = offset > 120
             if visible != showScrollTop {
                 withAnimation(.easeInOut(duration: 0.25)) {
                     showScrollTop = visible
@@ -532,10 +530,8 @@ private struct MailMessageListView: View {
                                 .animation(.easeInOut(duration: 0.25), value: showScrollTop)
                         }
                     }
-                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                        geometry.contentOffset.y + geometry.contentInsets.top
-                    } action: { _, newValue in
-                        updateScrollTop(offset: newValue)
+                    .scrollTopObserver { offset in
+                        updateScrollTop(offset: offset)
                     }
                 }
             }
@@ -845,11 +841,6 @@ private struct MailSearchView: View {
     @State private var query = ""
 
     var body: some View {
-        withDialogs
-    }
-
-    /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
-    private var baseContent: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -1510,6 +1501,22 @@ struct AutoRefreshRingView: View {
                 .frame(width: 16, height: 16)
                 .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
             }
+        }
+    }
+}
+
+extension View {
+    /// Scroll-Offset-Beobachter (iOS 18+); auf älteren Systemen ohne Effekt.
+    @ViewBuilder
+    func scrollTopObserver(_ onChange: @escaping (CGFloat) -> Void) -> some View {
+        if #available(iOS 18.0, *) {
+            self.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.contentOffset.y + geometry.contentInsets.top
+            } action: { _, newValue in
+                onChange(newValue)
+            }
+        } else {
+            self
         }
     }
 }
