@@ -218,10 +218,11 @@ final class CalDavClient {
 
 // MARK: - Shared multistatus parser (Foundation XMLParser)
 
-/// Parses DAV multistatus responses with XMLParser (deterministic, decodes
-/// XML entities like &#13; automatically). Each `<response>` block becomes a
-/// dictionary with href, etag, displayname, color, address-data/calendar-data
-/// and a resourcetype marker string.
+// Parses DAV multistatus responses with XMLParser (deterministic, decodes
+// XML entities like &#13; automatically). Each `<response>` block becomes a
+// dictionary with href, etag, displayname, color, address-data/calendar-data
+// and a resourcetype marker string. Regular comments only: doc comments on
+// NSObject subclasses are emitted into the generated ObjC header.
 final class DavMultistatusParser: NSObject, XMLParserDelegate {
     private var responses: [[String: String]] = []
     private var currentResponse: [String: String]?
