@@ -84,19 +84,20 @@ get_token() {
         t=$(gh auth token 2>/dev/null) && { printf '%s' "$t"; return 0; }
     fi
     local t
-    t=$(printf 'protocol=https\nhost=github.com\n\n' | git credential fill 2>/dev/null </dev/null | awk -F= '/^password=/{print $2}')
+    # GIT_TERMINAL_PROMPT=0 verhindert haengende GUI-Prompts der Helfer.
+    t=$(printf 'protocol=https\nhost=github.com\n\n' | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null | awk -F= '/^password=/{print $2}')
     [ -n "$t" ] && printf '%s' "$t"
     return 0
 }
 
 TOKEN=$(get_token)
-AUTH_ARGS=()
-if [ -n "$TOKEN" ]; then
-    AUTH_ARGS=(-H "Authorization: Bearer $TOKEN")
-fi
 
 api_get() { # url -> body ("" on failure)
-    curl -fsSL -H "Accept: application/vnd.github+json" "${AUTH_ARGS[@]}" "$1" 2>/dev/null
+    if [ -n "$TOKEN" ]; then
+        curl -fsSL -H "Accept: application/vnd.github+json" -H "Authorization: Bearer $TOKEN" "$1" 2>/dev/null
+    else
+        curl -fsSL -H "Accept: application/vnd.github+json" "$1" 2>/dev/null
+    fi
 }
 
 json_get() { # python-expr < json
@@ -152,7 +153,9 @@ prefix = sys.argv[1]
 name = sys.argv[2]
 best = None
 for run in d.get("workflow_runs", []):
-    if run.get("workflow_name") != name:
+    # The runs list uses "name" for the workflow name (workflow_name is
+    # only present on the single-run response).
+    if run.get("name") != name and run.get("workflow_name") != name:
         continue
     branch = run.get("head_branch") or ""
     if not branch.startswith(prefix):
@@ -333,17 +336,18 @@ install_artifact() { # runid commit
 # Screens
 # ---------------------------------------------------------------------------
 
-overview_block() { # runid commit branch status conclusion started [history]
+overview_block() { # runid commit branch status conclusion started
     local runid="$1" commit="$2" branch="$3" status="$4" conclusion="$5" started="$6"
     say "$DOUBLE"
     printf '%s Souvera Watcher%s\n' "$C_BOLD" "$C_RESET"
     if [ -z "$runid" ]; then
-        info "Kein aktiver Run."
+        info "Kein Run gefunden."
     else
         local st_label st_color
         case "$status:$conclusion" in
-            completed:success) st_label="✓ Erfolg"; st_color="$C_GREEN" ;;
-            completed:*)       st_label="✗ Fehlgeschlagen"; st_color="$C_RED" ;;
+            completed:success) st_label="✓ Erfolg (abgeschlossen)"; st_color="$C_GREEN" ;;
+            completed:failure) st_label="✗ Fehlgeschlagen"; st_color="$C_RED" ;;
+            completed:*)       st_label="• $conclusion"; st_color="$C_YELLOW" ;;
             *)                 st_label="läuft"; st_color="$C_YELLOW" ;;
         esac
         printf 'Run:      %s  Commit: %s  Branch: %s\n' "$runid" "$commit" "$branch"
@@ -392,13 +396,8 @@ last_created=$(printf '%s' "$run" | cut -d'|' -f7)
 last_poll=$(now)
 
 clear 2>/dev/null || true
-if [ -n "$runid" ] && [ "$status" != "completed" ]; then
-    overview_block "$runid" "$commit" "$branch" "$status" "$conclusion" "$started"
-    last_block_shown=$(now)
-else
-    overview_block "" "" "" "" "" ""
-    last_block_shown=$(now)
-fi
+overview_block "$runid" "$commit" "$branch" "$status" "$conclusion" "$started"
+last_block_shown=$(now)
 
 trap 'printf "\n"; stty sane 2>/dev/null; exit 0' INT TERM
 
