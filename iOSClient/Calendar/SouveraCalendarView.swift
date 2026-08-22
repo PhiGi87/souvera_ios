@@ -7,14 +7,31 @@
 
 import SwiftUI
 
+/// Persistente Kalender-Einstellungen (Standard-Ansicht).
+enum SouveraCalendarSettings {
+    static let defaultViewKey = "souvera_calendar_default_view"
+
+    /// Standard-Ansicht; Tagesansicht, solange der User nichts gewählt hat.
+    static var defaultView: String {
+        UserDefaults.standard.string(forKey: defaultViewKey) ?? "day"
+    }
+
+    static func setDefaultView(_ value: String) {
+        UserDefaults.standard.set(value, forKey: defaultViewKey)
+    }
+}
+
 struct SouveraCalendarView: View {
     @StateObject private var viewModel = CalendarViewModel()
     @State private var selectedDay = Date()
-    @State private var viewMode: CalendarViewMode = .month
+    @State private var viewMode: CalendarViewMode = CalendarViewMode(
+        rawValue: SouveraCalendarSettings.defaultView
+    ) ?? .day
     @State private var searchQuery = ""
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
     @State private var showCalendarPicker = false
+    @State private var showMonthYearPicker = false
 
     enum CalendarViewMode: String, CaseIterable, Identifiable {
         case day, threeDay, month
@@ -105,6 +122,11 @@ struct SouveraCalendarView: View {
         .sheet(isPresented: $showCalendarPicker) {
             CalendarPickerSheet(viewModel: viewModel)
         }
+        .sheet(isPresented: $showMonthYearPicker) {
+            MonthYearPickerSheet(initial: viewModel.visibleMonth) { date in
+                viewModel.jumpToMonth(date)
+            }
+        }
         .searchable(text: $searchQuery, prompt: Text(NSLocalizedString("_mail_search_", comment: "")))
         .sheet(item: $detailEvent) { event in
             CalendarEventDetailSheet(viewModel: viewModel, event: event) { draft in
@@ -147,7 +169,14 @@ struct SouveraCalendarView: View {
                 Image(systemName: "chevron.left")
             }
             Spacer()
-            Text(viewModel.monthTitle).font(.headline)
+            Button {
+                showMonthYearPicker = true
+            } label: {
+                Text(viewModel.monthTitle)
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
             Spacer()
             Button {
                 viewModel.shiftMonth(by: 1)
@@ -218,7 +247,7 @@ struct SouveraCalendarView: View {
 
     private var dayView: some View {
         VStack(spacing: 0) {
-            daySwitcher(day: selectedDay)
+            dateOnlySwitcher(day: selectedDay)
             Divider()
             TimelineDayView(
                 day: selectedDay,
@@ -226,13 +255,17 @@ struct SouveraCalendarView: View {
                 showHourLabels: true,
                 hourHeight: 56,
                 onSelect: { detailEvent = $0 },
-                colorFor: { viewModel.color(for: $0) }
+                colorFor: { viewModel.color(for: $0) },
+                onCreate: createEventInSlot
             )
             .refreshable { await viewModel.load() }
         }
+        .gesture(horizontalSwipe(step: 1))
     }
 
-    private func daySwitcher(day: Date) -> some View {
+    /// Datum + Pfeile (der Wochentag kommt aus dem Timeline-Kopf, sonst
+    /// stünde er doppelt da).
+    private func dateOnlySwitcher(day: Date) -> some View {
         HStack {
             Button {
                 shiftSelectedDay(by: -1)
@@ -240,10 +273,7 @@ struct SouveraCalendarView: View {
                 Image(systemName: "chevron.left")
             }
             Spacer()
-            VStack(spacing: 1) {
-                Text(day, style: .date).font(.headline)
-                Text(day.formatted(.dateTime.weekday(.wide))).font(.caption).foregroundStyle(.secondary)
-            }
+            Text(day, style: .date).font(.headline)
             Spacer()
             Button {
                 shiftSelectedDay(by: 1)
@@ -253,6 +283,46 @@ struct SouveraCalendarView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
+    }
+
+    /// Nur Pfeile (3-Tage-Ansicht: die Tagesköpfe zeigen Datum/Wochentag).
+    private func arrowsOnlySwitcher(step: Int) -> some View {
+        HStack {
+            Button {
+                shiftSelectedDay(by: -step)
+            } label: {
+                Image(systemName: "chevron.left")
+            }
+            Spacer()
+            Button {
+                shiftSelectedDay(by: step)
+            } label: {
+                Image(systemName: "chevron.right")
+            }
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 8)
+    }
+
+    /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter.
+    private func horizontalSwipe(step: Int) -> some Gesture {
+        DragGesture(minimumDistance: 50)
+            .onEnded { value in
+                let h = value.translation.width
+                let v = value.translation.height
+                guard abs(h) > abs(v) else { return }
+                withAnimation {
+                    shiftSelectedDay(by: h < 0 ? step : -step)
+                }
+            }
+    }
+
+    /// Öffnet den Erstell-Dialog mit dem getroffenen Zeitslot.
+    private func createEventInSlot(start: Date, end: Date) {
+        editState = EditSheetState(
+            draft: EventDraft(start: start, end: end),
+            existing: nil
+        )
     }
 
     private func dayDotColor(_ day: Date) -> Color {
@@ -272,15 +342,17 @@ struct SouveraCalendarView: View {
 
     private var threeDayView: some View {
         VStack(spacing: 0) {
-            daySwitcher(day: selectedDay)
+            arrowsOnlySwitcher(step: 3)
             Divider()
             ThreeDayTimelineView(
                 days: threeDayRange,
                 eventsProvider: { viewModel.events(on: $0) },
                 onSelect: { detailEvent = $0 },
-                colorFor: { viewModel.color(for: $0) }
+                colorFor: { viewModel.color(for: $0) },
+                onCreate: createEventInSlot
             )
         }
+        .gesture(horizontalSwipe(step: 3))
     }
 
     private var threeDayRange: [Date] {
@@ -382,7 +454,15 @@ private struct CalendarEventRow: View {
                     .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(event.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(event.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                    if !event.reminders.isEmpty {
+                        Image(systemName: "bell.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                    if event.talkRoomToken != nil {
+                        Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 9)).foregroundStyle(.secondary)
+                    }
+                }
                 Text(timeLabel).font(.caption).foregroundStyle(.secondary)
                 if let location = event.location, !location.isEmpty {
                     Label(location, systemImage: "mappin").font(.caption).foregroundStyle(.secondary).lineLimit(1)
@@ -416,6 +496,7 @@ private struct TimelineDayView: View {
     var compactHeader: Bool = false
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    var onCreate: ((Date, Date) -> Void)? = nil
 
     private let hours = Array(0..<24)
 
@@ -427,7 +508,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor)
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, onCreate: onCreate)
                     }
                 }
                 .padding(.bottom, 40)
@@ -499,29 +580,43 @@ private struct TimelineDayView: View {
 }
 
 /// The event lane of a single day: hour grid lines plus time-positioned
-/// event blocks. Shared between the day and 3-day views.
+/// event blocks. Overlapping events are laid out side by side. Shared
+/// between the day and 3-day views.
 private struct TimelineColumn: View {
     let day: Date
     let events: [CalendarEventModel]
     let hourHeight: CGFloat
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    var onCreate: ((Date, Date) -> Void)? = nil
+    var showTrailingBorder: Bool = false
 
     private let hours = Array(0..<24)
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
-            VStack(spacing: 0) {
-                ForEach(hours, id: \.self) { hour in
-                    Rectangle()
-                        .fill(Color(.separator).opacity(0.35))
-                        .frame(height: 1)
-                        .frame(maxWidth: .infinity, alignment: .top)
-                        .padding(.top, hour == 0 ? 0 : hourHeight - 1)
+        GeometryReader { geometry in
+            ZStack(alignment: .topLeading) {
+                VStack(spacing: 0) {
+                    ForEach(hours, id: \.self) { hour in
+                        Rectangle()
+                            .fill(Color(.separator).opacity(0.35))
+                            .frame(height: 1)
+                            .frame(maxWidth: .infinity, alignment: .top)
+                            .padding(.top, hour == 0 ? 0 : hourHeight - 1)
+                    }
+                }
+                ForEach(timedEvents) { event in
+                    eventBlock(event, containerWidth: geometry.size.width)
                 }
             }
-            ForEach(timedEvents) { event in
-                eventBlock(event)
+            .contentShape(Rectangle())
+            .gesture(createGesture())
+        }
+        .overlay(alignment: .trailing) {
+            if showTrailingBorder {
+                Rectangle()
+                    .fill(Color(.separator).opacity(0.35))
+                    .frame(width: 1)
             }
         }
     }
@@ -530,8 +625,42 @@ private struct TimelineColumn: View {
         events.filter { !$0.allDay }.sorted { $0.start < $1.start }
     }
 
+    /// Spalten-Aufteilung für überlappende Termine (greedy).
+    private func columnLayouts() -> [String: (column: Int, count: Int)] {
+        var result: [String: (Int, Int)] = [:]
+        var cluster: [CalendarEventModel] = []
+        for event in timedEvents {
+            if let lastEnd = cluster.map(\.end).max(), event.start >= lastEnd {
+                assignColumns(cluster, into: &result)
+                cluster = []
+            }
+            cluster.append(event)
+        }
+        assignColumns(cluster, into: &result)
+        return result
+    }
+
+    private func assignColumns(_ cluster: [CalendarEventModel], into result: inout [String: (Int, Int)]) {
+        guard !cluster.isEmpty else { return }
+        var columnEnds: [Date] = []
+        var columns: [String: Int] = [:]
+        for event in cluster {
+            if let found = columnEnds.firstIndex(where: { event.start >= $0 }) {
+                columnEnds[found] = event.end
+                columns[event.id] = found
+            } else {
+                columnEnds.append(event.end)
+                columns[event.id] = columnEnds.count - 1
+            }
+        }
+        let count = columnEnds.count
+        for event in cluster {
+            result[event.id] = (columns[event.id] ?? 0, count)
+        }
+    }
+
     @ViewBuilder
-    private func eventBlock(_ event: CalendarEventModel) -> some View {
+    private func eventBlock(_ event: CalendarEventModel, containerWidth: CGFloat) -> some View {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: day)
         let start = max(event.start, dayStart)
@@ -540,6 +669,9 @@ private struct TimelineColumn: View {
         let durationMinutes = max(30, calendar.dateComponents([.minute], from: start, to: end).minute ?? 30)
         let offsetY = CGFloat(startMinutes) / 60.0 * hourHeight
         let height = CGFloat(durationMinutes) / 60.0 * hourHeight
+        let layout = columnLayouts()[event.id] ?? (0, 1)
+        let width = containerWidth / CGFloat(layout.count)
+        let x = CGFloat(layout.column) * width
 
         Button {
             onSelect(event)
@@ -548,21 +680,55 @@ private struct TimelineColumn: View {
                 Text(event.title)
                     .font(.caption).fontWeight(.semibold)
                     .lineLimit(2)
-                if height > 44 {
+                if height > 40 {
                     Text(timeText(event))
                         .font(.caption2)
                         .lineLimit(1)
                 }
+                if height > 64 {
+                    HStack(spacing: 4) {
+                        if !event.reminders.isEmpty {
+                            Image(systemName: "bell.fill").font(.system(size: 9))
+                        }
+                        if event.talkRoomToken != nil {
+                            Image(systemName: "bubble.left.and.bubble.right.fill").font(.system(size: 9))
+                        }
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .padding(4)
+            .padding(3)
             .background(colorFor(event).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .offset(y: offsetY + 2)
-        .frame(height: max(height - 4, 28), alignment: .top)
-        .padding(.horizontal, 2)
+        .offset(x: x, y: offsetY + 2)
+        .frame(width: max(width - 3, 0), height: max(height - 4, 28), alignment: .top)
         .zIndex(1)
+    }
+
+    /// Tap auf die freie Fläche = Termin im Zeitslot erstellen; Ziehen wählt
+    /// den Slot-Bereich (min. 30 Minuten).
+    private func createGesture() -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onEnded { value in
+                guard let onCreate else { return }
+                let calendar = Calendar.current
+                let dayStart = calendar.startOfDay(for: day)
+                func minute(for y: CGFloat) -> Int {
+                    let minutes = Int((y / hourHeight) * 60)
+                    return max(0, min(24 * 60 - 1, minutes))
+                }
+                let startMinute = minute(for: value.startLocation.y)
+                let endMinute = minute(for: value.location.y)
+                let a = min(startMinute, endMinute)
+                let b = max(startMinute, endMinute)
+                let slotDuration = max(30, b - a)
+                guard let slotStart = calendar.date(byAdding: .minute, value: a, to: dayStart),
+                      let slotEnd = calendar.date(byAdding: .minute, value: a + slotDuration, to: dayStart) else { return }
+                onCreate(slotStart, slotEnd)
+            }
     }
 
     private func timeText(_ event: CalendarEventModel) -> String {
@@ -579,28 +745,31 @@ private struct ThreeDayTimelineView: View {
     let eventsProvider: (Date) -> [CalendarEventModel]
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    var onCreate: ((Date, Date) -> Void)? = nil
 
     private let hours = Array(0..<24)
     private let hourHeight: CGFloat = 44
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(spacing: 0) {
-                    HStack(alignment: .top, spacing: 0) {
-                        Color.clear.frame(width: 34, height: 44)
-                        ForEach(days, id: \.self) { day in
-                            VStack(spacing: 1) {
-                                Text(day.formatted(.dateTime.weekday(.abbreviated)))
-                                    .font(.caption).fontWeight(.medium)
-                                    .foregroundStyle(.secondary)
-                                Text("\(Calendar.current.component(.day, from: day))")
-                                    .font(.headline)
-                            }
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 44)
+            VStack(spacing: 0) {
+                // Feste Tagesköpfe: bleiben beim Scrollen stehen.
+                HStack(alignment: .top, spacing: 0) {
+                    Color.clear.frame(width: 34, height: 40)
+                    ForEach(days, id: \.self) { day in
+                        VStack(spacing: 1) {
+                            Text(day.formatted(.dateTime.weekday(.abbreviated)))
+                                .font(.caption).fontWeight(.medium)
+                                .foregroundStyle(.secondary)
+                            Text("\(Calendar.current.component(.day, from: day))")
+                                .font(.headline)
                         }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 40)
                     }
+                }
+                Divider()
+                ScrollView {
                     HStack(alignment: .top, spacing: 0) {
                         VStack(alignment: .trailing, spacing: 0) {
                             ForEach(hours, id: \.self) { hour in
@@ -612,25 +781,21 @@ private struct ThreeDayTimelineView: View {
                                     .id("hour_\(hour)")
                             }
                         }
-                        ForEach(Array(days.enumerated()), id: \.element) { index, day in
+                        ForEach(days, id: \.self) { day in
                             TimelineColumn(
                                 day: day,
                                 events: eventsProvider(day),
                                 hourHeight: hourHeight,
                                 onSelect: onSelect,
-                                colorFor: colorFor
+                                colorFor: colorFor,
+                                onCreate: onCreate,
+                                showTrailingBorder: true
                             )
                             .frame(maxWidth: .infinity)
-                            if index < days.count - 1 {
-                                // Subtle vertical separator between days.
-                                Rectangle()
-                                    .fill(Color(.separator).opacity(0.4))
-                                    .frame(width: 0.5)
-                            }
                         }
                     }
+                    .padding(.bottom, 40)
                 }
-                .padding(.bottom, 40)
             }
             .onAppear {
                 let currentHour = Calendar.current.component(.hour, from: Date())
@@ -1089,5 +1254,99 @@ extension Color {
             a = 1
         }
         self.init(red: r, green: g, blue: b, opacity: a)
+    }
+}
+
+/// Monat/Jahr-Auswahl: Jahres-Stepper + 12-Monats-Raster.
+private struct MonthYearPickerSheet: View {
+    let initial: Date
+    let onSelect: (Date) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var year: Int
+    @State private var month: Int
+
+    init(initial: Date, onSelect: @escaping (Date) -> Void) {
+        self.initial = initial
+        self.onSelect = onSelect
+        let calendar = Calendar.current
+        _year = State(initialValue: calendar.component(.year, from: initial))
+        _month = State(initialValue: calendar.component(.month, from: initial))
+    }
+
+    private let monthNames: [String] = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale.current
+        return (1...12).map { month in
+            formatter.monthSymbols[month - 1]
+        }
+    }()
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 18) {
+                HStack {
+                    Button {
+                        year -= 1
+                    } label: {
+                        Image(systemName: "chevron.left")
+                    }
+                    Spacer()
+                    Text("\(year)")
+                        .font(.title2.bold())
+                        .monospacedDigit()
+                    Spacer()
+                    Button {
+                        year += 1
+                    } label: {
+                        Image(systemName: "chevron.right")
+                    }
+                }
+                .padding(.horizontal, 40)
+
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 3), spacing: 12) {
+                    ForEach(1...12, id: \.self) { candidate in
+                        Button {
+                            selectMonth(candidate)
+                        } label: {
+                            Text(monthNames[candidate - 1])
+                                .font(.subheadline)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(
+                                    candidate == month && year == Calendar.current.component(.year, from: initial)
+                                        ? Color(NCBrandColor.shared.customer).opacity(0.25)
+                                        : Color(.secondarySystemBackground),
+                                    in: RoundedRectangle(cornerRadius: 10)
+                                )
+                                .foregroundStyle(.primary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 20)
+                Spacer()
+            }
+            .padding(.top, 16)
+            .navigationTitle(NSLocalizedString("_calendar_month_year_picker_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
+    }
+
+    private func selectMonth(_ candidate: Int) {
+        var components = DateComponents()
+        components.calendar = Calendar.current
+        components.year = year
+        components.month = candidate
+        components.day = 1
+        if let date = Calendar.current.date(from: components) {
+            onSelect(date)
+        }
+        dismiss()
     }
 }

@@ -164,6 +164,24 @@ actor LinkOcsApi {
         return federationEnabledCache ?? false
     }
 
+    /// Teilnehmer einer Konversation auflisten.
+    func listParticipants(token: String) async -> [LinkParticipant] {
+        guard let body = await get("\(base)/api/v4/room/\(token)/participants") else { return [] }
+        return decodeList(body)
+    }
+
+    /// Teilnehmer entfernen (erfordert Moderator-Recht; attendeeId aus der
+    /// Teilnehmerliste).
+    func removeParticipant(token: String, attendeeId: Int) async -> Bool {
+        var req = signed(url: "\(base)/api/v4/room/\(token)/participants", method: "DELETE")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "attendeeId=\(attendeeId)".data(using: .utf8)
+        guard let (_, response) = try? await session.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "removeParticipant \(token) attendee=\(attendeeId) -> \(status)")
+        return (200..<300).contains(status)
+    }
+
     /// Erstellt eine (öffentliche) Gruppenkonversation für externe Teilnehmer.
     func createGroupRoom(name: String) async -> String? {
         let encoded = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name

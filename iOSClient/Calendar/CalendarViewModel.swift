@@ -165,6 +165,17 @@ final class CalendarViewModel: ObservableObject {
         return Color(NCBrandColor.shared.customer)
     }
 
+    /// Springt gezielt zu einem Monat (Monat/Jahr-Auswahl).
+    func jumpToMonth(_ date: Date) {
+        let calendar = Calendar.current
+        if let start = calendar.dateInterval(of: .month, for: date)?.start {
+            visibleMonth = start
+        } else {
+            visibleMonth = date
+        }
+        Task { await load() }
+    }
+
     func shiftMonth(by value: Int) {
         let calendar = Calendar.current
         if let shifted = calendar.date(byAdding: .month, value: value, to: visibleMonth) {
@@ -351,6 +362,7 @@ final class CalendarViewModel: ObservableObject {
 
         let root = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let url = "\(root)/index.php/call/\(room.token)"
+        NotificationCenter.default.post(name: .linkRoomsChanged, object: nil)
         return (room.token, room.name, url)
     }
 
@@ -361,6 +373,7 @@ final class CalendarViewModel: ObservableObject {
         let api = LinkOcsApi(account: account)
         await api.deleteRoom(token: token)
         JmapLog.write("Calendar talk room deleted: \(token)")
+        NotificationCenter.default.post(name: .linkRoomsChanged, object: nil)
         actionFeedback = CalendarActionFeedback(
             success: true,
             message: NSLocalizedString("_calendar_talk_deleted_", comment: "")

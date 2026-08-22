@@ -309,6 +309,8 @@ extension Notification.Name {
     /// Die Call-UI wurde beendet: SwiftUI muss die fullScreenCover-Items
     /// leeren, sonst bleibt ein weisser Cover zurück.
     static let linkCallUIClose = Notification.Name("linkCallUIClose")
+    /// Räume wurden außerhalb des Link-Tabs geändert (z. B. Kalender-Channel).
+    static let linkRoomsChanged = Notification.Name("linkRoomsChanged")
     /// Simulierter eingehender Anruf (DEBUG, Simulator).
     static let linkSimulateIncomingCall = Notification.Name("linkSimulateIncomingCall")
 }

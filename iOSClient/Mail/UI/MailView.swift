@@ -34,6 +34,14 @@ struct MailView: View {
                         blacklistTarget = nil
                         Task { await viewModel.blacklistSenders(target) }
                     }
+                    Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
+                        let target = blacklistTarget ?? []
+                        blacklistTarget = nil
+                        Task {
+                            await viewModel.blacklistSenders(target)
+                            viewModel.delete(target)
+                        }
+                    }
                     Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
                         blacklistTarget = nil
                     }
@@ -456,6 +464,7 @@ private struct MailMessageListView: View {
     @State private var moveTarget: ([MailMessage], [Mailbox])?
     @State private var showScrollTop = false
     @State private var blacklistTarget: [MailMessage]?
+    @State private var showEmptyTrashConfirm = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -533,6 +542,14 @@ private struct MailMessageListView: View {
                         selected.removeAll()
                     }
                 } else {
+                    if viewModel.currentMailbox?.kind == .trash {
+                        Button {
+                            showEmptyTrashConfirm = true
+                        } label: {
+                            Image(systemName: "trash.slash")
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_trash_empty_", comment: ""))
+                    }
                     Menu {
                         ForEach(MailSortOrder.allCases) { order in
                             Button {
@@ -610,6 +627,18 @@ private struct MailMessageListView: View {
             if !value { selected.removeAll() }
         }
         .confirmationDialog(
+            NSLocalizedString("_mail_trash_empty_", comment: ""),
+            isPresented: $showEmptyTrashConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_mail_trash_empty_", comment: ""), role: .destructive) {
+                Task { await viewModel.emptyTrash() }
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+        } message: {
+            Text(NSLocalizedString("_mail_trash_empty_confirm_", comment: ""))
+        }
+        .confirmationDialog(
             NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
             isPresented: Binding(
                 get: { blacklistTarget != nil },
@@ -621,6 +650,16 @@ private struct MailMessageListView: View {
                 let target = blacklistTarget ?? []
                 blacklistTarget = nil
                 Task { await viewModel.blacklistSenders(target) }
+            }
+            Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
+                let target = blacklistTarget ?? []
+                blacklistTarget = nil
+                Task {
+                    await viewModel.blacklistSenders(target)
+                    viewModel.delete(target)
+                }
+                selected.removeAll()
+                editing = false
             }
             Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
                 blacklistTarget = nil

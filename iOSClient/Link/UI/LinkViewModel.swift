@@ -55,13 +55,19 @@ final class LinkViewModel: ObservableObject {
 
     /// Resolves the active account and loads the conversation list. Idempotent.
     func start() {
-        if api != nil { return }
-        guard let account = LinkAccount.active() else {
-            conversations = .error("No account")
-            return
+        if api == nil {
+            guard let account = LinkAccount.active() else {
+                conversations = .error("No account")
+                return
+            }
+            currentUserId = account.username
+            api = LinkOcsApi(account: account)
+            NotificationCenter.default.addObserver(forName: .linkRoomsChanged, object: nil, queue: .main) { [weak self] _ in
+                self?.loadConversations()
+            }
         }
-        currentUserId = account.username
-        api = LinkOcsApi(account: account)
+        // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
+        // erstellte Channels sofort sichtbar sind.
         loadConversations()
     }
 
@@ -133,6 +139,35 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Lädt die Teilnehmerliste des geöffneten Channels.
+    func loadParticipants() {
+        guard let api, case let .chat(token, _) = route else { return }
+        Task {
+            let list = await api.listParticipants(token: token)
+            self.participants = list
+        }
+    }
+
+    /// Entfernt einen Teilnehmer (Moderator-Recht erforderlich).
+    func removeParticipant(_ participant: LinkParticipant) {
+        guard let api, case let .chat(token, _) = route else { return }
+        Task {
+            let ok = await api.removeParticipant(token: token, attendeeId: participant.attendeeId)
+            if ok {
+                actionFeedback = LinkActionFeedback(
+                    success: true,
+                    message: String(format: NSLocalizedString("_link_participant_removed_", comment: ""), participant.displayName)
+                )
+                loadParticipants()
+            } else {
+                actionFeedback = LinkActionFeedback(
+                    success: false,
+                    message: NSLocalizedString("_link_participant_remove_failed_", comment: "")
+                )
+            }
+        }
+    }
+
     func startConversation(id: String, source: String, title: String) {
         guard let api else { return }
         if source == "federated" || source == "email_guest" {
@@ -199,12 +234,15 @@ final class LinkViewModel: ObservableObject {
     }
 
     @Published var currentRoom: LinkConversation?
+    @Published var participants: [LinkParticipant] = []
 
     func openConversation(token: String, title: String) {
         route = .chat(token: token, title: title)
         if case let .success(rooms) = conversations {
             currentRoom = rooms.first(where: { $0.token == token })
         }
+        participants = []
+        loadParticipants()
         messages = .loading
         lastMessageId = 0
         pollTask?.cancel()

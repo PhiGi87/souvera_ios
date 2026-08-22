@@ -125,6 +125,23 @@ actor MailImapClient {
         }
     }
 
+    /// Markiert alle Nachrichten des Postfachs als gelöscht und expungiert.
+    func emptyMailbox(mailboxPath: String) async -> Bool {
+        let result: MailResult<Void> = await run("Emptying mailbox failed") {
+            try await self.withConnection { connection in
+                _ = try await connection.send(.select(MailboxName(Array(mailboxPath.utf8)), []))
+                let fromFirst = MessageIdentifierSetNonEmpty<SequenceNumber>(SequenceNumber(rawValue: 1)...)
+                _ = try await connection.send(.store(.set(fromFirst), [], .flags(.add(silent: true, list: [.deleted]))))
+                _ = try await connection.send(.expunge)
+            }
+        }
+        if case .failure(let error) = result {
+            JmapLog.write("emptyMailbox imap failed: \(error.localizedDescription)")
+            return false
+        }
+        return true
+    }
+
     func move(mailboxPath: String, uid: UInt64, targetPath: String) async -> MailResult<Void> {
         await run("Moving message failed") {
             try await self.withConnection { connection in

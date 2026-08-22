@@ -16,9 +16,18 @@ struct LinkView: View {
     @State private var showCreateChannel = false
     @State private var channelName = ""
     @State private var showAddParticipant = false
+    @State private var startCallRequest: CallStartRequest?
+    @State private var showParticipants = false
 #if DEBUG
     @State private var simulatedIncoming: SimulatedCall?
 #endif
+
+    struct CallStartRequest: Identifiable {
+        let token: String
+        let title: String
+        let withVideo: Bool
+        var id: String { "\(token)|\(withVideo)" }
+    }
 
     struct CallContext: Identifiable {
         let token: String
@@ -43,33 +52,25 @@ struct LinkView: View {
                             }
                         }
                         ToolbarItem(placement: .topBarTrailing) {
-                            if viewModel.currentRoom?.canManage == true {
-                                Button {
-                                    showAddParticipant = true
-                                } label: {
-                                    Image(systemName: "person.badge.plus")
-                                }
-                                .accessibilityLabel(NSLocalizedString("_link_add_participant_", comment: ""))
+                            Button {
+                                viewModel.loadParticipants()
+                                showParticipants = true
+                            } label: {
+                                Image(systemName: "person.2")
                             }
+                            .accessibilityLabel(NSLocalizedString("_link_participants_", comment: ""))
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             Button {
-                                callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
                             } label: {
                                 Image(systemName: "phone.fill").foregroundStyle(.green)
                             }
                             Button {
-                                callContext = CallContext(token: token, title: title, withVideo: true, silent: false)
+                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: true)
                             } label: {
                                 Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
                             }
-                            Button {
-                                // Stiller Anruf: niemand im Kanal wird angeklingelt
-                                callContext = CallContext(token: token, title: title, withVideo: false, silent: true)
-                            } label: {
-                                Image(systemName: "bell.slash.fill").foregroundStyle(.orange)
-                            }
-                            .accessibilityLabel(NSLocalizedString("_link_silent_call_", comment: ""))
                         }
                     }
                     if case .home = viewModel.route {
@@ -162,8 +163,36 @@ struct LinkView: View {
                 .ignoresSafeArea()
             }
         }
-        .sheet(isPresented: $showAddParticipant) {
-            LinkAddParticipantSheet(viewModel: viewModel)
+        .sheet(isPresented: $showParticipants) {
+            LinkParticipantsSheet(viewModel: viewModel)
+        }
+        .confirmationDialog(
+            NSLocalizedString("_link_start_call_", comment: ""),
+            isPresented: Binding(
+                get: { startCallRequest != nil },
+                set: { if !$0 { startCallRequest = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(startCallRequest?.withVideo == true
+                   ? NSLocalizedString("_link_start_video_call_", comment: "")
+                   : NSLocalizedString("_link_start_audio_call_", comment: "")) {
+                if let request = startCallRequest {
+                    callContext = CallContext(token: request.token, title: request.title, withVideo: request.withVideo, silent: false)
+                }
+                startCallRequest = nil
+            }
+            Button(NSLocalizedString("_link_silent_call_", comment: "")) {
+                if let request = startCallRequest {
+                    callContext = CallContext(token: request.token, title: request.title, withVideo: request.withVideo, silent: true)
+                }
+                startCallRequest = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                startCallRequest = nil
+            }
+        } message: {
+            Text(startCallRequest?.title ?? "")
         }
         .alert(NSLocalizedString("_link_create_channel_", comment: ""), isPresented: $showCreateChannel) {
             TextField(NSLocalizedString("_link_channel_name_", comment: ""), text: $channelName)
@@ -575,10 +604,12 @@ struct LinkChatView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .onChange(of: items.count) { _, _ in
+                .onChange(of: items.last?.id) { _, _ in
+                    // Neue Nachricht angekommen: ans Ende springen.
                     scrollToBottom(proxy, items: items)
                 }
                 .onAppear {
+                    // Beim Öffnen immer die neueste Nachricht im Fokus.
                     scrollToBottom(proxy, items: items)
                 }
             }
@@ -587,8 +618,9 @@ struct LinkChatView: View {
 
     private func scrollToBottom(_ proxy: ScrollViewProxy, items: [LinkChatMessage]) {
         guard let last = items.last else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-            withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            // Ohne Animation, damit der Sprung ans Ende zuverlässig landet.
+            proxy.scrollTo(last.id, anchor: .bottom)
         }
     }
 
@@ -733,41 +765,97 @@ private struct LinkMessageBubble: View {
     }
 }
 
-/// Sucht Personen/Gruppen und fügt sie dem geöffneten Channel hinzu
-/// (externe E-Mail-Adressen werden als Gast/Federation angeboten).
-struct LinkAddParticipantSheet: View {
+/// Zeigt die Teilnehmer des geöffneten Channels; bei Owner-/Moderator-Recht
+/// können Teilnehmer gesucht/hinzugefügt und per Swipe entfernt werden.
+struct LinkParticipantsSheet: View {
     @ObservedObject var viewModel: LinkViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
+    @State private var removeCandidate: LinkParticipant?
 
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    HStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                        TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $query)
-                            .textFieldStyle(.plain)
-                            .autocorrectionDisabled()
+                if viewModel.currentRoom?.canManage == true {
+                    Section {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $query)
+                                .textFieldStyle(.plain)
+                                .autocorrectionDisabled()
+                        }
+                    }
+                    if !viewModel.userResults.isEmpty {
+                        Section(NSLocalizedString("_link_add_participant_", comment: "")) {
+                            ForEach(viewModel.userResults) { suggestion in
+                                Button {
+                                    viewModel.addParticipant(suggestion)
+                                    viewModel.loadParticipants()
+                                } label: {
+                                    Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
+                                }
+                            }
+                        }
                     }
                 }
-                Section {
-                    ForEach(viewModel.userResults) { suggestion in
-                        Button {
-                            viewModel.addParticipant(suggestion)
-                            dismiss()
-                        } label: {
-                            Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
+                Section(NSLocalizedString("_link_participants_", comment: "")) {
+                    if viewModel.participants.isEmpty {
+                        Text(NSLocalizedString("_link_no_participants_", comment: ""))
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(viewModel.participants) { participant in
+                            HStack(spacing: 10) {
+                                Image(systemName: participantIcon(participant.actorType))
+                                    .foregroundStyle(.secondary)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(participant.displayName).font(.subheadline)
+                                    if participant.participantType == 1 || participant.participantType == 2 {
+                                        Text(NSLocalizedString("_link_participant_moderator_", comment: ""))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                Spacer()
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if viewModel.currentRoom?.canManage == true {
+                                    Button(role: .destructive) {
+                                        removeCandidate = participant
+                                    } label: {
+                                        Label(NSLocalizedString("_link_participant_remove_", comment: ""), systemImage: "person.crop.circle.badge.minus")
+                                    }
+                                }
+                            }
                         }
                     }
                 }
             }
-            .navigationTitle(NSLocalizedString("_link_add_participant_", comment: ""))
+            .navigationTitle(NSLocalizedString("_link_participants_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
                 }
+            }
+            .confirmationDialog(
+                NSLocalizedString("_link_participant_remove_", comment: ""),
+                isPresented: Binding(
+                    get: { removeCandidate != nil },
+                    set: { if !$0 { removeCandidate = nil } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button(NSLocalizedString("_link_participant_remove_", comment: ""), role: .destructive) {
+                    if let participant = removeCandidate {
+                        viewModel.removeParticipant(participant)
+                    }
+                    removeCandidate = nil
+                }
+                Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                    removeCandidate = nil
+                }
+            } message: {
+                Text(removeCandidate?.displayName ?? "")
             }
         }
         .onChange(of: query) { _, newValue in
@@ -780,6 +868,15 @@ struct LinkAddParticipantSheet: View {
         case "groups": return "person.3.fill"
         case "federated": return "globe"
         case "email_guest": return "envelope.badge.person.crop"
+        default: return "person.crop.circle"
+        }
+    }
+
+    private func participantIcon(_ actorType: String) -> String {
+        switch actorType {
+        case "guests": return "person.crop.circle.badge.questionmark"
+        case "federated_users": return "globe"
+        case "emails": return "envelope"
         default: return "person.crop.circle"
         }
     }

@@ -152,6 +152,30 @@ struct LinkChatMessage: Decodable, Identifiable {
 }
 
 /// A Talk rich-object parameter (only the fields we use).
+/// Teilnehmer einer Konversation (GET participants).
+struct LinkParticipant: Decodable, Identifiable {
+    let attendeeId: Int
+    let actorType: String
+    let actorId: String
+    let displayName: String
+    let participantType: Int
+
+    var id: Int { attendeeId }
+
+    enum CodingKeys: String, CodingKey {
+        case attendeeId, actorType, actorId, displayName, participantType
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
+        actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
+        actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? actorId
+        participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
+    }
+}
+
 struct LinkRichObject: Decodable {
     let type: String?
     let name: String?

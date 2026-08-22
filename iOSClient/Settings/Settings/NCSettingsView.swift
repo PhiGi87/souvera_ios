@@ -125,17 +125,27 @@ struct NCSettingsView: View {
             }
 
             // Display
+            // Standard-Kalenderansicht
+            Section(header: Text(NSLocalizedString("_settings_calendar_default_view_", comment: "")).font(.headline), content: {
+                Picker(NSLocalizedString("_settings_calendar_default_view_", comment: ""), selection: Binding(
+                    get: { SouveraCalendarSettings.defaultView },
+                    set: { SouveraCalendarSettings.setDefaultView($0) }
+                )) {
+                    Text(NSLocalizedString("_calendar_day_", comment: "")).tag("day")
+                    Text(NSLocalizedString("_calendar_three_days_", comment: "")).tag("threeDay")
+                    Text(NSLocalizedString("_calendar_month_", comment: "")).tag("month")
+                }
+                .pickerStyle(.segmented)
+            })
             // Auto-Refresh (Mail & Kalender)
             Section(header: Text(NSLocalizedString("_settings_auto_refresh_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_auto_refresh_interval_", comment: ""), selection: Binding(
-                    get: { SouveraAutoRefresh.intervalMinutes },
-                    set: { SouveraAutoRefresh.set(minutes: $0) }
+                    get: { SouveraAutoRefresh.intervalSeconds },
+                    set: { SouveraAutoRefresh.set(seconds: $0) }
                 )) {
-                    ForEach(SouveraAutoRefresh.presets, id: \.self) { minutes in
-                        Text(minutes == 0
-                             ? NSLocalizedString("_settings_auto_refresh_off_", comment: "")
-                             : String(format: NSLocalizedString("_settings_auto_refresh_minutes_", comment: ""), minutes))
-                            .tag(minutes)
+                    ForEach(SouveraAutoRefresh.presets, id: \.self) { seconds in
+                        Text(SouveraAutoRefresh.label(for: seconds))
+                            .tag(seconds)
                     }
                 }
                 .pickerStyle(.segmented)

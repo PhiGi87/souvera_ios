@@ -424,6 +424,34 @@ final class MailViewModel: ObservableObject {
         }
     }
 
+    /// Leert den Papierkorb (zerstört alle Nachrichten des aktuellen
+    /// Ordners dauerhaft).
+    func emptyTrash() async {
+        guard let mailbox = currentMailbox,
+              case let .success(items) = messages,
+              !items.isEmpty else { return }
+        var ok = false
+        if useJmap {
+            do {
+                _ = try await jmapApi?.deleteEmails(accountId: mailbox.accountId, emailIds: items.map(\.id))
+                ok = true
+            } catch {
+                JmapLog.write("emptyTrash jmap failed: \(error)")
+            }
+        } else {
+            ok = await imapClient?.emptyMailbox(mailboxPath: mailbox.path) ?? false
+        }
+        actionFeedback = MailSendFeedback(
+            success: ok,
+            message: ok
+                ? NSLocalizedString("_mail_trash_emptied_", comment: "")
+                : NSLocalizedString("_mail_trash_empty_failed_", comment: "")
+        )
+        if ok {
+            await syncMessages()
+        }
+    }
+
     // MARK: - Shield Blacklist
 
     /// Übernimmt die Absender der Nachrichten in die Shield-Blacklist.

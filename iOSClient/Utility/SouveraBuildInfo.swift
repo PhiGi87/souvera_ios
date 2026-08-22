@@ -33,26 +33,46 @@ struct SouveraBuildInfo {
 
 /// Background refresh interval setting: while the app is active, the mail and
 /// calendar modules re-sync automatically; the same interval is used as an
-/// advisory value for BGAppRefresh. 0 = off.
+/// advisory value for BGAppRefresh. Werte in Sekunden; 0 = aus.
 enum SouveraAutoRefresh {
-    static let defaultsKey = "souvera_auto_refresh_minutes"
-    static let presets: [Int] = [0, 2, 5, 15, 60]
+    static let defaultsKey = "souvera_auto_refresh_seconds"
+    static let legacyMinutesKey = "souvera_auto_refresh_minutes"
+    /// Aus, 30 Sekunden, 2, 5 und 15 Minuten.
+    static let presets: [Int] = [0, 30, 120, 300, 900]
 
-    static var intervalMinutes: Int {
-        // Standard 5 Minuten, solange der User nichts geändert hat.
-        if UserDefaults.standard.object(forKey: defaultsKey) == nil {
-            return 5
+    static var intervalSeconds: Int {
+        if UserDefaults.standard.object(forKey: defaultsKey) != nil {
+            return UserDefaults.standard.integer(forKey: defaultsKey)
         }
-        return UserDefaults.standard.integer(forKey: defaultsKey)
+        // Migration vom früheren Minuten-Wert.
+        let legacy = UserDefaults.standard.integer(forKey: legacyMinutesKey)
+        if legacy > 0 {
+            let seconds = legacy * 60
+            UserDefaults.standard.set(seconds, forKey: defaultsKey)
+            UserDefaults.standard.removeObject(forKey: legacyMinutesKey)
+            return seconds
+        }
+        // Standard: 5 Minuten.
+        return 300
     }
 
     static var interval: TimeInterval? {
-        let minutes = intervalMinutes
-        return minutes > 0 ? TimeInterval(minutes * 60) : nil
+        let seconds = intervalSeconds
+        return seconds > 0 ? TimeInterval(seconds) : nil
     }
 
-    static func set(minutes: Int) {
-        UserDefaults.standard.set(minutes, forKey: defaultsKey)
+    static func set(seconds: Int) {
+        UserDefaults.standard.set(seconds, forKey: defaultsKey)
+    }
+
+    static func label(for seconds: Int) -> String {
+        if seconds <= 0 {
+            return NSLocalizedString("_settings_auto_refresh_off_", comment: "")
+        }
+        if seconds < 60 {
+            return String(format: NSLocalizedString("_settings_auto_refresh_seconds_", comment: ""), seconds)
+        }
+        return String(format: NSLocalizedString("_settings_auto_refresh_minutes_", comment: ""), seconds / 60)
     }
 }
 

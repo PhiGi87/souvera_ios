@@ -28,6 +28,19 @@ struct ShieldView: View {
 
     private var header: some View {
         VStack(spacing: 0) {
+            // Ausgewähltes Postfach (oder "Alle Postfächer") steht über dem
+            // Segment-Toggle.
+            Label(
+                viewModel.selectedMailbox ?? NSLocalizedString("_shield_all_mailboxes_", comment: ""),
+                systemImage: "tray"
+            )
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+            .padding(.bottom, 2)
+
             Picker("", selection: $section) {
                 ForEach(ShieldSection.allCases) { section in
                     Text(NSLocalizedString(section.titleKey, comment: "")).tag(section)
@@ -36,15 +49,6 @@ struct ShieldView: View {
             .pickerStyle(.segmented)
             .padding(.horizontal, 16)
             .padding(.vertical, 6)
-
-            if let mailbox = viewModel.selectedMailbox {
-                Label(mailbox, systemImage: "tray")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 4)
-            }
 
             if !viewModel.warnings.isEmpty {
                 Text(viewModel.warnings.joined(separator: "\n"))
