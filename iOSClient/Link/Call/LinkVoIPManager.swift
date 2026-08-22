@@ -32,7 +32,7 @@ final class LinkVoIPManager: NSObject {
     private(set) var voipToken: String = ""
     /// Call being offered via CallKit right now (set when reporting, consumed
     /// on answer or cleared on decline).
-    private(set) var pendingIncomingCall: (token: String, title: String, hasVideo: Bool)?""
+    private(set) var pendingIncomingCall: (token: String, title: String, hasVideo: Bool)?
     /// The currently running outgoing call (owned by this manager so it can
     /// outlive the call UI when the user switches to the chat).
     private(set) var activeSession: CallSession?
