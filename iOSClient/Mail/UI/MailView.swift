@@ -524,49 +524,49 @@ private struct MailMessageListView: View {
             )
         }
         .toolbar {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                if editing {
+            if editing {
+                ToolbarItemGroup(placement: .topBarTrailing) {
                     Button(NSLocalizedString("_done_", comment: "")) {
                         editing = false
                         selected.removeAll()
                     }
-                } else {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        if viewModel.currentMailbox?.kind == .trash {
-                            Button {
-                                showEmptyTrashConfirm = true
-                            } label: {
-                                Image(systemName: "trash.slash")
-                            }
-                            .accessibilityLabel(NSLocalizedString("_mail_trash_empty_", comment: ""))
+                }
+            } else {
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if viewModel.currentMailbox?.kind == .trash {
+                        Button {
+                            showEmptyTrashConfirm = true
+                        } label: {
+                            Image(systemName: "trash.slash")
                         }
+                        .accessibilityLabel(NSLocalizedString("_mail_trash_empty_", comment: ""))
                     }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Menu {
-                            ForEach(MailSortOrder.allCases) { order in
-                                Button {
-                                    viewModel.sortOrder = order
-                                } label: {
-                                    if viewModel.sortOrder == order {
-                                        Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
-                                    } else {
-                                        Text(NSLocalizedString(order.titleKey, comment: ""))
-                                    }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Menu {
+                        ForEach(MailSortOrder.allCases) { order in
+                            Button {
+                                viewModel.sortOrder = order
+                            } label: {
+                                if viewModel.sortOrder == order {
+                                    Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
+                                } else {
+                                    Text(NSLocalizedString(order.titleKey, comment: ""))
                                 }
                             }
-                        } label: {
-                            Image(systemName: "arrow.up.arrow.down")
                         }
-                        .accessibilityLabel(NSLocalizedString("_mail_sort_", comment: ""))
-                        if !isEmptyList {
-                            Button { editing = true } label: { Image(systemName: "checklist") }
-                                .accessibilityLabel(NSLocalizedString("_edit_", comment: ""))
-                        }
+                    } label: {
+                        Image(systemName: "arrow.up.arrow.down")
                     }
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
-                            .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
+                    .accessibilityLabel(NSLocalizedString("_mail_sort_", comment: ""))
+                    if !isEmptyList {
+                        Button { editing = true } label: { Image(systemName: "checklist") }
+                            .accessibilityLabel(NSLocalizedString("_edit_", comment: ""))
                     }
+                }
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
+                        .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
                 }
             }
         }
