@@ -331,6 +331,11 @@ struct NCSettingsView: View {
         }
         .navigationBarTitle(NSLocalizedString("_settings_", comment: ""))
         .defaultViewModifier(model)
+        .alert(NSLocalizedString("_settings_language_", comment: ""), isPresented: $showLanguageRestart) {
+            Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
+        } message: {
+            Text(NSLocalizedString("_language_restart_", comment: ""))
+        }
     }
 }
 
