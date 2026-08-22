@@ -97,7 +97,7 @@ struct MailView: View {
     private var navigationTitle: String {
         switch viewModel.route {
         case .folders: return NSLocalizedString("_mail_", comment: "")
-        case .messages: return 
+        case .messages: return "" 
         case .detail: return ""
         case .compose: return NSLocalizedString("_mail_compose_", comment: "")
         case .search: return NSLocalizedString("_mail_search_", comment: "")
