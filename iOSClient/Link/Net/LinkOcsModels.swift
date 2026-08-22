@@ -61,7 +61,7 @@ struct LinkConversation: Decodable, Identifiable {
     func lastMessageText() -> String {
         guard let msg = lastMessage else { return "" }
         if let file = msg.fileName() { return "📎 \(file)" }
-        return msg.message
+        return msg.displayText()
     }
 
     var isOneToOne: Bool { type == LinkRoomType.oneToOne.rawValue }
@@ -122,6 +122,21 @@ struct LinkChatMessage: Decodable, Identifiable {
     }
 
     var isSystemMessage: Bool { !systemMessage.isEmpty }
+
+    /// Systemnachrichten kommen mit Platzhaltern wie {user1} - hier werden
+    /// sie durch die Namen aus den messageParameters ersetzt.
+    func displayText() -> String {
+        var text = message
+        if isSystemMessage, let params = messageParameters, !params.isEmpty {
+            for (key, object) in params {
+                let name = object.name ?? object.id ?? ""
+                if !name.isEmpty {
+                    text = text.replacingOccurrences(of: "{\(key)}", with: name)
+                }
+            }
+        }
+        return text
+    }
 
     /// The deleted message id when this is a `message_deleted` system
     /// message (Talk keeps the deleted id in the parent rich object).

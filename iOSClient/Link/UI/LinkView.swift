@@ -695,6 +695,6 @@ private struct LinkMessageBubble: View {
 
     private var displayText: String {
         if let file = message.fileName() { return "📎 \(file)" }
-        return message.message
+        return message.displayText()
     }
 }
