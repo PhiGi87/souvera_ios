@@ -216,11 +216,6 @@ struct NCSettingsView: View {
             if capabilities.e2EEEnabled {
                 E2EESection(model: model)
             }
-            .alert(NSLocalizedString("_settings_language_", comment: ""), isPresented: $showLanguageRestart) {
-                Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
-            } message: {
-                Text(NSLocalizedString("_language_restart_", comment: ""))
-            }
             // `Advanced` Section
             Section {
                 NavigationLink(destination: LazyView {
