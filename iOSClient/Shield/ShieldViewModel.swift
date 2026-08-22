@@ -30,6 +30,18 @@ final class ShieldViewModel: ObservableObject {
 
     private let api = ShieldApi()
 
+    /// Das persönliche Postfach des aktiven Kontos - nur dort darf man
+    /// Whitelist-/Blacklist-Einträge hinzufügen.
+    var personalMailbox: String? {
+        NCManageDatabase.shared.getActiveTableAccount()?.user
+    }
+
+    /// Hinzufügen erlaubt, wenn das persönliche Postfach ausgewählt ist.
+    var canAddEntry: Bool {
+        guard let personalMailbox else { return false }
+        return selectedMailbox == personalMailbox
+    }
+
     func filteredSpam() -> [ShieldSpamEntry] {
         guard case let .success(all) = spamQuarantine else { return [] }
         guard let selectedMailbox else { return all }

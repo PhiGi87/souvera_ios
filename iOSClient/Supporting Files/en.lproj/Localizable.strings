@@ -992,3 +992,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_add_participant_"           = "Add participant";
 "_link_participant_added_"         = "%@ added";
 "_link_participant_add_failed_"    = "Participant could not be added";
+"_shield_add_whitelist_"          = "Add to whitelist";
+"_shield_add_blacklist_"          = "Add to blacklist";
+"_shield_add_personal_only_"      = "Adding is only possible for the personal mailbox (%@).";

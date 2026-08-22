@@ -6,6 +6,7 @@ import Foundation
 import UIKit
 import SwiftUI
 import NextcloudKit
+import Combine
 
 /// View model used by `NCMoreView` to build and handle the content of the More tab.
 ///
@@ -43,6 +44,7 @@ final class NCMoreModel: ObservableObject {
     @Published var activeAccountDisplayName: String = ""
     @Published var activeAccountHost: String = ""
     @Published var activeAccountUser: String = ""
+    private var shieldAddVisibility: AnyCancellable?""
     @Published var activeAvatar: UIImage?
     @Published var accountList: [AccountItem] = []
 
@@ -452,6 +454,13 @@ final class NCMoreModel: ObservableObject {
                 action: nil
             )
             addButton.primaryAction = UIAction { _ in addTrigger.fire = true }
+            addButton.isHidden = true
+            shieldAddVisibility?.cancel()
+            shieldAddVisibility = addTrigger.$showAdd
+                .receive(on: RunLoop.main)
+                .sink { visible in
+                    addButton.isHidden = !visible
+                }
             let mailboxButton = UIBarButtonItem(
                 image: UIImage(systemName: "tray.full"),
                 style: .plain,
@@ -776,9 +785,11 @@ final class ShieldMailboxPicker: ObservableObject {
     @Published var selected: String?
 }
 
-/// Fires a one-shot "add entry" request from the Shield host bar.
+/// Fires a one-shot "add entry" request from the Shield host bar. The "+"
+/// is only visible on the whitelist/blacklist sections.
 final class ShieldAddTrigger: ObservableObject {
     @Published var fire = false
+    @Published var showAdd = false
 }
 
 /// Marker for screens pushed from the More tab that manage their own

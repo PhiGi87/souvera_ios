@@ -83,14 +83,32 @@ struct ShieldView: View {
         .onChange(of: addTrigger.fire) { _, fired in
             if fired {
                 addTrigger.fire = false
+                guard section == .whitelist || section == .blacklist else { return }
                 addEntryList = section == .blacklist ? .blacklist : .whitelist
+                guard viewModel.canAddEntry else {
+                    if let personal = viewModel.personalMailbox {
+                        viewModel.feedback = ShieldViewModel.ShieldFeedback(
+                            success: false,
+                            message: String(format: NSLocalizedString("_shield_add_personal_only_", comment: ""), personal)
+                        )
+                    }
+                    return
+                }
                 showAddEntry = true
             }
+        }
+        .onChange(of: section) { _, newValue in
+            addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
+        }
+        .onAppear {
+            addTrigger.showAdd = section == .whitelist || section == .blacklist
         }
         .sheet(item: $detailEntry) { entry in
             ShieldDetailSheet(viewModel: viewModel, entry: entry)
         }
-        .alert(NSLocalizedString("_shield_add_entry_", comment: ""), isPresented: $showAddEntry) {
+        .alert(addEntryList == .blacklist
+               ? NSLocalizedString("_shield_add_blacklist_", comment: "")
+               : NSLocalizedString("_shield_add_whitelist_", comment: ""), isPresented: $showAddEntry) {
             TextField(NSLocalizedString("_shield_entry_placeholder_", comment: ""), text: $addEntryText)
                 .keyboardType(.emailAddress)
                 .autocapitalization(.none)
