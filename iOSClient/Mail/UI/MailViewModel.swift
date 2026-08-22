@@ -72,6 +72,10 @@ final class MailViewModel: ObservableObject {
     var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
     private var queryStates: [String: String] = [:]
+    /// Mail-IDs, deren Flags lokal geändert wurden (mailboxId → emailIds).
+    /// Der inkrementelle Sync lädt diese immer frisch nach, weil Flag-
+    /// Änderungen in queryChanges nicht als Query-Änderung auftauchen.
+    private var dirtyFlagIds: [String: Set<String>] = [:]
     private var identityId: String?
     private var allIdentities: [[String: Any]] = []
     private var hasRecoveredCredential = false
@@ -145,7 +149,7 @@ final class MailViewModel: ObservableObject {
                         await self.refreshMessages()
                     } else {
                         // Ordnerübersicht: Postfächer (Ungelesen-Zähler) aktualisieren
-                        await self.loadMailboxes()
+                        await self.loadMailboxes(autoOpenInbox: false)
                     }
                 }
             }
@@ -243,12 +247,16 @@ final class MailViewModel: ObservableObject {
 
     // MARK: - Folders
 
-    func loadMailboxes() async {
+    /// Lädt die Postfachliste neu. `autoOpenInbox` steuert, ob danach
+    /// automatisch der Posteingang geöffnet wird - nur beim Start/Retry
+    /// gewünscht, niemals bei internen Aktualisierungen (Badge-Abgleich etc.),
+    /// weil der Routen-Wechsel den Nutzer aus der aktuellen Ansicht wirft.
+    func loadMailboxes(autoOpenInbox: Bool = true) async {
         mailboxes = .loading
         if useJmap {
-            await loadMailboxesJmap()
+            await loadMailboxesJmap(autoOpenInbox: autoOpenInbox)
         } else {
-            await loadMailboxesImap()
+            await loadMailboxesImap(autoOpenInbox: autoOpenInbox)
         }
         updateUnreadBadge()
     }
@@ -276,13 +284,13 @@ final class MailViewModel: ObservableObject {
         postUnreadBadge(count)
     }
 
-    private func loadMailboxesImap() async {
+    private func loadMailboxesImap(autoOpenInbox: Bool) async {
         guard let client = imapClient else { return }
         switch await client.fetchMailboxes() {
         case let .success(boxes):
             allMailboxes = sortMailboxGroups(boxes)
             mailboxes = .success(allMailboxes)
-            if let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+            if autoOpenInbox, let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         case let .failure(message):
             if message.contains("[AUTH]"), !hasRecoveredCredential {
                 await recoverCredentialAndReload()
@@ -292,7 +300,7 @@ final class MailViewModel: ObservableObject {
         }
     }
 
-    private func loadMailboxesJmap() async {
+    private func loadMailboxesJmap(autoOpenInbox: Bool) async {
         guard let api = jmapApi else { return }
         do {
             let session = try await jmapClient?.refreshSession()
@@ -336,7 +344,7 @@ final class MailViewModel: ObservableObject {
             allMailboxes = sorted
             mailboxes = .success(sorted)
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
-            if let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+            if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         } catch {
             if isJmapAuthRecoverable(error), !hasRecoveredCredential {
                 await recoverCredentialAndReload()
@@ -350,7 +358,7 @@ final class MailViewModel: ObservableObject {
                 allMailboxes = sorted
                 mailboxes = .success(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
-                if let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+                if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
                 return
             }
             JmapLog.write("mailbox load failed: \(error.localizedDescription)")
@@ -473,7 +481,7 @@ final class MailViewModel: ObservableObject {
         )
         if ok {
             await syncMessages()
-            await loadMailboxes()
+            await loadMailboxes(autoOpenInbox: false)
         }
     }
 
@@ -568,15 +576,24 @@ final class MailViewModel: ObservableObject {
                         if let dict = item as? [String: Any], let id = dict["id"] as? String { return id }
                         return nil
                     } ?? []
+                    // Flag-Änderungen (gelesen/ungelesen, Flag) sind KEINE
+                    // Query-Result-Änderungen - queryChanges liefert sie
+                    // nicht. Lokal geänderte Nachrichten deshalb immer frisch
+                    // nachladen, sonst würde ein inkrementeller Sync den
+                    // alten (Cache-)Zustand zurückspielen.
+                    let dirty = Array(dirtyFlagIds[cacheKey] ?? [])
                     var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
-                    if !added.isEmpty {
-                        let fetched = try await api.getEmails(accountId: accId, ids: added)
+                    let refetch = Array(Set(added + dirty))
+                    if !refetch.isEmpty {
+                        let fetched = try await api.getEmails(accountId: accId, ids: refetch)
                         emails = mergeEmails(existing: emails, incoming: fetched)
+                        dirtyFlagIds[cacheKey] = nil
                     }
                     let newState = changes.optString("newQueryState") ?? state
                     queryStates[cacheKey] = newState
                     MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
                     messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                    JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
                     return
                 } catch {
                     // Incremental path failed - fall through to a full refresh.
@@ -590,11 +607,13 @@ final class MailViewModel: ObservableObject {
             queryStates[cacheKey] = state
             guard !ids.isEmpty else {
                 messages = .success([])
+                dirtyFlagIds[cacheKey] = nil
                 MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: [], queryState: state)
                 return
             }
             let list = try await api.getEmails(accountId: accId, ids: ids)
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: list, queryState: state)
+            dirtyFlagIds[cacheKey] = nil
             messages = .success(list.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
         } catch {
             // Only real connectivity problems count as "offline"; anything
@@ -735,6 +754,15 @@ final class MailViewModel: ObservableObject {
 
     func setRead(_ messagesToMark: [MailMessage], _ read: Bool) async {
         guard let first = messagesToMark.first else { return }
+        // Badge-Delta VOR der lokalen Aktualisierung berechnen, sonst ist
+        // `isRead` bereits der neue Wert und das Delta wäre immer 0.
+        var badgeDelta = 0
+        if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal {
+            for message in messagesToMark {
+                if read && !message.isRead { badgeDelta -= 1 }
+                if !read && message.isRead { badgeDelta += 1 }
+            }
+        }
         if useJmap {
             guard let api = jmapApi,
                   let client = jmapClient,
@@ -757,19 +785,37 @@ final class MailViewModel: ObservableObject {
                 applyLocalKeyword(message, keyword: "$seen", value: read)
             }
         }
-        // Badge sofort lokal anpassen (ohne auf den Server-Roundtrip zu warten).
-        if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal {
-            var delta = 0
-            for message in messagesToMark {
-                if read && !message.isRead { delta -= 1 }
-                if !read && message.isRead { delta += 1 }
-            }
-            if delta != 0 {
-                postUnreadBadge(personalInboxUnread + delta)
-            }
+        // Badge + Ordnerzähler sofort lokal anpassen - KEIN loadMailboxes()
+        // hinterher: dessen openMailbox würde die Route umschalten und den
+        // Nutzer aus Detail-/Listenansicht werfen.
+        if badgeDelta != 0 {
+            postUnreadBadge(personalInboxUnread + badgeDelta)
         }
-        // Server-Abgleich korrigiert anschließend eventuelle Drift.
-        Task { await loadMailboxes() }
+        applyUnreadDeltaToMailboxList(delta: badgeDelta)
+    }
+
+    /// Zieht ein Unread-Delta lokal durch die Postfachliste (Badge-Abgleich
+    /// ohne Server-Roundtrip), damit Ordnerzähler nicht veralten.
+    private func applyUnreadDeltaToMailboxList(delta: Int) {
+        guard delta != 0, let mailbox = currentMailbox else { return }
+        var updated = allMailboxes.map { box -> Mailbox in
+            guard box.id == mailbox.id else { return box }
+            var copy = box
+            copy.unreadCount = max(0, copy.unreadCount + delta)
+            return copy
+        }
+        if updated != allMailboxes {
+            allMailboxes = updated
+        }
+        if case let .success(boxes) = mailboxes {
+            updated = boxes.map { box -> Mailbox in
+                guard box.id == mailbox.id else { return box }
+                var copy = box
+                copy.unreadCount = max(0, copy.unreadCount + delta)
+                return copy
+            }
+            mailboxes = .success(updated)
+        }
     }
 
     func toggleFlagged(_ message: MailMessage) {
@@ -805,6 +851,7 @@ final class MailViewModel: ObservableObject {
         } else if keyword == "$flagged" {
             updated.isFlagged = value
         }
+        dirtyFlagIds[message.mailboxId, default: []].insert(message.emailId)
         updateLocalMessage(updated)
 
         // Mirror the change into the cached snapshot.
@@ -893,6 +940,7 @@ final class MailViewModel: ObservableObject {
         let accountName = mailAccount?.account ?? ""
         MailCache.remove(account: accountName, mailboxId: mailbox.id)
         queryStates.removeValue(forKey: mailbox.id)
+        dirtyFlagIds.removeValue(forKey: mailbox.id)
     }
 
     private func afterListMutation(_ removedIds: [String]) {
@@ -906,7 +954,7 @@ final class MailViewModel: ObservableObject {
                 postUnreadBadge(personalInboxUnread - unreadRemoved)
             }
         }
-        Task { await loadMailboxes() }
+        Task { await loadMailboxes(autoOpenInbox: false) }
         // Remove from the visible list (server confirms the change).
         if case var .success(list) = messages {
             list.removeAll { removedIds.contains($0.emailId) }

@@ -128,12 +128,16 @@ struct MailView: View {
             }
         }
         if case let .messages(mailbox) = viewModel.route {
-            // Ordnername linksbündig neben dem Zurück-Pfeil (nicht zentriert).
-            ToolbarItem(placement: .topBarLeading) {
-                Text(mailbox.displayName)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .padding(.leading, 6)
+            // Ordnername als normale Schrift linksbündig - als .principal-
+            // Element (keine Button-Kapsel), volle Restbreite zwischen
+            // Zurück-Pfeil und Trailing-Items, damit nichts abgeschnitten wird.
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 0) {
+                    Text(mailbox.displayName)
+                        .font(.headline)
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                }
             }
         }
         if case let .detail(message) = viewModel.route {

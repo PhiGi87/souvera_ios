@@ -134,16 +134,28 @@ struct LinkChatMessage: Decodable, Identifiable {
     var isSystemMessage: Bool { !systemMessage.isEmpty }
 
     /// AttributedString für die Bubble: {mention-...}-Platzhalter werden als
-    /// @Name mit hellem Orangen-Hintergrund (Pill) gerendert, alle anderen
-    /// Platzhalter als Klartext ersetzt.
+    /// @Name mit hellem Orangen-Hintergrund (Pill) gerendet, alle anderen
+    /// Platzhalter als Klartext ersetzt. Rohe @"Name"-Reste (alte, unparste
+    /// Nachrichten) werden ebenfalls als Pille dargestellt.
     func attributedDisplayText() -> AttributedString {
+        var legacyMentions: [String: String] = [:]
+        var working = message
+        var legacyIndex = 0
+        while let range = working.range(of: #"@\"[^\"]+\""#, options: .regularExpression) {
+            let raw = String(working[range])
+            let name = String(raw.dropFirst(2).dropLast())
+            let key = "mention-legacy-\(legacyIndex)"
+            legacyIndex += 1
+            legacyMentions[key] = name
+            working.replaceSubrange(range, with: "{\(key)}")
+        }
         var output = AttributedString()
-        var remaining = Substring(message)
+        var remaining = Substring(working)
         while let open = remaining.firstIndex(of: "{") {
             output += AttributedString(String(remaining[..<open]))
             if let close = remaining[open...].firstIndex(of: "}") {
                 let key = String(remaining[remaining.index(after: open)..<close])
-                let name = messageParameters?[key]?.name ?? messageParameters?[key]?.id ?? key
+                let name = messageParameters?[key]?.name ?? messageParameters?[key]?.id ?? legacyMentions[key] ?? key
                 var piece = AttributedString(key.hasPrefix("mention-") ? "@\(name)" : name)
                 if key.hasPrefix("mention-") {
                     piece.foregroundColor = .orange

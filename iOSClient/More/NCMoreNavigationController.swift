@@ -12,14 +12,37 @@ class NCMoreNavigationController: NCMainNavigationController {
         if viewController === navigationController.viewControllers.first {
             // Nur die Mehr-Root bekommt den blauen Souvera-Header mit Logo.
             applySouveraHeader(viewController)
+            // Die Basisklasse setzt ihr Standard-Erscheinungsbild asynchron in
+            // einem Task NACH diesem Aufruf wieder zurück. Deshalb hier
+            // ebenfalls asynchron erneut anwenden - mein Task ist danach
+            // eingereiht und gewinnt.
+            Task { @MainActor in
+                if viewController === navigationController.topViewController {
+                    applySouveraHeader(viewController)
+                }
+            }
         } else {
             // Gepushte Module: Standard-Optik, kein blaues Header-Erbe.
             setNavigationBarAppearance()
             viewController.navigationItem.leftBarButtonItem = nil
+            viewController.navigationItem.titleView = nil
             navigationBar.overrideUserInterfaceStyle = .unspecified
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
             }
+        }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        guard let root = viewControllers.first,
+              root === topViewController,
+              let titleView = root.navigationItem.titleView else { return }
+        // Logo-Behälter über die volle Balkenbreite ziehen (linksbündiges
+        // Logo trotz zentrierter titleView-Position).
+        let width = max(0, navigationBar.bounds.width - 32)
+        if abs(titleView.bounds.width - width) > 1 || titleView.bounds.width == 0 {
+            titleView.frame = CGRect(x: 0, y: 0, width: width, height: 44)
         }
     }
 
@@ -29,35 +52,42 @@ class NCMoreNavigationController: NCMainNavigationController {
         guard let gradient = Self.souveraGradientImage() else { return }
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
-        appearance.backgroundImage = gradient
+        // Nur die Pattern-Hintergrundfarbe - backgroundImage kollidiert auf
+        // iOS 26 mit dem Liquid-Glass-Effekt und wird ignoriert/geglast.
         appearance.backgroundColor = UIColor(patternImage: gradient)
+        appearance.backgroundEffect = nil
         appearance.shadowColor = .clear
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
         navigationBar.standardAppearance = appearance
         navigationBar.scrollEdgeAppearance = appearance
         navigationBar.compactAppearance = appearance
         navigationBar.compactScrollEdgeAppearance = appearance
+        navigationBar.isTranslucent = false
         navigationBar.tintColor = .white
         navigationBar.overrideUserInterfaceStyle = .light
 
         viewController.navigationItem.title = ""
+        viewController.navigationItem.leftBarButtonItem = nil
+
         // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
-        // Header - kein Kapsel-/Button-Look.
+        // Header. titleView bekommt auf iOS 26 KEINE Button-Kapsel (anders
+        // als leftBarButtonItem-CustomViews).
         let imageView = UIImageView(image: UIImage(named: "souveraLogo"))
         imageView.contentMode = .scaleAspectFit
         imageView.translatesAutoresizingMaskIntoConstraints = false
-        let container = UIView()
+        let container = UIView(frame: CGRect(x: 0, y: 0, width: 200, height: 44))
+        container.autoresizingMask = [.flexibleWidth, .flexibleLeftMargin]
         container.addSubview(imageView)
         NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
             imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 24)
+            imageView.heightAnchor.constraint(equalToConstant: 24),
+            imageView.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor)
         ])
-        viewController.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: container)
+        viewController.navigationItem.titleView = container
     }
 
-    /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Balkenbild.
+    /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Kachelbild.
     private static func souveraGradientImage() -> UIImage? {
         let size = CGSize(width: 1, height: 120)
         let layer = CAGradientLayer()

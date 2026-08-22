@@ -781,6 +781,28 @@ private struct LinkMessageRow: View {
         return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
     }
 
+    /// Emoji-Reaktions-Pills, halb überlappend am unteren Bubble-Rand.
+    @ViewBuilder
+    private func reactionPills(message: LinkChatMessage) -> some View {
+        HStack(spacing: 4) {
+            ForEach(message.reactions.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, count in
+                Text("\(emoji) \(count)")
+                    .font(.caption2)
+                    .foregroundStyle(message.reactionsSelf.contains(emoji) ? .white : .primary)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule().fill(message.reactionsSelf.contains(emoji)
+                            ? Color.orange.opacity(0.95)
+                            : Color(.secondarySystemBackground))
+                    )
+                    .overlay(
+                        Capsule().stroke(message.reactionsSelf.contains(emoji) ? Color.orange : .clear, lineWidth: 1)
+                    )
+            }
+        }
+    }
+
     var body: some View {
         VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
             if showTime {
@@ -812,28 +834,20 @@ private struct LinkMessageRow: View {
             HStack(spacing: 0) {
                 if isOwn { Spacer(minLength: 40) }
                 LinkMessageBubble(message: message, isOwn: isOwn)
+                    .overlay(alignment: .bottomTrailing) {
+                        // Reaktionen am unteren rechten Bubble-Rand, leicht
+                        // überlappend (WhatsApp-Stil): etwas nach rechts
+                        // eingerückt und halb über die Unterkante gehängt,
+                        // ohne den Nachrichtentext zu verdecken.
+                        if !message.reactions.isEmpty {
+                            reactionPills(message: message)
+                                .offset(x: 8, y: 10)
+                        }
+                    }
                 if !isOwn { Spacer(minLength: 40) }
             }
             .onLongPressGesture {
                 onLongPress(message)
-            }
-            if !message.reactions.isEmpty {
-                HStack(spacing: 4) {
-                    ForEach(message.reactions.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, count in
-                        Text("\(emoji) \(count)")
-                            .font(.caption2)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                Capsule().fill(message.reactionsSelf.contains(emoji)
-                                    ? Color.orange.opacity(0.35)
-                                    : Color(.secondarySystemBackground))
-                            )
-                            .overlay(
-                                Capsule().stroke(message.reactionsSelf.contains(emoji) ? Color.orange : .clear, lineWidth: 1)
-                            )
-                    }
-                }
             }
         }
         .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)

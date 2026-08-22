@@ -331,7 +331,41 @@ final class LinkViewModel: ObservableObject {
         guard case let .chat(token, _) = route else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
-        Task { await api.sendMessage(token: token, message: trimmed) }
+        let outgoing = mentionAwareMessage(trimmed)
+        Task { await api.sendMessage(token: token, message: outgoing) }
+    }
+
+    /// Talk parst Mentions nur in der Form @"<ID>" (User-ID,
+    /// guest/<sessionId>, federated_user/<cloudId>, ...) - @"Anzeigename"
+    /// bleibt im Nachrichtentext roh stehen. Deshalb vor dem Senden alle
+    /// @"<Anzeigename>"-Vorkommen der Raum-Teilnehmer auf die ID-Form
+    /// mappen (genau wie es Talk Web mit `mentionId` tut).
+    private func mentionAwareMessage(_ text: String) -> String {
+        var result = text
+        let candidates = participants
+            .filter { !$0.displayName.trimmingCharacters(in: .whitespaces).isEmpty }
+            .sorted { $0.displayName.count > $1.displayName.count }
+        for participant in candidates {
+            let name = participant.displayName
+            let mentionId = Self.mentionId(for: participant)
+            guard mentionId != name else { continue }
+            result = result.replacingOccurrences(of: "@\"\(name)\"", with: "@\"\(mentionId)\"")
+        }
+        return result
+    }
+
+    /// Talk-Mention-ID je Akteurstyp (wie Talk Web): users → userId,
+    /// guests → guest/<sessionId>, federated_user → federated_user/<cloudId>,
+    /// emails → email/<address>, groups → group/<gid>, sonst unverändert.
+    static func mentionId(for participant: LinkParticipant) -> String {
+        switch participant.actorType {
+        case "users": return participant.actorId
+        case "guests": return "guest/\(participant.actorId)"
+        case "federated_users": return "federated_user/\(participant.actorId)"
+        case "emails": return "email/\(participant.actorId)"
+        case "groups": return "group/\(participant.actorId)"
+        default: return participant.actorId
+        }
     }
 
     // MARK: - Delete / edit

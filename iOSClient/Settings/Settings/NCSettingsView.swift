@@ -151,6 +151,24 @@ struct NCSettingsView: View {
                 }
                 .pickerStyle(.segmented)
             })
+            // Sprache (In-App-Wechsel, wirkt nach Neustart)
+            Section(header: Text(NSLocalizedString("_settings_language_", comment: "")).font(.headline), content: {
+                Picker(NSLocalizedString("_settings_language_", comment: ""), selection: Binding(
+                    get: { SouveraLanguage.currentCode },
+                    set: { code in
+                        SouveraLanguage.set(code)
+                        showLanguageRestart = true
+                    }
+                )) {
+                    Text(NSLocalizedString("_souvera_language_system_", comment: "")).tag("system")
+                    Text("Deutsch").tag("de")
+                    Text("English").tag("en")
+                    Text("Español").tag("es")
+                    Text("Français").tag("fr")
+                    Text("Nederlands").tag("nl")
+                }
+                .pickerStyle(.menu)
+            })
             Section(header: Text(NSLocalizedString("_display_", comment: "")).font(.headline), content: {
                 NavigationLink(destination: LazyView {
                     NCDisplayView(model: NCDisplayModel(controller: model.controller))

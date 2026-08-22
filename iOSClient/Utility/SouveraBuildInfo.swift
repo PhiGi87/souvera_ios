@@ -31,10 +31,10 @@ struct SouveraBuildInfo {
     }
 }
 
-/// In-App-Sprachwahl (System/Deutsch/English/Nederlands).
+/// In-App-Sprachwahl (System/Deutsch/English/Español/Français/Nederlands).
 enum SouveraLanguage {
     static let defaultsKey = "AppleLanguages"
-    static let supportedCodes = ["de", "en", "nl"]
+    static let supportedCodes = ["de", "en", "es", "fr", "nl"]
 
     static var currentCode: String {
         let languages = UserDefaults.standard.stringArray(forKey: defaultsKey) ?? []
