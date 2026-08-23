@@ -18,6 +18,7 @@
 		B7E3D1A5C8F2496E02B4A7C1 /* SouveraMaintenanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */; };
 		F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */; };
 		E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
+		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */; };
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
 		FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */; };
@@ -4743,6 +4744,7 @@
 				F7CAFE202F17A37C00DB35A5 /* ProgressQuantizer.swift in Sources */,
 				F343A4B62A1E084200DDA874 /* PHAsset+Extension.swift in Sources */,
 				F70BFC7520E0FA7D00C67599 /* NCUtility.swift in Sources */,
+				A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */,
 				F71DFA222F59FB9A003A93C5 /* View+Extension.swift in Sources */,
 				AF22B20C277C6F4D00DAB0CC /* NCShareCell.swift in Sources */,
 				F7B769AB2B7A0B2000C1AAEB /* NCManageDatabase+Metadata+Session.swift in Sources */,
