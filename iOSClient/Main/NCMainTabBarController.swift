@@ -222,12 +222,13 @@ class NCMainTabBarController: UITabBarController {
         }
     }
 
-    /// Badge-Icon: 32-pt-Canvas (3x-Skala) - Basis-Symbol unten links,
-    /// rote Zahl-Kapsel bzw. oranger Punkt rechts überlappend am Icon.
-    /// Inaktiv wird das Symbol weiß gezeichnet (wie die native TabBar-Optik),
-    /// ausgewählt in Souvera-Blau. Das Badge ist pixeldeckend gerendert.
+    /// Badge-Icon: 25-pt-Canvas (TabBar-Standardmaß, 3x-Skala) - das Symbol
+    /// füllt den Canvas vollflächig, damit die sichtbare Breite exakt der
+    /// normalen TabBar-Iconbreite entspricht. Die rote Kapsel bzw. der
+    /// orange Punkt liegen voll deckend rechts überlappend innerhalb des
+    /// Canvas. Inaktiv wird das Symbol weiß gezeichnet, ausgewählt blau.
     private static func badgedIcon(baseName: String, count: Int?, dot: Bool, selected: Bool) -> UIImage? {
-        let size = CGSize(width: 32, height: 32)
+        let size = CGSize(width: 25, height: 25)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3
         format.opaque = false
@@ -236,18 +237,18 @@ class NCMainTabBarController: UITabBarController {
             let iconColor: UIColor = selected
                 ? NCBrandColor.shared.customer
                 : UIColor.white
-            if let symbol = UIImage(systemName: baseName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)) {
+            if let symbol = UIImage(systemName: baseName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .regular)) {
                 symbol.withTintColor(iconColor, renderingMode: .alwaysOriginal)
-                    .draw(in: CGRect(x: 4.5, y: 5, width: 23, height: 23))
+                    .draw(in: CGRect(origin: .zero, size: size))
             }
             if let count, count > 0 {
                 let text = count > 99 ? "99+" : "\(count)"
-                let font = UIFont.systemFont(ofSize: 9, weight: .bold)
+                let font = UIFont.systemFont(ofSize: 8.5, weight: .bold)
                 let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
                 let textSize = (text as NSString).size(withAttributes: attrs)
-                let capsuleH: CGFloat = 11.5
-                let capsuleW = max(textSize.width + 5, 12)
-                let capsuleRect = CGRect(x: 32 - capsuleW - 0.5, y: 0.5, width: capsuleW, height: capsuleH)
+                let capsuleH: CGFloat = 11
+                let capsuleW = max(textSize.width + 4.5, 11)
+                let capsuleRect = CGRect(x: 25 - capsuleW - 0.5, y: 0.5, width: capsuleW, height: capsuleH)
                 let path = UIBezierPath(roundedRect: capsuleRect, cornerRadius: capsuleH / 2)
                 UIColor.systemRed.setFill()
                 path.fill()
@@ -259,7 +260,7 @@ class NCMainTabBarController: UITabBarController {
                     withAttributes: attrs
                 )
             } else if dot {
-                let dotRect = CGRect(x: 24.5, y: 1, width: 7, height: 7)
+                let dotRect = CGRect(x: 25 - 6.5, y: 0.5, width: 6, height: 6)
                 let path = UIBezierPath(ovalIn: dotRect)
                 UIColor.systemOrange.setFill()
                 path.fill()
