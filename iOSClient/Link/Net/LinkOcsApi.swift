@@ -40,7 +40,7 @@ actor LinkOcsApi {
     /// roh im LinkCache gesichert.
     func listConversations() async -> [LinkConversation]? {
         guard let body = await get("\(base)/api/v4/room") else { return nil }
-        LinkCache.saveConversations(raw: body)
+        LinkCache.saveConversations(raw: Data(body.utf8))
         return decodeList(body)
     }
 
@@ -76,7 +76,7 @@ actor LinkOcsApi {
             "\(lastKnownParam)&timeout=\(timeoutSeconds)&limit=\(Self.pageLimit)&setReadMarker=1"
         guard let body = await get(url, longPoll: future) else { return [] }
         if !future {
-            LinkCache.saveMessages(token: token, raw: body)
+            LinkCache.saveMessages(token: token, raw: Data(body.utf8))
         }
         return decodeList(body)
     }
