@@ -32,6 +32,12 @@ final class JmapApi {
 
     /// Mailbox/set: anlegen (name + optionale parentId), umbenennen
     /// (id + name) und löschen (destroy, wahlweise inkl. Mails).
+    ///
+    /// Stalwart-Abhängigkeiten (live verifiziert):
+    /// - `create` NUR als Map (Client-ID -> Objekt), Array-Form wird mit
+    ///   400 notRequest abgelehnt
+    /// - `update` als Map mit der Mailbox-ID als KEY (Patch ohne "id")
+    /// - `destroy` als Array von IDs
     func setMailboxes(
         accountId: String,
         create: [[String: Any]] = [],
@@ -42,10 +48,22 @@ final class JmapApi {
         var args: [String: Any] = [:]
         args["accountId"] = try resolveAccountArg(accountId)
         if !create.isEmpty {
-            args["create"] = create
+            var createMap: [String: Any] = [:]
+            for (index, object) in create.enumerated() {
+                createMap["c\(index)"] = object
+            }
+            args["create"] = createMap
         }
         if !update.isEmpty {
-            args["update"] = update
+            var updateMap: [String: Any] = [:]
+            for object in update {
+                if let id = object["id"] as? String {
+                    var patch = object
+                    patch.removeValue(forKey: "id")
+                    updateMap[id] = patch
+                }
+            }
+            args["update"] = updateMap
         }
         if !destroy.isEmpty {
             args["destroy"] = destroy
