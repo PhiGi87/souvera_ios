@@ -49,8 +49,9 @@ class NCMoreNavigationController: NCMainNavigationController {
         layoutSouveraLogo()
     }
 
-    /// Positioniert das Logo: x = 16 pt (Flucht mit der Menüliste), vertikal
-    /// zentriert im 44-pt-Inhaltsstreifen unter der Statusleiste.
+    /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus
+    /// kleiner Korrektur), vertikal an der Höhe der rechten Buttons (12 pt
+    /// über der Streifenmitte - Ausgleich der Wortmarken-Padding im PNG).
     private func layoutSouveraLogo() {
         guard let logo = souveraLogoView else { return }
         let bar = navigationBar
@@ -60,9 +61,10 @@ class NCMoreNavigationController: NCMainNavigationController {
         let image = logo.image
         let ratio = (image?.size.height ?? logoHeight) > 0 ? (image?.size.width ?? 1) / (image?.size.height ?? 1) : 1
         let width = min(logoHeight * ratio, bar.bounds.width - 32)
+        let y = max(topInset, topInset + (contentHeight - logoHeight) / 2 - 6)
         logo.frame = CGRect(
-            x: 16,
-            y: topInset + (contentHeight - logoHeight) / 2,
+            x: 20,
+            y: y,
             width: width,
             height: logoHeight
         )
