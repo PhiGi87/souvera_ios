@@ -163,7 +163,7 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
         let user = typing?["user"] as? [String: Any]
         let name = user?["displayName"] as? String
         let actorId = user?["id"] as? String ?? user?["sessionId"] as? String ?? ""
-        guard !name.isEmpty, actorId != ownUserId else { return }
+        guard let name, !name.isEmpty, actorId != ownUserId else { return }
 
         if type == "signalingTypingStop" {
             activeTypers.removeValue(forKey: actorId)
