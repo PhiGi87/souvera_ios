@@ -49,6 +49,11 @@ struct Mailbox: Identifiable, Hashable {
     let namespace: MailboxNamespace
     let ownerIdentity: String?
     let parentId: String?
+    /// JMAP myRights: darf dieser Ordner umbenannt/gelöscht werden bzw.
+    /// Unterordner aufnehmen? (Systemordner liefern hier false.)
+    let mayRename: Bool
+    let mayDelete: Bool
+    let mayCreateChild: Bool
 
     static func makeId(account: String, path: String) -> String { "\(account)|\(path)" }
 

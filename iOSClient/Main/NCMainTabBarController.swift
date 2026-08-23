@@ -190,44 +190,87 @@ class NCMainTabBarController: UITabBarController {
         selectedIndex = 0
     }
 
-    // MARK: - Badges (voll deckend in die Tab-Icons gerendert)
+    // MARK: - Badges
 
     private weak var moreTabBarItem: UITabBarItem?
+    /// Rotes Mail-Badge als Overlay über dem Tab (Stand 8233e7c) - das
+    /// Tab-Icon selbst bleibt das Original-System-Symbol (exakte Breite).
+    private var mailBadgeLabel: UILabel?
 
     private func updateMailBadge(_ count: Int) {
-        applyBadge(to: mailTabBarItem, baseName: "envelope.fill", count: count, dot: false)
-        JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
+        if count > 0 {
+            if mailBadgeLabel == nil {
+                let label = UILabel()
+                label.font = .systemFont(ofSize: 11, weight: .bold)
+                label.textColor = .white
+                label.backgroundColor = .systemRed
+                label.isOpaque = true
+                label.alpha = 1
+                label.textAlignment = .center
+                label.clipsToBounds = true
+                label.layer.backgroundColor = UIColor.systemRed.cgColor
+                label.layer.borderColor = UIColor.white.cgColor
+                label.layer.borderWidth = 1
+                tabBar.addSubview(label)
+                tabBar.bringSubviewToFront(label)
+                mailBadgeLabel = label
+            }
+            mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
+            JmapLog.write("Mail tab badge set -> \(count)")
+        } else {
+            mailBadgeLabel?.removeFromSuperview()
+            mailBadgeLabel = nil
+            JmapLog.write("Mail tab badge set -> 0")
+        }
+        layoutMailBadge()
     }
 
+    /// Link-Badge als System-Badge (Stand 8233e7c); das Tab-Icon bleibt das
+    /// Original-System-Symbol.
     private func updateLinkBadge(_ count: Int) {
-        applyBadge(to: linkTabBarItem, baseName: "bubble.left.and.bubble.right.fill", count: count, dot: false)
+        linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
     }
 
     private func updateMaintenanceDot(_ maintenance: Bool) {
         applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: maintenance)
     }
 
-    /// Zeichnet das Badge VOLL DECKEND direkt in das Tab-Icon - keine
-    /// Subviews und keine Transparenz-Probleme auf iOS 26 (die TabBar
-    /// kann nichts mehr überlagern oder durchscheinen lassen).
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutMailBadge()
+    }
+
+    private func layoutMailBadge() {
+        guard let badge = mailBadgeLabel else { return }
+        let itemCount = max(viewControllers?.count ?? 1, 1)
+        guard itemCount > 0, tabBar.bounds.width > 0 else { return }
+        let itemWidth = tabBar.bounds.width / CGFloat(itemCount)
+        let mailIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 100 }) ?? 0
+        badge.sizeToFit()
+        let width = max(badge.bounds.width + 10, 18)
+        let height: CGFloat = 18
+        // Position wie Commit 8233e7c: rechts über dem Mail-Icon, leicht
+        // nach innen gerückt.
+        let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
+        badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
+        badge.layer.cornerRadius = height / 2
+        tabBar.bringSubviewToFront(badge)
+    }
+
+    /// Rendert den Wartungs-Punkt in das Mehr-Icon (nur Punkt-Variante).
     private func applyBadge(to item: UITabBarItem?, baseName: String, count: Int?, dot: Bool) {
         guard let item else { return }
-        let showCount = (count ?? 0) > 0
-        if showCount || dot {
-            item.image = Self.badgedIcon(baseName: baseName, count: showCount ? count : nil, dot: dot && !showCount, selected: false)
-            item.selectedImage = Self.badgedIcon(baseName: baseName, count: showCount ? count : nil, dot: dot && !showCount, selected: true)
+        if dot {
+            item.image = Self.badgedIcon(baseName: baseName, count: nil, dot: true, selected: false)
+            item.selectedImage = Self.badgedIcon(baseName: baseName, count: nil, dot: true, selected: true)
         } else {
             item.image = UIImage(systemName: baseName)
             item.selectedImage = UIImage(systemName: baseName)
         }
     }
 
-    /// Badge-Icon: Canvas = exakt die intrinsische Größe des Original-Symbols
-    /// (dieselbe Quelle wie die anderen Tab-Icons), damit die Breite mit den
-    /// übrigen Menüpunkten identisch ist. Das Symbol wird ohne Größen-Vorgabe
-    /// vollflächig gezeichnet (Original-Pixel); die rote Kapsel bzw. der
-    /// orange Punkt liegen nur überlappend oben rechts - das Symbol wird nie
-    /// geschrumpft. Inaktiv weiß, ausgewählt blau, Badge voll deckend.
+    /// Punkt-Icon für den Mehr-Tab (Canvas = Original-Symbolgröße, Punkt
+    /// voll deckend rechts überlappend).
     private static func badgedIcon(baseName: String, count: Int?, dot: Bool, selected: Bool) -> UIImage? {
         let base = UIImage(systemName: baseName)
         var canvasSize = base?.size ?? CGSize(width: 25, height: 25)

@@ -394,7 +394,9 @@ final class MailViewModel: ObservableObject {
                 name: box.name, path: box.path, kind: box.kind,
                 unreadCount: box.unreadCount, messageCount: box.messageCount,
                 jmapId: box.jmapId, role: box.role, namespace: box.namespace,
-                ownerIdentity: box.ownerIdentity, parentId: parentId
+                ownerIdentity: box.ownerIdentity, parentId: parentId,
+                mayRename: box.mayRename, mayDelete: box.mayDelete,
+                mayCreateChild: box.mayCreateChild
             )
         }
         return box
@@ -455,8 +457,64 @@ final class MailViewModel: ObservableObject {
         }
     }
 
-    /// Leert den Papierkorb (zerstört alle Nachrichten des aktuellen
-    /// Ordners dauerhaft).
+    // MARK: - Ordner-Verwaltung (JMAP Mailbox/set)
+
+    /// Legt einen Ordner an - auf Root-Ebene (parent nil) oder als
+    /// Unterordner des übergebenen Elternordners.
+    func createMailbox(name: String, parent: Mailbox?) async {
+        guard let api = jmapApi, let client = jmapClient,
+              let session = try? await client.refreshSession() else { return }
+        let accId = parent?.accountId ?? session.primaryAccountId
+        var create: [String: Any] = ["name": name]
+        if let parentId = parent?.jmapId, !parentId.isEmpty {
+            create["parentId"] = parentId
+        }
+        do {
+            _ = try await api.setMailboxes(accountId: accId, create: [create])
+            JmapLog.write("Mailbox created: \(name) parent=\(parent?.jmapId ?? "root")")
+            await loadMailboxes(autoOpenInbox: false)
+        } catch {
+            JmapLog.write("Mailbox create failed: \(error)")
+        }
+    }
+
+    /// Benennt einen Ordner um (nur bei mayRename).
+    func renameMailbox(_ mailbox: Mailbox, to name: String) async {
+        guard let api = jmapApi, let client = jmapClient,
+              let id = mailbox.jmapId, !id.isEmpty,
+              (try? await client.refreshSession()) != nil else { return }
+        do {
+            _ = try await api.setMailboxes(accountId: mailbox.accountId, update: [["id": id, "name": name]])
+            JmapLog.write("Mailbox renamed: \(mailbox.name) -> \(name)")
+            await loadMailboxes(autoOpenInbox: false)
+        } catch {
+            JmapLog.write("Mailbox rename failed: \(error)")
+        }
+    }
+
+    /// Löscht einen Ordner (nur bei mayDelete); `removeEmails` steuert, ob
+    /// die enthaltenen Mails mitgelöscht werden (onDestroyRemoveEmails).
+    func deleteMailbox(_ mailbox: Mailbox, removeEmails: Bool) async {
+        guard let api = jmapApi, let client = jmapClient,
+              let id = mailbox.jmapId, !id.isEmpty,
+              (try? await client.refreshSession()) != nil else { return }
+        do {
+            _ = try await api.setMailboxes(
+                accountId: mailbox.accountId,
+                destroy: [id],
+                onDestroyRemoveEmails: removeEmails
+            )
+            JmapLog.write("Mailbox destroyed: \(mailbox.name) removeEmails=\(removeEmails)")
+            if currentMailbox?.id == mailbox.id {
+                currentMailbox = nil
+                route = .folders
+            }
+            await loadMailboxes(autoOpenInbox: false)
+        } catch {
+            JmapLog.write("Mailbox destroy failed: \(error)")
+        }
+    }
+
     func emptyTrash() async {
         guard let mailbox = currentMailbox,
               case let .success(items) = messages,

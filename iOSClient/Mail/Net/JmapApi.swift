@@ -28,7 +28,31 @@ final class JmapApi {
         try await client.refreshSession().primaryAccountId
     }
 
-    // MARK: - Mailbox/get
+    // MARK: - Mailbox/get & Mailbox/set
+
+    /// Mailbox/set: anlegen (name + optionale parentId), umbenennen
+    /// (id + name) und löschen (destroy, wahlweise inkl. Mails).
+    func setMailboxes(
+        accountId: String,
+        create: [[String: Any]] = [],
+        update: [[String: Any]] = [],
+        destroy: [String] = [],
+        onDestroyRemoveEmails: Bool = true
+    ) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
+        args["accountId"] = try resolveAccountArg(accountId)
+        if !create.isEmpty {
+            args["create"] = create
+        }
+        if !update.isEmpty {
+            args["update"] = update
+        }
+        if !destroy.isEmpty {
+            args["destroy"] = destroy
+            args["onDestroyRemoveEmails"] = onDestroyRemoveEmails
+        }
+        return try await client.singleCall("Mailbox/set", args: args)
+    }
 
     func getMailboxes(accountId: String) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]

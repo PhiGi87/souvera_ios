@@ -12,6 +12,7 @@ struct MailView: View {
     @StateObject private var viewModel = MailViewModel()
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
+    @State private var showNewFolderSheet = false
 
     var body: some View {
         NavigationStack {
@@ -80,11 +81,15 @@ struct MailView: View {
         )) { context in
             MailComposeView(viewModel: viewModel, context: context)
         }
+        .sheet(isPresented: $showNewFolderSheet) {
+            MailNewFolderSheet(viewModel: viewModel)
+        }
         .sheet(item: Binding(
             get: { detailMoveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },
             set: { if $0 == nil { detailMoveTarget = nil } }
         )) { state in
             MailMovePickerView(
+                viewModel: viewModel,
                 title: state.messages.first?.subject ?? "",
                 mailboxes: state.mailboxes,
                 onSelect: { target in
@@ -202,6 +207,10 @@ struct MailView: View {
                 AutoRefreshRingView(viewModel: viewModel)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button { showNewFolderSheet = true } label: { Image(systemName: "folder.badge.plus") }
+                    .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { viewModel.route = .search } label: { Image(systemName: "magnifyingglass") }
             }
         }
@@ -255,6 +264,9 @@ struct MailSendBanner: View {
 private struct MailFolderListView: View {
     @ObservedObject var viewModel: MailViewModel
     @State private var showScrollTop = false
+    @State private var renameTarget: Mailbox?
+    @State private var renameText = ""
+    @State private var deleteTarget: Mailbox?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -295,7 +307,9 @@ private struct MailFolderListView: View {
                             MailboxTreeRow(
                                 viewModel: viewModel,
                                 node: row.node,
-                                depth: row.depth
+                                depth: row.depth,
+                                renameTarget: $renameTarget,
+                                deleteTarget: $deleteTarget
                             )
                         }
                     }
@@ -347,6 +361,46 @@ private struct MailFolderListView: View {
                     showScrollTop = visible
                 }
             }
+        }
+        .alert(NSLocalizedString("_mail_rename_folder_", comment: ""), isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField(NSLocalizedString("_mail_folder_name_", comment: ""), text: $renameText)
+            Button(NSLocalizedString("_ok_", comment: "")) {
+                if let target = renameTarget {
+                    let newName = renameText.trimmingCharacters(in: .whitespaces)
+                    if !newName.isEmpty {
+                        Task { await viewModel.renameMailbox(target, to: newName) }
+                    }
+                }
+                renameTarget = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { renameTarget = nil }
+        }
+        .confirmationDialog(
+            NSLocalizedString("_mail_delete_folder_", comment: ""),
+            isPresented: Binding(
+                get: { deleteTarget != nil },
+                set: { if !$0 { deleteTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_mail_delete_folder_with_mails_", comment: ""), role: .destructive) {
+                if let target = deleteTarget {
+                    Task { await viewModel.deleteMailbox(target, removeEmails: true) }
+                }
+                deleteTarget = nil
+            }
+            Button(NSLocalizedString("_mail_delete_folder_only_", comment: ""), role: .destructive) {
+                if let target = deleteTarget {
+                    Task { await viewModel.deleteMailbox(target, removeEmails: false) }
+                }
+                deleteTarget = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text(deleteTarget.map { String(format: NSLocalizedString("_mail_delete_folder_confirm_", comment: ""), $0.displayName) } ?? "")
         }
         }
     }
@@ -427,27 +481,22 @@ private struct MailFolderListView: View {
 
 /// One collapsible row of the mailbox tree: folders with children get a
 /// disclosure chevron and start collapsed; unread counts sum up children.
-private struct MailboxTreeRow: View {
-    @ObservedObject var viewModel: MailViewModel
+/// Basis-Zeile des Ordnerbaums (Chevron, Icon, Name, Unread-Zähler) -
+/// gemeinsam genutzt von Ordnerliste, Verschieben-Fenster und
+/// Positionsauswahl beim Anlegen.
+private struct MailboxTreeRowBase: View {
     let node: MailboxNode
     let depth: Int
-
-    private var isExpanded: Bool {
-        viewModel.expandedMailboxIds.contains(node.mailbox.id)
-    }
+    let isExpanded: Bool
+    let onToggleExpand: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
         HStack(spacing: 0) {
             if node.children.isEmpty {
                 Color.clear.frame(width: 28, height: 1)
             } else {
-                Button {
-                    if isExpanded {
-                        viewModel.expandedMailboxIds.remove(node.mailbox.id)
-                    } else {
-                        viewModel.expandedMailboxIds.insert(node.mailbox.id)
-                    }
-                } label: {
+                Button(action: onToggleExpand) {
                     Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
@@ -456,9 +505,7 @@ private struct MailboxTreeRow: View {
                 }
                 .buttonStyle(.plain)
             }
-            Button {
-                viewModel.openMailbox(node.mailbox)
-            } label: {
+            Button(action: onTap) {
                 HStack(spacing: 8) {
                     Image(systemName: icon(for: node.mailbox.kind))
                         .font(.body)
@@ -490,6 +537,49 @@ private struct MailboxTreeRow: View {
         case .trash: return "trash.fill"
         case .junk: return "xmark.bin.fill"
         case .regular: return "folder.fill"
+        }
+    }
+}
+
+/// Ordnerliste-Zeile: öffnet den Ordner; Swipe bietet Umbenennen/Löschen
+/// (nur wenn die JMAP-Rechte mayRename/mayDelete es erlauben).
+private struct MailboxTreeRow: View {
+    @ObservedObject var viewModel: MailViewModel
+    let node: MailboxNode
+    let depth: Int
+    @Binding var renameTarget: Mailbox?
+    @Binding var deleteTarget: Mailbox?
+
+    var body: some View {
+        MailboxTreeRowBase(
+            node: node,
+            depth: depth,
+            isExpanded: viewModel.expandedMailboxIds.contains(node.mailbox.id),
+            onToggleExpand: {
+                if viewModel.expandedMailboxIds.contains(node.mailbox.id) {
+                    viewModel.expandedMailboxIds.remove(node.mailbox.id)
+                } else {
+                    viewModel.expandedMailboxIds.insert(node.mailbox.id)
+                }
+            },
+            onTap: { viewModel.openMailbox(node.mailbox) }
+        )
+        .swipeActions(edge: .trailing) {
+            if node.mailbox.mayRename {
+                Button {
+                    renameTarget = node.mailbox
+                } label: {
+                    Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+            if node.mailbox.mayDelete {
+                Button(role: .destructive) {
+                    deleteTarget = node.mailbox
+                } label: {
+                    Label(NSLocalizedString("_mail_delete_folder_", comment: ""), systemImage: "trash")
+                }
+            }
         }
     }
 }
@@ -537,6 +627,7 @@ private struct MailMessageListView: View {
         }
         .sheet(item: moveSheetBinding) { state in
             MailMovePickerView(
+                viewModel: viewModel,
                 title: state.messages.count == 1
                     ? (state.messages.first?.subject.isEmpty == false ? state.messages.first!.subject : NSLocalizedString("_mail_no_subject_", comment: ""))
                     : "\(state.messages.count)",
@@ -849,25 +940,30 @@ private struct MoveSheetState: Identifiable, Equatable {
 }
 
 private struct MailMovePickerView: View {
+    @ObservedObject var viewModel: MailViewModel
     let title: String
     let mailboxes: [Mailbox]
     let onSelect: (Mailbox) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var expanded: Set<String> = []
 
     var body: some View {
         NavigationStack {
-            List(mailboxes) { box in
-                Button {
-                    onSelect(box)
-                    dismiss()
-                } label: {
-                    HStack {
-                        Image(systemName: "folder").foregroundStyle(Color(NCBrandColor.shared.customer))
-                        Text(box.displayName)
-                    }
+            List {
+                ForEach(rows(for: viewModel.mailboxTree(for: mailboxes))) { row in
+                    MailboxTreeRowBase(
+                        node: row.node,
+                        depth: row.depth,
+                        isExpanded: expanded.contains(row.node.mailbox.id),
+                        onToggleExpand: { toggle(row.node.mailbox.id) },
+                        onTap: {
+                            onSelect(row.node.mailbox)
+                            dismiss()
+                        }
+                    )
                 }
-                .buttonStyle(.plain)
             }
+            .listStyle(.insetGrouped)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -875,6 +971,137 @@ private struct MailMovePickerView: View {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
                 }
             }
+        }
+    }
+
+    private struct TreeRow: Identifiable {
+        let node: MailboxNode
+        let depth: Int
+        var id: String { node.id }
+    }
+
+    private func rows(for nodes: [MailboxNode], depth: Int = 0) -> [TreeRow] {
+        var result: [TreeRow] = []
+        for node in nodes {
+            result.append(TreeRow(node: node, depth: depth))
+            if expanded.contains(node.mailbox.id) {
+                result.append(contentsOf: rows(for: node.children, depth: depth + 1))
+            }
+        }
+        return result
+    }
+
+    private func toggle(_ id: String) {
+        if expanded.contains(id) {
+            expanded.remove(id)
+        } else {
+            expanded.insert(id)
+        }
+    }
+}
+
+/// Sheet zum Anlegen eines Ordners: Name + Position (Root oder
+/// Unterordner im Baum).
+private struct MailNewFolderSheet: View {
+    @ObservedObject var viewModel: MailViewModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var parent: Mailbox?
+    @State private var expanded: Set<String> = []
+
+    private var personalFolders: [Mailbox] {
+        if case let .success(boxes) = viewModel.mailboxes {
+            return boxes.filter { $0.namespace == .personal && $0.jmapId != nil }
+        }
+        return []
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField(NSLocalizedString("_mail_folder_name_", comment: ""), text: $name)
+                        .autocorrectionDisabled()
+                }
+                Section(NSLocalizedString("_mail_folder_position_", comment: "")) {
+                    Button {
+                        parent = nil
+                    } label: {
+                        HStack {
+                            Image(systemName: "tray.full")
+                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            Text(NSLocalizedString("_mail_folder_position_root_", comment: ""))
+                            Spacer()
+                            if parent == nil {
+                                Image(systemName: "checkmark")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    ForEach(rows(for: viewModel.mailboxTree(for: personalFolders))) { row in
+                        MailboxTreeRowBase(
+                            node: row.node,
+                            depth: row.depth,
+                            isExpanded: expanded.contains(row.node.mailbox.id),
+                            onToggleExpand: { toggle(row.node.mailbox.id) },
+                            onTap: { parent = row.node.mailbox }
+                        )
+                        .overlay(alignment: .trailing) {
+                            if parent?.id == row.node.mailbox.id {
+                                Image(systemName: "checkmark")
+                                    .font(.subheadline)
+                                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_mail_new_folder_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("_mail_create_", comment: "")) {
+                        let targetParent = parent
+                        let trimmed = name.trimmingCharacters(in: .whitespaces)
+                        Task {
+                            await viewModel.createMailbox(name: trimmed, parent: targetParent)
+                            dismiss()
+                        }
+                    }
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+        }
+    }
+
+    private struct TreeRow: Identifiable {
+        let node: MailboxNode
+        let depth: Int
+        var id: String { node.id }
+    }
+
+    private func rows(for nodes: [MailboxNode], depth: Int = 0) -> [TreeRow] {
+        var result: [TreeRow] = []
+        for node in nodes {
+            result.append(TreeRow(node: node, depth: depth))
+            if expanded.contains(node.mailbox.id) {
+                result.append(contentsOf: rows(for: node.children, depth: depth + 1))
+            }
+        }
+        return result
+    }
+
+    private func toggle(_ id: String) {
+        if expanded.contains(id) {
+            expanded.remove(id)
+        } else {
+            expanded.insert(id)
         }
     }
 }
@@ -1000,6 +1227,7 @@ private struct MailDetailView: View {
             set: { if $0 == nil { moveTarget = nil } }
         )) { state in
             MailMovePickerView(
+                viewModel: viewModel,
                 title: state.messages.first?.subject ?? "",
                 mailboxes: state.mailboxes,
                 onSelect: { target in

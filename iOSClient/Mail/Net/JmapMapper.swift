@@ -23,6 +23,7 @@ enum JmapMapper {
         let role = json.optString("role")
         let kind = resolveMailboxKind(role: role, name: name, path: resolvedPath)
         let jmapId = json.optString("id")
+        let rights = json["myRights"] as? [String: Any]
 
         return Mailbox(
             id: Mailbox.makeId(account: account, path: resolvedPath),
@@ -37,7 +38,10 @@ enum JmapMapper {
             role: role,
             namespace: namespace,
             ownerIdentity: ownerIdentity,
-            parentId: json.optString("parentId")
+            parentId: json.optString("parentId"),
+            mayRename: (rights?["mayRename"] as? Bool) ?? true,
+            mayDelete: (rights?["mayDelete"] as? Bool) ?? true,
+            mayCreateChild: (rights?["mayCreateChild"] as? Bool) ?? true
         )
     }
 
