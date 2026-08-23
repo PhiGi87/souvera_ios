@@ -126,8 +126,8 @@ struct ShieldView: View {
             }
     }
 
-    /// Stufe 3: Verhalten (onChange/onAppear).
-    private var withBehavior: some View {
+    /// Stufe 3a: Bindings.
+    private var withBindings: some View {
         withSheets
             .onChange(of: viewModel.mailboxes) { _, newValue in
                 mailboxPicker.mailboxes = newValue
@@ -141,6 +141,11 @@ struct ShieldView: View {
             .onChange(of: section) { _, newValue in
                 addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
             }
+    }
+
+    /// Stufe 3b: Feedback-Toast (eigene Stufe, hält den Type-Checker klein).
+    private var withFeedbackToast: some View {
+        withBindings
             .onChange(of: viewModel.feedback) { _, newValue in
                 if let feedback = newValue {
                     SouveraToastCenter.shared.show(
@@ -158,7 +163,7 @@ struct ShieldView: View {
 
     /// Stufe 4: Initial-Load.
     private var decorated: some View {
-        withBehavior
+        withFeedbackToast
             .task {
                 await viewModel.loadAll()
                 mailboxPicker.mailboxes = viewModel.mailboxes
