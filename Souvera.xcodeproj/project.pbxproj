@@ -19,6 +19,7 @@
 		F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */; };
 		E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
+		D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */; };
 		FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */; };
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
 		FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */; };
@@ -1258,6 +1259,7 @@
 		E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraMaintenanceMonitor.swift"; sourceTree = SOURCE_ROOT; };
 		A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkCache.swift"; sourceTree = SOURCE_ROOT; };
 		B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraAppearance.swift"; sourceTree = SOURCE_ROOT; };
+		C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
 		FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapTypes.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1ADD802F125C3224605E0 /* JmapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapClient.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapApi.swift"; sourceTree = SOURCE_ROOT; };
@@ -3256,6 +3258,7 @@
 				D4B2C3E6F1A8492307B5C8D9 /* LinkBadgeMonitor.swift */,
 				A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */,
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
+				C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */,
 				E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */,
 			);
 			path = Extensions;
@@ -4984,6 +4987,7 @@
 				C9A1F5E2B3D8472109E6F8A7 /* LinkBadgeMonitor.swift in Sources */,
 				F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */,
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
+				D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */,
 				B7E3D1A5C8F2496E02B4A7C1 /* SouveraMaintenanceMonitor.swift in Sources */,
 				FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */,
 				FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */,

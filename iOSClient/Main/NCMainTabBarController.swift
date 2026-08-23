@@ -164,7 +164,7 @@ class NCMainTabBarController: UITabBarController {
             queue: .main
         ) { [weak self] notification in
             let count = notification.object as? Int ?? 0
-            self?.linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+            self?.updateLinkBadge(count)
         }
         // Hintergrund-Poller für ungelesene Talk-Nachrichten (Badge).
         LinkBadgeMonitor.shared.start()
@@ -195,23 +195,16 @@ class NCMainTabBarController: UITabBarController {
     /// Eigenes Badge-Overlay auf der TabBar, damit die Position frei
     /// steuerbar ist (System-Badge sitzt zu weit Richtung Kalender-Tab).
     private var mailBadgeLabel: UILabel?
+    /// Badge am Link-Tab - identischer Stil wie das Mail-Badge.
+    private var linkBadgeLabel: UILabel?
     /// Oranger Info-Punkt am Mehr-Tab bei Wartungsmodus.
     private var maintenanceDot: UIView?
 
     private func updateMailBadge(_ count: Int) {
         if count > 0 {
             if mailBadgeLabel == nil {
-                let label = UILabel()
-                label.font = .systemFont(ofSize: 11, weight: .bold)
-                label.textColor = .white
-                label.backgroundColor = .systemRed
-                label.isOpaque = true
-                label.textAlignment = .center
-                label.clipsToBounds = true
-                label.layer.borderColor = UIColor.white.cgColor
-                label.layer.borderWidth = 1
+                let label = makeBadgeLabel()
                 tabBar.addSubview(label)
-                tabBar.bringSubviewToFront(label)
                 mailBadgeLabel = label
             }
             mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
@@ -224,15 +217,52 @@ class NCMainTabBarController: UITabBarController {
         layoutBadges()
     }
 
+    private func updateLinkBadge(_ count: Int) {
+        if count > 0 {
+            if linkBadgeLabel == nil {
+                let label = makeBadgeLabel()
+                tabBar.addSubview(label)
+                linkBadgeLabel = label
+            }
+            linkBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
+        } else {
+            linkBadgeLabel?.removeFromSuperview()
+            linkBadgeLabel = nil
+        }
+        layoutBadges()
+    }
+
+    /// Voll deckendes rotes Badge-Label (weißes Icon darf nicht durchscheinen).
+    private func makeBadgeLabel() -> UILabel {
+        let label = UILabel()
+        label.font = .systemFont(ofSize: 11, weight: .bold)
+        label.textColor = .white
+        label.backgroundColor = .systemRed
+        label.isOpaque = true
+        label.alpha = 1
+        label.textAlignment = .center
+        label.clipsToBounds = true
+        // Hintergrund zusätzlich explizit als Layer zeichnen - auf
+        // iOS 26 kann die TabBar-Ebene sonst durchscheinen.
+        label.layer.backgroundColor = UIColor.systemRed.cgColor
+        label.layer.borderColor = UIColor.white.cgColor
+        label.layer.borderWidth = 1
+        return label
+    }
+
     private func updateMaintenanceDot(_ maintenance: Bool) {
         if maintenance {
             guard maintenanceDot == nil else { return }
             let dot = UIView()
             dot.backgroundColor = .systemOrange
+            dot.isOpaque = true
+            dot.alpha = 1
             dot.clipsToBounds = true
+            dot.layer.backgroundColor = UIColor.systemOrange.cgColor
             dot.layer.borderColor = UIColor.white.cgColor
             dot.layer.borderWidth = 1
             tabBar.addSubview(dot)
+            tabBar.bringSubviewToFront(dot)
             maintenanceDot = dot
         } else {
             maintenanceDot?.removeFromSuperview()
@@ -262,12 +292,27 @@ class NCMainTabBarController: UITabBarController {
             let centerX = itemWidth * (CGFloat(mailIndex) + 0.70)
             badge.frame = CGRect(x: centerX - width / 2, y: 5, width: width, height: height)
             badge.layer.cornerRadius = height / 2
+            tabBar.bringSubviewToFront(badge)
+        }
+        if let badge = linkBadgeLabel {
+            let linkIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 102 }) ?? 0
+            badge.sizeToFit()
+            let width = max(badge.bounds.width + 10, 17)
+            let height: CGFloat = 17
+            // Identisch zum Mail-Badge: rechts überlappend auf dem Link-Icon.
+            let centerX = itemWidth * (CGFloat(linkIndex) + 0.70)
+            badge.frame = CGRect(x: centerX - width / 2, y: 5, width: width, height: height)
+            badge.layer.cornerRadius = height / 2
+            tabBar.bringSubviewToFront(badge)
         }
         if let dot = maintenanceDot {
+            // Identisch zum Mail-Badge verankert (rechts überlappend auf
+            // dem Mehr-Icon), nur als kleiner Punkt.
             let size: CGFloat = 11
-            let centerX = itemWidth * (CGFloat(moreIndex) + 0.72)
-            dot.frame = CGRect(x: centerX - size / 2, y: 7, width: size, height: size)
+            let centerX = itemWidth * (CGFloat(moreIndex) + 0.70)
+            dot.frame = CGRect(x: centerX - size / 2, y: 5, width: size, height: size)
             dot.layer.cornerRadius = size / 2
+            tabBar.bringSubviewToFront(dot)
         }
     }
 

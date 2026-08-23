@@ -56,10 +56,6 @@ final class MailViewModel: ObservableObject {
     @Published var expandedMailboxIds: Set<String> = []
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
-    @Published var messageScrollPosition: String?
-    /// Scroll-Anker, der NICHT vom SwiftUI-Binding überschrieben wird;
-    /// wird nach dem Erscheinen der Liste erneut ins Binding geschrieben.
-    private(set) var pendingScrollAnchor: String?
     /// Rückmeldung für Aktionen (z. B. Absender in die Blacklist) — wird wie
     /// das Sende-Feedback als Banner angezeigt.
     @Published var actionFeedback: MailSendFeedback?
@@ -524,8 +520,6 @@ final class MailViewModel: ObservableObject {
 
     func openMailbox(_ mailbox: Mailbox) {
         currentMailbox = mailbox
-        messageScrollPosition = nil
-        pendingScrollAnchor = nil
         route = .messages(mailbox: mailbox)
         Task { await syncMessages() }
     }
@@ -666,6 +660,55 @@ final class MailViewModel: ObservableObject {
         } else {
             await syncMessagesImap(mailbox)
         }
+        // Badge autoritativ nachziehen - extern ankommende Mails würden
+        // sonst erst mit dem nächsten Postfach-Load zählen.
+        await refreshUnreadBadge()
+    }
+
+    /// Autoritative Ungelesen-Zählung für den persönlichen Posteingang
+    /// (JMAP Email/query mit notKeyword $seen) - aktualisiert Badge und
+    /// Ordnerzähler. Fallback: komplette Postfachliste (unreadEmails).
+    func refreshUnreadBadge() async {
+        if useJmap {
+            if let api = jmapApi, let client = jmapClient,
+               let session = try? await client.refreshSession() {
+                let accId = session.primaryAccountId
+                if let boxes = try? await api.getMailboxes(accountId: accId),
+                   let inbox = boxes.first(where: { ($0["role"] as? String) == "inbox" }),
+                   let inboxId = inbox["id"] as? String,
+                   let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
+                   let total = resp["total"] as? Int {
+                    JmapLog.write("Mail unread count (Email/query) -> \(total)")
+                    postUnreadBadge(total)
+                    applyUnreadCountToMailboxList(total)
+                    return
+                }
+            }
+        }
+        await loadMailboxes(autoOpenInbox: false)
+    }
+
+    /// Setzt den absoluten Ungelesen-Zähler des persönlichen Posteingangs
+    /// in der Ordnerliste (absolute Variante des Delta-Pfads).
+    private func applyUnreadCountToMailboxList(_ count: Int) {
+        guard let mailbox = currentMailbox,
+              mailbox.kind == .inbox, mailbox.namespace == .personal else { return }
+        var updated = allMailboxes.map { box -> Mailbox in
+            guard box.id == mailbox.id else { return box }
+            var copy = box
+            copy.unreadCount = max(0, count)
+            return copy
+        }
+        allMailboxes = updated
+        if case let .success(boxes) = mailboxes {
+            updated = boxes.map { box -> Mailbox in
+                guard box.id == mailbox.id else { return box }
+                var copy = box
+                copy.unreadCount = max(0, count)
+                return copy
+            }
+            mailboxes = .success(updated)
+        }
     }
 
     private func mergeEmails(existing: [[String: Any]], incoming: [[String: Any]]) -> [[String: Any]] {
@@ -682,8 +725,6 @@ final class MailViewModel: ObservableObject {
     // MARK: - Detail
     func openMessage(_ message: MailMessage, fromSearch: Bool = false) {
         cameFromSearch = fromSearch
-        messageScrollPosition = message.id
-        pendingScrollAnchor = message.id
         route = .detail(message: message)
         body = .loading
         Task {
@@ -693,15 +734,6 @@ final class MailViewModel: ObservableObject {
                 await openMessageImap(message)
             }
         }
-    }
-
-    /// Setzt den Scroll-Anker erneut, NACHDEM die Liste erschienen ist -
-    /// SwiftUI überschreibt das Binding beim Erscheinen mit der obersten
-    /// Zeile; die Änderung im lebenden View löst den Scroll zuverlässig aus.
-    func applyPendingScrollAnchor() {
-        guard let anchor = pendingScrollAnchor else { return }
-        pendingScrollAnchor = nil
-        messageScrollPosition = anchor
     }
 
     private func openMessageImap(_ message: MailMessage) async {

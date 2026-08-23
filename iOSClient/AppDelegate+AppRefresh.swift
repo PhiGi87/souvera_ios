@@ -14,8 +14,13 @@ extension AppDelegate {
     func scheduleAppRefresh() {
         BGTaskScheduler.shared.cancel(taskRequestWithIdentifier: global.refreshTask)
 
+        // Hintergrundaktualisierung deaktiviert: nichts planen.
+        guard let interval = SouveraAutoRefresh.interval else {
+            nkLog(tag: self.global.logTagTask, emoji: .info, message: "Refresh task not scheduled (background refresh disabled)")
+            return
+        }
+
         let request = BGAppRefreshTaskRequest(identifier: global.refreshTask)
-        let interval = SouveraAutoRefresh.interval ?? 60
         request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
 
         do {

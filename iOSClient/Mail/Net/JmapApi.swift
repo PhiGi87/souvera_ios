@@ -50,7 +50,9 @@ final class JmapApi {
         sort: [Any]? = nil,
         limit: Int = 50,
         anchor: Int64? = nil,
-        filterText: String? = nil
+        filterText: String? = nil,
+        calculateTotal: Bool = false,
+        notKeyword: String? = nil
     ) async throws -> [String: Any] {
         var filter: [String: Any] = [:]
         if !inMailboxId.isEmpty {
@@ -58,6 +60,9 @@ final class JmapApi {
         }
         if let text = filterText, !text.isEmpty {
             filter["text"] = text
+        }
+        if let notKeyword, !notKeyword.isEmpty {
+            filter["notKeyword"] = notKeyword
         }
 
         var args: [String: Any] = [:]
@@ -74,6 +79,9 @@ final class JmapApi {
             args["anchor"] = anchor
         }
         args["limit"] = limit
+        if calculateTotal {
+            args["calculateTotal"] = true
+        }
 
         return try await client.singleCall("Email/query", args: args)
     }

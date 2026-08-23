@@ -669,6 +669,11 @@ struct LinkChatView: View {
         }
         .onChange(of: draft) { _, _ in
             updateMentions()
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                viewModel.signaling.stopLocalTyping()
+            } else {
+                viewModel.signaling.notifyTyping()
+            }
         }
     }
 
@@ -793,8 +798,31 @@ struct LinkChatView: View {
         }
     }
 
+    /// Talk-Logik: 1 Person "X schreibt…", 2 "X und Y schreiben…",
+    /// 3+ "Mehrere Personen schreiben…".
+    private func typingText(names: [String]) -> String {
+        switch names.count {
+        case 1:
+            return String(format: NSLocalizedString("_link_typing_one_", comment: ""), names[0])
+        case 2:
+            return String(format: NSLocalizedString("_link_typing_two_", comment: ""), names[0], names[1])
+        default:
+            return NSLocalizedString("_link_typing_many_", comment: "")
+        }
+    }
+
     private var composer: some View {
         VStack(spacing: 0) {
+            if !viewModel.typingNames.isEmpty {
+                HStack(spacing: 6) {
+                    Text(typingText(names: viewModel.typingNames))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TypingDotsView()
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
             if !mentionSuggestions.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(mentionSuggestions) { participant in
@@ -899,6 +927,29 @@ struct LinkChatView: View {
             }
             .padding(10)
         }
+    }
+}
+
+/// Drei animierte Punkte für die Tipp-Anzeige (Talk-Stil).
+private struct TypingDotsView: View {
+    @State private var animate = false
+
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(0..<3, id: \.self) { index in
+                Circle()
+                    .fill(Color.secondary)
+                    .frame(width: 5, height: 5)
+                    .opacity(animate ? 0.25 : 1)
+                    .animation(
+                        .easeInOut(duration: 0.6)
+                            .repeatForever(autoreverses: true)
+                            .delay(Double(index) * 0.18),
+                        value: animate
+                    )
+            }
+        }
+        .onAppear { animate = true }
     }
 }
 
@@ -1137,6 +1188,60 @@ private struct LinkSystemMessageRow: View {
     }
 }
 
+/// Info-Sheet nach dem Einladen eines externen Teilnehmers: Raum-Link
+/// kopieren + Hinweis auf die aktivierte Lobby.
+private struct ExternalInviteSheet: View {
+    let context: LinkViewModel.ExternalInviteContext
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.green.opacity(0.15)).frame(width: 56, height: 56)
+                Image(systemName: "person.crop.circle.badge.checkmark")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.green)
+            }
+            .padding(.top, 6)
+
+            Text(NSLocalizedString("_link_guest_invited_", comment: ""))
+                .font(.headline)
+            Text(context.title)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+
+            Button {
+                UIPasteboard.general.string = context.link
+                dismiss()
+            } label: {
+                Label(NSLocalizedString("_link_copy_room_link_", comment: ""), systemImage: "doc.on.doc")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Color(NCBrandColor.shared.customer))
+
+            HStack(spacing: 8) {
+                Image(systemName: "door.left.hand.open")
+                    .foregroundStyle(.secondary)
+                Text(NSLocalizedString("_link_lobby_enabled_hint_", comment: ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {
+                dismiss()
+            }
+            .font(.subheadline)
+        }
+        .padding(20)
+        .presentationDetents([.medium])
+        .presentationDragIndicator(.visible)
+        .presentationBackground(.regularMaterial)
+    }
+}
+
 /// Zeigt die Teilnehmer des geöffneten Channels; bei Owner-/Moderator-Recht
 /// können Teilnehmer gesucht/hinzugefügt und per Swipe entfernt werden.
 struct LinkParticipantsSheet: View {
@@ -1204,6 +1309,9 @@ struct LinkParticipantsSheet: View {
             }
             .navigationTitle(NSLocalizedString("_link_participants_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $viewModel.externalInviteContext) { context in
+                ExternalInviteSheet(context: context)
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
@@ -1323,22 +1431,42 @@ struct EmojiReactionOverlay: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture { onCancel() }
-            HStack(spacing: 10) {
-                ForEach(emojis, id: \.self) { emoji in
-                    Button {
-                        onPick(emoji)
-                    } label: {
-                        Text(emoji)
-                            .font(.system(size: 26))
-                            .frame(width: 44, height: 44)
-                            .background(Circle().fill(Color(.secondarySystemBackground)))
-                    }
-                }
+            // Passt die Reihe -> einzeilig, sonst automatisch 2 Reihen à 4
+            // (kompakt, läuft nie über den Bildschirmrand).
+            ViewThatFits(in: .horizontal) {
+                emojiRow(Array(emojis))
+                compactGrid
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 14)
             .padding(.vertical, 10)
-            .background(.regularMaterial, in: Capsule())
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
             .shadow(color: .black.opacity(0.2), radius: 16, y: 6)
+        }
+    }
+
+    private func emojiButton(_ emoji: String) -> some View {
+        Button {
+            onPick(emoji)
+        } label: {
+            Text(emoji)
+                .font(.system(size: 22))
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(Color(.secondarySystemBackground)))
+        }
+    }
+
+    private func emojiRow(_ items: [String]) -> some View {
+        HStack(spacing: 6) {
+            ForEach(items, id: \.self) { emoji in
+                emojiButton(emoji)
+            }
+        }
+    }
+
+    private var compactGrid: some View {
+        VStack(spacing: 6) {
+            emojiRow(Array(emojis.prefix(4)))
+            emojiRow(Array(emojis.suffix(4)))
         }
     }
 }

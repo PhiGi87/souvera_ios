@@ -133,8 +133,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         return true
     }
 
-    func applicationWillTerminate(_ application: UIApplication) {
-        if self.notificationSettings?.authorizationStatus != .denied && UIApplication.shared.backgroundRefreshStatus == .available {
+    func applicationDidEnterBackground(_ application: UIApplication) {
+        // Frische BGTask-Planung beim Verlassen der App, damit der
+        // Refresh-Rhythmus (Mail/Kalender/Link) im Hintergrund läuft.
+        scheduleAppRefresh()
+    }
+
+    func applicationWillTerminate(_ application: UIApplication) {        if self.notificationSettings?.authorizationStatus != .denied && UIApplication.shared.backgroundRefreshStatus == .available {
             let content = UNMutableNotificationContent()
             content.title = NCBrandOptions.shared.brand
             content.body = NSLocalizedString("_keep_running_", comment: "")

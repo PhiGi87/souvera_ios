@@ -366,12 +366,10 @@ final class CalendarViewModel: ObservableObject {
         }
         await api.addParticipants(token: room.token, userIds: internalUsers, emails: externalEmails)
 
-        // Public room with external guests: keep them in the lobby until a
-        // moderator lets them in.
-        if !externalEmails.isEmpty {
-            await api.setLobby(token: room.token, enabled: true)
-            JmapLog.write("Calendar talk room \(room.token): lobby enabled for \(externalEmails.count) external guest(s)")
-        }
+        // Lobby immer aktivieren: Eingeladene warten auf die Freigabe,
+        // Owner/Moderatoren sind davon ausgenommen.
+        await api.setLobby(token: room.token, enabled: true)
+        JmapLog.write("Calendar talk room \(room.token): lobby enabled")
 
         let root = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let url = "\(root)/index.php/call/\(room.token)"

@@ -1085,6 +1085,9 @@ private struct CalendarEventEditSheet: View {
                         TextField(NSLocalizedString("_calendar_add_attendee_", comment: ""), text: $attendeeInput)
                             .keyboardType(.emailAddress)
                             .autocapitalization(.none)
+                            .onSubmit {
+                                addAttendee(attendeeInput)
+                            }
                             .onChange(of: attendeeInput) { _, newValue in
                                 suggestionTask?.cancel()
                                 suggestionTask = Task {
@@ -1096,6 +1099,16 @@ private struct CalendarEventEditSheet: View {
                                     }
                                 }
                             }
+                        // Unbekannte E-Mail-Adressen direkt übernehmen -
+                        // nach dem Hinzufügen bleibt das Feld für den
+                        // nächsten Teilnehmer frei.
+                        Button {
+                            addAttendee(attendeeInput)
+                        } label: {
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        }
+                        .disabled(attendeeInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         Button {
                             showContactPicker = true
                         } label: {

@@ -71,6 +71,11 @@ final class LinkViewModel: ObservableObject {
             NotificationCenter.default.addObserver(forName: .linkRoomsChanged, object: nil, queue: .main) { [weak self] _ in
                 self?.loadConversations()
             }
+            // Badge-Poll meldet neue Ungelesen-Zahlen: Liste live
+            // aktualisieren, damit die Kanal-Badges sofort mitzählen.
+            NotificationCenter.default.addObserver(forName: .linkUnreadChanged, object: nil, queue: .main) { [weak self] _ in
+                self?.loadConversations()
+            }
         }
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
         // erstellte Channels sofort sichtbar sind.
@@ -128,6 +133,7 @@ final class LinkViewModel: ObservableObject {
     /// Owner-/Moderator-Recht; die Oberfläche blendet den Button sonst aus).
     func addParticipant(_ suggestion: LinkSuggestion) {
         guard let api, let room = currentRoom else { return }
+        let isExternal = suggestion.source == "email_guest" || suggestion.source == "federated"
         Task {
             switch suggestion.source {
             case "federated":
@@ -142,8 +148,34 @@ final class LinkViewModel: ObservableObject {
                 success: true,
                 message: String(format: NSLocalizedString("_link_participant_added_", comment: ""), suggestion.label)
             )
+            if isExternal {
+                // Externe Gäste: Raum öffentlich schalten (Beitritt über den
+                // Link) und Lobby aktivieren - dann Link-Angebot zeigen.
+                if room.type != 3 {
+                    await api.makeRoomPublic(token: room.token)
+                }
+                await api.setLobby(token: room.token, enabled: true)
+                let root = accountBaseUrl()
+                externalInviteContext = ExternalInviteContext(
+                    title: suggestion.label,
+                    link: "\(root)/index.php/call/\(room.token)"
+                )
+            }
         }
     }
+
+    private func accountBaseUrl() -> String {
+        LinkAccount.active()?.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
+    }
+
+    /// Kontext für das "Externer Teilnehmer eingeladen"-Sheet.
+    struct ExternalInviteContext: Identifiable {
+        let title: String
+        let link: String
+        var id: String { link }
+    }
+
+    @Published var externalInviteContext: ExternalInviteContext?
 
     /// Lädt die Teilnehmerliste des geöffneten Channels.
     func loadParticipants() {
@@ -329,6 +361,7 @@ final class LinkViewModel: ObservableObject {
         messages = .loading
         lastMessageId = 0
         pollTask?.cancel()
+        connectSignaling(token: token)
         guard let api else { return }
         pollTask = Task {
             // Load the newest messages: lookIntoFuture=0 pages backwards from a high anchor id, so
@@ -522,6 +555,8 @@ final class LinkViewModel: ObservableObject {
     func back() -> Bool {
         if case .chat = route {
             pollTask?.cancel()
+            signaling.disconnect()
+            typingNames = []
             route = .home
             loadConversations()
             return true
@@ -529,7 +564,30 @@ final class LinkViewModel: ObservableObject {
         return false
     }
 
-    deinit { pollTask?.cancel() }
+    deinit {
+        pollTask?.cancel()
+        signaling.disconnect()
+    }
+
+    // MARK: - Typing-Indikatoren
+
+    let signaling = LinkSignalingClient()
+    /// Anzeigenamen der aktuell tippenden Personen.
+    @Published var typingNames: [String] = []
+
+    private func connectSignaling(token: String) {
+        signaling.disconnect()
+        typingNames = []
+        signaling.onTypingChanged = { [weak self] names in
+            self?.typingNames = names
+        }
+        guard let account = LinkAccount.active(),
+              let roomId = currentRoom?.roomId, roomId != 0 else { return }
+        Task {
+            guard let settings = await api?.fetchSignalingSettings() else { return }
+            signaling.connect(account: account, token: token, roomId: roomId, settings: settings)
+        }
+    }
 }
 
 /// Kurzer Rückmelde-Hinweis für Link-Aktionen (Toast).

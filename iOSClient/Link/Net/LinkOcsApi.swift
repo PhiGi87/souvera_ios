@@ -70,6 +70,17 @@ actor LinkOcsApi {
         return data
     }
 
+    /// Signaling-Einstellungen für Typing-Indikatoren (externer Modus):
+    /// Server-URL + Ticket für den WebSocket-Hello.
+    func fetchSignalingSettings() async -> [String: Any]? {
+        guard let body = await get("\(base)/api/v3/signaling/settings"),
+              let data = body.data(using: .utf8),
+              let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = env["ocs"] as? [String: Any],
+              let payload = ocs["data"] as? [String: Any] else { return nil }
+        return payload
+    }
+
     /// Recent history (`future=false`) or the long-poll for new messages (`future=true`). For the
     /// initial history fetch `lastKnownId` is 0 and MUST be omitted — sending `lastKnownMessageId=0`
     /// with lookIntoFuture=0 means "messages older than 0" and returns nothing. The long-poll always
@@ -161,6 +172,12 @@ actor LinkOcsApi {
 
     /// Adds participants: internal Souvera users by user id (`source=users`),
     /// external guests by email (`source=emails`, Talk sends the invite).
+    /// Raum öffentlich schalten (Gäste können über den Link beitreten).
+    func makeRoomPublic(token: String) async {
+        let req = signed(url: "\(base)/api/v4/room/\(token)/public", method: "POST")
+        _ = try? await session.data(for: req)
+    }
+
     func addParticipants(token: String, userIds: [String], emails: [String], federatedIds: [String] = []) async {
         for userId in userIds {
             let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId

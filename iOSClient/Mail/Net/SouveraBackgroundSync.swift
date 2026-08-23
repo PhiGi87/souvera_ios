@@ -20,6 +20,7 @@ final class SouveraBackgroundSync {
         guard NCManageDatabase.shared.getActiveTableAccount() != nil else { return }
         await syncMail()
         await syncCalendar()
+        await syncLink()
     }
 
     // MARK: - Mail
@@ -101,5 +102,41 @@ final class SouveraBackgroundSync {
         // Erinnerungen anhand der VALARM-Daten der Termine planen (bis zu 64
         // kommende Notifications); Termine ohne Erinnerung bleiben still.
         SouveraReminderScheduler.schedule(for: upcoming)
+    }
+
+    // MARK: - Link
+
+    /// Pollt die Talk-Konversationsliste, meldet neue ungelesene Nachrichten
+    /// als lokale Benachrichtigungen und aktualisiert die Badge-Basis
+    /// (Unread-Summe). Der LinkCache wird dabei mit dem frischen Stand
+    /// gesichert (offline-fähig).
+    private func syncLink() async {
+        guard let account = LinkAccount.active() else { return }
+        let api = LinkOcsApi(account: account)
+        guard let list = await api.listConversations() else { return }
+
+        let previous = LinkCache.loadConversations() ?? []
+        let previousUnread = Dictionary(uniqueKeysWithValues: previous.map { ($0.token, $0.unreadMessages) })
+
+        for room in list {
+            let before = previousUnread[room.token] ?? 0
+            let newCount = max(0, room.unreadMessages - before)
+            guard newCount > 0, let last = room.lastMessage, !last.isSystemMessage else { continue }
+            let sender = last.actorDisplayName.isEmpty ? room.displayName : last.actorDisplayName
+            let preview = last.displayText()
+            let content = UNMutableNotificationContent()
+            content.title = room.displayName
+            content.body = preview.isEmpty ? sender : "\(sender): \(preview)"
+            content.sound = .default
+            let request = UNNotificationRequest(
+                identifier: "talk_\(room.token)_\(last.id)",
+                content: content,
+                trigger: nil
+            )
+            try? await notificationCenter.add(request)
+        }
+
+        // Badge-Basis: Summe aller ungelesenen Nachrichten melden.
+        LinkViewModel.postUnreadTotal(list)
     }
 }

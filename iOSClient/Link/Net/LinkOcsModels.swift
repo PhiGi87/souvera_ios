@@ -40,6 +40,8 @@ struct LinkConversation: Decodable, Identifiable {
     let avatarVersion: String
     /// True, wenn der Raum einen eigenen Avatar hat.
     let isCustomAvatar: Bool
+    /// Numerische Raum-ID (Signaling-"roomid" für WebSocket/Typing).
+    let roomId: Int
 
     var id: String { token }
 
@@ -49,7 +51,7 @@ struct LinkConversation: Decodable, Identifiable {
     var canManage: Bool { participantType == 1 || participantType == 2 }
 
     enum CodingKeys: String, CodingKey {
-        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar
+        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar, roomId = "id"
     }
 
     init(from decoder: Decoder) throws {
@@ -65,6 +67,7 @@ struct LinkConversation: Decodable, Identifiable {
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
         avatarVersion = (try? c.decode(String.self, forKey: .avatarVersion)) ?? ""
         isCustomAvatar = (try? c.decode(Bool.self, forKey: .isCustomAvatar)) ?? false
+        roomId = (try? c.decode(Int.self, forKey: .roomId)) ?? 0
     }
 
     /// Last message preview text; falls back to a file marker for shared files.

@@ -215,7 +215,16 @@ struct MailView: View {
         case .messages:
             MailMessageListView(viewModel: viewModel)
         case let .detail(message):
-            MailDetailView(viewModel: viewModel, message: message)
+            // Die Nachrichtenliste bleibt UNTER der Detailansicht gemountet
+            // (unsichtbar + nicht interaktiv), damit ihre Scrollposition
+            // beim Zurückkehren exakt erhalten bleibt - kein Anchor-Restore
+            // nötig.
+            ZStack {
+                MailMessageListView(viewModel: viewModel)
+                    .opacity(0)
+                    .allowsHitTesting(false)
+                MailDetailView(viewModel: viewModel, message: message)
+            }
         case .compose:
             MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
         case .search:
@@ -702,17 +711,9 @@ private struct MailMessageListView: View {
                 }
             }
             .listStyle(.plain)
-            // Zwei-Wege-Binding wie von SwiftUI vorgesehen. Beim Erscheinen
-            // überschreibt SwiftUI den Wert ggf. mit der obersten Zeile -
-            // deshalb wird der Anker danach über pendingScrollAnchor erneut
-            // gesetzt (onAppear unten), worauf die Liste zuverlässig scrollt.
-            .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
-            .onAppear {
-                guard viewModel.pendingScrollAnchor != nil else { return }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                    viewModel.applyPendingScrollAnchor()
-                }
-            }
+            // Die Liste bleibt beim Öffnen einer Mail gemountet (ZStack in
+            // content) - die Scrollposition bleibt dadurch automatisch
+            // erhalten, ohne Anchor-Restore.
             .refreshable { await viewModel.refreshMessages() }
             .overlay(alignment: .bottom) {
                 if let firstId = sorted.first?.id {
