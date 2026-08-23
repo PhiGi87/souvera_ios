@@ -1242,7 +1242,8 @@ final class MailViewModel: ObservableObject {
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,
-                    namespace: .personal, ownerIdentity: nil, parentId: nil
+                    namespace: .personal, ownerIdentity: nil, parentId: nil,
+                    mayRename: false, mayDelete: false, mayCreateChild: false
                 ))
                 await syncMessages()
             case .failure(let error):
