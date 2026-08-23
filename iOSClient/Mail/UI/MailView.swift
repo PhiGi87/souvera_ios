@@ -308,8 +308,13 @@ private struct MailFolderListView: View {
                                 viewModel: viewModel,
                                 node: row.node,
                                 depth: row.depth,
-                                renameTarget: $renameTarget,
-                                deleteTarget: $deleteTarget
+                                onRename: { mailbox in
+                                    renameText = mailbox.name
+                                    renameTarget = mailbox
+                                },
+                                onDelete: { mailbox in
+                                    deleteTarget = mailbox
+                                }
                             )
                         }
                     }
@@ -550,8 +555,8 @@ private struct MailboxTreeRow: View {
     @ObservedObject var viewModel: MailViewModel
     let node: MailboxNode
     let depth: Int
-    @Binding var renameTarget: Mailbox?
-    @Binding var deleteTarget: Mailbox?
+    let onRename: (Mailbox) -> Void
+    let onDelete: (Mailbox) -> Void
 
     var body: some View {
         MailboxTreeRowBase(
@@ -570,8 +575,7 @@ private struct MailboxTreeRow: View {
         .swipeActions(edge: .trailing) {
             if node.mailbox.mayRename {
                 Button {
-                    renameText = node.mailbox.name
-                    renameTarget = node.mailbox
+                    onRename(node.mailbox)
                 } label: {
                     Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
                 }
@@ -579,7 +583,7 @@ private struct MailboxTreeRow: View {
             }
             if node.mailbox.mayDelete {
                 Button(role: .destructive) {
-                    deleteTarget = node.mailbox
+                    onDelete(node.mailbox)
                 } label: {
                     Label(NSLocalizedString("_mail_delete_folder_", comment: ""), systemImage: "trash")
                 }
