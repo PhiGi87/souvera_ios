@@ -137,17 +137,13 @@ class NCMainTabBarController: UITabBarController {
             tag: 100
         )
         mailTabBarItem = mailController.tabBarItem
-        // Badge optisch etwas nach links/innen über das Mail-Icon rücken,
-        // damit es nicht bis zum Kalender-Tab herüberreicht.
-        mailController.tabBarItem.badgePositionAdjustment = UIOffset(horizontal: -6, vertical: 0)
         NotificationCenter.default.addObserver(
             forName: .mailUnreadChanged,
             object: nil,
             queue: .main
         ) { [weak self] notification in
             let count = notification.object as? Int ?? 0
-            self?.mailTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
-            JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
+            self?.updateMailBadge(count)
         }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),
@@ -182,6 +178,54 @@ class NCMainTabBarController: UITabBarController {
 
         viewControllers = [mailController, calendarController, linkController, filesController, moreController]
         selectedIndex = 0
+    }
+
+    // MARK: - Badges (Mail)
+
+    /// Eigenes Badge-Overlay auf der TabBar, damit die Position frei
+    /// steuerbar ist (System-Badge sitzt zu weit Richtung Kalender-Tab).
+    private var mailBadgeLabel: UILabel?
+
+    private func updateMailBadge(_ count: Int) {
+        if count > 0 {
+            if mailBadgeLabel == nil {
+                let label = UILabel()
+                label.font = .systemFont(ofSize: 11, weight: .bold)
+                label.textColor = .white
+                label.backgroundColor = .systemRed
+                label.textAlignment = .center
+                label.clipsToBounds = true
+                tabBar.addSubview(label)
+                mailBadgeLabel = label
+            }
+            mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
+            JmapLog.write("Mail tab badge set -> \(count)")
+        } else {
+            mailBadgeLabel?.removeFromSuperview()
+            mailBadgeLabel = nil
+            JmapLog.write("Mail tab badge set -> 0")
+        }
+        layoutBadges()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutBadges()
+    }
+
+    private func layoutBadges() {
+        guard let badge = mailBadgeLabel else { return }
+        let itemCount = max(viewControllers?.count ?? 1, 1)
+        let itemWidth = tabBar.bounds.width / CGFloat(itemCount)
+        let mailIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 100 }) ?? 0
+        badge.sizeToFit()
+        let width = max(badge.bounds.width + 10, 18)
+        let height: CGFloat = 18
+        // 6 pt weiter nach innen (links), damit das Badge nicht bis zum
+        // Kalender-Tab herüberreicht.
+        let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
+        badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
+        badge.layer.cornerRadius = height / 2
     }
 
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
