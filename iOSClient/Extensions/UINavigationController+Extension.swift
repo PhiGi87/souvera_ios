@@ -13,39 +13,28 @@ extension UINavigationController {
     }
 
     func setNavigationBarAppearance(textColor: UIColor = NCBrandColor.shared.iconImageColor, backgroundColor: UIColor? = .systemBackground) {
-        let appearance: UINavigationBarAppearance
-        if SouveraAppearance.blueHeaderEnabled {
-            // Globaler blauer Souvera-Header (alle Bereiche; das Logo bleibt
-            // exklusiv auf der Mehr-Root).
-            appearance = SouveraAppearance.blueNavigationBarAppearance()
-            navigationBar.isTranslucent = false
-            navigationBar.tintColor = .white
-            navigationBar.overrideUserInterfaceStyle = .light
+        let appearance = UINavigationBarAppearance()
+
+        if #available(iOS 26.0, *) {
+            appearance.configureWithDefaultBackground()
         } else {
-            if #available(iOS 26.0, *) {
-                appearance = UINavigationBarAppearance()
-                appearance.configureWithDefaultBackground()
+            appearance.configureWithTransparentBackground()
+            if topViewController is NCMedia {
+                // transparent
             } else {
-                appearance = UINavigationBarAppearance()
-                appearance.configureWithTransparentBackground()
-                if topViewController is NCMedia {
-                    // transparent
-                } else {
-                    appearance.backgroundColor = backgroundColor
-                }
-                appearance.shadowColor = .clear
-                appearance.shadowImage = UIImage()
+                appearance.backgroundColor = backgroundColor
             }
-            appearance.titleTextAttributes = [.foregroundColor: textColor]
-            navigationBar.tintColor = textColor
-            navigationBar.overrideUserInterfaceStyle = .unspecified
+            appearance.shadowColor = .clear
+            appearance.shadowImage = UIImage()
         }
+        appearance.titleTextAttributes = [.foregroundColor: textColor]
 
         navigationBar.standardAppearance = appearance
         navigationBar.scrollEdgeAppearance = appearance
         navigationBar.compactAppearance = appearance
         navigationBar.compactScrollEdgeAppearance = appearance
 
+        navigationBar.tintColor = textColor
         navigationBar.prefersLargeTitles = false
     }
 }

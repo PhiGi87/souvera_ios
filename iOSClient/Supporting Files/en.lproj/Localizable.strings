@@ -1051,5 +1051,3 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_forward_to_" = "Forward to";
 "_link_forwarded_" = "Message forwarded";
 "_calendar_talk_remove_" = "Remove link";
-"_settings_blue_header_" = "Blue header everywhere";
-"_settings_blue_header_footer_" = "Takes effect after restarting the app. The More menu always stays blue.";

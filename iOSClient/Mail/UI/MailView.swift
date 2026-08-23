@@ -21,7 +21,6 @@ struct MailView: View {
                 .toolbar {
                     toolbar
                 }
-                .souveraBlueHeader()
                 .confirmationDialog(
                     NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
                     isPresented: Binding(

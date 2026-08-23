@@ -113,24 +113,3 @@ struct ViewFirstAppearModifier: ViewModifier {
         }
     }
 }
-
-extension View {
-    /// Blauer Souvera-Header für den gesamten NavigationStack (Gradient,
-    /// helle Icons/Titel). Respektiert den globalen Schalter
-    /// SouveraAppearance.blueHeaderEnabled - bei "aus" bleibt alles beim
-    /// bisherigen Look (das Mehr-Menü ist davon unabhängig immer blau).
-    @ViewBuilder
-    func souveraBlueHeader() -> some View {
-        if SouveraAppearance.blueHeaderEnabled {
-            self
-                .toolbarBackground(
-                    LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
-                    for: .navigationBar
-                )
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarColorScheme(.light, for: .navigationBar)
-        } else {
-            self
-        }
-    }
-}

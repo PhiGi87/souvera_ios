@@ -309,8 +309,15 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         var desiredItems: [UIBarButtonItem] = []
 
-        // Benachrichtigungen und Übertragungen bleiben bewusst aus dem
-        // Dateien-Header heraus (nur Assistent + "..."-Menü).
+        // Benachrichtigungen + Übertragungen bleiben erhalten - AUSSER im
+        // Dateien-Modul (NCFilesNavigationController): dort führt nur das
+        // "..."-Menü (+ Assistent). Das Mehr-Menü behält beide Buttons.
+        if !(self is NCFilesNavigationController) {
+            if controller?.availableNotifications ?? false {
+                desiredItems.append(notificationsButtonItem)
+            }
+            desiredItems.append(transfersButtonItem)
+        }
 
         if capabilities.assistantEnabled {
             desiredItems.append(assistantButtonItem)

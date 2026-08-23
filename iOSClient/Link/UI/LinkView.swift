@@ -42,7 +42,6 @@ struct LinkView: View {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
-                .souveraBlueHeader()
                 .toolbar {
                     if case let .chat(token, title) = viewModel.route {
                         ToolbarItem(placement: .topBarLeading) {

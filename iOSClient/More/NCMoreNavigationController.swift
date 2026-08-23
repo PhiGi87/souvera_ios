@@ -33,14 +33,34 @@ class NCMoreNavigationController: NCMainNavigationController {
                 }
             }
         } else {
-            // Gepushte Module: Standard-Optik (mit globalem blauen Header).
-            setNavigationBarAppearance()
+            // Gepushte Module: blauer Header wie die Root (Logo bleibt
+            // exklusiv auf der Root) - inkl. Async-Re-Apply gegen den
+            // asynchronen Reset der Basisklasse.
+            applyBlueHeader()
             viewController.navigationItem.leftBarButtonItem = nil
             showSouveraLogo(false)
+            Task { @MainActor in
+                if viewController === navigationController.topViewController {
+                    applyBlueHeader()
+                    showSouveraLogo(false)
+                }
+            }
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
             }
         }
+    }
+
+    /// Blauer Header ohne Logo (alle aus dem Mehr-Menü gepushten Screens).
+    private func applyBlueHeader() {
+        let appearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+        navigationBar.compactScrollEdgeAppearance = appearance
+        navigationBar.isTranslucent = false
+        navigationBar.tintColor = .white
+        navigationBar.overrideUserInterfaceStyle = .light
     }
 
     override func viewDidLayoutSubviews() {
@@ -83,14 +103,7 @@ class NCMoreNavigationController: NCMainNavigationController {
     /// deckend - kein Liquid-Glass-Effekt auf iOS 26). Nutzt die zentralen
     /// Bausteine aus SouveraAppearance.
     private func applySouveraHeader(_ viewController: UIViewController) {
-        let appearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationBar.standardAppearance = appearance
-        navigationBar.scrollEdgeAppearance = appearance
-        navigationBar.compactAppearance = appearance
-        navigationBar.compactScrollEdgeAppearance = appearance
-        navigationBar.isTranslucent = false
-        navigationBar.tintColor = .white
-        navigationBar.overrideUserInterfaceStyle = .light
+        applyBlueHeader()
 
         viewController.navigationItem.title = ""
         viewController.navigationItem.leftBarButtonItem = nil

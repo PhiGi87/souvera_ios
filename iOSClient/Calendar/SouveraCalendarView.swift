@@ -78,7 +78,6 @@ struct SouveraCalendarView: View {
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
-            .souveraBlueHeader()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

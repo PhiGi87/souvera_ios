@@ -4,19 +4,9 @@
 import SwiftUI
 import UIKit
 
-/// Zentraler Schalter und Bausteine für den blauen Souvera-Header.
-///
-/// `blueHeaderEnabled` ist ein UserDefaults-Schalter (Standard: an). Bei
-/// `false` gilt überall wieder der alte Look - AUSSER im Mehr-Menü (Root
-/// mit Logo bleibt immer blau). So lässt sich die globale blaue Optik ohne
-/// neuen Build zurückdrehen.
+/// Zentrale Bausteine für den blauen Souvera-Header des Mehr-Menüs
+/// (Root mit Logo und alle gepushten Unterseiten ohne Logo).
 enum SouveraAppearance {
-    static let blueHeaderKey = "souvera_blue_header_enabled"
-
-    static var blueHeaderEnabled: Bool {
-        if UserDefaults.standard.object(forKey: blueHeaderKey) == nil { return true }
-        return UserDefaults.standard.bool(forKey: blueHeaderKey)
-    }
 
     /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als SwiftUI-Farben.
     static let gradientColors: [Color] = [
