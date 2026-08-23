@@ -100,8 +100,9 @@ struct LinkChatMessage: Decodable, Identifiable {
     var reactions: [String: Int] = [:]
     /// Emojis, mit denen der aktuelle Nutzer selbst reagiert hat.
     var reactionsSelf: [String] = []
-    /// Elternteil bei Antworten (Talk liefert die volle Nachricht mit).
-    let parent: LinkChatMessage?
+    /// Elternteil bei Antworten (Talk liefert die volle Nachricht mit; als
+    /// eigener Typ, um die Struct-Rekursion zu vermeiden).
+    let parent: LinkParent?
 
     enum CodingKeys: String, CodingKey {
         case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf, parent
@@ -122,7 +123,7 @@ struct LinkChatMessage: Decodable, Identifiable {
         // reactions kann ein Objekt oder `[]` sein; tolerant dekodieren.
         reactions = (try? c.decode([String: Int].self, forKey: .reactions)) ?? [:]
         reactionsSelf = (try? c.decode([String].self, forKey: .reactionsSelf)) ?? []
-        parent = try? c.decode(LinkChatMessage.self, forKey: .parent)
+        parent = try? c.decode(LinkParent.self, forKey: .parent)
     }
 
     /// Talk erzeugt für jede Reaktion eine Systemnachricht; der Browser
@@ -245,13 +246,40 @@ struct LinkParticipant: Decodable, Identifiable {
     }
 }
 
+/// Elternteil einer Antwort (Talk liefert die volle Nachricht als `parent`,
+/// ohne weitere Verschachtelung). Eigener Typ statt rekursivem
+/// LinkChatMessage (Struct-Rekursion wäre nicht zulässig).
+struct LinkParent: Decodable {
+    let id: Int64
+    let actorId: String
+    let actorDisplayName: String
+    let timestamp: TimeInterval
+    let message: String
+    let systemMessage: String
+
+    var isSystemMessage: Bool { !systemMessage.isEmpty }
+
+    enum CodingKeys: String, CodingKey {
+        case id, actorId, actorDisplayName, timestamp, message, systemMessage
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(Int64.self, forKey: .id)) ?? 0
+        actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
+        actorDisplayName = (try? c.decode(String.self, forKey: .actorDisplayName)) ?? ""
+        timestamp = (try? c.decode(TimeInterval.self, forKey: .timestamp)) ?? 0
+        message = (try? c.decode(String.self, forKey: .message)) ?? ""
+        systemMessage = (try? c.decode(String.self, forKey: .systemMessage)) ?? ""
+    }
+}
+
 struct LinkRichObject: Decodable {
     let type: String?
     let name: String?
     let id: String?
     let path: String?
     let size: String?
-
     enum CodingKeys: String, CodingKey { case type, name, id, path, size }
 
     init(from decoder: Decoder) throws {
