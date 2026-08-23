@@ -1006,6 +1006,11 @@ private struct CalendarEventEditSheet: View {
     /// Talk-Token, mit dem das Sheet geöffnet wurde - wird der Link entfernt,
     /// löschen wir nach dem Speichern den zugehörigen Channel.
     @State private var originalTalkToken: String?
+    /// Raum, der in DIESER Sitzung erstellt wurde (noch ungespeichert) -
+    /// wird bei Abbruch/Entfernen aufgeräumt (Waisen-Schutz).
+    @State private var createdSessionToken: String?
+    /// Link wurde in dieser Sitzung explizit per Menü entfernt.
+    @State private var removedTalkLink = false
     @Environment(\.dismiss) private var dismiss
 
     init(viewModel: CalendarViewModel, draft: EventDraft, existing: CalendarEventModel?) {
@@ -1118,10 +1123,28 @@ private struct CalendarEventEditSheet: View {
                         HStack {
                             Label(roomName, systemImage: "bubble.left.and.bubble.right")
                             Spacer()
-                            Button {
-                                removeTalkLinkFromDraft()
+                            // "…"-Menü statt nacktem X: Öffnen und Entfernen
+                            // sind explizite Aktionen (kein versehentliches
+                            // Löschen des Raums beim Speichern).
+                            Menu {
+                                Button {
+                                    if let token = draft.talkRoomToken {
+                                        NotificationCenter.default.post(
+                                            name: .openLinkRoom,
+                                            object: ["token": token, "title": roomName]
+                                        )
+                                        dismiss()
+                                    }
+                                } label: {
+                                    Label(NSLocalizedString("_calendar_open_talk_", comment: ""), systemImage: "arrow.up.right.square")
+                                }
+                                Button(role: .destructive) {
+                                    removeTalkLinkFromDraft()
+                                } label: {
+                                    Label(NSLocalizedString("_calendar_talk_remove_", comment: ""), systemImage: "link.badge.minus")
+                                }
                             } label: {
-                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
                             }
                         }
                     } else if creatingTalkRoom {
@@ -1141,6 +1164,7 @@ private struct CalendarEventEditSheet: View {
                                 ) {
                                     draft.talkRoomToken = room.token
                                     draft.talkRoomName = room.name
+                                    createdSessionToken = room.token
                                     // Store the join link in the standard fields, exactly
                                     // like the Nextcloud Calendar web app: LOCATION when
                                     // free, otherwise appended to the DESCRIPTION - so
@@ -1175,7 +1199,10 @@ private struct CalendarEventEditSheet: View {
             }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                    Button(NSLocalizedString("_cancel_", comment: "")) {
+                        cleanupUnsavedSessionRoom()
+                        dismiss()
+                    }
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     if saving {
@@ -1186,11 +1213,7 @@ private struct CalendarEventEditSheet: View {
                             Task {
                                 let ok = await viewModel.saveEvent(draft, existing: existing)
                                 if ok {
-                                    if let original = originalTalkToken,
-                                       !original.isEmpty,
-                                       draft.talkRoomToken == nil {
-                                        await viewModel.deleteTalkRoom(token: original)
-                                    }
+                                    await applyTalkLinkChanges()
                                     dismiss()
                                 } else {
                                     saving = false
@@ -1211,6 +1234,7 @@ private struct CalendarEventEditSheet: View {
 
     private func removeTalkLinkFromDraft() {
         let token = draft.talkRoomToken
+        removedTalkLink = true
         draft.talkRoomToken = nil
         draft.talkRoomName = nil
         // Auch die im Standardfeld gespeicherte URL (LOCATION/DESCRIPTION)
@@ -1233,6 +1257,39 @@ private struct CalendarEventEditSheet: View {
         draft.attendees.append(trimmed)
         attendeeInput = ""
         attendeeSuggestions = []
+    }
+
+    /// Setzt die Talk-Link-Änderungen nach erfolgreichem Speichern um:
+    /// - explizit entfernt → zugehörigen Raum löschen (gespeicherten ODER
+    ///   in dieser Sitzung erstellten)
+    /// - neuer Link erstellt, während ein alter gespeichert war → alten Raum
+    ///   ersetzen (kein Leak)
+    /// - sonst: nichts löschen (der Raum bleibt bestehen).
+    private func applyTalkLinkChanges() async {
+        if removedTalkLink {
+            if let created = createdSessionToken, !created.isEmpty, created != originalTalkToken {
+                JmapLog.write("Calendar talk: removing unsaved session room \(created)")
+                await viewModel.deleteTalkRoom(token: created)
+            } else if let original = originalTalkToken, !original.isEmpty {
+                await viewModel.deleteTalkRoom(token: original)
+            }
+            return
+        }
+        if let created = createdSessionToken, !created.isEmpty, created != originalTalkToken,
+           let original = originalTalkToken, !original.isEmpty {
+            JmapLog.write("Calendar talk: replacing old room \(original) with \(created)")
+            await viewModel.deleteTalkRoom(token: original)
+        }
+    }
+
+    /// Abbruch ohne Speichern: ein in dieser Sitzung erstellter, noch nicht
+    /// gespeicherter Raum wird wieder gelöscht (kein Waisenraum).
+    private func cleanupUnsavedSessionRoom() {
+        guard !saving else { return }
+        if let created = createdSessionToken, !created.isEmpty, created != originalTalkToken {
+            JmapLog.write("Calendar talk: cancel - removing unsaved session room \(created)")
+            Task { await viewModel.deleteTalkRoom(token: created) }
+        }
     }
 }
 

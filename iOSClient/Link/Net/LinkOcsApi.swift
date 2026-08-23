@@ -121,13 +121,15 @@ actor LinkOcsApi {
     /// is linked to the event via Talk's object reference (objectType=event,
     /// objectId=event UID) and the event notes become the room description.
     /// Returns the conversation token and display name.
+    /// Erstellt den mit einem Termin verknüpften Channel als NORMALEN
+    /// öffentlichen Raum (roomType=3) - bewusst OHNE objectType/objectId:
+    /// Event-verknüpfte Räume blendet Talk in der Browser-/App-Raumliste aus,
+    /// normale öffentliche Räume erscheinen überall.
     func createEventRoom(name: String, objectId: String, description: String) async -> (token: String, name: String)? {
         var components = URLComponents()
         components.queryItems = [
             URLQueryItem(name: "roomType", value: "3"),
             URLQueryItem(name: "roomName", value: name),
-            URLQueryItem(name: "objectType", value: "event"),
-            URLQueryItem(name: "objectId", value: objectId),
             URLQueryItem(name: "description", value: description)
         ]
         guard let query = components.query else { return nil }
@@ -136,7 +138,7 @@ actor LinkOcsApi {
         for attempt in 1...3 {
             let req = signed(url: url, method: "POST")
             guard let (data, response) = try? await session.data(for: req) else {
-                JmapLog.write("createEventRoom attempt \(attempt): transport failure")
+                JmapLog.write("createEventRoom attempt \(attempt): transport failure (event \(objectId))")
                 if attempt < 3 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
                 continue
             }

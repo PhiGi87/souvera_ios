@@ -1050,3 +1050,4 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_forward_" = "Forward";
 "_link_forward_to_" = "Forward to";
 "_link_forwarded_" = "Message forwarded";
+"_calendar_talk_remove_" = "Remove link";
