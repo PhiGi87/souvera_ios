@@ -8,7 +8,10 @@ import SwiftUI
 
 struct SouveraNotesView: View {
     var body: some View {
-        Text("Notizen")
-            .navigationTitle(NSLocalizedString("_souvera_notes_", comment: ""))
+        SouveraStateView(state: .empty(
+            title: NSLocalizedString("_souvera_notes_", comment: ""),
+            systemImage: "note.text"
+        ))
+        .navigationTitle(NSLocalizedString("_souvera_notes_", comment: ""))
     }
 }

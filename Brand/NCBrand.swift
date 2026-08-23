@@ -259,13 +259,14 @@ final class NCBrandColor: @unchecked Sendable {
                 return palette
             }
 
-            let red = UIColor(red: 182 / 255, green: 70 / 255, blue: 157 / 255, alpha: 1).cgColor
-            let yellow = UIColor(red: 221 / 255, green: 203 / 255, blue: 85 / 255, alpha: 1).cgColor
-            let blue = UIColor(red: 0 / 255, green: 130 / 255, blue: 201 / 255, alpha: 1).cgColor
+            // Souvera-derived avatar palette (from the logo gradient: indigo → cyan → deep blue).
+            let indigo = UIColor(hex: "#496BBF")!.cgColor
+            let cyan = UIColor(hex: "#4BBFEA")!.cgColor
+            let deepBlue = UIColor(hex: "#3B86D0")!.cgColor
 
-            let palette1 = mixPalette(steps: steps, color1: red, color2: yellow)
-            let palette2 = mixPalette(steps: steps, color1: yellow, color2: blue)
-            let palette3 = mixPalette(steps: steps, color1: blue, color2: red)
+            let palette1 = mixPalette(steps: steps, color1: indigo, color2: cyan)
+            let palette2 = mixPalette(steps: steps, color1: cyan, color2: deepBlue)
+            let palette3 = mixPalette(steps: steps, color1: deepBlue, color2: indigo)
 
             return palette1 + palette2 + palette3
         }

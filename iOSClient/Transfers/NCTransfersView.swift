@@ -207,7 +207,7 @@ struct TransferRowView: View {
                         Circle()
                             .trim(from: 0, to: CGFloat(model.progress(for: item)))
                             .stroke(
-                                Color(Color(NCBrandColor.shared.customer)),
+                                Color.Souvera.brandPrimary,
                                 style: StrokeStyle(lineWidth: 2, lineCap: .round)
                             )
                             .rotationEffect(.degrees(-90))

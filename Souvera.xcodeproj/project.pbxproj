@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		43221A2E6CB1714A52D79F75 /* SouveraTokens.swift in Sources */ = {isa = PBXBuildFile; fileRef = 272A091F728AB4D280EC4F18 /* SouveraTokens.swift */; };
+		51C802F5792E71236C5BF24D /* Color+Souvera.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6771ACB238A2231E918D225 /* Color+Souvera.swift */; };
+		FA4824AF5CC06B219068EC22 /* UIColor+Souvera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30BA1AA77CD4BBA9313DF74 /* UIColor+Souvera.swift */; };
+		14BA8775E42459B3803EBDCA /* SouveraButtonStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64EE11906CF5C27B80BE2A5C /* SouveraButtonStyle.swift */; };
+		006A05B03E1A027B0ABB0661 /* SouveraStateView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 637ADF33E62822F1E1175D6E /* SouveraStateView.swift */; };
+		11C2DD393E394409F11CC51A /* SouveraBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 350CEB89B87DF86FFAF027D6 /* SouveraBadge.swift */; };
+		B7CA2D7D98A0C4D3ADBBC323 /* SouveraToast.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B0CFE3E156D0EE7C3FDD6A7 /* SouveraToast.swift */; };
 		FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */; };
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
 		FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */; };
@@ -1235,6 +1242,13 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+				272A091F728AB4D280EC4F18 /* SouveraTokens.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraTokens.swift"; sourceTree = SOURCE_ROOT; };
+				A6771ACB238A2231E918D225 /* Color+Souvera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/Color+Souvera.swift"; sourceTree = SOURCE_ROOT; };
+				C30BA1AA77CD4BBA9313DF74 /* UIColor+Souvera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/UIColor+Souvera.swift"; sourceTree = SOURCE_ROOT; };
+				64EE11906CF5C27B80BE2A5C /* SouveraButtonStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraButtonStyle.swift"; sourceTree = SOURCE_ROOT; };
+				637ADF33E62822F1E1175D6E /* SouveraStateView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraStateView.swift"; sourceTree = SOURCE_ROOT; };
+				350CEB89B87DF86FFAF027D6 /* SouveraBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraBadge.swift"; sourceTree = SOURCE_ROOT; };
+				4B0CFE3E156D0EE7C3FDD6A7 /* SouveraToast.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraToast.swift"; sourceTree = SOURCE_ROOT; };
 		FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapTypes.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1ADD802F125C3224605E0 /* JmapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapClient.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1F092AAB81FDFAC0D3DAD /* JmapApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapApi.swift"; sourceTree = SOURCE_ROOT; };
@@ -3223,6 +3237,13 @@
 				F7E41315294A19B300839300 /* UIView+Extension.swift */,
 				F77BB745289984CA0090FC19 /* UIViewController+Extension.swift */,
 				F7E8A390295DC5E0006CB2D0 /* View+Extension.swift */,
+				272A091F728AB4D280EC4F18 /* SouveraTokens.swift */,
+				A6771ACB238A2231E918D225 /* Color+Souvera.swift */,
+				C30BA1AA77CD4BBA9313DF74 /* UIColor+Souvera.swift */,
+				64EE11906CF5C27B80BE2A5C /* SouveraButtonStyle.swift */,
+				637ADF33E62822F1E1175D6E /* SouveraStateView.swift */,
+				350CEB89B87DF86FFAF027D6 /* SouveraBadge.swift */,
+				4B0CFE3E156D0EE7C3FDD6A7 /* SouveraToast.swift */,
 			);
 			path = Extensions;
 			sourceTree = "<group>";
@@ -4939,6 +4960,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				43221A2E6CB1714A52D79F75 /* SouveraTokens.swift in Sources */,
+				51C802F5792E71236C5BF24D /* Color+Souvera.swift in Sources */,
+				FA4824AF5CC06B219068EC22 /* UIColor+Souvera.swift in Sources */,
+				14BA8775E42459B3803EBDCA /* SouveraButtonStyle.swift in Sources */,
+				006A05B03E1A027B0ABB0661 /* SouveraStateView.swift in Sources */,
+				11C2DD393E394409F11CC51A /* SouveraBadge.swift in Sources */,
+				B7CA2D7D98A0C4D3ADBBC323 /* SouveraToast.swift in Sources */,
 				FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */,
 				FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */,
 				FEB1B09989B7508E74BCD53A /* JmapApi.swift in Sources */,

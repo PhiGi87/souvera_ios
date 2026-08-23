@@ -68,24 +68,15 @@ struct SouveraContactsView: View {
             }
             switch viewModel.contacts {
             case .loading:
-                Spacer()
-                ProgressView()
-                Spacer()
+                SouveraStateView(state: .loading)
             case let .error(message):
-                Spacer()
-                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
-                Spacer()
+                SouveraStateView(state: .error(message: message), retry: { Task { await viewModel.load() } })
             case let .success(entries):
                 if entries.isEmpty {
-                    Spacer()
-                    VStack(spacing: 12) {
-                        Image(systemName: "person.crop.circle")
-                            .font(.system(size: 44))
-                            .foregroundStyle(.secondary)
-                        Text(NSLocalizedString("_contact_empty_", comment: ""))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
+                    SouveraStateView(state: .empty(
+                        title: NSLocalizedString("_contact_empty_", comment: ""),
+                        systemImage: "person.crop.circle"
+                    ))
                 } else {
                     List {
                         if !viewModel.directoryResults.isEmpty {
@@ -96,7 +87,7 @@ struct SouveraContactsView: View {
                                     } label: {
                                         HStack(spacing: 12) {
                                             Circle()
-                                                .fill(Color(NCBrandColor.shared.customer))
+                                                .fill(Color.Souvera.brandPrimaryDeep)
                                                 .frame(width: 38, height: 38)
                                                 .overlay(
                                                     Text(String((user.displayName ?? user.email).prefix(1)).uppercased())
@@ -118,7 +109,7 @@ struct SouveraContactsView: View {
                             } label: {
                                 HStack(spacing: 12) {
                                     Circle()
-                                        .fill(Color(NCBrandColor.shared.customer))
+                                        .fill(Color.Souvera.brandPrimaryDeep)
                                         .frame(width: 38, height: 38)
                                         .overlay(
                                             Text(String(entry.displayName.prefix(1)).uppercased())
@@ -180,7 +171,7 @@ private struct DirectoryUserDetailSheet: View {
                 Section {
                     HStack(spacing: 14) {
                         Circle()
-                            .fill(Color(NCBrandColor.shared.customer))
+                            .fill(Color.Souvera.brandPrimaryDeep)
                             .frame(width: 56, height: 56)
                             .overlay(
                                 Text(String((user.displayName ?? user.email).prefix(1)).uppercased())
@@ -218,7 +209,7 @@ private struct ContactDetailSheet: View {
                 Section {
                     HStack(spacing: 14) {
                         Circle()
-                            .fill(Color(NCBrandColor.shared.customer))
+                            .fill(Color.Souvera.brandPrimaryDeep)
                             .frame(width: 56, height: 56)
                             .overlay(
                                 Text(String(entry.displayName.prefix(1)).uppercased())

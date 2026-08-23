@@ -112,9 +112,7 @@ struct ShieldView: View {
         .alert(addEntryTitle, isPresented: $showAddEntry, actions: addEntryAlertActions) {
             Text(NSLocalizedString("_shield_entry_placeholder_", comment: ""))
         }
-        .overlay(alignment: .bottom) {
-            feedbackOverlay
-        }
+        .souveraToast()
     }
 
     /// Stufe 2: Sheets.
@@ -142,6 +140,16 @@ struct ShieldView: View {
             }
             .onChange(of: section) { _, newValue in
                 addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
+            }
+            .onChange(of: viewModel.feedback) { _, newValue in
+                if let feedback = newValue {
+                    SouveraToastCenter.shared.show(
+                        SouveraToast(
+                            message: feedback.message,
+                            style: feedback.success ? .success : .error
+                        )
+                    )
+                }
             }
             .onAppear {
                 addTrigger.showAdd = section == .whitelist || section == .blacklist
@@ -176,26 +184,6 @@ struct ShieldView: View {
         }
     }
 
-    @ViewBuilder
-    private var feedbackOverlay: some View {
-        if let feedback = viewModel.feedback {
-            HStack(spacing: 8) {
-                Image(systemName: feedback.success ? "checkmark.circle.fill" : "xmark.circle.fill")
-                    .foregroundStyle(feedback.success ? .green : .red)
-                Text(feedback.message).font(.subheadline)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(.regularMaterial, in: Capsule())
-            .shadow(radius: 4)
-            .padding(.bottom, 20)
-            .task(id: feedback) {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                viewModel.feedback = nil
-            }
-        }
-    }
-
     // MARK: - Quarantine
 
     private var quarantineSection: some View {
@@ -221,15 +209,16 @@ struct ShieldView: View {
     private var spamList: some View {
         switch viewModel.spamQuarantine {
         case .loading:
-            Spacer(); ProgressView(); Spacer()
+            SouveraStateView(state: .loading)
         case let .error(message):
-            Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
+            SouveraStateView(state: .error(message: message), retry: { Task { await viewModel.loadAll() } })
         case let .success(entries):
             let filtered = viewModel.filteredSpam()
             if filtered.isEmpty {
-                Spacer()
-                Text(NSLocalizedString("_shield_empty_", comment: "")).foregroundStyle(.secondary)
-                Spacer()
+                SouveraStateView(state: .empty(
+                    title: NSLocalizedString("_shield_empty_", comment: ""),
+                    systemImage: "tray"
+                ))
             } else {
                 List(filtered) { entry in
                     Button {
@@ -274,15 +263,16 @@ struct ShieldView: View {
     private func genericList(state: ShieldUiState<[ShieldGenericEntry]>, kind: ShieldApi.QuarantineKind) -> some View {
         switch state {
         case .loading:
-            Spacer(); ProgressView(); Spacer()
+            SouveraStateView(state: .loading)
         case let .error(message):
-            Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
+            SouveraStateView(state: .error(message: message), retry: { Task { await viewModel.loadAll() } })
         case let .success(entries):
             let filtered = viewModel.filteredGeneric(state)
             if filtered.isEmpty {
-                Spacer()
-                Text(NSLocalizedString("_shield_empty_", comment: "")).foregroundStyle(.secondary)
-                Spacer()
+                SouveraStateView(state: .empty(
+                    title: NSLocalizedString("_shield_empty_", comment: ""),
+                    systemImage: "tray"
+                ))
             } else {
                 List(filtered) { entry in
                     VStack(alignment: .leading, spacing: 3) {
@@ -322,9 +312,9 @@ struct ShieldView: View {
     private func listSection(kind: ShieldApi.ListKind, state: ShieldUiState<[String]>) -> some View {
         switch state {
         case .loading:
-            Spacer(); ProgressView(); Spacer()
+            SouveraStateView(state: .loading)
         case let .error(message):
-            Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
+            SouveraStateView(state: .error(message: message), retry: { Task { await viewModel.loadAll() } })
         case let .success(entries):
             List {
                 ForEach(entries, id: \.self) { entry in
@@ -487,7 +477,7 @@ private struct ShieldReleaseSheet: View {
                 .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
         )
         .padding(14)
-        .presentationDetents([.height(request.allowsWhitelist ? 330 : 240)])
+        .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
     }
 }

@@ -8,15 +8,15 @@ import NextcloudKit
 
 /// SwiftUI implementation of the More tab content.
 ///
-/// `NCMoreView` renders the sections provided by `NCMoreModel`.
-/// Navigation is delegated to the model through `Destination`, because the view is hosted
-/// inside the UIKit-based `NCMoreNavigationController`.
+/// `NCMoreView` renders the sections provided by `NCMoreModel` using a native
+/// `.insetGrouped` list. Navigation is delegated to the model through
+/// `Destination`, because the view is hosted inside the UIKit-based
+/// `NCMoreNavigationController`.
 struct NCMoreView: View {
     @StateObject private var model: NCMoreModel
     @State private var autoUploadCounter = NCAutoUploadCounter()
     @State private var showAccountSettings = false
     private let loadItemsOnAppear: Bool
-    private let shortcutIconColor = Color(red: 0, green: 130 / 255, blue: 201 / 255) // Nextcloud Color
 
     init(account: String, controller: NCMainTabBarController?) {
         _model = StateObject(
@@ -37,125 +37,44 @@ struct NCMoreView: View {
         model.perform(destination)
     }
 
-    /// Account area at the top-left of the More screen: avatar, display
-    /// name and the account menu (account switch + account settings).
-    private var accountHeader: some View {
-        Menu {
-            ForEach(model.accountList) { item in
-                Button {
-                    model.switchAccount(item.account)
-                } label: {
-                    if item.account == model.tabBarController?.account {
-                        Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
-                    } else {
-                        Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
-                    }
-                }
-            }
-            // "Add account" is intentionally kept out of the menu for now
-            // (the flow remains available as model.performAddAccount()).
-            Button {
-                showAccountSettings = true
-            } label: {
-                Label(NSLocalizedString("_account_settings_", comment: ""), systemImage: "gear")
-            }
-        } label: {
-            HStack(spacing: 14) {
-                if let avatar = model.activeAvatar {
-                    Image(uiImage: avatar)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 52, height: 52)
-                        .clipShape(Circle())
-                        .overlay(Circle().stroke(Color(NCBrandColor.shared.customer).opacity(0.4), lineWidth: 2))
-                } else {
-                    Circle()
-                        .fill(LinearGradient(
-                            colors: [Color(NCBrandColor.shared.customer).opacity(0.35), Color.gray.opacity(0.25)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ))
-                        .frame(width: 52, height: 52)
-                        .overlay(Image(systemName: "person.fill").foregroundStyle(.secondary))
-                }
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.activeAccountDisplayName)
-                        .font(.headline)
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Image(systemName: "envelope.fill")
-                            .font(.system(size: 9))
-                            .foregroundStyle(.secondary)
-                        Text(model.activeAccountUser.isEmpty ? model.activeAccountHost : model.activeAccountUser)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                Image(systemName: "chevron.down")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            .padding(14)
-            .background(
-                LinearGradient(
-                    colors: [
-                        Color(NCBrandColor.shared.customer).opacity(0.14),
-                        Color(.secondarySystemGroupedBackground)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                in: RoundedRectangle(cornerRadius: 16, style: .continuous)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color(NCBrandColor.shared.customer).opacity(0.25), lineWidth: 1)
-            )
-            .shadow(color: .black.opacity(0.06), radius: 6, y: 2)
-            .contentShape(Rectangle())
-        }
-    }
-
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollView {
-                VStack(spacing: 18) {
-                    accountHeader
+        List {
+            Section {
+                accountHeader
+            }
 
-                    if let appsSection = model.sections.first(where: { $0.type == .moreApps }) {
-                        moreAppsSection(items: appsSection.items)
-                    }
+            if let appsSection = model.sections.first(where: { $0.type == .moreApps }) {
+                Section {
+                    moreAppsRow(items: appsSection.items)
+                }
+            }
 
-                    autoUploadSection
+            Section {
+                autoUploadRow
+            }
 
-                    ForEach(model.sections.filter { $0.type == .regular }) { section in
-                        menuSection(items: section.items)
+            ForEach(model.sections.filter { $0.type == .regular }) { section in
+                Section {
+                    ForEach(section.items, id: \.identifier) { item in
+                        menuRow(item)
                     }
                 }
-                .padding(.horizontal, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 20)
-            }
-            .overlay(alignment: .bottom) {
-                LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0),
-                                        Color(.systemGroupedBackground)],
-                               startPoint: .top,
-                               endPoint: .bottom)
-                    .frame(height: 32)
-                    .allowsHitTesting(false)
             }
 
-            quotaSection
+            Section {
+                quotaRows
+            }
 
-            Text(SouveraBuildInfo.label)
-                .font(.footnote)
-                .foregroundStyle(.tertiary)
-                .padding(.bottom, 6)
+            Section {
+                Text(SouveraBuildInfo.label)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .listRowBackground(Color.clear)
+            }
         }
-        .background(Color(.systemGroupedBackground).ignoresSafeArea())
+        .listStyle(.insetGrouped)
+        .tint(Color.Souvera.brandPrimaryDeep)
         .sheet(isPresented: $showAccountSettings) {
             NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
         }
@@ -189,173 +108,159 @@ struct NCMoreView: View {
                                 autoUploadStart: model.autoUploadStart)
     }
 
-    private var autoUploadSection: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Button {
-                model.openAutoUpload(counter: autoUploadCounter)
-            } label: {
-                HStack(spacing: 16) {
-                    NCFocusedAutoUploadCloudAnimation(size: 44,
-                                                      cloudColor: Color(NCBrandColor.shared.iconImageColor),
-                                                      arrowColor: model.autoUploadStart
-                                                      ? Color(UIColor.systemBackground)
-                                                      : Color(NCBrandColor.shared.iconImageColor),
-                                                      isAnimated: model.autoUploadStart)
-                        .frame(width: 39)
+    // MARK: - Account header
 
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(NSLocalizedString("_settings_autoupload_", comment: ""))
-                            .font(.body)
-                            .foregroundColor(Color(NCBrandColor.shared.textColor))
-
-                        if model.autoUploadStart && autoUploadCounter.isLoaded {
-                            Text(autoUploadCounter.itemsLeftSummary)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
+    private var accountHeader: some View {
+        Menu {
+            ForEach(model.accountList) { item in
+                Button {
+                    model.switchAccount(item.account)
+                } label: {
+                    if item.account == model.tabBarController?.account {
+                        Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
+                    } else {
+                        Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
                     }
-
-                    Spacer()
-
-                    Image(systemName: "chevron.right")
-                        .font(.caption)
-                        .foregroundColor(Color(.tertiaryLabel))
                 }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 54)
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-
-            Text(NSLocalizedString("_autoupload_description_", comment: ""))
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 16)
-        }
-    }
-
-    private func moreAppsSection(items: [NCMoreModel.Item]) -> some View {
-        HStack(spacing: 14) {
-            ForEach(Array(items.enumerated()), id: \.element.identifier) { _, item in
-                shortcutButton(item)
+            Button {
+                showAccountSettings = true
+            } label: {
+                Label(NSLocalizedString("_account_settings_", comment: ""), systemImage: "gear")
             }
-        }
-    }
-
-    private func shortcutButton(_ item: NCMoreModel.Item) -> some View {
-        Button {
-            model.perform(item.destination)
         } label: {
-            VStack(spacing: 6) {
-                Image(item.image)
-                    .renderingMode(.template)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-                    .foregroundColor(shortcutIconColor)
-
-                Text(NSLocalizedString(item.titleKey, comment: ""))
-                    .font(.system(size: 17))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .tint(.primary)
+            HStack(spacing: SouveraTokens.Spacing.sm) {
+                avatar
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(model.activeAccountDisplayName)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Text(model.activeAccountUser.isEmpty ? model.activeAccountHost : model.activeAccountUser)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
             }
-            .frame(maxWidth: .infinity)
-            .frame(height: 62)
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .foregroundStyle(.primary)
     }
 
-    private func menuSection(items: [NCMoreModel.Item]) -> some View {
-        VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.identifier) { index, item in
-                menuRow(item)
+    @ViewBuilder
+    private var avatar: some View {
+        if let avatar = model.activeAvatar {
+            Image(uiImage: avatar)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: SouveraTokens.Metrics.avatarSize, height: SouveraTokens.Metrics.avatarSize)
+                .clipShape(Circle())
+        } else {
+            ZStack {
+                Circle().fill(Color.Souvera.brandSurface)
+                Image(systemName: "person.fill")
+                    .foregroundStyle(Color.Souvera.brandPrimaryDeep)
+            }
+            .frame(width: SouveraTokens.Metrics.avatarSize, height: SouveraTokens.Metrics.avatarSize)
+        }
+    }
 
-                if index < items.count - 1 {
-                    divider
+    // MARK: - Sections
+
+    private func moreAppsRow(items: [NCMoreModel.Item]) -> some View {
+        HStack(spacing: SouveraTokens.Spacing.sm) {
+            ForEach(items, id: \.identifier) { item in
+                Button {
+                    model.perform(item.destination)
+                } label: {
+                    VStack(spacing: SouveraTokens.Spacing.xs) {
+                        Image(systemName: item.image)
+                            .font(.icon())
+                            .foregroundStyle(Color.Souvera.brandPrimaryDeep)
+                            .frame(width: SouveraTokens.Metrics.iconButtonSize,
+                                   height: SouveraTokens.Metrics.iconButtonSize)
+                            .background(Color.Souvera.brandSurface,
+                                        in: RoundedRectangle(cornerRadius: SouveraTokens.Radius.small,
+                                                             style: .continuous))
+                        Text(NSLocalizedString(item.titleKey, comment: ""))
+                            .font(.caption)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, SouveraTokens.Spacing.xs)
+    }
+
+    private var autoUploadRow: some View {
+        Button {
+            model.openAutoUpload(counter: autoUploadCounter)
+        } label: {
+            HStack(spacing: SouveraTokens.Spacing.md) {
+                NCFocusedAutoUploadCloudAnimation(size: 44,
+                                                  cloudColor: Color.Souvera.brandPrimaryDeep,
+                                                  arrowColor: model.autoUploadStart
+                                                      ? Color(UIColor.systemBackground)
+                                                      : Color.Souvera.brandPrimaryDeep,
+                                                  isAnimated: model.autoUploadStart)
+                    .frame(width: 39)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(NSLocalizedString("_settings_autoupload_", comment: ""))
+                        .font(.body)
+                        .foregroundStyle(.primary)
+
+                    if model.autoUploadStart && autoUploadCounter.isLoaded {
+                        Text(autoUploadCounter.itemsLeftSummary)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private func menuRow(_ item: NCMoreModel.Item) -> some View {
         Button {
             model.perform(item.destination)
         } label: {
-            HStack(spacing: 16) {
-                Image(systemName: item.image)
-                    .font(.icon())
-                    .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
-                    .frame(width: 39)
-
-                Text(NSLocalizedString(item.titleKey, comment: ""))
-                    .font(.body)
-                    .foregroundColor(Color(NCBrandColor.shared.textColor))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .tint(.primary)
-
-                Spacer()
-
-                Image(systemName: "chevron.right")
-                    .font(.caption)
-                    .foregroundColor(Color(.tertiaryLabel))
-            }
-            .padding(.horizontal, 16)
-            .frame(height: 54)
-            .contentShape(Rectangle())
+            Label(NSLocalizedString(item.titleKey, comment: ""), systemImage: item.image)
         }
-        .buttonStyle(.plain)
-    }
-
-    private var divider: some View {
-        Rectangle()
-            .fill(Color(.separator).opacity(0.45))
-            .frame(height: 0.5)
-            .padding(.leading, 71)
     }
 
     @ViewBuilder
-    private var quotaSection: some View {
-        if !model.quotaDescription.isEmpty || !model.quotaExternalSiteTitle.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                if !model.quotaDescription.isEmpty {
-                    Text(model.quotaDescription)
-                        .font(.footnote)
-                        .foregroundColor(.primary)
-                        .lineLimit(2)
+    private var quotaRows: some View {
+        if !model.quotaDescription.isEmpty {
+            VStack(alignment: .leading, spacing: SouveraTokens.Spacing.xs) {
+                Text(model.quotaDescription)
+                    .font(.footnote)
+                    .foregroundStyle(.primary)
+                    .lineLimit(2)
 
-                    quotaProgressView
-                }
-
-                if !model.quotaExternalSiteTitle.isEmpty,
-                   let url = model.quotaExternalSiteUrl {
-                    Button {
-                        model.perform(
-                            .browser(
-                                url: url,
-                                title: model.quotaExternalSiteTitle
-                            )
-                        )
-                    } label: {
-                        Text(model.quotaExternalSiteTitle)
-                            .font(.footnote)
-                            .lineLimit(1)
-                            .tint(.primary)
-                    }
-                    .buttonStyle(.plain)
-                }
+                quotaProgressView
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 16)
+        }
+
+        if !model.quotaExternalSiteTitle.isEmpty,
+           let url = model.quotaExternalSiteUrl {
+            Button {
+                model.perform(
+                    .browser(
+                        url: url,
+                        title: model.quotaExternalSiteTitle
+                    )
+                )
+            } label: {
+                Text(model.quotaExternalSiteTitle)
+                    .font(.footnote)
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -368,7 +273,7 @@ struct NCMoreView: View {
             let width = geometry.size.width
             let progress = normalizedQuotaProgress
             let warningThreshold = 0.90
-            let brandColor = Color(NCBrandColor.shared.getElement(account: model.account))
+            let brandColor = Color.Souvera.brandPrimaryDeep
 
             ZStack(alignment: .leading) {
                 Capsule()
@@ -473,5 +378,7 @@ extension NCMoreModel {
 }
 
 #Preview {
-    NCMoreView(model: .preview)
+    NavigationStack {
+        NCMoreView(model: .preview)
+    }
 }
