@@ -971,7 +971,10 @@ final class MailViewModel: ObservableObject {
         }
         if let mailbox = currentMailbox {
             route = .messages(mailbox: mailbox)
-            Task { await syncMessages() }
+            // Voller Sync statt Inkrementalpfad: queryChanges meldet
+            // Verschieben/Löschen nicht zuverlässig, der Cache-Snapshot
+            // würde die Mail sonst wieder einblenden.
+            Task { await refreshMessages() }
         } else if !lastSearchQuery.isEmpty {
             Task { await search(lastSearchQuery) }
         }

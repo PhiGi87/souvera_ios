@@ -38,8 +38,10 @@ struct MailView: View {
                         let target = blacklistTarget ?? []
                         blacklistTarget = nil
                         Task {
-                            await viewModel.blacklistSenders(target)
+                            // Erst löschen - die Liste aktualisiert sofort;
+                            // der Blacklist-API-Lauf dauert länger.
                             viewModel.delete(target)
+                            await viewModel.blacklistSenders(target)
                         }
                     }
                     Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {

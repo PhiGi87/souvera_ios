@@ -16,6 +16,7 @@ struct NCMoreView: View {
     @StateObject private var model: NCMoreModel
     @State private var autoUploadCounter = NCAutoUploadCounter()
     @State private var showAccountSettings = false
+    @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
     private let loadItemsOnAppear: Bool
 
     init(account: String, controller: NCMainTabBarController?) {
@@ -39,6 +40,20 @@ struct NCMoreView: View {
 
     var body: some View {
         List {
+            if maintenanceMonitor.isMaintenance {
+                Section {
+                    HStack(spacing: 10) {
+                        Image(systemName: "info.circle.fill")
+                            .foregroundStyle(.orange)
+                        Text(NSLocalizedString("_maintenance_info_", comment: ""))
+                            .font(.footnote)
+                            .foregroundStyle(.primary)
+                    }
+                    .padding(.vertical, 4)
+                }
+                .listRowBackground(Color.orange.opacity(0.12))
+            }
+
             Section {
                 accountHeader
             }

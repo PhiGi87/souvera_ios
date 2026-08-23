@@ -29,7 +29,7 @@ final class LinkBadgeMonitor {
     private func tick() async {
         guard let account = LinkAccount.active() else { return }
         let api = LinkOcsApi(account: account)
-        let list = await api.listConversations()
+        guard let list = await api.listConversations() else { return }
         guard !Task.isCancelled else { return }
         LinkViewModel.postUnreadTotal(list)
     }

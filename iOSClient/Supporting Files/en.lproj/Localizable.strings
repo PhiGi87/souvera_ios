@@ -1045,3 +1045,5 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_souvera_language_system_" = "System";
 "_link_reply_" = "Reply";
 "_link_reply_to_" = "Reply to %@";
+"_link_offline_" = "Offline – showing last synced state";
+"_maintenance_info_" = "The server is in maintenance mode. You can keep working offline with the latest state in Mail, Calendar and Link.";

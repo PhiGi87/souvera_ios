@@ -168,6 +168,16 @@ class NCMainTabBarController: UITabBarController {
         }
         // Hintergrund-Poller für ungelesene Talk-Nachrichten (Badge).
         LinkBadgeMonitor.shared.start()
+        // Wartungsmodus-Erkennung: Info-Punkt am Mehr-Tab + Hinweis im
+        // Mehr-Menü, während die Module mit ihrem Cache weiterarbeiten.
+        SouveraMaintenanceMonitor.shared.start()
+        NotificationCenter.default.addObserver(
+            forName: .maintenanceChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            self?.updateMaintenanceDot(notification.object as? Bool ?? false)
+        }
 
         filesController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("_home_", comment: ""),
@@ -185,6 +195,8 @@ class NCMainTabBarController: UITabBarController {
     /// Eigenes Badge-Overlay auf der TabBar, damit die Position frei
     /// steuerbar ist (System-Badge sitzt zu weit Richtung Kalender-Tab).
     private var mailBadgeLabel: UILabel?
+    /// Oranger Info-Punkt am Mehr-Tab bei Wartungsmodus.
+    private var maintenanceDot: UIView?
 
     private func updateMailBadge(_ count: Int) {
         if count > 0 {
@@ -208,24 +220,51 @@ class NCMainTabBarController: UITabBarController {
         layoutBadges()
     }
 
+    private func updateMaintenanceDot(_ maintenance: Bool) {
+        if maintenance {
+            guard maintenanceDot == nil else { return }
+            let dot = UIView()
+            dot.backgroundColor = .systemOrange
+            dot.clipsToBounds = true
+            dot.layer.borderColor = UIColor.white.cgColor
+            dot.layer.borderWidth = 1
+            tabBar.addSubview(dot)
+            maintenanceDot = dot
+        } else {
+            maintenanceDot?.removeFromSuperview()
+            maintenanceDot = nil
+        }
+        layoutBadges()
+    }
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutBadges()
     }
 
     private func layoutBadges() {
-        guard let badge = mailBadgeLabel else { return }
         let itemCount = max(viewControllers?.count ?? 1, 1)
+        guard itemCount > 0, tabBar.bounds.width > 0 else { return }
         let itemWidth = tabBar.bounds.width / CGFloat(itemCount)
         let mailIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 100 }) ?? 0
-        badge.sizeToFit()
-        let width = max(badge.bounds.width + 10, 18)
-        let height: CGFloat = 18
-        // 6 pt weiter nach innen (links), damit das Badge nicht bis zum
-        // Kalender-Tab herüberreicht.
-        let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
-        badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
-        badge.layer.cornerRadius = height / 2
+        let moreIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 104 }) ?? max(0, itemCount - 1)
+
+        if let badge = mailBadgeLabel {
+            badge.sizeToFit()
+            let width = max(badge.bounds.width + 10, 18)
+            let height: CGFloat = 18
+            // 6 pt weiter nach innen (links), damit das Badge nicht bis zum
+            // Kalender-Tab herüberreicht.
+            let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
+            badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
+            badge.layer.cornerRadius = height / 2
+        }
+        if let dot = maintenanceDot {
+            let size: CGFloat = 11
+            let centerX = itemWidth * (CGFloat(moreIndex) + 0.72)
+            dot.frame = CGRect(x: centerX - size / 2, y: 7, width: size, height: size)
+            dot.layer.cornerRadius = size / 2
+        }
     }
 
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {

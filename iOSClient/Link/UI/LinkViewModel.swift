@@ -47,6 +47,8 @@ final class LinkViewModel: ObservableObject {
     @Published var userResults: [LinkSuggestion] = []
     /// In-Memory-Avatar-Cache (URL -> Bilddaten) für Raum- und Nutzer-Avatare.
     @Published var avatarCache: [String: Data] = [:]
+    /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
+    @Published var offlineNotice: String?
 
     private(set) var currentUserId: String = ""
 
@@ -273,9 +275,16 @@ final class LinkViewModel: ObservableObject {
     func loadConversations() {
         guard let api else { return }
         Task {
-            let list = await api.listConversations()
-            self.conversations = .success(list.sorted { $0.lastActivity > $1.lastActivity })
-            Self.postUnreadTotal(list)
+            if let list = await api.listConversations() {
+                self.conversations = .success(list.sorted { $0.lastActivity > $1.lastActivity })
+                Self.postUnreadTotal(list)
+                self.offlineNotice = nil
+            } else if let cached = LinkCache.loadConversations() {
+                // Server nicht erreichbar (Wartung/offline): letzter Stand.
+                self.conversations = .success(cached.sorted { $0.lastActivity > $1.lastActivity })
+                Self.postUnreadTotal(cached)
+                self.offlineNotice = NSLocalizedString("_link_offline_", comment: "")
+            }
         }
     }
 
@@ -323,7 +332,12 @@ final class LinkViewModel: ObservableObject {
         pollTask = Task {
             // Load the newest messages: lookIntoFuture=0 pages backwards from a high anchor id, so
             // it returns the most recent page (there is no "give me the latest" without an anchor).
-            let history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
+            var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
+            if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
+                // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
+                history = cached
+                offlineNotice = NSLocalizedString("_link_offline_", comment: "")
+            }
             if Task.isCancelled { return }
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0

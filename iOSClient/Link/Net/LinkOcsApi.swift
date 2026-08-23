@@ -35,8 +35,12 @@ actor LinkOcsApi {
 
     // MARK: - Rooms & chat
 
-    func listConversations() async -> [LinkConversation] {
-        guard let body = await get("\(base)/api/v4/room") else { return [] }
+    /// Konversationsliste; nil bei Transport-/Serverfehlern (dann greift der
+    /// lokale Cache als Offline-Fallback). Erfolgreiche Antworten werden
+    /// roh im LinkCache gesichert.
+    func listConversations() async -> [LinkConversation]? {
+        guard let body = await get("\(base)/api/v4/room") else { return nil }
+        LinkCache.saveConversations(raw: body)
         return decodeList(body)
     }
 
@@ -71,6 +75,9 @@ actor LinkOcsApi {
         let url = "\(base)/api/v1/chat/\(token)?lookIntoFuture=\(future ? 1 : 0)" +
             "\(lastKnownParam)&timeout=\(timeoutSeconds)&limit=\(Self.pageLimit)&setReadMarker=1"
         guard let body = await get(url, longPoll: future) else { return [] }
+        if !future {
+            LinkCache.saveMessages(token: token, raw: body)
+        }
         return decodeList(body)
     }
 

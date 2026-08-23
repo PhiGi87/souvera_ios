@@ -389,6 +389,15 @@ struct LinkConversationListView: View {
 
     var body: some View {
         List {
+            if let offlineNotice = viewModel.offlineNotice {
+                Section {
+                    HStack(spacing: 8) {
+                        Image(systemName: "wifi.slash").foregroundStyle(.secondary)
+                        Text(offlineNotice).font(.footnote).foregroundStyle(.secondary)
+                    }
+                    .padding(.vertical, 2)
+                }
+            }
 #if DEBUG
             Section(NSLocalizedString("_link_debug_", comment: "")) {
                 Button {
