@@ -700,7 +700,20 @@ private struct MailMessageListView: View {
                 }
             }
             .listStyle(.plain)
-            .scrollPosition(id: $viewModel.messageScrollPosition, anchor: .top)
+            // Einweg-Binding: SwiftUI darf den Anker NICHT zurückschreiben -
+            // sonst löscht der Teardown der Liste (beim Öffnen einer Mail)
+            // die Zielposition und die Liste springt beim Zurückkehren nach
+            // oben. Der Anker wird nach dem Restore bewusst geleert.
+            .scrollPosition(id: Binding<String?>(
+                get: { viewModel.messageScrollPosition },
+                set: { _ in }
+            ), anchor: .top)
+            .onAppear {
+                guard viewModel.messageScrollPosition != nil else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    viewModel.clearMessageScrollPosition()
+                }
+            }
             .refreshable { await viewModel.refreshMessages() }
             .overlay(alignment: .bottom) {
                 if let firstId = sorted.first?.id {

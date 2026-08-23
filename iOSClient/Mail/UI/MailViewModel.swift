@@ -676,7 +676,6 @@ final class MailViewModel: ObservableObject {
     }
 
     // MARK: - Detail
-
     func openMessage(_ message: MailMessage, fromSearch: Bool = false) {
         cameFromSearch = fromSearch
         messageScrollPosition = message.id
@@ -689,6 +688,11 @@ final class MailViewModel: ObservableObject {
                 await openMessageImap(message)
             }
         }
+    }
+
+    /// Leert den Scroll-Anker, nachdem die Liste ihn wiederhergestellt hat.
+    func clearMessageScrollPosition() {
+        messageScrollPosition = nil
     }
 
     private func openMessageImap(_ message: MailMessage) async {

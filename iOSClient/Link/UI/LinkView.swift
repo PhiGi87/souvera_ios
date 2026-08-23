@@ -429,7 +429,7 @@ struct LinkConversationListView: View {
                         Button {
                             viewModel.openConversation(token: room.token, title: room.displayName)
                         } label: {
-                            LinkConversationRow(room: room)
+                            LinkConversationRow(viewModel: viewModel, room: room)
                         }
                         .buttonStyle(.plain)
                         .swipeActions(edge: .leading) {
@@ -484,15 +484,12 @@ struct LinkConversationListView: View {
 }
 
 private struct LinkConversationRow: View {
+    @ObservedObject var viewModel: LinkViewModel
     let room: LinkConversation
 
     var body: some View {
         HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(Color(NCBrandColor.shared.customer)).frame(width: 44, height: 44)
-                Image(systemName: room.isOneToOne ? "person.fill" : "person.3.fill")
-                    .foregroundStyle(.white)
-            }
+            avatar
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(room.displayName).font(.body).fontWeight(.medium).lineLimit(1)
@@ -503,15 +500,42 @@ private struct LinkConversationRow: View {
                 Text(room.lastMessageText()).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer()
-            if room.unreadMessages > 0 {
-                Text("\(room.unreadMessages)")
-                    .font(.caption2).fontWeight(.bold).foregroundStyle(.white)
-                    .padding(.horizontal, 7).padding(.vertical, 3)
-                    .background(Capsule().fill(Color(NCBrandColor.shared.customer)))
-            }
         }
         .padding(.vertical, 4)
         .contentShape(Rectangle())
+    }
+
+    /// Raum-Avatar (1:1 liefert den Avatar des Gegenübers) mit dem
+    /// Unread-Badge überlappend unten rechts.
+    private var avatar: some View {
+        ZStack {
+            if let url = URL(string: viewModel.roomAvatarURL(token: room.token)),
+               let data = viewModel.avatarCache[url],
+               let ui = UIImage(data: data) {
+                Image(uiImage: ui)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: 44, height: 44)
+                    .clipShape(Circle())
+            } else {
+                Circle().fill(Color(NCBrandColor.shared.customer)).frame(width: 44, height: 44)
+                Image(systemName: room.isOneToOne ? "person.fill" : "person.3.fill")
+                    .foregroundStyle(.white)
+            }
+        }
+        .frame(width: 44, height: 44)
+        .overlay(alignment: .bottomTrailing) {
+            if room.unreadMessages > 0 {
+                Text(room.unreadMessages > 99 ? "99+" : "\(room.unreadMessages)")
+                    .font(.caption2).fontWeight(.bold).foregroundStyle(.white)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(Capsule().fill(Color.red))
+                    .offset(x: 3, y: 3)
+            }
+        }
+        .task {
+            await viewModel.loadAvatar(url: viewModel.roomAvatarURL(token: room.token))
+        }
     }
 }
 
@@ -527,6 +551,7 @@ struct LinkChatView: View {
     @State private var previewURL: URL?
     @State private var mentionSuggestions: [LinkParticipant] = []
     @State private var reactionTarget: LinkChatMessage?
+    @State private var replyingTo: LinkChatMessage?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -626,6 +651,7 @@ struct LinkChatView: View {
                                 message: message,
                                 isOwn: message.actorId == viewModel.currentUserId,
                                 showTime: showsTime(index: index, message: message, items: items),
+                                showsAvatar: showsAvatar(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
                                 onOpenFile: { info in
                                     Task {
@@ -634,6 +660,7 @@ struct LinkChatView: View {
                                         }
                                     }
                                 },
+                                onStartReply: { replyingTo = message },
                                 onLongPress: { target in reactionTarget = target }
                             )
                             .id(message.id)
@@ -657,14 +684,29 @@ struct LinkChatView: View {
         }
     }
 
-    /// Zeitstempel minutengenau gruppieren: nur bei Minutenwechsel anzeigen.
+    /// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start
+    /// einer Autoren-Gruppe (dort sitzt der Stempel neben dem Avatar).
     private func showsTime(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> Bool {
         let visible = items.filter { $0.systemMessage != "message_deleted" }
         guard let currentIndex = visible.firstIndex(where: { $0.id == message.id }),
               currentIndex > 0 else { return true }
         let previous = visible[currentIndex - 1]
         guard !previous.isSystemMessage else { return true }
+        if previous.actorId != message.actorId { return true }
+        if message.timestamp - previous.timestamp > 300 { return true }
         return minuteStamp(message) != minuteStamp(previous)
+    }
+
+    /// Avatar (Talk-Stil) nur am Start einer Folge desselben Autors zeigen;
+    /// Folge-Nachrichten desselben Autors (innerhalb 5 Min.) rücken ein.
+    private func showsAvatar(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> Bool {
+        let visible = items.filter { $0.systemMessage != "message_deleted" }
+        guard let currentIndex = visible.firstIndex(where: { $0.id == message.id }) else { return false }
+        if currentIndex == 0 { return true }
+        let previous = visible[currentIndex - 1]
+        guard !previous.isSystemMessage else { return true }
+        guard previous.actorId == message.actorId else { return true }
+        return message.timestamp - previous.timestamp > 300
     }
 
     private func minuteStamp(_ message: LinkChatMessage) -> String {
@@ -729,6 +771,30 @@ struct LinkChatView: View {
                 .padding(.top, 6)
                 Divider()
             }
+            if let replyingTo {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrowshape.turn.up.left")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(String(format: NSLocalizedString("_link_reply_to_", comment: ""), replyingTo.actorDisplayName))
+                            .font(.caption)
+                            .fontWeight(.medium)
+                        Text(replyingTo.message)
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Button {
+                        self.replyingTo = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+            }
             HStack(spacing: 8) {
             Menu {
                 Button {
@@ -751,8 +817,10 @@ struct LinkChatView: View {
                 .lineLimit(1...5)
             Button {
                 let text = draft
+                let replyTarget = replyingTo?.id
                 draft = ""
-                viewModel.send(text: text)
+                replyingTo = nil
+                viewModel.send(text: text, replyTo: replyTarget)
             } label: {
                 Image(systemName: "paperplane.fill")
                     .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color(NCBrandColor.shared.customer))
@@ -771,14 +839,23 @@ private struct LinkMessageRow: View {
     let message: LinkChatMessage
     let isOwn: Bool
     var showTime: Bool = true
+    var showsAvatar: Bool = true
     let onStartEdit: () -> Void
     let onOpenFile: (LinkFileInfo) -> Void
+    let onStartReply: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
 
     private var messageTime: String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
+    }
+
+    /// Initialen aus dem Anzeigenamen (Fallback-Avatar).
+    private func initials(_ name: String) -> String {
+        let parts = name.split(separator: " ").prefix(2)
+        let letters = parts.compactMap { $0.first.map(String.init) }
+        return letters.joined().uppercased()
     }
 
     /// Emoji-Reaktions-Pills, halb überlappend am unteren Bubble-Rand.
@@ -803,57 +880,116 @@ private struct LinkMessageRow: View {
         }
     }
 
-    var body: some View {
-        VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
-            if showTime {
-                Text(messageTime)
-                    .font(.system(size: 9))
-                    .foregroundStyle(.secondary)
-                    .padding(.leading, isOwn ? 0 : 6)
-                    .padding(.trailing, isOwn ? 6 : 0)
+    /// Autor-Avatar (Talk-Stil): nur am Start einer Gruppe desselben Autors,
+    /// sonst ein leerer Platzhalter gleicher Breite (Einrückung).
+    @ViewBuilder
+    private var avatarColumn: some View {
+        let url = viewModel.userAvatarURL(for: message)
+        if !showsAvatar {
+            Color.clear.frame(width: 30, height: 30)
+        } else if let url, let data = viewModel.avatarCache[url], let ui = UIImage(data: data) {
+            Image(uiImage: ui)
+                .resizable()
+                .scaledToFill()
+                .frame(width: 30, height: 30)
+                .clipShape(Circle())
+        } else {
+            ZStack {
+                Circle().fill(Color(NCBrandColor.shared.customer))
+                Text(initials(message.actorDisplayName))
+                    .font(.caption2).foregroundStyle(.white)
             }
-            if let file = message.fileInfo() {
-                Button {
-                    onOpenFile(file)
-                } label: {
-                    HStack(spacing: 6) {
-                        Image(systemName: "paperclip").font(.caption)
-                        Text(file.name).font(.caption).lineLimit(1)
-                        if file.size > 0 {
-                            Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Color(.secondarySystemBackground), in: Capsule())
+            .frame(width: 30, height: 30)
+            .task {
+                if let url { await viewModel.loadAvatar(url: url) }
+            }
+        }
+    }
+
+    /// Zitat des Elternteils bei Antworten (klein, über der Bubble).
+    @ViewBuilder
+    private var replyQuote: some View {
+        if let parent = message.parent, !parent.isSystemMessage {
+            HStack(spacing: 5) {
+                Rectangle().fill(Color.gray.opacity(0.45)).frame(width: 2.5)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(parent.actorDisplayName).font(.caption2).fontWeight(.medium)
+                    Text(parent.message).font(.caption2).lineLimit(2)
                 }
-                .buttonStyle(.plain)
+                .foregroundStyle(.secondary)
             }
-            HStack(spacing: 0) {
-                if isOwn { Spacer(minLength: 40) }
-                LinkMessageBubble(message: message, isOwn: isOwn)
-                    .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
-                        // Reaktionen leicht überlappend am unteren Bubble-Rand,
-                        // etwas eingerückt (nicht ganz bündig mit der Kante),
-                        // ohne den Nachrichtentext zu verdecken.
-                        if !message.reactions.isEmpty {
-                            reactionPills(message: message)
-                                .offset(x: isOwn ? -6 : 6, y: 10)
+            .padding(.horizontal, 8).padding(.vertical, 4)
+            .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
+            .frame(maxWidth: 230, alignment: .leading)
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            if !isOwn {
+                avatarColumn
+            }
+            VStack(alignment: isOwn ? .trailing : .leading, spacing: 2) {
+                if showTime {
+                    Text(messageTime)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.secondary)
+                        .padding(.leading, isOwn ? 0 : 6)
+                        .padding(.trailing, isOwn ? 6 : 0)
+                }
+                replyQuote
+                if let file = message.fileInfo() {
+                    Button {
+                        onOpenFile(file)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperclip").font(.caption)
+                            Text(file.name).font(.caption).lineLimit(1)
+                            if file.size > 0 {
+                                Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
-                if !isOwn { Spacer(minLength: 40) }
+                    .buttonStyle(.plain)
+                }
+                HStack(spacing: 0) {
+                    if isOwn { Spacer(minLength: 40) }
+                    LinkMessageBubble(message: message, isOwn: isOwn)
+                        .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
+                            // Reaktionen leicht überlappend am unteren Bubble-Rand,
+                            // etwas eingerückt (nicht ganz bündig mit der Kante),
+                            // ohne den Nachrichtentext zu verdecken.
+                            if !message.reactions.isEmpty {
+                                reactionPills(message: message)
+                                    .offset(x: isOwn ? -6 : 6, y: 10)
+                            }
+                        }
+                    if !isOwn { Spacer(minLength: 40) }
+                }
+                // Mit Reaktionen hängen die Pills über die Unterkante - der
+                // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
+                .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
+                .onLongPressGesture {
+                    onLongPress(message)
+                }
             }
-            // Mit Reaktionen hängen die Pills über die Unterkante - der
-            // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
-            .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
-            .onLongPressGesture {
-                onLongPress(message)
+            if isOwn {
+                avatarColumn
             }
         }
         .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
-        .swipeActions(edge: .trailing) {
+        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            Button {
+                onStartReply()
+            } label: {
+                Label(NSLocalizedString("_link_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+            }
+            .tint(.gray)
             if isOwn {
                 Button {
                     viewModel.deleteMessage(message)

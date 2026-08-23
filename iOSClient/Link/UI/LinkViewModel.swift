@@ -16,6 +16,8 @@ extension Notification.Name {
     static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
     /// Posted whenever the active call state changes (started/ended).
     static let linkCallStateChanged = Notification.Name("SouveraLinkCallStateChanged")
+    /// Posted with the total number of unread messages (Link tab badge).
+    static let linkUnreadChanged = Notification.Name("SouveraLinkUnreadChanged")
 }
 
 /// Loading/content/error state for a Link screen's data.
@@ -43,6 +45,8 @@ final class LinkViewModel: ObservableObject {
     @Published var conversations: LinkUiState<[LinkConversation]> = .loading
     @Published var messages: LinkUiState<[LinkChatMessage]> = .loading
     @Published var userResults: [LinkSuggestion] = []
+    /// In-Memory-Avatar-Cache (URL -> Bilddaten) für Raum- und Nutzer-Avatare.
+    @Published var avatarCache: [String: Data] = [:]
 
     private(set) var currentUserId: String = ""
 
@@ -271,6 +275,34 @@ final class LinkViewModel: ObservableObject {
         Task {
             let list = await api.listConversations()
             self.conversations = .success(list.sorted { $0.lastActivity > $1.lastActivity })
+            Self.postUnreadTotal(list)
+        }
+    }
+
+    /// Summiert ungelesene Nachrichten aller Channels und meldet sie als
+    /// Tab-Badge (NotificationCenter).
+    static func postUnreadTotal(_ list: [LinkConversation]) {
+        let total = list.reduce(0) { $0 + $1.unreadMessages }
+        NotificationCenter.default.post(name: .linkUnreadChanged, object: total)
+    }
+
+    /// Raum-Avatar-URL für den Loader.
+    func roomAvatarURL(token: String) -> String {
+        api?.roomAvatarURL(token: token) ?? ""
+    }
+
+    /// Nutzer-Avatar-URL (Nachrichten) für den Loader.
+    func userAvatarURL(for message: LinkChatMessage) -> String? {
+        guard message.actorType == "users", !message.actorId.isEmpty else { return nil }
+        return api?.userAvatarURL(actorId: message.actorId)
+    }
+
+    /// Lädt ein Avatar-Bild in den gemeinsamen Cache (idempotent).
+    func loadAvatar(url: String) async {
+        guard !url.isEmpty, avatarCache[url] == nil else { return }
+        guard let api else { return }
+        if let data = await api.fetchImage(url: url), !data.isEmpty {
+            avatarCache[url] = data
         }
     }
 
@@ -293,7 +325,7 @@ final class LinkViewModel: ObservableObject {
             // it returns the most recent page (there is no "give me the latest" without an anchor).
             let history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
             if Task.isCancelled { return }
-            let ordered = history.sorted { $0.id < $1.id }
+            let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
             await self.pollNewMessages(token: token)
@@ -318,6 +350,7 @@ final class LinkViewModel: ObservableObject {
                     }
                 }
                 let deduped = merged
+                    .filter { !$0.isReactionEvent }
                     .filter { !deletedIds.contains($0.id) }
                     .filter { seen.insert($0.id).inserted }
                     .sorted { $0.id < $1.id }
@@ -326,13 +359,13 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
-    func send(text: String) {
+    func send(text: String, replyTo: Int64? = nil) {
         guard let api else { return }
         guard case let .chat(token, _) = route else { return }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         let outgoing = mentionAwareMessage(trimmed)
-        Task { await api.sendMessage(token: token, message: outgoing) }
+        Task { await api.sendMessage(token: token, message: outgoing, replyTo: replyTo) }
     }
 
     /// Talk parst Mentions nur in der Form @"<ID>" (User-ID,
@@ -402,7 +435,7 @@ final class LinkViewModel: ObservableObject {
     private func reloadMessages(token: String) {
         Task {
             let history = await api?.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
-            let ordered = history.sorted { $0.id < $1.id }
+            let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
         }

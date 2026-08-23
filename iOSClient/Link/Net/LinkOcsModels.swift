@@ -36,6 +36,10 @@ struct LinkConversation: Decodable, Identifiable {
     /// Talk participant type: 1 = owner, 2 = moderator, 3 = user, 4 = guest.
     /// Löschen einer Konversation erfordert Owner oder Moderator.
     let participantType: Int
+    /// Avatar-Version (Cache-Busting für den Raum-Avatar).
+    let avatarVersion: String
+    /// True, wenn der Raum einen eigenen Avatar hat.
+    let isCustomAvatar: Bool
 
     var id: String { token }
 
@@ -45,7 +49,7 @@ struct LinkConversation: Decodable, Identifiable {
     var canManage: Bool { participantType == 1 || participantType == 2 }
 
     enum CodingKeys: String, CodingKey {
-        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType
+        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar
     }
 
     init(from decoder: Decoder) throws {
@@ -59,6 +63,8 @@ struct LinkConversation: Decodable, Identifiable {
         // Server sends `[]` when there is no last message; that fails object decoding, so tolerate it.
         lastMessage = try? c.decode(LinkChatMessage.self, forKey: .lastMessage)
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
+        avatarVersion = (try? c.decode(String.self, forKey: .avatarVersion)) ?? ""
+        isCustomAvatar = (try? c.decode(Bool.self, forKey: .isCustomAvatar)) ?? false
     }
 
     /// Last message preview text; falls back to a file marker for shared files.
@@ -94,9 +100,11 @@ struct LinkChatMessage: Decodable, Identifiable {
     var reactions: [String: Int] = [:]
     /// Emojis, mit denen der aktuelle Nutzer selbst reagiert hat.
     var reactionsSelf: [String] = []
+    /// Elternteil bei Antworten (Talk liefert die volle Nachricht mit).
+    let parent: LinkChatMessage?
 
     enum CodingKeys: String, CodingKey {
-        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf
+        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf, parent
     }
 
     init(from decoder: Decoder) throws {
@@ -114,6 +122,14 @@ struct LinkChatMessage: Decodable, Identifiable {
         // reactions kann ein Objekt oder `[]` sein; tolerant dekodieren.
         reactions = (try? c.decode([String: Int].self, forKey: .reactions)) ?? [:]
         reactionsSelf = (try? c.decode([String].self, forKey: .reactionsSelf)) ?? []
+        parent = try? c.decode(LinkChatMessage.self, forKey: .parent)
+    }
+
+    /// Talk erzeugt für jede Reaktion eine Systemnachricht; der Browser
+    /// blendet diese aus der Ansicht aus (die Reaktion steht ohnehin am
+    /// Elternteil). Diese Nachrichten gehören nicht in den Verlauf.
+    var isReactionEvent: Bool {
+        systemMessage == "reaction" || systemMessage == "reaction_revoked" || systemMessage == "reaction_deleted"
     }
 
     /// File name if this message is a shared file (Talk puts a `file` rich-object parameter), else nil.

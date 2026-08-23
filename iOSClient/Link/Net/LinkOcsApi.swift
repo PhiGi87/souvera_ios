@@ -40,6 +40,27 @@ actor LinkOcsApi {
         return decodeList(body)
     }
 
+    /// Avatar-URL des Raums (1:1-Räume liefern den Avatar des Gegenübers).
+    func roomAvatarURL(token: String) -> String {
+        "\(base)/api/v4/room/\(token)/avatar"
+    }
+
+    /// Avatar-URL eines Nextcloud-Benutzers (öffentliche Avatar-Route).
+    func userAvatarURL(actorId: String, size: Int = 64) -> String {
+        let encoded = actorId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? actorId
+        return "\(root)/index.php/avatar/\(encoded)/\(size)"
+    }
+
+    /// Lädt ein Binärbild (Avatar) mit den Konto-Zugangsdaten.
+    func fetchImage(url: String) async -> Data? {
+        guard let url = URL(string: url) else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return data
+    }
+
     /// Recent history (`future=false`) or the long-poll for new messages (`future=true`). For the
     /// initial history fetch `lastKnownId` is 0 and MUST be omitted — sending `lastKnownMessageId=0`
     /// with lookIntoFuture=0 means "messages older than 0" and returns nothing. The long-poll always
@@ -53,8 +74,10 @@ actor LinkOcsApi {
         return decodeList(body)
     }
 
-    func sendMessage(token: String, message: String) async {
-        let payload = try? JSONSerialization.data(withJSONObject: ["message": message])
+    func sendMessage(token: String, message: String, replyTo: Int64? = nil) async {
+        var body: [String: Any] = ["message": message]
+        if let replyTo { body["replyTo"] = replyTo }
+        let payload = try? JSONSerialization.data(withJSONObject: body)
         var req = signed(url: "\(base)/api/v1/chat/\(token)", method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = payload
@@ -96,12 +119,30 @@ actor LinkOcsApi {
             URLQueryItem(name: "description", value: description)
         ]
         guard let query = components.query else { return nil }
-        let req = signed(url: "\(base)/api/v4/room?\(query)", method: "POST")
-        guard let (data, response) = try? await session.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode ?? 500 < 300 else { return nil }
-        let env: OcsEnvelope<LinkConversation>? = try? decoder.decode(OcsEnvelope<LinkConversation>.self, from: data)
-        guard let token = env?.ocs.data?.token else { return nil }
-        return (token, env?.ocs.data?.displayName ?? name)
+        let url = "\(base)/api/v4/room?\(query)"
+        // Server kann kurz 503 liefern - mit kleinem Abstand wiederholen.
+        for attempt in 1...3 {
+            let req = signed(url: url, method: "POST")
+            guard let (data, response) = try? await session.data(for: req) else {
+                JmapLog.write("createEventRoom attempt \(attempt): transport failure")
+                if attempt < 3 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                continue
+            }
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            let body = String(data: data.prefix(400), encoding: .utf8) ?? ""
+            JmapLog.write("createEventRoom attempt \(attempt): HTTP \(status) \(body)")
+            if status < 300 {
+                let env: OcsEnvelope<LinkConversation>? = try? decoder.decode(OcsEnvelope<LinkConversation>.self, from: data)
+                guard let token = env?.ocs.data?.token else { return nil }
+                return (token, env?.ocs.data?.displayName ?? name)
+            }
+            if status == 503 || status >= 500 {
+                if attempt < 3 { try? await Task.sleep(nanoseconds: 1_000_000_000) }
+                continue
+            }
+            return nil
+        }
+        return nil
     }
 
     /// Adds participants: internal Souvera users by user id (`source=users`),

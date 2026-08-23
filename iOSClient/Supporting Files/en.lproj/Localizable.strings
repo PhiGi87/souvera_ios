@@ -1043,3 +1043,5 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_start_conversation_" = "Start conversation";
 "_stop_focused_auto_upload_" = "Stop";
 "_souvera_language_system_" = "System";
+"_link_reply_" = "Reply";
+"_link_reply_to_" = "Reply to %@";

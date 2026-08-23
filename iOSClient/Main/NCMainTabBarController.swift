@@ -21,6 +21,7 @@ class NCMainTabBarController: UITabBarController {
     }
     var availableNotifications: Bool = false
     private weak var mailTabBarItem: UITabBarItem?
+    private weak var linkTabBarItem: UITabBarItem?
     var documentPickerViewController: NCDocumentPickerViewController?
     let navigationCollectionViewCommon = ThreadSafeArray<NavigationCollectionViewCommon>()
     private var previousIndex: Int?
@@ -136,6 +137,9 @@ class NCMainTabBarController: UITabBarController {
             tag: 100
         )
         mailTabBarItem = mailController.tabBarItem
+        // Badge optisch etwas nach links/innen über das Mail-Icon rücken,
+        // damit es nicht bis zum Kalender-Tab herüberreicht.
+        mailController.tabBarItem.badgePositionAdjustment = UIOffset(horizontal: -6, vertical: 0)
         NotificationCenter.default.addObserver(
             forName: .mailUnreadChanged,
             object: nil,
@@ -157,6 +161,17 @@ class NCMainTabBarController: UITabBarController {
             imageName: "bubble.left.and.bubble.right.fill",
             tag: 102
         )
+        linkTabBarItem = linkController.tabBarItem
+        NotificationCenter.default.addObserver(
+            forName: .linkUnreadChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let count = notification.object as? Int ?? 0
+            self?.linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+        }
+        // Hintergrund-Poller für ungelesene Talk-Nachrichten (Badge).
+        LinkBadgeMonitor.shared.start()
 
         filesController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("_home_", comment: ""),
