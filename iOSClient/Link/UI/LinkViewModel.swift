@@ -322,7 +322,7 @@ final class LinkViewModel: ObservableObject {
 
     /// Summiert ungelesene Nachrichten aller Channels und meldet sie als
     /// Tab-Badge (NotificationCenter).
-    static func postUnreadTotal(_ list: [LinkConversation]) {
+    nonisolated static func postUnreadTotal(_ list: [LinkConversation]) {
         let total = list.reduce(0) { $0 + $1.unreadMessages }
         NotificationCenter.default.post(name: .linkUnreadChanged, object: total)
     }
@@ -566,7 +566,10 @@ final class LinkViewModel: ObservableObject {
 
     deinit {
         pollTask?.cancel()
-        signaling.disconnect()
+        let client = signaling
+        Task { @MainActor in
+            client.disconnect()
+        }
     }
 
     // MARK: - Typing-Indikatoren
