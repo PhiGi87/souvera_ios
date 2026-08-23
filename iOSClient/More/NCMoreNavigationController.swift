@@ -50,10 +50,13 @@ class NCMoreNavigationController: NCMainNavigationController {
     }
 
     /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus
-    /// kleiner Korrektur), vertikal an der Höhe der rechten Buttons (12 pt
+    /// kleiner Korrektur), vertikal an der Höhe der rechten Buttons (6 pt
     /// über der Streifenmitte - Ausgleich der Wortmarken-Padding im PNG).
+    /// Setzt bewusst KEIN isHidden - die Sichtbarkeit steuert allein
+    /// showSouveraLogo aus willShow (nur auf der Mehr-Root sichtbar).
     private func layoutSouveraLogo() {
         guard let logo = souveraLogoView else { return }
+        guard let root = viewControllers.first, root === topViewController else { return }
         let bar = navigationBar
         let contentHeight: CGFloat = 44
         let topInset = bar.bounds.height - contentHeight
@@ -68,7 +71,6 @@ class NCMoreNavigationController: NCMainNavigationController {
             width: width,
             height: logoHeight
         )
-        logo.isHidden = false
     }
 
     /// Zeigt/versteckt das Logo (nur auf der Mehr-Root sichtbar).
