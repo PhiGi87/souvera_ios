@@ -229,7 +229,7 @@ struct MailView: View {
             // beim Zurückkehren exakt erhalten bleibt - kein Anchor-Restore
             // nötig.
             ZStack {
-                MailMessageListView(viewModel: viewModel)
+                MailMessageListView(viewModel: viewModel, toolbarActive: false)
                     .opacity(0)
                     .allowsHitTesting(false)
                 MailDetailView(viewModel: viewModel, message: message)
@@ -488,6 +488,7 @@ private struct MailboxTreeRowBase: View {
     let node: MailboxNode
     let depth: Int
     let isExpanded: Bool
+    var showsUnread: Bool = true
     let onToggleExpand: () -> Void
     let onTap: () -> Void
 
@@ -514,10 +515,12 @@ private struct MailboxTreeRowBase: View {
                     Text(node.mailbox.displayName)
                         .font(.body)
                     Spacer()
-                    if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
-                        Text("\(node.totalUnread)").foregroundStyle(.secondary)
-                    } else if node.mailbox.unreadCount > 0 {
-                        Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
+                    if showsUnread {
+                        if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
+                            Text("\(node.totalUnread)").foregroundStyle(.secondary)
+                        } else if node.mailbox.unreadCount > 0 {
+                            Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
+                        }
                     }
                 }
                 .padding(.leading, CGFloat(depth) * 14)
@@ -567,6 +570,7 @@ private struct MailboxTreeRow: View {
         .swipeActions(edge: .trailing) {
             if node.mailbox.mayRename {
                 Button {
+                    renameText = node.mailbox.name
                     renameTarget = node.mailbox
                 } label: {
                     Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
@@ -586,6 +590,10 @@ private struct MailboxTreeRow: View {
 
 private struct MailMessageListView: View {
     @ObservedObject var viewModel: MailViewModel
+    /// false = Liste ist unter der Detailansicht versteckt gemountet; ihre
+    /// Toolbar-Items (Bearbeiten/Sortierung/"Neue Mail") dürfen dann nicht
+    /// in der Einzelansicht erscheinen.
+    var toolbarActive: Bool = true
     @State private var editing = false
     @State private var selected = Set<String>()
     @State private var moveTarget: ([MailMessage], [Mailbox])?
@@ -641,14 +649,14 @@ private struct MailMessageListView: View {
             )
         }
         .toolbar {
-            if editing {
+            if toolbarActive, editing {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Button(NSLocalizedString("_done_", comment: "")) {
                         editing = false
                         selected.removeAll()
                     }
                 }
-            } else {
+            } else if toolbarActive {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
                         if !isEmptyList {
@@ -1046,6 +1054,7 @@ private struct MailNewFolderSheet: View {
                             node: row.node,
                             depth: row.depth,
                             isExpanded: expanded.contains(row.node.mailbox.id),
+                            showsUnread: false,
                             onToggleExpand: { toggle(row.node.mailbox.id) },
                             onTap: { parent = row.node.mailbox }
                         )

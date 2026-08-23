@@ -251,7 +251,7 @@ final class CalendarViewModel: ObservableObject {
         let all = Self.parseEntries(entries)
         events = .success(all.sorted { $0.start < $1.start })
         for event in all.prefix(12) {
-            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
+            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) attendees=[\(event.attendees.joined(separator: ","))] reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
         }
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")

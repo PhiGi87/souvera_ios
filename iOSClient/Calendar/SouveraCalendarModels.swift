@@ -92,7 +92,14 @@ enum ICSParser {
             var inAlarm = false
             var reminders: [Int] = []
 
-            for rawLine in body.components(separatedBy: .newlines) {
+            // RFC-5545-Folding entfalten: Der Server bricht lange Zeilen
+            // (z. B. ATTENDEE;ROLE=...;RSVP=TRUE;SCHEDULE-STATUS=...) nach
+            // ~75 Oktetten um; Fortsetzungszeilen beginnen mit Leerzeichen/
+            // Tab und gehören an die Vorgängerzeile. Ohne Entfaltung gehen
+            // solche Teilnehmer beim Parsen verloren.
+            let unfolded = Self.unfold(body)
+
+            for rawLine in unfolded.components(separatedBy: .newlines) {
                 let line = rawLine.trimmingCharacters(in: .whitespaces)
                 guard !line.isEmpty else { continue }
                 // VTIMEZONE blocks carry their own DTSTART/DST transitions
@@ -298,6 +305,25 @@ enum ICSParser {
         lines.append("END:VEVENT")
         lines.append("END:VCALENDAR")
         return lines.joined(separator: "\r\n")
+    }
+
+    /// Entfaltet RFC-5545-Fortsetzungszeilen: Zeilen, die mit Leerzeichen
+    /// oder Tab beginnen, werden (ohne das führende Whitespace) an die
+    /// vorherige Zeile angehängt.
+    static func unfold(_ ics: String) -> String {
+        let normalized = ics.replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+        var result: [String] = []
+        for line in normalized.components(separatedBy: "\n") {
+            if line.hasPrefix(" ") || line.hasPrefix("\t") {
+                if let lastIndex = result.indices.last {
+                    result[lastIndex] += String(line.dropFirst())
+                }
+            } else {
+                result.append(line)
+            }
+        }
+        return result.joined(separator: "\n")
     }
 
     private static func escape(_ value: String) -> String {

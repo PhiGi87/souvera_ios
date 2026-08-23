@@ -1074,10 +1074,14 @@ private struct CalendarEventEditSheet: View {
                         HStack {
                             Text(attendee).font(.subheadline)
                             Spacer()
-                            Button {
+                        }
+                        // Entfernen bewusst per Swipe (kein nacktes X mehr,
+                        // das versehentlich angetippt wird).
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
                                 draft.attendees.removeAll { $0 == attendee }
                             } label: {
-                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                             }
                         }
                     }
@@ -1100,15 +1104,16 @@ private struct CalendarEventEditSheet: View {
                                 }
                             }
                         // Unbekannte E-Mail-Adressen direkt übernehmen -
-                        // nach dem Hinzufügen bleibt das Feld für den
-                        // nächsten Teilnehmer frei.
-                        Button {
-                            addAttendee(attendeeInput)
-                        } label: {
-                            Image(systemName: "plus.circle.fill")
-                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        // der Add-Button erscheint nur bei gültiger Eingabe,
+                        // der Kontakt-Picker behält sein Personen-Icon.
+                        if attendeeInput.trimmingCharacters(in: .whitespaces).contains("@") {
+                            Button {
+                                addAttendee(attendeeInput)
+                            } label: {
+                                Image(systemName: "plus.circle.fill")
+                                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            }
                         }
-                        .disabled(attendeeInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         Button {
                             showContactPicker = true
                         } label: {
