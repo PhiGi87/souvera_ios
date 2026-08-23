@@ -1226,6 +1226,12 @@ private struct CalendarEventEditSheet: View {
                     } else {
                         Button(NSLocalizedString("_contact_save_", comment: "")) {
                             saving = true
+                            // Noch nicht übernommene E-Mail-Eingabe mitnehmen
+                            // (kein stiller Verlust beim Speichern).
+                            let pending = attendeeInput.trimmingCharacters(in: .whitespaces)
+                            if !pending.isEmpty {
+                                addAttendee(pending)
+                            }
                             Task {
                                 let ok = await viewModel.saveEvent(draft, existing: existing)
                                 if ok {

@@ -190,130 +190,82 @@ class NCMainTabBarController: UITabBarController {
         selectedIndex = 0
     }
 
-    // MARK: - Badges (Mail)
+    // MARK: - Badges (voll deckend in die Tab-Icons gerendert)
 
-    /// Eigenes Badge-Overlay auf der TabBar, damit die Position frei
-    /// steuerbar ist (System-Badge sitzt zu weit Richtung Kalender-Tab).
-    private var mailBadgeLabel: UILabel?
-    /// Badge am Link-Tab - identischer Stil wie das Mail-Badge.
-    private var linkBadgeLabel: UILabel?
-    /// Oranger Info-Punkt am Mehr-Tab bei Wartungsmodus.
-    private var maintenanceDot: UIView?
+    private weak var moreTabBarItem: UITabBarItem?
 
     private func updateMailBadge(_ count: Int) {
-        if count > 0 {
-            if mailBadgeLabel == nil {
-                let label = makeBadgeLabel()
-                tabBar.addSubview(label)
-                mailBadgeLabel = label
-            }
-            mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
-            JmapLog.write("Mail tab badge set -> \(count)")
-        } else {
-            mailBadgeLabel?.removeFromSuperview()
-            mailBadgeLabel = nil
-            JmapLog.write("Mail tab badge set -> 0")
-        }
-        layoutBadges()
+        applyBadge(to: mailTabBarItem, baseName: "envelope.fill", count: count, dot: false)
+        JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
     }
 
     private func updateLinkBadge(_ count: Int) {
-        if count > 0 {
-            if linkBadgeLabel == nil {
-                let label = makeBadgeLabel()
-                tabBar.addSubview(label)
-                linkBadgeLabel = label
-            }
-            linkBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
-        } else {
-            linkBadgeLabel?.removeFromSuperview()
-            linkBadgeLabel = nil
-        }
-        layoutBadges()
-    }
-
-    /// Voll deckendes rotes Badge-Label (weißes Icon darf nicht durchscheinen).
-    private func makeBadgeLabel() -> UILabel {
-        let label = UILabel()
-        label.font = .systemFont(ofSize: 11, weight: .bold)
-        label.textColor = .white
-        label.backgroundColor = .systemRed
-        label.isOpaque = true
-        label.alpha = 1
-        label.textAlignment = .center
-        label.clipsToBounds = true
-        // Hintergrund zusätzlich explizit als Layer zeichnen - auf
-        // iOS 26 kann die TabBar-Ebene sonst durchscheinen.
-        label.layer.backgroundColor = UIColor.systemRed.cgColor
-        label.layer.borderColor = UIColor.white.cgColor
-        label.layer.borderWidth = 1
-        return label
+        applyBadge(to: linkTabBarItem, baseName: "bubble.left.and.bubble.right.fill", count: count, dot: false)
     }
 
     private func updateMaintenanceDot(_ maintenance: Bool) {
-        if maintenance {
-            guard maintenanceDot == nil else { return }
-            let dot = UIView()
-            dot.backgroundColor = .systemOrange
-            dot.isOpaque = true
-            dot.alpha = 1
-            dot.clipsToBounds = true
-            dot.layer.backgroundColor = UIColor.systemOrange.cgColor
-            dot.layer.borderColor = UIColor.white.cgColor
-            dot.layer.borderWidth = 1
-            tabBar.addSubview(dot)
-            tabBar.bringSubviewToFront(dot)
-            maintenanceDot = dot
+        applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: maintenance)
+    }
+
+    /// Zeichnet das Badge VOLL DECKEND direkt in das Tab-Icon - keine
+    /// Subviews und keine Transparenz-Probleme auf iOS 26 (die TabBar
+    /// kann nichts mehr überlagern oder durchscheinen lassen).
+    private func applyBadge(to item: UITabBarItem?, baseName: String, count: Int?, dot: Bool) {
+        guard let item else { return }
+        let showCount = (count ?? 0) > 0
+        if showCount || dot {
+            item.image = Self.badgedIcon(baseName: baseName, count: showCount ? count : nil, dot: dot && !showCount, selected: false)
+            item.selectedImage = Self.badgedIcon(baseName: baseName, count: showCount ? count : nil, dot: dot && !showCount, selected: true)
         } else {
-            maintenanceDot?.removeFromSuperview()
-            maintenanceDot = nil
+            item.image = UIImage(systemName: baseName)
+            item.selectedImage = UIImage(systemName: baseName)
         }
-        layoutBadges()
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        layoutBadges()
-    }
-
-    private func layoutBadges() {
-        let itemCount = max(viewControllers?.count ?? 1, 1)
-        guard itemCount > 0, tabBar.bounds.width > 0 else { return }
-        let itemWidth = tabBar.bounds.width / CGFloat(itemCount)
-        let mailIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 100 }) ?? 0
-        let moreIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 104 }) ?? max(0, itemCount - 1)
-
-        if let badge = mailBadgeLabel {
-            badge.sizeToFit()
-            let width = max(badge.bounds.width + 10, 17)
-            let height: CGFloat = 17
-            // Rechts überlappend auf dem Mail-Icon - nicht bis zum
-            // Kalender-Tab herüberreichend.
-            let centerX = itemWidth * (CGFloat(mailIndex) + 0.70)
-            badge.frame = CGRect(x: centerX - width / 2, y: 5, width: width, height: height)
-            badge.layer.cornerRadius = height / 2
-            tabBar.bringSubviewToFront(badge)
-        }
-        if let badge = linkBadgeLabel {
-            let linkIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 102 }) ?? 0
-            badge.sizeToFit()
-            let width = max(badge.bounds.width + 10, 17)
-            let height: CGFloat = 17
-            // Identisch zum Mail-Badge: rechts überlappend auf dem Link-Icon.
-            let centerX = itemWidth * (CGFloat(linkIndex) + 0.70)
-            badge.frame = CGRect(x: centerX - width / 2, y: 5, width: width, height: height)
-            badge.layer.cornerRadius = height / 2
-            tabBar.bringSubviewToFront(badge)
-        }
-        if let dot = maintenanceDot {
-            // Identisch zum Mail-Badge verankert (rechts überlappend auf
-            // dem Mehr-Icon), nur als kleiner Punkt.
-            let size: CGFloat = 11
-            let centerX = itemWidth * (CGFloat(moreIndex) + 0.70)
-            dot.frame = CGRect(x: centerX - size / 2, y: 5, width: size, height: size)
-            dot.layer.cornerRadius = size / 2
-            tabBar.bringSubviewToFront(dot)
-        }
+    /// 32-pt-Canvas (3x-Skala): Basis-Symbol unten links, rote Zahl-Kapsel
+    /// bzw. oranger Punkt rechts überlappend am Icon.
+    private static func badgedIcon(baseName: String, count: Int?, dot: Bool, selected: Bool) -> UIImage? {
+        let size = CGSize(width: 32, height: 32)
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        return renderer.image { _ in
+            let iconColor: UIColor = selected
+                ? NCBrandColor.shared.customer
+                : UIColor(red: 0.56, green: 0.56, blue: 0.58, alpha: 1)
+            if let symbol = UIImage(systemName: baseName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)) {
+                symbol.withTintColor(iconColor, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(x: 4.5, y: 5, width: 23, height: 23))
+            }
+            if let count, count > 0 {
+                let text = count > 99 ? "99+" : "\(count)"
+                let font = UIFont.systemFont(ofSize: 9, weight: .bold)
+                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
+                let textSize = (text as NSString).size(withAttributes: attrs)
+                let capsuleH: CGFloat = 11.5
+                let capsuleW = max(textSize.width + 5, 12)
+                let capsuleRect = CGRect(x: 32 - capsuleW - 0.5, y: 0.5, width: capsuleW, height: capsuleH)
+                let path = UIBezierPath(roundedRect: capsuleRect, cornerRadius: capsuleH / 2)
+                UIColor.systemRed.setFill()
+                path.fill()
+                UIColor.white.setStroke()
+                path.lineWidth = 1
+                path.stroke()
+                (text as NSString).draw(
+                    at: CGPoint(x: capsuleRect.midX - textSize.width / 2, y: capsuleRect.midY - textSize.height / 2),
+                    withAttributes: attrs
+                )
+            } else if dot {
+                let dotRect = CGRect(x: 24.5, y: 1, width: 7, height: 7)
+                let path = UIBezierPath(ovalIn: dotRect)
+                UIColor.systemOrange.setFill()
+                path.fill()
+                UIColor.white.setStroke()
+                path.lineWidth = 1
+                path.stroke()
+            }
+        }.withRenderingMode(.alwaysOriginal)
     }
 
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
@@ -343,6 +295,7 @@ class NCMainTabBarController: UITabBarController {
             selectedImage: UIImage(systemName: "ellipsis.circle.fill")
         )
         navigationController.tabBarItem.tag = 104
+        moreTabBarItem = navigationController.tabBarItem
 
         return navigationController
     }

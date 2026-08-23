@@ -262,9 +262,16 @@ final class CalendarViewModel: ObservableObject {
     // MARK: - Mutations
 
     func saveEvent(_ draft: EventDraft, existing: CalendarEventModel?) async -> Bool {
-        let ics = ICSParser.buildICS(draft)
+        let account = NCManageDatabase.shared.getActiveTableAccount()
+        let organizerEmail = account?.user ?? ""
+        let organizerName = account?.displayName ?? ""
+        let ics = ICSParser.buildICS(draft, organizerEmail: organizerEmail, organizerName: organizerName)
         let interesting = ics.components(separatedBy: "\r\n")
-            .filter { $0.hasPrefix("LOCATION") || $0.hasPrefix("X-SOUVERA") || $0.hasPrefix("DESCRIPTION") || $0.hasPrefix("BEGIN:VALARM") || $0.hasPrefix("TRIGGER") }
+            .filter {
+                $0.hasPrefix("LOCATION") || $0.hasPrefix("X-SOUVERA") || $0.hasPrefix("DESCRIPTION")
+                    || $0.hasPrefix("BEGIN:VALARM") || $0.hasPrefix("TRIGGER")
+                    || $0.hasPrefix("ATTENDEE") || $0.hasPrefix("ORGANIZER")
+            }
             .joined(separator: " | ")
         JmapLog.write("Calendar saveEvent existing=\(existing != nil) talk=\(draft.talkRoomToken ?? "-") \n\(interesting)")
         let ok: Bool

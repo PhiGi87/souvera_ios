@@ -230,7 +230,7 @@ enum ICSParser {
     }
 
     /// Serializes a draft into an iCalendar VEVENT (all UTC).
-    static func buildICS(_ draft: EventDraft) -> String {
+    static func buildICS(_ draft: EventDraft, organizerEmail: String = "", organizerName: String = "") -> String {
         let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
@@ -271,8 +271,16 @@ enum ICSParser {
         if !draft.notes.isEmpty {
             lines.append("DESCRIPTION:\(escape(draft.notes))")
         }
+        // Organizer setzen: ohne ORGANIZER verschickt Nextcloud Calendar
+        // KEINE Einladungs-E-Mails und zeigt Teilnehmer nicht korrekt an.
+        if !organizerEmail.isEmpty {
+            lines.append("ORGANIZER;CN=\(escape(organizerName)):mailto:\(organizerEmail)")
+        }
         for attendee in draft.attendees {
-            lines.append("ATTENDEE:mailto:\(attendee)")
+            // Volle Parameter wie Nextcloud Calendar Web, damit der Server
+            // die iTIP-Einladung verschickt und der Teilnehmer mit Status
+            // angezeigt wird.
+            lines.append("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:\(attendee)")
         }
         if let token = draft.talkRoomToken, !token.isEmpty {
             lines.append("X-SOUVERA-TALK-ROOM:\(escape(token))")
