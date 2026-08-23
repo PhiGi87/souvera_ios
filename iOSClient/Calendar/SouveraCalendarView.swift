@@ -64,7 +64,10 @@ struct SouveraCalendarView: View {
                     }
                     .pickerStyle(.segmented)
                     .padding(.horizontal, 16)
-                    .padding(.vertical, isWide ? 2 : 6)
+                    // Mindestabstand unter dem blauen Header (nichts klebt
+                    // direkt an der Header-Kante).
+                    .padding(.top, 8)
+                    .padding(.bottom, isWide ? 2 : 6)
 
                     if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                         content(isWide: isWide)
@@ -75,6 +78,7 @@ struct SouveraCalendarView: View {
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .souveraBlueHeader()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

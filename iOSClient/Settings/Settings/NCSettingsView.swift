@@ -169,6 +169,19 @@ struct NCSettingsView: View {
                 }
                 .pickerStyle(.menu)
             })
+            // Blauer Header global (Schnell-Rückweg zum alten Look).
+            Section(header: Text(NSLocalizedString("_settings_blue_header_", comment: "")).font(.headline), content: {
+                Toggle(NSLocalizedString("_settings_blue_header_", comment: ""), isOn: Binding(
+                    get: { SouveraAppearance.blueHeaderEnabled },
+                    set: { enabled in
+                        UserDefaults.standard.set(enabled, forKey: SouveraAppearance.blueHeaderKey)
+                    }
+                ))
+                .font(.body)
+            }, footer: {
+                Text(NSLocalizedString("_settings_blue_header_footer_", comment: ""))
+                    .font(.footnote)
+            })
             Section(header: Text(NSLocalizedString("_display_", comment: "")).font(.headline), content: {
                 NavigationLink(destination: LazyView {
                     NCDisplayView(model: NCDisplayModel(controller: model.controller))

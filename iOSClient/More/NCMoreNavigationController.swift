@@ -33,10 +33,9 @@ class NCMoreNavigationController: NCMainNavigationController {
                 }
             }
         } else {
-            // Gepushte Module: Standard-Optik, kein blaues Header-Erbe.
+            // Gepushte Module: Standard-Optik (mit globalem blauen Header).
             setNavigationBarAppearance()
             viewController.navigationItem.leftBarButtonItem = nil
-            navigationBar.overrideUserInterfaceStyle = .unspecified
             showSouveraLogo(false)
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
@@ -81,17 +80,10 @@ class NCMoreNavigationController: NCMainNavigationController {
     }
 
     /// Blauer Gradient-Header mit Souvera-Logo links (hell/dunkel identisch,
-    /// deckend - kein Liquid-Glass-Effekt auf iOS 26).
+    /// deckend - kein Liquid-Glass-Effekt auf iOS 26). Nutzt die zentralen
+    /// Bausteine aus SouveraAppearance.
     private func applySouveraHeader(_ viewController: UIViewController) {
-        guard let gradient = Self.souveraGradientImage() else { return }
-        let appearance = UINavigationBarAppearance()
-        appearance.configureWithOpaqueBackground()
-        // Nur die Pattern-Hintergrundfarbe - backgroundImage kollidiert auf
-        // iOS 26 mit dem Liquid-Glass-Effekt und wird ignoriert/geglast.
-        appearance.backgroundColor = UIColor(patternImage: gradient)
-        appearance.backgroundEffect = nil
-        appearance.shadowColor = .clear
-        appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+        let appearance = SouveraAppearance.blueNavigationBarAppearance()
         navigationBar.standardAppearance = appearance
         navigationBar.scrollEdgeAppearance = appearance
         navigationBar.compactAppearance = appearance
@@ -112,23 +104,6 @@ class NCMoreNavigationController: NCMainNavigationController {
             logo.contentMode = .scaleAspectFit
             navigationBar.addSubview(logo)
             souveraLogoView = logo
-        }
-    }
-
-    /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Kachelbild.
-    private static func souveraGradientImage() -> UIImage? {
-        let size = CGSize(width: 1, height: 120)
-        let layer = CAGradientLayer()
-        layer.frame = CGRect(origin: .zero, size: size)
-        layer.colors = [
-            UIColor(red: 0x4B / 255.0, green: 0xBF / 255.0, blue: 0xEA / 255.0, alpha: 1).cgColor,
-            UIColor(red: 0x49 / 255.0, green: 0x6B / 255.0, blue: 0xBF / 255.0, alpha: 1).cgColor
-        ]
-        layer.startPoint = CGPoint(x: 0, y: 0)
-        layer.endPoint = CGPoint(x: 0, y: 1)
-        let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { context in
-            layer.render(in: context.cgContext)
         }
     }
 

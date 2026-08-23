@@ -309,15 +309,12 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         var desiredItems: [UIBarButtonItem] = []
 
-        if controller?.availableNotifications ?? false {
-            desiredItems.append(notificationsButtonItem)
-        }
+        // Benachrichtigungen und Übertragungen bleiben bewusst aus dem
+        // Dateien-Header heraus (nur Assistent + "..."-Menü).
 
         if capabilities.assistantEnabled {
             desiredItems.append(assistantButtonItem)
         }
-
-        desiredItems.append(transfersButtonItem)
 
         if let optionMenu = await createOptionMenu() {
             optionButtonItem.menu = optionMenu

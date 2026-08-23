@@ -37,11 +37,12 @@ struct LinkView: View {
         var id: String { "\(token)|\(withVideo)|\(silent)" }
     }
 
-    var body: some View {
+        var body: some View {
         NavigationStack {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
+                .souveraBlueHeader()
                 .toolbar {
                     if case let .chat(token, title) = viewModel.route {
                         ToolbarItem(placement: .topBarLeading) {
