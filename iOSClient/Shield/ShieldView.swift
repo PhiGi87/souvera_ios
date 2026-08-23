@@ -18,6 +18,7 @@ struct ShieldView: View {
     @State private var addEntryText = ""
     @State private var addEntryList: ShieldApi.ListKind = .whitelist
     @State private var releaseChoice: ShieldReleaseRequest?
+    @State private var showScrollTop = false
 
     private var addEntryTitle: String {
         if addEntryList == .blacklist {
@@ -140,6 +141,10 @@ struct ShieldView: View {
             }
             .onChange(of: section) { _, newValue in
                 addTrigger.showAdd = newValue == .whitelist || newValue == .blacklist
+                showScrollTop = false
+            }
+            .onChange(of: quarantineKind) { _, _ in
+                showScrollTop = false
             }
     }
 
@@ -191,6 +196,38 @@ struct ShieldView: View {
 
     // MARK: - Quarantine
 
+    /// Up-Pfeil wie im Mail-Modul: erscheint nach ~120 pt Scroll, scrollt
+    /// sanft zum ersten Eintrag der aktuellen Liste.
+    @ViewBuilder
+    private func scrollTopButton(proxy: ScrollViewProxy, firstId: String) -> some View {
+        if showScrollTop, !firstId.isEmpty {
+            Button {
+                withAnimation { proxy.scrollTo(firstId, anchor: .top) }
+            } label: {
+                Image(systemName: "arrow.up")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                    .frame(width: 44, height: 44)
+                    .background(.ultraThinMaterial, in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                    .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+            .padding(.bottom, 70)
+            .transition(.opacity)
+        }
+    }
+
+    private func updateShieldScrollTop(_ offset: CGFloat) {
+        let visible = offset > 120
+        if visible != showScrollTop {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showScrollTop = visible
+            }
+        }
+    }
+
     private var quarantineSection: some View {
         VStack(spacing: 0) {
             Picker("", selection: $quarantineKind) {
@@ -225,41 +262,55 @@ struct ShieldView: View {
                     systemImage: "tray"
                 ))
             } else {
-                List(filtered) { entry in
-                    Button {
-                        detailEntry = entry
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(entry.subject.isEmpty ? entry.sender : entry.subject)
-                                .font(.subheadline).lineLimit(1)
-                            Text("\(entry.sender) · \(entry.time.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions(edge: .leading) {
+                ScrollViewReader { proxy in
+                    List(filtered) { entry in
                         Button {
-                            releaseChoice = ShieldReleaseRequest(
-                                id: entry.id,
-                                title: entry.subject.isEmpty ? entry.sender : entry.subject,
-                                sender: entry.sender,
-                                kind: .spam
-                            )
+                            detailEntry = entry
                         } label: {
-                            Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
+                            HStack(spacing: 10) {
+                                ZStack {
+                                    Circle().fill(Color(.secondarySystemBackground)).frame(width: 36, height: 36)
+                                    Image(systemName: "envelope.badge.shield.half.filled")
+                                        .font(.system(size: 15))
+                                        .foregroundStyle(.orange.opacity(0.75))
+                                }
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(entry.subject.isEmpty ? entry.sender : entry.subject)
+                                        .font(.subheadline).lineLimit(1)
+                                    Text("\(entry.sender) · \(entry.time.formatted(date: .abbreviated, time: .shortened))")
+                                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                }
+                            }
                         }
-                        .tint(.green)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await viewModel.delete(.spam, ids: [entry.id]) }
-                        } label: {
-                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        .buttonStyle(.plain)
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                releaseChoice = ShieldReleaseRequest(
+                                    id: entry.id,
+                                    title: entry.subject.isEmpty ? entry.sender : entry.subject,
+                                    sender: entry.sender,
+                                    kind: .spam
+                                )
+                            } label: {
+                                Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
+                            }
+                            .tint(.green)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await viewModel.delete(.spam, ids: [entry.id]) }
+                            } label: {
+                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                            }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollTopObserver { updateShieldScrollTop($0) }
+                    .overlay(alignment: .bottom) {
+                        scrollTopButton(proxy: proxy, firstId: filtered.first?.id ?? "")
+                    }
+                    .refreshable { await viewModel.loadAll() }
                 }
-                .listStyle(.plain)
-                .refreshable { await viewModel.loadAll() }
             }
         }
     }
@@ -279,34 +330,50 @@ struct ShieldView: View {
                     systemImage: "tray"
                 ))
             } else {
-                List(filtered) { entry in
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(entry.displayTitle).font(.subheadline).lineLimit(1)
-                        Text(entry.displaySubtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button {
-                            releaseChoice = ShieldReleaseRequest(
-                                id: entry.id,
-                                title: entry.displayTitle,
-                                sender: "",
-                                kind: kind
-                            )
-                        } label: {
-                            Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
+                let iconName = kind == .virus ? "shield.slash" : "doc.fill"
+                let iconTint: Color = kind == .virus ? .red.opacity(0.7) : .blue.opacity(0.7)
+                ScrollViewReader { proxy in
+                    List(filtered) { entry in
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle().fill(Color(.secondarySystemBackground)).frame(width: 36, height: 36)
+                                Image(systemName: iconName)
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(iconTint)
+                            }
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(entry.displayTitle).font(.subheadline).lineLimit(1)
+                                Text(entry.displaySubtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            }
                         }
-                        .tint(.green)
-                    }
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) {
-                            Task { await viewModel.delete(kind, ids: [entry.id]) }
-                        } label: {
-                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                releaseChoice = ShieldReleaseRequest(
+                                    id: entry.id,
+                                    title: entry.displayTitle,
+                                    sender: "",
+                                    kind: kind
+                                )
+                            } label: {
+                                Label(NSLocalizedString("_shield_release_", comment: ""), systemImage: "tray.and.arrow.up")
+                            }
+                            .tint(.green)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button(role: .destructive) {
+                                Task { await viewModel.delete(kind, ids: [entry.id]) }
+                            } label: {
+                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                            }
                         }
                     }
+                    .listStyle(.plain)
+                    .scrollTopObserver { updateShieldScrollTop($0) }
+                    .overlay(alignment: .bottom) {
+                        scrollTopButton(proxy: proxy, firstId: filtered.first?.id ?? "")
+                    }
+                    .refreshable { await viewModel.loadAll() }
                 }
-                .listStyle(.plain)
-                .refreshable { await viewModel.loadAll() }
             }
         }
     }
@@ -321,9 +388,19 @@ struct ShieldView: View {
         case let .error(message):
             SouveraStateView(state: .error(message: message), retry: { Task { await viewModel.loadAll() } })
         case let .success(entries):
-            List {
-                ForEach(entries, id: \.self) { entry in
-                    Text(entry).font(.subheadline)
+            let iconTint: Color = kind == .whitelist ? .green.opacity(0.7) : .red.opacity(0.7)
+            ScrollViewReader { proxy in
+                List {
+                    ForEach(entries, id: \.self) { entry in
+                        HStack(spacing: 10) {
+                            ZStack {
+                                Circle().fill(Color(.secondarySystemBackground)).frame(width: 36, height: 36)
+                                Image(systemName: kind == .whitelist ? "checkmark.shield" : "shield.slash")
+                                    .font(.system(size: 15))
+                                    .foregroundStyle(iconTint)
+                            }
+                            Text(entry).font(.subheadline)
+                        }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
                                 Task { await viewModel.removeEntry(kind, entry: entry) }
@@ -331,10 +408,15 @@ struct ShieldView: View {
                                 Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                             }
                         }
+                    }
                 }
+                .listStyle(.plain)
+                .scrollTopObserver { updateShieldScrollTop($0) }
+                .overlay(alignment: .bottom) {
+                    scrollTopButton(proxy: proxy, firstId: entries.first ?? "")
+                }
+                .refreshable { await viewModel.loadAll() }
             }
-            .listStyle(.plain)
-            .refreshable { await viewModel.loadAll() }
         }
     }
 }
@@ -439,14 +521,34 @@ private struct ShieldReleaseSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text(NSLocalizedString("_shield_release_", comment: ""))
+        VStack(spacing: 14) {
+            ZStack {
+                Circle().fill(Color.green.opacity(0.15)).frame(width: 56, height: 56)
+                Image(systemName: "tray.and.arrow.up")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(.green)
+            }
+            .padding(.top, 6)
+
+            Text(NSLocalizedString("_shield_release_", comment: "") + "?")
                 .font(.headline)
-            Text(request.title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .lineLimit(3)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(request.title)
+                    .font(.subheadline)
+                    .fontWeight(.medium)
+                    .lineLimit(2)
+                if !request.sender.isEmpty {
+                    Text(request.sender)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(10)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+
             Button {
                 Task {
                     await viewModel.release(request.kind, ids: [request.id])
@@ -459,6 +561,7 @@ private struct ShieldReleaseSheet: View {
             }
             .buttonStyle(.borderedProminent)
             .tint(.green)
+
             if request.allowsWhitelist, !request.sender.isEmpty {
                 Button {
                     Task {
@@ -467,22 +570,20 @@ private struct ShieldReleaseSheet: View {
                         dismiss()
                     }
                 } label: {
-                    Label(NSLocalizedString("_shield_release_whitelist_", comment: ""), systemImage: "checkmark.shield.fill")
+                    Label(NSLocalizedString("_shield_release_whitelist_", comment: ""), systemImage: "checkmark.shield")
                         .frame(maxWidth: .infinity)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.bordered)
             }
+
             Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
                 dismiss()
             }
+            .font(.subheadline)
         }
-        .padding(18)
-        .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-        )
-        .padding(14)
+        .padding(20)
         .presentationDetents([.medium])
         .presentationDragIndicator(.visible)
+        .presentationBackground(.regularMaterial)
     }
 }
