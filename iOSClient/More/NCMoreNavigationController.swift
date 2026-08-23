@@ -6,14 +6,12 @@ import UIKit
 import SwiftUI
 
 class NCMoreNavigationController: NCMainNavigationController {
+    /// Logo als direkte Subview der NavigationBar (kein Bar-Item, keine
+    /// titleView - deshalb keine Glaskapsel und exakt positionierbar).
+    private weak var souveraLogoView: UIImageView?
+
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Klassische UIKit-Optik statt Liquid Glass: verhindert die
-        // Glaskapseln um Bar-Items und lässt das Logo linksbündig als
-        // plain CustomView auf dem blauen Header sitzen.
-        if #available(iOS 26.0, *) {
-            navigationBar.preferredBehavioralStyle = .pad
-        }
     }
 
     override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
@@ -22,6 +20,7 @@ class NCMoreNavigationController: NCMainNavigationController {
         if viewController === navigationController.viewControllers.first {
             // Nur die Mehr-Root bekommt den blauen Souvera-Header mit Logo.
             applySouveraHeader(viewController)
+            showSouveraLogo(true)
             // Die Basisklasse setzt ihr Standard-Erscheinungsbild asynchron in
             // einem Task NACH diesem Aufruf wieder zurück. Deshalb hier
             // ebenfalls asynchron erneut anwenden - mein Task ist danach
@@ -29,6 +28,8 @@ class NCMoreNavigationController: NCMainNavigationController {
             Task { @MainActor in
                 if viewController === navigationController.topViewController {
                     applySouveraHeader(viewController)
+                    showSouveraLogo(true)
+                    layoutSouveraLogo()
                 }
             }
         } else {
@@ -36,10 +37,43 @@ class NCMoreNavigationController: NCMainNavigationController {
             setNavigationBarAppearance()
             viewController.navigationItem.leftBarButtonItem = nil
             navigationBar.overrideUserInterfaceStyle = .unspecified
+            showSouveraLogo(false)
             if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
                 return
             }
         }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutSouveraLogo()
+    }
+
+    /// Positioniert das Logo: x = 16 pt (Flucht mit der Menüliste), vertikal
+    /// zentriert im 44-pt-Inhaltsstreifen unter der Statusleiste.
+    private func layoutSouveraLogo() {
+        guard let logo = souveraLogoView else { return }
+        let bar = navigationBar
+        let contentHeight: CGFloat = 44
+        let topInset = bar.bounds.height - contentHeight
+        let logoHeight: CGFloat = 32
+        let image = logo.image
+        let ratio = (image?.size.height ?? logoHeight) > 0 ? (image?.size.width ?? 1) / (image?.size.height ?? 1) : 1
+        let width = min(logoHeight * ratio, bar.bounds.width - 32)
+        logo.frame = CGRect(
+            x: 16,
+            y: topInset + (contentHeight - logoHeight) / 2,
+            width: width,
+            height: logoHeight
+        )
+        logo.isHidden = false
+    }
+
+    /// Zeigt/versteckt das Logo (nur auf der Mehr-Root sichtbar).
+    private func showSouveraLogo(_ show: Bool) {
+        guard let logo = souveraLogoView else { return }
+        logo.isHidden = !show
+        if show { layoutSouveraLogo() }
     }
 
     /// Blauer Gradient-Header mit Souvera-Logo links (hell/dunkel identisch,
@@ -63,22 +97,18 @@ class NCMoreNavigationController: NCMainNavigationController {
         navigationBar.overrideUserInterfaceStyle = .light
 
         viewController.navigationItem.title = ""
+        viewController.navigationItem.leftBarButtonItem = nil
+        viewController.navigationItem.titleView = nil
+
         // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
-        // Header - links an der nativen Leading-Kante (bündig mit der
-        // Menüliste darunter). Dank preferredBehavioralStyle = .pad gibt es
-        // keine Glaskapsel um das CustomView.
-        let imageView = UIImageView(image: UIImage(named: "souveraLogo"))
-        imageView.contentMode = .scaleAspectFit
-        imageView.translatesAutoresizingMaskIntoConstraints = false
-        let container = UIView()
-        container.addSubview(imageView)
-        NSLayoutConstraint.activate([
-            imageView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
-            imageView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
-            imageView.heightAnchor.constraint(equalToConstant: 32)
-        ])
-        viewController.navigationItem.leftBarButtonItem = UIBarButtonItem(customView: container)
+        // Header: als direkte Subview der Bar - keine Button-Kapsel, exakte
+        // Positionierung in viewDidLayoutSubviews.
+        if souveraLogoView == nil {
+            let logo = UIImageView(image: UIImage(named: "souveraLogo"))
+            logo.contentMode = .scaleAspectFit
+            navigationBar.addSubview(logo)
+            souveraLogoView = logo
+        }
     }
 
     /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als Kachelbild.
