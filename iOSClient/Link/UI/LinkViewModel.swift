@@ -295,9 +295,10 @@ final class LinkViewModel: ObservableObject {
         NotificationCenter.default.post(name: .linkUnreadChanged, object: total)
     }
 
-    /// Raum-Avatar-URL für den Loader.
-    func roomAvatarURL(token: String) -> String {
-        api?.roomAvatarURL(token: token) ?? ""
+    /// Raum-Avatar-URL für den Loader (Talk API v1, mit Versions-Parameter
+    /// für Cache-Busting).
+    func roomAvatarURL(for room: LinkConversation) -> String {
+        api?.roomAvatarURL(token: room.token, avatarVersion: room.avatarVersion) ?? ""
     }
 
     /// Nutzer-Avatar-URL (Nachrichten) für den Loader.
@@ -380,6 +381,22 @@ final class LinkViewModel: ObservableObject {
         if trimmed.isEmpty { return }
         let outgoing = mentionAwareMessage(trimmed)
         Task { await api.sendMessage(token: token, message: outgoing, replyTo: replyTo) }
+    }
+
+    /// Leitet eine Nachricht in einen anderen Channel weiter (wie Talk Web:
+    /// aufgelöster Text als neue Nachricht im Ziel; Mentions behalten ihre
+    /// @"<id>"-Form und werden dort wieder zu Pillen).
+    func forwardMessage(_ message: LinkChatMessage, to target: LinkConversation) {
+        guard let api else { return }
+        let text = message.forwardText()
+        guard !text.isEmpty else { return }
+        Task {
+            await api.sendMessage(token: target.token, message: text)
+            actionFeedback = LinkActionFeedback(
+                success: true,
+                message: NSLocalizedString("_link_forwarded_", comment: "")
+            )
+        }
     }
 
     /// Talk parst Mentions nur in der Form @"<ID>" (User-ID,

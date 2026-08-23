@@ -57,6 +57,9 @@ final class MailViewModel: ObservableObject {
     @Published var collapsedGroupIds: Set<String> = []
     @Published var folderScrollPosition: String?
     @Published var messageScrollPosition: String?
+    /// Scroll-Anker, der NICHT vom SwiftUI-Binding überschrieben wird;
+    /// wird nach dem Erscheinen der Liste erneut ins Binding geschrieben.
+    private(set) var pendingScrollAnchor: String?
     /// Rückmeldung für Aktionen (z. B. Absender in die Blacklist) — wird wie
     /// das Sende-Feedback als Banner angezeigt.
     @Published var actionFeedback: MailSendFeedback?
@@ -522,6 +525,7 @@ final class MailViewModel: ObservableObject {
     func openMailbox(_ mailbox: Mailbox) {
         currentMailbox = mailbox
         messageScrollPosition = nil
+        pendingScrollAnchor = nil
         route = .messages(mailbox: mailbox)
         Task { await syncMessages() }
     }
@@ -679,6 +683,7 @@ final class MailViewModel: ObservableObject {
     func openMessage(_ message: MailMessage, fromSearch: Bool = false) {
         cameFromSearch = fromSearch
         messageScrollPosition = message.id
+        pendingScrollAnchor = message.id
         route = .detail(message: message)
         body = .loading
         Task {
@@ -690,9 +695,13 @@ final class MailViewModel: ObservableObject {
         }
     }
 
-    /// Leert den Scroll-Anker, nachdem die Liste ihn wiederhergestellt hat.
-    func clearMessageScrollPosition() {
-        messageScrollPosition = nil
+    /// Setzt den Scroll-Anker erneut, NACHDEM die Liste erschienen ist -
+    /// SwiftUI überschreibt das Binding beim Erscheinen mit der obersten
+    /// Zeile; die Änderung im lebenden View löst den Scroll zuverlässig aus.
+    func applyPendingScrollAnchor() {
+        guard let anchor = pendingScrollAnchor else { return }
+        pendingScrollAnchor = nil
+        messageScrollPosition = anchor
     }
 
     private func openMessageImap(_ message: MailMessage) async {

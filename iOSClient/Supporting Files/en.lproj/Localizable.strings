@@ -1047,3 +1047,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_reply_to_" = "Reply to %@";
 "_link_offline_" = "Offline – showing last synced state";
 "_maintenance_info_" = "The server is in maintenance mode. You can keep working offline with the latest state in Mail, Calendar and Link.";
+"_link_forward_" = "Forward";
+"_link_forward_to_" = "Forward to";
+"_link_forwarded_" = "Message forwarded";

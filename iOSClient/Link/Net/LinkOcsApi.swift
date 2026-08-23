@@ -45,8 +45,13 @@ actor LinkOcsApi {
     }
 
     /// Avatar-URL des Raums (1:1-Räume liefern den Avatar des Gegenübers).
-    nonisolated func roomAvatarURL(token: String) -> String {
-        "\(base)/api/v4/room/\(token)/avatar"
+    /// Talk Web nutzt API v1 - v4 liefert für Räume kein Bild.
+    nonisolated func roomAvatarURL(token: String, avatarVersion: String = "") -> String {
+        var url = "\(base)/api/v1/room/\(token)/avatar"
+        if !avatarVersion.isEmpty {
+            url += "?v=\(avatarVersion)"
+        }
+        return url
     }
 
     /// Avatar-URL eines Nextcloud-Benutzers (öffentliche Avatar-Route).

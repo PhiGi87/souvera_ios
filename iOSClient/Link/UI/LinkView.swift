@@ -515,9 +515,10 @@ private struct LinkConversationRow: View {
     }
 
     /// Raum-Avatar (1:1 liefert den Avatar des Gegenübers) mit dem
-    /// Unread-Badge überlappend unten rechts.
+    /// Unread-Badge überlappend unten rechts. SVG-Antworten (generierte
+    /// Gruppen-Avatare) kann UIImage nicht dekodieren -> Icon-Kreis wie Talk.
     private var avatar: some View {
-        let url = viewModel.roomAvatarURL(token: room.token)
+        let url = viewModel.roomAvatarURL(for: room)
         return ZStack {
             if let data = viewModel.avatarCache[url],
                let ui = UIImage(data: data) {
@@ -548,6 +549,61 @@ private struct LinkConversationRow: View {
     }
 }
 
+/// Ziel-Auswahl für "Weiterleiten": zeigt die vorhandenen Channels,
+/// durchsuchbar; ein Tipp sendet die Nachricht ins Ziel.
+private struct ForwardPickerSheet: View {
+    @ObservedObject var viewModel: LinkViewModel
+    let message: LinkChatMessage
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                switch viewModel.conversations {
+                case .loading:
+                    ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
+                case let .error(errorMessage):
+                    Text(errorMessage).foregroundStyle(.secondary).padding()
+                case let .success(rooms):
+                    let filtered = query.isEmpty
+                        ? rooms
+                        : rooms.filter { $0.displayName.localizedCaseInsensitiveContains(query) }
+                    if filtered.isEmpty {
+                        Text(NSLocalizedString("_link_no_conversations_", comment: ""))
+                            .foregroundStyle(.secondary)
+                            .padding()
+                    } else {
+                        List(filtered) { room in
+                            Button {
+                                viewModel.forwardMessage(message, to: room)
+                                dismiss()
+                            } label: {
+                                HStack(spacing: 12) {
+                                    Image(systemName: room.isOneToOne ? "person.crop.circle" : "person.3.fill")
+                                        .foregroundStyle(.secondary)
+                                    Text(room.displayName).lineLimit(1)
+                                    Spacer()
+                                }
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .listStyle(.plain)
+                        .searchable(text: $query, prompt: NSLocalizedString("_link_search_people_", comment: ""))
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_link_forward_to_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
+        }
+    }
+}
+
 /// A live chat: message list (auto-scrolls to newest) + composer.
 struct LinkChatView: View {
     @ObservedObject var viewModel: LinkViewModel
@@ -561,6 +617,7 @@ struct LinkChatView: View {
     @State private var mentionSuggestions: [LinkParticipant] = []
     @State private var reactionTarget: LinkChatMessage?
     @State private var replyingTo: LinkChatMessage?
+    @State private var forwardTarget: LinkChatMessage?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -607,6 +664,9 @@ struct LinkChatView: View {
             }
         }
         .quickLookPreview($previewURL)
+        .sheet(item: $forwardTarget) { message in
+            ForwardPickerSheet(viewModel: viewModel, message: message)
+        }
         .onChange(of: draft) { _, _ in
             updateMentions()
         }
@@ -670,6 +730,7 @@ struct LinkChatView: View {
                                     }
                                 },
                                 onStartReply: { replyingTo = message },
+                                onStartForward: { forwardTarget = message },
                                 onLongPress: { target in reactionTarget = target }
                             )
                             .id(message.id)
@@ -852,6 +913,7 @@ private struct LinkMessageRow: View {
     let onStartEdit: () -> Void
     let onOpenFile: (LinkFileInfo) -> Void
     let onStartReply: () -> Void
+    let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
 
     private var messageTime: String {
@@ -999,6 +1061,12 @@ private struct LinkMessageRow: View {
                 Label(NSLocalizedString("_link_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
             }
             .tint(.gray)
+            Button {
+                onStartForward()
+            } label: {
+                Label(NSLocalizedString("_link_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+            }
+            .tint(.blue)
             if isOwn {
                 Button {
                     viewModel.deleteMessage(message)

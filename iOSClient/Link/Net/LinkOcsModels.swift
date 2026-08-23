@@ -133,6 +133,35 @@ struct LinkChatMessage: Decodable, Identifiable {
         systemMessage == "reaction" || systemMessage == "reaction_revoked" || systemMessage == "reaction_deleted"
     }
 
+    /// Text für die Weiterleitung (wie Talk Web): Mention-Platzhalter werden
+    /// zu @"<id>" bzw. **Name** (mention-call) aufgelöst, andere Platzhalter
+    /// zu ihren Namen; Datei-Nachrichten fallen auf "📎 Name" zurück.
+    func forwardText() -> String {
+        var text = message
+        if let params = messageParameters {
+            for (key, object) in params where key.hasPrefix("mention-") {
+                let replacement: String
+                if key.hasPrefix("mention-call") {
+                    replacement = object.name ?? object.id ?? key
+                } else {
+                    replacement = "@\"\(object.id ?? object.name ?? key)\""
+                }
+                text = text.replacingOccurrences(of: "{\(key)}", with: replacement)
+            }
+            for (key, object) in params where !key.hasPrefix("mention-") {
+                let name = object.name ?? object.id ?? ""
+                if !name.isEmpty {
+                    text = text.replacingOccurrences(of: "{\(key)}", with: name)
+                }
+            }
+        }
+        if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let file = fileName() {
+            text = "📎 \(file)"
+        }
+        return text
+    }
+
     /// File name if this message is a shared file (Talk puts a `file` rich-object parameter), else nil.
     func fileName() -> String? {
         messageParameters?.values.first(where: { $0.type == "file" })?.name

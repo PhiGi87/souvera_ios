@@ -205,9 +205,13 @@ class NCMainTabBarController: UITabBarController {
                 label.font = .systemFont(ofSize: 11, weight: .bold)
                 label.textColor = .white
                 label.backgroundColor = .systemRed
+                label.isOpaque = true
                 label.textAlignment = .center
                 label.clipsToBounds = true
+                label.layer.borderColor = UIColor.white.cgColor
+                label.layer.borderWidth = 1
                 tabBar.addSubview(label)
+                tabBar.bringSubviewToFront(label)
                 mailBadgeLabel = label
             }
             mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
@@ -251,12 +255,12 @@ class NCMainTabBarController: UITabBarController {
 
         if let badge = mailBadgeLabel {
             badge.sizeToFit()
-            let width = max(badge.bounds.width + 10, 18)
-            let height: CGFloat = 18
-            // 6 pt weiter nach innen (links), damit das Badge nicht bis zum
-            // Kalender-Tab herüberreicht.
-            let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
-            badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
+            let width = max(badge.bounds.width + 10, 17)
+            let height: CGFloat = 17
+            // Rechts überlappend auf dem Mail-Icon - nicht bis zum
+            // Kalender-Tab herüberreichend.
+            let centerX = itemWidth * (CGFloat(mailIndex) + 0.70)
+            badge.frame = CGRect(x: centerX - width / 2, y: 5, width: width, height: height)
             badge.layer.cornerRadius = height / 2
         }
         if let dot = maintenanceDot {
