@@ -222,50 +222,66 @@ class NCMainTabBarController: UITabBarController {
         }
     }
 
-    /// Badge-Icon: 25-pt-Canvas (TabBar-Standardmaß, 3x-Skala) - das Symbol
-    /// füllt den Canvas vollflächig, damit die sichtbare Breite exakt der
-    /// normalen TabBar-Iconbreite entspricht. Die rote Kapsel bzw. der
-    /// orange Punkt liegen voll deckend rechts überlappend innerhalb des
-    /// Canvas. Inaktiv wird das Symbol weiß gezeichnet, ausgewählt blau.
+    /// Badge-Icon: Canvas = exakt die intrinsische Größe des Original-Symbols
+    /// (dieselbe Quelle wie die anderen Tab-Icons), damit die Breite mit den
+    /// übrigen Menüpunkten identisch ist. Das Symbol wird ohne Größen-Vorgabe
+    /// vollflächig gezeichnet (Original-Pixel); die rote Kapsel bzw. der
+    /// orange Punkt liegen nur überlappend oben rechts - das Symbol wird nie
+    /// geschrumpft. Inaktiv weiß, ausgewählt blau, Badge voll deckend.
     private static func badgedIcon(baseName: String, count: Int?, dot: Bool, selected: Bool) -> UIImage? {
-        let size = CGSize(width: 25, height: 25)
+        let base = UIImage(systemName: baseName)
+        var canvasSize = base?.size ?? CGSize(width: 25, height: 25)
+        if canvasSize.width < 10 || canvasSize.height < 10 {
+            canvasSize = CGSize(width: 25, height: 25)
+        }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3
         format.opaque = false
-        let renderer = UIGraphicsImageRenderer(size: size, format: format)
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
         return renderer.image { _ in
             let iconColor: UIColor = selected
                 ? NCBrandColor.shared.customer
                 : UIColor.white
-            if let symbol = UIImage(systemName: baseName, withConfiguration: UIImage.SymbolConfiguration(pointSize: 25, weight: .regular)) {
-                symbol.withTintColor(iconColor, renderingMode: .alwaysOriginal)
-                    .draw(in: CGRect(origin: .zero, size: size))
+            if let base {
+                base.withTintColor(iconColor, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(origin: .zero, size: canvasSize))
             }
             if let count, count > 0 {
                 let text = count > 99 ? "99+" : "\(count)"
-                let font = UIFont.systemFont(ofSize: 8.5, weight: .bold)
+                let font = UIFont.systemFont(ofSize: max(7, canvasSize.height * 0.36), weight: .bold)
                 let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
                 let textSize = (text as NSString).size(withAttributes: attrs)
-                let capsuleH: CGFloat = 11
-                let capsuleW = max(textSize.width + 4.5, 11)
-                let capsuleRect = CGRect(x: 25 - capsuleW - 0.5, y: 0.5, width: capsuleW, height: capsuleH)
+                let capsuleH = canvasSize.height * 0.44
+                let capsuleW = max(textSize.width + capsuleH * 0.4, capsuleH)
+                let capsuleRect = CGRect(
+                    x: canvasSize.width - capsuleW - capsuleH * 0.05,
+                    y: capsuleH * 0.05,
+                    width: capsuleW,
+                    height: capsuleH
+                )
                 let path = UIBezierPath(roundedRect: capsuleRect, cornerRadius: capsuleH / 2)
                 UIColor.systemRed.setFill()
                 path.fill()
                 UIColor.white.setStroke()
-                path.lineWidth = 1
+                path.lineWidth = max(0.5, capsuleH * 0.09)
                 path.stroke()
                 (text as NSString).draw(
                     at: CGPoint(x: capsuleRect.midX - textSize.width / 2, y: capsuleRect.midY - textSize.height / 2),
                     withAttributes: attrs
                 )
             } else if dot {
-                let dotRect = CGRect(x: 25 - 6.5, y: 0.5, width: 6, height: 6)
+                let dotSide = canvasSize.height * 0.24
+                let dotRect = CGRect(
+                    x: canvasSize.width - dotSide * 1.1,
+                    y: dotSide * 0.08,
+                    width: dotSide,
+                    height: dotSide
+                )
                 let path = UIBezierPath(ovalIn: dotRect)
                 UIColor.systemOrange.setFill()
                 path.fill()
                 UIColor.white.setStroke()
-                path.lineWidth = 1
+                path.lineWidth = max(0.5, dotSide * 0.14)
                 path.stroke()
             }
         }.withRenderingMode(.alwaysOriginal)
