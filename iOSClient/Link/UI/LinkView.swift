@@ -508,9 +508,9 @@ private struct LinkConversationRow: View {
     /// Raum-Avatar (1:1 liefert den Avatar des Gegenübers) mit dem
     /// Unread-Badge überlappend unten rechts.
     private var avatar: some View {
-        ZStack {
-            if let url = URL(string: viewModel.roomAvatarURL(token: room.token)),
-               let data = viewModel.avatarCache[url],
+        let url = viewModel.roomAvatarURL(token: room.token)
+        return ZStack {
+            if let data = viewModel.avatarCache[url],
                let ui = UIImage(data: data) {
                 Image(uiImage: ui)
                     .resizable()
@@ -534,7 +534,7 @@ private struct LinkConversationRow: View {
             }
         }
         .task {
-            await viewModel.loadAvatar(url: viewModel.roomAvatarURL(token: room.token))
+            await viewModel.loadAvatar(url: url)
         }
     }
 }

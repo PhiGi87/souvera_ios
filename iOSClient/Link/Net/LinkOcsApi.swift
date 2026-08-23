@@ -41,12 +41,12 @@ actor LinkOcsApi {
     }
 
     /// Avatar-URL des Raums (1:1-Räume liefern den Avatar des Gegenübers).
-    func roomAvatarURL(token: String) -> String {
+    nonisolated func roomAvatarURL(token: String) -> String {
         "\(base)/api/v4/room/\(token)/avatar"
     }
 
     /// Avatar-URL eines Nextcloud-Benutzers (öffentliche Avatar-Route).
-    func userAvatarURL(actorId: String, size: Int = 64) -> String {
+    nonisolated func userAvatarURL(actorId: String, size: Int = 64) -> String {
         let encoded = actorId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? actorId
         return "\(root)/index.php/avatar/\(encoded)/\(size)"
     }
