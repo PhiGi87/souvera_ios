@@ -74,6 +74,9 @@ final class MailViewModel: ObservableObject {
     var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
     private var queryStates: [String: String] = [:]
+    /// Signatur der Postfachliste (Redundanz-Guard gegen identische
+    /// SwiftUI-Updates).
+    private var mailboxesSignature = ""
     /// Mail-IDs, deren Flags lokal geändert wurden (mailboxId → emailIds).
     /// Der inkrementelle Sync lädt diese immer frisch nach, weil Flag-
     /// Änderungen in queryChanges nicht als Query-Änderung auftauchen.
@@ -290,8 +293,7 @@ final class MailViewModel: ObservableObject {
         guard let client = imapClient else { return }
         switch await client.fetchMailboxes() {
         case let .success(boxes):
-            allMailboxes = sortMailboxGroups(boxes)
-            mailboxes = .success(allMailboxes)
+            applyMailboxes(sortMailboxGroups(boxes))
             if autoOpenInbox, let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         case let .failure(message):
             if message.contains("[AUTH]"), !hasRecoveredCredential {
@@ -343,8 +345,7 @@ final class MailViewModel: ObservableObject {
             }
 
             let sorted = sortMailboxGroups(filterNonStandardSentFolders(all))
-            allMailboxes = sorted
-            mailboxes = .success(sorted)
+            applyMailboxes(sorted)
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
             if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         } catch {
@@ -357,8 +358,7 @@ final class MailViewModel: ObservableObject {
             if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
                 let boxes = cached.map { mailbox(from: $0) }
                 let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
-                allMailboxes = sorted
-                mailboxes = .success(sorted)
+                applyMailboxes(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
                 cacheBannerActive = true
                 if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
@@ -911,6 +911,16 @@ final class MailViewModel: ObservableObject {
             postUnreadBadge(personalInboxUnread + badgeDelta)
         }
         applyUnreadDeltaToMailboxList(delta: badgeDelta)
+    }
+
+    /// Setzt die Postfachliste nur, wenn sich die Signatur geändert hat
+    /// (verhindert redundante SwiftUI-Updates und List-Diff-Probleme).
+    private func applyMailboxes(_ boxes: [Mailbox]) {
+        let signature = boxes.map { "\($0.id):\($0.unreadCount):\($0.messageCount)" }.joined(separator: ",")
+        guard signature != mailboxesSignature else { return }
+        mailboxesSignature = signature
+        allMailboxes = boxes
+        mailboxes = .success(boxes)
     }
 
     /// Zieht ein Unread-Delta lokal durch die Postfachliste (Badge-Abgleich

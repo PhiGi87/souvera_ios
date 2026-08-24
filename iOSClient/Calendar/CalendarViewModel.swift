@@ -26,6 +26,7 @@ final class CalendarViewModel: ObservableObject {
     @Published var events: CalendarUiState<[CalendarEventModel]> = .loading
     @Published var calendars: [CalDavCalendar] = []
     @Published var offlineNotice: String?
+    private var eventsSignature = ""
     /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner.
     @Published var cacheBannerActive = false
     @Published var visibleMonth: Date = Date()
@@ -220,7 +221,11 @@ final class CalendarViewModel: ObservableObject {
         // Lade-Screens während der Server-Abfrage.
         if case .loading = events {
             if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
-                events = .success(Self.parseEntries(cached).sorted { $0.start < $1.start })
+                let cachedSorted = Self.parseEntries(cached).sorted { $0.start < $1.start }
+                if eventsSignature != "cached-\(cached.count)" {
+                    eventsSignature = "cached-\(cached.count)"
+                    events = .success(cachedSorted)
+                }
             }
         }
 
@@ -253,7 +258,13 @@ final class CalendarViewModel: ObservableObject {
         Self.saveCachedEntries(entries, month: visibleMonth)
 
         let all = Self.parseEntries(entries)
-        events = .success(all.sorted { $0.start < $1.start })
+        let sortedAll = all.sorted { $0.start < $1.start }
+        // Redundanz-Guard: identische Event-Stände nicht erneut setzen.
+        let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
+        if signature != eventsSignature {
+            eventsSignature = signature
+            events = .success(sortedAll)
+        }
         for event in all.prefix(12) {
             JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) attendees=[\(event.attendees.joined(separator: ","))] reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
         }

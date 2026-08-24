@@ -57,19 +57,8 @@ struct SouveraCalendarView: View {
         NavigationStack {
             GeometryReader { geometry in
                 let isWide = geometry.size.width > geometry.size.height
+                let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 VStack(spacing: 0) {
-                    Picker("", selection: $viewMode) {
-                        ForEach(CalendarViewMode.allCases) { mode in
-                            Text(mode.title).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, 16)
-                    // Mindestabstand unter dem blauen Header (nichts klebt
-                    // direkt an der Header-Kante).
-                    .padding(.top, 8)
-                    .padding(.bottom, isWide ? 2 : 6)
-
                     // Suchfeld nur auf Knopfdruck: eigene Zeile (schiebt den
                     // Inhalt nach unten statt ihn zu überlagern).
                     if showSearch {
@@ -92,15 +81,39 @@ struct SouveraCalendarView: View {
                     }
 
                     if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height)
+                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                     } else {
                         searchResults
                     }
                 }
+                .padding(.top, 8)
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    // Ein einziger Button mit Auswahl-Menü (wie die
+                    // Mail-Sortierung): aktueller Modus + Häkchen.
+                    Menu {
+                        ForEach(CalendarViewMode.allCases) { mode in
+                            Button {
+                                viewMode = mode
+                            } label: {
+                                if viewMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(viewMode.title).font(.subheadline)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                    }
+                    .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         showSearch.toggle()
@@ -176,10 +189,10 @@ struct SouveraCalendarView: View {
     }
 
     @ViewBuilder
-    private func content(isWide: Bool, width: CGFloat, height: CGFloat) -> some View {
+    private func content(isWide: Bool, width: CGFloat, height: CGFloat, bottomInset: CGFloat) -> some View {
         switch viewMode {
         case .month:
-            monthView(isWide: isWide, width: width, height: height)
+            monthView(isWide: isWide, width: width, height: height, bottomInset: bottomInset)
         case .day:
             dayView(isWide: isWide)
         case .threeDay:
@@ -193,7 +206,7 @@ struct SouveraCalendarView: View {
     private static let wideSplitThreshold: CGFloat = 700
 
     @ViewBuilder
-    private func monthView(isWide: Bool, width: CGFloat, height: CGFloat) -> some View {
+    private func monthView(isWide: Bool, width: CGFloat, height: CGFloat, bottomInset: CGFloat) -> some View {
         if isWide {
             // Apple-Stil: links kompakter Monatskalender, rechts die
             // scrollbare Terminliste des gewählten Tages. Spaltenbreite:
@@ -205,7 +218,7 @@ struct SouveraCalendarView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     monthSwitcher(compact: true)
-                    monthGrid(compact: true, availableHeight: height)
+                    monthGrid(compact: true, availableHeight: height - bottomInset)
                     Spacer(minLength: 0)
                 }
                 .frame(width: splitWidth)
@@ -218,7 +231,7 @@ struct SouveraCalendarView: View {
         } else {
             VStack(spacing: 0) {
                 monthSwitcher(compact: false)
-                monthGrid(compact: false, availableHeight: height)
+                monthGrid(compact: false, availableHeight: height - bottomInset)
                 Divider()
                 dayEventList
             }
@@ -977,7 +990,12 @@ private struct CalendarEventDetailSheet: View {
                 Section {
                     Label(dateLabel, systemImage: "clock")
                     if let location = event.location, !location.isEmpty {
-                        Label(location, systemImage: "mappin")
+                        Label {
+                            Text(SouveraLinkOpener.linkified(location))
+                                .souveraOpenURLAction()
+                        } icon: {
+                            Image(systemName: "mappin")
+                        }
                     }
                 }
                 if !event.reminders.isEmpty {
@@ -996,7 +1014,9 @@ private struct CalendarEventDetailSheet: View {
                 }
                 if let notes = event.description, !notes.isEmpty {
                     Section(NSLocalizedString("_calendar_notes_", comment: "")) {
-                        Text(notes).textSelection(.enabled)
+                        Text(SouveraLinkOpener.linkified(notes))
+                            .textSelection(.enabled)
+                            .souveraOpenURLAction()
                     }
                 }
                 if let roomName = event.talkRoomName {

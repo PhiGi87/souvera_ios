@@ -1327,8 +1327,9 @@ private struct MailDetailView: View {
                 MailHtmlView(html: html, height: $htmlHeight)
                     .frame(height: max(htmlHeight, 120))
             } else {
-                Text(body.plainText ?? "")
+                Text(SouveraLinkOpener.linkified(body.plainText ?? ""))
                     .textSelection(.enabled)
+                    .souveraOpenURLAction()
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.vertical, 4)
             }
@@ -1374,6 +1375,20 @@ private struct MailHtmlView: UIViewRepresentable {
                     self.parent.height = CGFloat(value.doubleValue)
                 }
             }
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            // Link-Klicks nicht im WebView navigieren, sondern über den
+            // SouveraLinkOpener öffnen (extern im Browser, Call-Links im
+            // Link-Modul).
+            if navigationAction.navigationType == .linkActivated,
+               let url = navigationAction.request.url,
+               url.scheme == "http" || url.scheme == "https" || url.scheme == "mailto" {
+                SouveraLinkOpener.open(url)
+                decisionHandler(.cancel)
+                return
+            }
+            decisionHandler(.allow)
         }
     }
 }

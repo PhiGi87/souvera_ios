@@ -223,6 +223,19 @@ struct LinkChatMessage: Decodable, Identifiable {
             }
         }
         output += AttributedString(String(remaining))
+        // URLs in der Nachricht als tappbare Links markieren (extern im
+        // Browser, interne Call-Links öffnen das Link-Modul).
+        let plain = String(output.characters)
+        if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+            let nsText = plain as NSString
+            for match in detector.matches(in: plain, options: [], range: NSRange(location: 0, length: nsText.length)) {
+                guard let url = match.url,
+                      let start = AttributedString.Index(match.range.location, within: output),
+                      let end = AttributedString.Index(match.range.location + match.range.length, within: output) else { continue }
+                output[start..<end].link = url
+                output[start..<end].underlineStyle = .single
+            }
+        }
         return output
     }
 

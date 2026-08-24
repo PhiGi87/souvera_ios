@@ -1150,6 +1150,7 @@ private struct LinkMessageBubble: View {
                 Text(displayText)
             } else {
                 Text(message.attributedDisplayText())
+                    .souveraOpenURLAction()
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)

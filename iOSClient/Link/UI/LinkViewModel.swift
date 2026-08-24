@@ -306,16 +306,41 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Signatur der Konversationsliste (Redundanz-Guard gegen identische
+    /// SwiftUI-Updates, die List-Diff-Crashes auslösen können).
+    private func conversationSignature(_ list: [LinkConversation]) -> String {
+        list.map { "\($0.token):\($0.unreadMessages):\(Int($0.lastActivity)):\($0.lastMessage?.id ?? 0)" }
+            .joined(separator: ",")
+    }
+    private var conversationsSignature = ""
+
     func loadConversations() {
         guard let api else { return }
+        // Cache-first bei erstem Laden: sofortiger Inhalt statt Spinner.
+        if case .loading = conversations, let cached = LinkCache.loadConversations() {
+            let sorted = cached.sorted { $0.lastActivity > $1.lastActivity }
+            self.conversationsSignature = conversationSignature(sorted)
+            self.conversations = .success(sorted)
+            Self.postUnreadTotal(cached)
+        }
         Task {
             if let list = await api.listConversations() {
-                self.conversations = .success(list.sorted { $0.lastActivity > $1.lastActivity })
+                let sorted = list.sorted { $0.lastActivity > $1.lastActivity }
+                let signature = conversationSignature(sorted)
+                if self.conversationsSignature != signature {
+                    self.conversationsSignature = signature
+                    self.conversations = .success(sorted)
+                }
                 Self.postUnreadTotal(list)
                 self.offlineNotice = nil
             } else if let cached = LinkCache.loadConversations() {
                 // Server nicht erreichbar (Wartung/offline): letzter Stand.
-                self.conversations = .success(cached.sorted { $0.lastActivity > $1.lastActivity })
+                let sorted = cached.sorted { $0.lastActivity > $1.lastActivity }
+                let signature = conversationSignature(sorted)
+                if self.conversationsSignature != signature {
+                    self.conversationsSignature = signature
+                    self.conversations = .success(sorted)
+                }
                 Self.postUnreadTotal(cached)
                 self.offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 self.cacheBannerActive = true
@@ -367,6 +392,13 @@ final class LinkViewModel: ObservableObject {
         connectSignaling(token: token)
         guard let api else { return }
         pollTask = Task {
+            // Cache-first: letzten Stand SOFORT anzeigen (kein Spinner bei
+            // langsamem Server), danach frisch nachladen und ersetzen.
+            if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
+                let ordered = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                self.lastMessageId = ordered.last?.id ?? 0
+                self.messages = .success(ordered)
+            }
             // Load the newest messages: lookIntoFuture=0 pages backwards from a high anchor id, so
             // it returns the most recent page (there is no "give me the latest" without an anchor).
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
@@ -375,6 +407,8 @@ final class LinkViewModel: ObservableObject {
                 history = cached
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 cacheBannerActive = true
+            } else {
+                offlineNotice = nil
             }
             if Task.isCancelled { return }
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }

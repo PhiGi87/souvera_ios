@@ -136,3 +136,14 @@ extension View {
             }
     }
 }
+
+extension View {
+    /// Routet Link-Klicks über den SouveraLinkOpener (interne App-Links
+    /// intern, externe URLs im Standard-Browser).
+    func souveraOpenURLAction() -> some View {
+        self.environment(\.openURL, OpenURLAction { url in
+            SouveraLinkOpener.open(url)
+            return .handled
+        })
+    }
+}

@@ -29,6 +29,10 @@ final class ShieldViewModel: ObservableObject {
     @Published var selectedMailbox: String?
 
     private let api = ShieldApi()
+    /// Signaturen der Listen (Redundanz-Guard gegen identische Updates).
+    private var spamSignature = ""
+    private var fileSignature = ""
+    private var virusSignature = ""
 
     /// Das persönliche Postfach des aktiven Kontos - nur dort darf man
     /// Whitelist-/Blacklist-Einträge hinzufügen.
@@ -67,21 +71,33 @@ final class ShieldViewModel: ObservableObject {
             warnings += result.warnings
             let entries = result.data.compactMap { ShieldSpamEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
-            spamQuarantine = .success(entries)
+            let signature = entries.map { "\($0.id):\($0.seen)" }.joined(separator: ",")
+            if signature != spamSignature {
+                spamSignature = signature
+                spamQuarantine = .success(entries)
+            }
         } else {
             spamQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         if let result = await api.quarantineList(.file) {
             let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
-            fileQuarantine = .success(entries)
+            let signature = entries.map(\.id).joined(separator: ",")
+            if signature != fileSignature {
+                fileSignature = signature
+                fileQuarantine = .success(entries)
+            }
         } else {
             fileQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         if let result = await api.quarantineList(.virus) {
             let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
-            virusQuarantine = .success(entries)
+            let signature = entries.map(\.id).joined(separator: ",")
+            if signature != virusSignature {
+                virusSignature = signature
+                virusQuarantine = .success(entries)
+            }
         } else {
             virusQuarantine = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
