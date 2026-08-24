@@ -246,8 +246,8 @@ final class CallSession: NSObject, HpbSignalingListener {
             }
             return
         }
-        for session in sessionIds where peers[session] == nil {
-            let peer = peerFor(session: session, addLocalTracks: true, isPublisher: false)
+        for session in sessionIds where session != ownSessionId && peers[session] == nil {
+            let peer = peerFor(key: session, session: session, addLocalTracks: true, isPublisher: false, roomType: "video")
             if ownSessionId > session {
                 peer.offer(for: receiveConstraints()) { [weak self] sdp, _ in
                     guard let self, let sdp else { return }

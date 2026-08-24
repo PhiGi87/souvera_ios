@@ -720,7 +720,7 @@ final class MailViewModel: ObservableObject {
                     position: lastId == nil ? 0 : 1
                 )
                 let ids = (resp["ids"] as? [String]) ?? []
-                state = resp.optString("queryState")
+                state = resp.optString("queryState") ?? state
                 guard !ids.isEmpty else { break }
                 let page = try await api.getEmails(accountId: accId, ids: ids)
                 var addedCount = 0
