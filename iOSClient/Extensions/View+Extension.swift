@@ -113,3 +113,26 @@ struct ViewFirstAppearModifier: ViewModifier {
         }
     }
 }
+
+extension View {
+    /// Temporärer Cache-Banner (Server-Error: Cache aktiv) - identisch in
+    /// Mail, Kalender und Link: blendet ein, solange der Trigger aktiv ist,
+    /// und nach 3 Sekunden automatisch wieder aus.
+    func souveraCacheBanner(active: Binding<Bool>) -> some View {
+        self
+            .overlay(alignment: .bottom) {
+                if active.wrappedValue {
+                    SouveraCacheBanner()
+                        .padding(.bottom, 24)
+                }
+            }
+            .animation(.easeInOut(duration: 0.3), value: active.wrappedValue)
+            .onChange(of: active.wrappedValue) { _, value in
+                guard value else { return }
+                Task {
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    active.wrappedValue = false
+                }
+            }
+    }
+}

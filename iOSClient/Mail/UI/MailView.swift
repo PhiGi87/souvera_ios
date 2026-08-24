@@ -53,6 +53,7 @@ struct MailView: View {
                 }
         }
         .onAppear { viewModel.start() }
+        .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
                 MailSendBanner(feedback: feedback)

@@ -193,68 +193,21 @@ class NCMainTabBarController: UITabBarController {
     // MARK: - Badges
 
     private weak var moreTabBarItem: UITabBarItem?
-    /// Rotes Mail-Badge als Overlay über dem Tab (Stand 8233e7c) - das
-    /// Tab-Icon selbst bleibt das Original-System-Symbol (exakte Breite).
-    private var mailBadgeLabel: UILabel?
 
+    /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
+    /// deckend, korrekt in Portrait UND Landscape).
     private func updateMailBadge(_ count: Int) {
-        if count > 0 {
-            if mailBadgeLabel == nil {
-                let label = UILabel()
-                label.font = .systemFont(ofSize: 11, weight: .bold)
-                label.textColor = .white
-                label.backgroundColor = .systemRed
-                label.isOpaque = true
-                label.alpha = 1
-                label.textAlignment = .center
-                label.clipsToBounds = true
-                label.layer.backgroundColor = UIColor.systemRed.cgColor
-                label.layer.borderColor = UIColor.white.cgColor
-                label.layer.borderWidth = 1
-                tabBar.addSubview(label)
-                tabBar.bringSubviewToFront(label)
-                mailBadgeLabel = label
-            }
-            mailBadgeLabel?.text = count > 99 ? "99+" : "\(count)"
-            JmapLog.write("Mail tab badge set -> \(count)")
-        } else {
-            mailBadgeLabel?.removeFromSuperview()
-            mailBadgeLabel = nil
-            JmapLog.write("Mail tab badge set -> 0")
-        }
-        layoutMailBadge()
+        mailTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+        JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
     }
 
-    /// Link-Badge als System-Badge (Stand 8233e7c); das Tab-Icon bleibt das
-    /// Original-System-Symbol.
+    /// Link-Badge als System-Badge (identisch zum Mail-Badge).
     private func updateLinkBadge(_ count: Int) {
         linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
     }
 
     private func updateMaintenanceDot(_ maintenance: Bool) {
         applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: maintenance)
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        layoutMailBadge()
-    }
-
-    private func layoutMailBadge() {
-        guard let badge = mailBadgeLabel else { return }
-        let itemCount = max(viewControllers?.count ?? 1, 1)
-        guard itemCount > 0, tabBar.bounds.width > 0 else { return }
-        let itemWidth = tabBar.bounds.width / CGFloat(itemCount)
-        let mailIndex = viewControllers?.firstIndex(where: { ($0.tabBarItem?.tag ?? -1) == 100 }) ?? 0
-        badge.sizeToFit()
-        let width = max(badge.bounds.width + 10, 18)
-        let height: CGFloat = 18
-        // Position wie Commit 8233e7c: rechts über dem Mail-Icon, leicht
-        // nach innen gerückt.
-        let centerX = itemWidth * (CGFloat(mailIndex) + 0.68) - 6
-        badge.frame = CGRect(x: centerX - width / 2, y: 6, width: width, height: height)
-        badge.layer.cornerRadius = height / 2
-        tabBar.bringSubviewToFront(badge)
     }
 
     /// Rendert den Wartungs-Punkt in das Mehr-Icon (nur Punkt-Variante).
@@ -289,30 +242,7 @@ class NCMainTabBarController: UITabBarController {
                 base.withTintColor(iconColor, renderingMode: .alwaysOriginal)
                     .draw(in: CGRect(origin: .zero, size: canvasSize))
             }
-            if let count, count > 0 {
-                let text = count > 99 ? "99+" : "\(count)"
-                let font = UIFont.systemFont(ofSize: max(7, canvasSize.height * 0.36), weight: .bold)
-                let attrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: UIColor.white]
-                let textSize = (text as NSString).size(withAttributes: attrs)
-                let capsuleH = canvasSize.height * 0.44
-                let capsuleW = max(textSize.width + capsuleH * 0.4, capsuleH)
-                let capsuleRect = CGRect(
-                    x: canvasSize.width - capsuleW - capsuleH * 0.05,
-                    y: capsuleH * 0.05,
-                    width: capsuleW,
-                    height: capsuleH
-                )
-                let path = UIBezierPath(roundedRect: capsuleRect, cornerRadius: capsuleH / 2)
-                UIColor.systemRed.setFill()
-                path.fill()
-                UIColor.white.setStroke()
-                path.lineWidth = max(0.5, capsuleH * 0.09)
-                path.stroke()
-                (text as NSString).draw(
-                    at: CGPoint(x: capsuleRect.midX - textSize.width / 2, y: capsuleRect.midY - textSize.height / 2),
-                    withAttributes: attrs
-                )
-            } else if dot {
+            if dot {
                 let dotSide = canvasSize.height * 0.24
                 let dotRect = CGRect(
                     x: canvasSize.width - dotSide * 1.1,

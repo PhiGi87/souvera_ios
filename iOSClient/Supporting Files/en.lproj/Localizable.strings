@@ -1067,3 +1067,4 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_delete_folder_confirm_" = "Really delete folder “%@”?";
 "_mail_delete_folder_with_mails_" = "Delete folder and mails";
 "_mail_delete_folder_only_" = "Delete folder only";
+"_cache_active_" = "Server error: cache active";

@@ -28,6 +28,7 @@ struct SouveraCalendarView: View {
         rawValue: SouveraCalendarSettings.defaultView
     ) ?? .day
     @State private var searchQuery = ""
+    @State private var showSearch = false
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
     @State private var showCalendarPicker = false
@@ -69,8 +70,29 @@ struct SouveraCalendarView: View {
                     .padding(.top, 8)
                     .padding(.bottom, isWide ? 2 : 6)
 
+                    // Suchfeld nur auf Knopfdruck: eigene Zeile (schiebt den
+                    // Inhalt nach unten statt ihn zu überlagern).
+                    if showSearch {
+                        HStack(spacing: 8) {
+                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                            TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
+                                .textFieldStyle(.plain)
+                                .autocorrectionDisabled()
+                            if !searchQuery.isEmpty {
+                                Button {
+                                    searchQuery = ""
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground))
+                    }
+
                     if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                        content(isWide: isWide)
+                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height)
                     } else {
                         searchResults
                     }
@@ -79,6 +101,15 @@ struct SouveraCalendarView: View {
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        showSearch.toggle()
+                        if !showSearch { searchQuery = "" }
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(3600)), existing: nil)
@@ -103,6 +134,7 @@ struct SouveraCalendarView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             Task { await viewModel.load() }
         }
+        .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.actionFeedback {
                 HStack(spacing: 8) {
@@ -133,7 +165,6 @@ struct SouveraCalendarView: View {
                 viewModel.jumpToMonth(date)
             }
         }
-        .searchable(text: $searchQuery, prompt: Text(NSLocalizedString("_mail_search_", comment: "")))
         .sheet(item: $detailEvent) { event in
             CalendarEventDetailSheet(viewModel: viewModel, event: event) { draft in
                 editState = EditSheetState(draft: draft, existing: event)
@@ -145,10 +176,10 @@ struct SouveraCalendarView: View {
     }
 
     @ViewBuilder
-    private func content(isWide: Bool) -> some View {
+    private func content(isWide: Bool, width: CGFloat, height: CGFloat) -> some View {
         switch viewMode {
         case .month:
-            monthView(isWide: isWide)
+            monthView(isWide: isWide, width: width, height: height)
         case .day:
             dayView(isWide: isWide)
         case .threeDay:
@@ -158,27 +189,36 @@ struct SouveraCalendarView: View {
 
     // MARK: - Month
 
+    /// Breitengrenze für die 50/50-Aufteilung der Landscape-Monatsansicht.
+    private static let wideSplitThreshold: CGFloat = 700
+
     @ViewBuilder
-    private func monthView(isWide: Bool) -> some View {
+    private func monthView(isWide: Bool, width: CGFloat, height: CGFloat) -> some View {
         if isWide {
             // Apple-Stil: links kompakter Monatskalender, rechts die
-            // scrollbare Terminliste des gewählten Tages.
+            // scrollbare Terminliste des gewählten Tages. Spaltenbreite:
+            // 50/50 ab der Breitengrenze, darunter wird die linke Spalte
+            // schmaler, damit die Terminliste genug Platz behält.
+            let splitWidth: CGFloat = width >= Self.wideSplitThreshold
+                ? width / 2
+                : max(230, width * 0.4)
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     monthSwitcher(compact: true)
-                    monthGrid(compact: true)
+                    monthGrid(compact: true, availableHeight: height)
                     Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity)
+                .frame(width: splitWidth)
                 Divider()
                 dayEventList
                     .frame(maxWidth: .infinity)
             }
+            .safeAreaPadding(.bottom, 8)
             .refreshable { await viewModel.load() }
         } else {
             VStack(spacing: 0) {
                 monthSwitcher(compact: false)
-                monthGrid(compact: false)
+                monthGrid(compact: false, availableHeight: height)
                 Divider()
                 dayEventList
             }
@@ -220,17 +260,27 @@ struct SouveraCalendarView: View {
         return Array(symbols[first...] + symbols[..<first])
     }
 
-    private func monthGrid(compact: Bool) -> some View {
+    private func monthGrid(compact: Bool, availableHeight: CGFloat) -> some View {
         let days = viewModel.monthDays
+        let weeks = max(4, min(6, Int(ceil(Double(days.count) / 7.0))))
+        // Zellenhöhe dynamisch aus der verfügbaren Höhe (abzüglich
+        // Umschalter, Wochentagszeile, Paddings und TabBar-Puffer), damit
+        // die Monatsansicht nie hinter die untere Tab-Leiste rutscht.
+        let budget = max(120, availableHeight - (compact ? 76 : 130))
+        let cellSize: CGFloat = compact
+            ? min(34, max(18, (budget - 14) / CGFloat(weeks)))
+            : 40
+        let dayFont = Font.system(size: max(10, min(15, cellSize * 0.5)))
+        let weekdayFont = Font.system(size: max(8, min(10, cellSize * 0.3)))
         return LazyVGrid(
             columns: Array(repeating: GridItem(.flexible(), spacing: compact ? 2 : 4), count: 7),
             spacing: compact ? 2 : 4
         ) {
             ForEach(weekdaySymbols, id: \.self) { label in
-                Text(label).font(compact ? .system(size: 9) : .caption2).foregroundStyle(.secondary)
+                Text(label).font(weekdayFont).foregroundStyle(.secondary)
             }
             ForEach(days, id: \.self) { day in
-                dayCell(day, compact: compact)
+                dayCell(day, compact: compact, cellSize: cellSize, dayFont: dayFont)
             }
         }
         .padding(.horizontal, compact ? 4 : 10)
@@ -238,7 +288,7 @@ struct SouveraCalendarView: View {
     }
 
     @ViewBuilder
-    private func dayCell(_ day: Date, compact: Bool = false) -> some View {
+    private func dayCell(_ day: Date, compact: Bool = false, cellSize: CGFloat = 30, dayFont: Font = .subheadline) -> some View {
         let calendar = Calendar.current
         let inMonth = calendar.isDate(day, equalTo: viewModel.visibleMonth, toGranularity: .month)
         let isSelected = calendar.isDate(day, inSameDayAs: selectedDay)
@@ -255,9 +305,9 @@ struct SouveraCalendarView: View {
         } label: {
             VStack(spacing: compact ? 1 : 3) {
                 Text("\(calendar.component(.day, from: day))")
-                    .font(compact ? .caption : .subheadline)
+                    .font(dayFont)
                     .fontWeight(isToday ? .bold : .regular)
-                    .frame(width: compact ? 22 : 30, height: compact ? 22 : 30)
+                    .frame(width: cellSize, height: cellSize)
                     .background(
                         Circle()
                             .fill(isSelected ? Color(NCBrandColor.shared.customer) : .clear)

@@ -49,6 +49,8 @@ final class LinkViewModel: ObservableObject {
     @Published var avatarCache: [String: Data] = [:]
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
+    /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner.
+    @Published var cacheBannerActive = false
 
     private(set) var currentUserId: String = ""
 
@@ -316,6 +318,7 @@ final class LinkViewModel: ObservableObject {
                 self.conversations = .success(cached.sorted { $0.lastActivity > $1.lastActivity })
                 Self.postUnreadTotal(cached)
                 self.offlineNotice = NSLocalizedString("_link_offline_", comment: "")
+                self.cacheBannerActive = true
             }
         }
     }
@@ -371,6 +374,7 @@ final class LinkViewModel: ObservableObject {
                 // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
                 history = cached
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
+                cacheBannerActive = true
             }
             if Task.isCancelled { return }
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }

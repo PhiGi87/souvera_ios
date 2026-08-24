@@ -51,6 +51,9 @@ final class MailViewModel: ObservableObject {
     @Published var sendError: String?
     @Published var searchResults: MailUiState<[MailMessage]> = .success([])
     @Published var offlineNotice: String?
+    /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner
+    /// (fade-in beim Öffnen, fade-out nach 3 s).
+    @Published var cacheBannerActive = false
     @Published var composeContext: MailComposeContext?
     @Published var sendFeedback: MailSendFeedback?
     @Published var expandedMailboxIds: Set<String> = []
@@ -349,14 +352,15 @@ final class MailViewModel: ObservableObject {
                 await recoverCredentialAndReload()
                 return
             }
-            // Offline: rebuild the folder list from the cache when possible.
-            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? ""),
-               isOfflineError(error) {
+            // Cache-Fallback bei JEDEM Fehler (auch 404/HTML/nicht-JSON vom
+            // Server): letzten Stand anzeigen statt Fehlerbildschirm.
+            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
                 let boxes = cached.map { mailbox(from: $0) }
                 let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
                 allMailboxes = sorted
                 mailboxes = .success(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
+                cacheBannerActive = true
                 if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
                 return
             }
@@ -672,15 +676,15 @@ final class MailViewModel: ObservableObject {
             dirtyFlagIds[cacheKey] = nil
             messages = .success(list.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
         } catch {
-            // Only real connectivity problems count as "offline"; anything
-            // else surfaces with its actual error text.
-            if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id),
-               isOfflineError(error) {
+            // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
+            // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
+            if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {
                 let accId = mailbox.accountId
                 messages = .success(cached.emails.map {
                     JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
                 })
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
+                cacheBannerActive = true
                 return
             }
             JmapLog.write("sync failed for \(mailbox.id): \(error.localizedDescription)")
@@ -742,6 +746,18 @@ final class MailViewModel: ObservableObject {
                     return
                 }
             }
+        }
+        // Server nicht erreichbar: Badge aus dem Postfach-Cache
+        // rekonstruieren (Roh-JSON enthält unreadEmails der Inbox).
+        if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? ""),
+           let inbox = cached.first(where: { ($0["role"] as? String) == "inbox" }) {
+            let total = inbox["unreadEmails"] as? Int ?? 0
+            JmapLog.write("Mail unread count (cache) -> \(total)")
+            postUnreadBadge(total)
+            if currentMailbox != nil {
+                applyUnreadCountToMailboxList(total)
+            }
+            return
         }
         await loadMailboxes(autoOpenInbox: false)
     }

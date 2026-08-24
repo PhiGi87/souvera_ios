@@ -115,6 +115,7 @@ struct LinkView: View {
                 activeCallBanner(title: info.title)
             }
         }
+        .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.actionFeedback {
                 HStack(spacing: 8) {
