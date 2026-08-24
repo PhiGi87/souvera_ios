@@ -61,16 +61,15 @@ enum SouveraLogSender {
 
         do {
             let session = try await client.refreshSession()
-            let accId = session?.primaryAccountId ?? ""
+            let accId = session.primaryAccountId
             guard !accId.isEmpty else {
                 return .failure(MailSendError.noClient)
             }
 
             let logs = combinedLog()
             let data = Data(logs.utf8)
-            guard let uploaded = try await client.uploadBlob(accountId: accId, data: data, contentType: "text/plain") else {
-                return .failure(MailSendError.smtp("Log-Upload fehlgeschlagen"))
-            }
+            let uploaded = try await client.uploadBlob(accountId: accId, data: data, contentType: "text/plain")
+            let blobId = uploaded.blobId
 
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -79,9 +78,20 @@ enum SouveraLogSender {
             // Draft-Ziel: der Drafts-Ordner des Kontos, sonst irgendein
             // beschreibbarer Ordner (JMAP braucht eine echte Mailbox-ID).
             let boxes = try await api.getMailboxes(accountId: accId)
-            let draftsMailbox = boxes.first(where: { ($0["role"] as? String) == "drafts" })?.optString("id")
-                ?? boxes.first(where: { $0.optString("id") != nil })?.optString("id")
-                ?? ""
+            let draftsMailbox: String
+            if let drafts = boxes.first(where: { ($0["role"] as? String) == "drafts" }) {
+                draftsMailbox = drafts.optString("id") ?? ""
+            } else if let any = boxes.first {
+                draftsMailbox = any.optString("id") ?? ""
+            } else {
+                draftsMailbox = ""
+            }
+            let attachmentSpec = JmapAttachmentSpec(
+                blobId: blobId,
+                name: "souvera-logs.txt",
+                mimeType: "text/plain",
+                sizeBytes: Int64(data.count)
+            )
             let draftResp = try await api.createDraft(
                 accountId: accId,
                 mailboxId: draftsMailbox,
@@ -93,12 +103,7 @@ enum SouveraLogSender {
                 htmlBody: nil,
                 plainText: "Automatisch gesendete App-Logs (siehe Anhang).",
                 inReplyTo: nil,
-                attachments: [JmapAttachmentSpec(
-                    blobId: uploaded.blobId,
-                    name: "souvera-logs.txt",
-                    mimeType: "text/plain",
-                    sizeBytes: Int64(data.count)
-                )]
+                attachments: [attachmentSpec]
             )
 
             let created = draftResp["created"] as? [String: Any]
@@ -106,7 +111,8 @@ enum SouveraLogSender {
             guard !createdId.isEmpty else {
                 return .failure(MailSendError.smtp("Draft-Erstellung fehlgeschlagen"))
             }
-            let identityId = try await api.getIdentities(accountId: accId).first?.optString("id") ?? ""
+            let identities = try await api.getIdentities(accountId: accId)
+            let identityId = identities.first?.optString("id") ?? ""
             _ = try await api.submitEmail(accountId: accId, emailId: createdId, identityId: identityId)
             SouveraLog.write("LogSender", "logs sent to \(recipient)")
             return .success(recipient)
