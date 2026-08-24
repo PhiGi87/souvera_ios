@@ -877,7 +877,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_remove_"                  = "Remove";
 "_mail_sent_"                    = "Email sent";
 "_mail_sending_"                 = "Sending email…";
-_link_upload_failed_"            = "File upload failed. Please try again.";
+"_link_upload_failed_"            = "File upload failed. Please try again.";
 "_calendar_join_video_call_"      = "Join video call";
 "_settings_diagnostics_"          = "Diagnostics";
 "_settings_logs_"                 = "Share logs";
