@@ -492,7 +492,7 @@ final class CalendarViewModel: ObservableObject {
     private static var calendarListCacheKey: String { "calendar_list_cache" }
 
     private static func saveCachedCalendars(_ calendars: [CalDavCalendar]) {
-        let array: [[String: Any]] = calendars.map { ["href": $0.href, "displayName": $0.displayName, "color": $0.color ?? ""] }
+        let array: [[String: Any]] = calendars.map { ["href": $0.href, "displayName": $0.displayName, "color": $0.color ?? "", "canWrite": $0.canWrite] }
         MailCache.saveJSON(array, key: calendarListCacheKey)
     }
 
@@ -501,7 +501,12 @@ final class CalendarViewModel: ObservableObject {
         return array.compactMap { dict in
             guard let href = dict["href"] as? String,
                   let displayName = dict["displayName"] as? String else { return nil }
-            return CalDavCalendar(href: href, displayName: displayName, color: dict["color"] as? String)
+            return CalDavCalendar(
+                href: href,
+                displayName: displayName,
+                color: dict["color"] as? String,
+                canWrite: (dict["canWrite"] as? Bool) ?? true
+            )
         }
     }
 }
