@@ -103,7 +103,6 @@ enum MailCache {
             attachments: attachments
         )
     }
-    }
 
     // MARK: - Mailbox list snapshot
 
