@@ -37,9 +37,10 @@ enum SouveraLinkOpener {
         let length = nsText.length
         for match in detector.matches(in: text, options: [], range: NSRange(location: 0, length: length)) {
             guard let url = match.url,
-                  match.range.location + match.range.length <= attributed.characters.count,
-                  let start = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location),
-                  let end = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location + match.range.length) else { continue }
+                  match.range.location >= 0,
+                  match.range.location + match.range.length <= attributed.characters.count else { continue }
+            let start = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location)
+            let end = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location + match.range.length)
             attributed[start..<end].link = url
             attributed[start..<end].underlineStyle = .single
         }
