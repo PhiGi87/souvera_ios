@@ -12,6 +12,16 @@ struct CalDavCalendar {
     let displayName: String
     /// Server-side calendar color as a hex string (#RRGGBB), if set.
     let color: String?
+    /// Schreibrecht laut current-user-privilege-set (write/all).
+    let canWrite: Bool
+
+    /// Eigener Kalender des Nutzers (kein geteilter, Deck- oder
+    /// Geburtstags-Kalender).
+    var isPersonal: Bool {
+        !href.contains("_shared_by_")
+            && !href.contains("deck")
+            && !href.contains("contact_birthdays")
+    }
 }
 
 struct CalDavEventEntry {
@@ -93,7 +103,8 @@ final class CalDavClient {
             calendars.append(CalDavCalendar(
                 href: href,
                 displayName: (name?.isEmpty == false) ? name! : (href as NSString).lastPathComponent,
-                color: response["color"]
+                color: response["color"],
+                canWrite: response["canWrite"] == "1"
             ))
         }
         return calendars
@@ -196,6 +207,7 @@ final class CalDavClient {
             <d:displayname/>
             <d:resourcetype/>
             <c:calendar-color/>
+            <d:current-user-privilege-set/>
           </d:prop>
         </d:propfind>
         """
@@ -241,6 +253,7 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
     private var currentResponse: [String: String]?
     private var currentElement = ""
     private var currentValue = ""
+    private var inPrivilegeSet = false
 
     func parse(_ xml: String) -> [[String: String]] {
         responses = []
@@ -258,6 +271,13 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
         let local = Self.localName(elementName)
         if local == "response" {
             currentResponse = [:]
+            inPrivilegeSet = false
+        }
+        if local == "current-user-privilege-set" {
+            inPrivilegeSet = true
+        } else if inPrivilegeSet, local == "write" || local == "all" {
+            // write/all im Privilege-Set => Schreibrecht auf den Kalender.
+            currentResponse?["canWrite"] = "1"
         }
         currentElement = local
         currentValue = ""
@@ -282,6 +302,9 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
         case "collection", "calendar", "schedule-inbox", "schedule-outbox", "trash-bin", "addressbook":
             response["resourcetype"] = (response["resourcetype"] ?? "") + local + ";"
         default: break
+        }
+        if local == "current-user-privilege-set" {
+            inPrivilegeSet = false
         }
         if local == "response" {
             responses.append(response)

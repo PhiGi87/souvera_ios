@@ -38,6 +38,8 @@ struct EventDraft {
     var talkRoomToken: String?
     var talkRoomName: String?
     var reminders: [Int] = [15]
+    /// Ziel-Kalender für neue Termine (CalDAV-href); leer = Default.
+    var calendarHref: String = ""
 }
 
 /// Localized labels for calendar reminders (shared between detail, edit

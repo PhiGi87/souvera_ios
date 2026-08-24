@@ -295,12 +295,16 @@ final class CalendarViewModel: ObservableObject {
                 ?? CalDavEventEntry(calendarHref: existing.calendarHref, href: existing.href, etag: existing.etag, ics: ics)
             ok = await client.updateEvent(entry, ics: ics)
         } else {
-            let targetCalendar = calendars.first(where: { !$0.href.contains("deck") })?.href
-                ?? calendars.first?.href
-                ?? ""
-            guard !targetCalendar.isEmpty else { return false }
+            // Ziel-Kalender: gewählter (schreibbarer) Kalender, sonst der
+            // eigene/persönliche, sonst bisheriger Fallback.
+            let chosen: CalDavCalendar? =
+                calendars.first(where: { $0.href == draft.calendarHref && $0.canWrite })
+                ?? calendars.first(where: { $0.canWrite && $0.isPersonal })
+                ?? calendars.first(where: { $0.canWrite && !$0.href.contains("deck") })
+                ?? calendars.first(where: { !$0.href.contains("deck") })
+            guard let targetCalendar = chosen else { return false }
             let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
-            ok = await client.createEvent(calendarHref: targetCalendar, ics: ics, uid: uid) != nil
+            ok = await client.createEvent(calendarHref: targetCalendar.href, ics: ics, uid: uid) != nil
         }
         if ok {
             await load()
@@ -421,6 +425,18 @@ final class CalendarViewModel: ObservableObject {
         )
     }
 
+    /// Schreibbare Kalender für neue Termine (kein Deck - das sind
+    /// VTODO-Boards, keine VEVENT-Ziele).
+    var writableCalendars: [CalDavCalendar] {
+        calendars.filter { $0.canWrite && !$0.href.contains("deck") }
+    }
+
+    /// Standard-Zielkalender: der eigene/persönliche Kalender.
+    var defaultCalendar: CalDavCalendar? {
+        writableCalendars.first(where: { $0.isPersonal })
+            ?? writableCalendars.first
+    }
+
     func draft(from event: CalendarEventModel) -> EventDraft {
         var draft = EventDraft()
         draft.uid = event.uid
@@ -434,6 +450,7 @@ final class CalendarViewModel: ObservableObject {
         draft.talkRoomToken = event.talkRoomToken
         draft.talkRoomName = event.talkRoomName
         draft.reminders = event.reminders
+        draft.calendarHref = event.calendarHref
         return draft
     }
 

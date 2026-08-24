@@ -29,6 +29,7 @@ struct SouveraCalendarView: View {
     ) ?? .day
     @State private var searchQuery = ""
     @State private var showSearch = false
+    @State private var scrollToNowTrigger = 0
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
     @State private var showCalendarPicker = false
@@ -141,6 +142,7 @@ struct SouveraCalendarView: View {
         }
         .onAppear {
             selectedDay = Date()
+            scrollToNowTrigger += 1
             Task { await viewModel.load() }
             viewModel.startAutoRefresh()
         }
@@ -194,9 +196,9 @@ struct SouveraCalendarView: View {
         case .month:
             monthView(isWide: isWide, width: width, height: height, bottomInset: bottomInset)
         case .day:
-            dayView(isWide: isWide)
+            dayView(isWide: isWide, scrollTrigger: scrollToNowTrigger)
         case .threeDay:
-            threeDayView(isWide: isWide)
+            threeDayView(isWide: isWide, scrollTrigger: scrollToNowTrigger)
         }
     }
 
@@ -268,7 +270,7 @@ struct SouveraCalendarView: View {
 
     private var weekdaySymbols: [String] {
         let calendar = Calendar.current
-        let symbols = calendar.veryShortWeekdaySymbols
+        let symbols = calendar.shortWeekdaySymbols
         let first = calendar.firstWeekday - 1
         return Array(symbols[first...] + symbols[..<first])
     }
@@ -277,9 +279,10 @@ struct SouveraCalendarView: View {
         let days = viewModel.monthDays
         let weeks = max(4, min(6, Int(ceil(Double(days.count) / 7.0))))
         // Zellenhöhe dynamisch aus der verfügbaren Höhe (abzüglich
-        // Umschalter, Wochentagszeile, Paddings und TabBar-Puffer), damit
-        // die Monatsansicht nie hinter die untere Tab-Leiste rutscht.
-        let budget = max(120, availableHeight - (compact ? 76 : 130))
+        // Umschalter, Wochentagszeile, Paddings und Sicherheitsrand), damit
+        // die Monatsansicht bis knapp über die Tab-Leiste reicht, aber nie
+        // dahinter verschwindet.
+        let budget = max(120, availableHeight - (compact ? 64 : 130))
         let cellSize: CGFloat = compact
             ? min(34, max(18, (budget - 14) / CGFloat(weeks)))
             : 40
@@ -336,7 +339,7 @@ struct SouveraCalendarView: View {
 
     // MARK: - Day
 
-    private func dayView(isWide: Bool) -> some View {
+    private func dayView(isWide: Bool, scrollTrigger: Int = 0) -> some View {
         VStack(spacing: 0) {
             dateOnlySwitcher(day: selectedDay, compact: isWide)
             Divider()
@@ -348,7 +351,8 @@ struct SouveraCalendarView: View {
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
                 onCreate: createEventInSlot,
-                bottomPadding: isWide ? 12 : 40
+                bottomPadding: isWide ? 12 : 40,
+                scrollTrigger: scrollTrigger
             )
             .refreshable { await viewModel.load() }
         }
@@ -449,17 +453,18 @@ struct SouveraCalendarView: View {
 
     // MARK: - 3 days
 
-    private func threeDayView(isWide: Bool) -> some View {
+    private func threeDayView(isWide: Bool, scrollTrigger: Int = 0) -> some View {
         VStack(spacing: 0) {
-            arrowsOnlySwitcher(step: 3, compact: isWide)
-            Divider()
             ThreeDayTimelineView(
                 days: threeDayRange,
                 eventsProvider: { viewModel.events(on: $0) },
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
                 onCreate: createEventInSlot,
-                compact: isWide
+                compact: isWide,
+                onPrev: { shiftSelectedDay(by: -3) },
+                onNext: { shiftSelectedDay(by: 3) },
+                scrollTrigger: scrollTrigger
             )
         }
         .offset(x: swipeOffset)
@@ -610,6 +615,9 @@ private struct TimelineDayView: View {
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
     var onCreate: ((Date, Date) -> Void)? = nil
     var bottomPadding: CGFloat = 40
+    /// Zählt bei jedem Erscheinen des Kalenders hoch (Tab-Wechsel) ->
+    /// Scroll zur Jetzt-Linie.
+    var scrollTrigger: Int = 0
 
     private let hours = Array(0..<24)
 
@@ -627,11 +635,18 @@ private struct TimelineDayView: View {
                 .padding(.bottom, bottomPadding)
             }
             .onAppear {
-                let currentHour = Calendar.current.component(.hour, from: Date())
-                if Calendar.current.isDateInToday(day) {
-                    proxy.scrollTo("hour_\(currentHour)", anchor: .top)
-                }
+                scrollToNow(proxy)
             }
+            .onChange(of: scrollTrigger) { _, _ in
+                scrollToNow(proxy)
+            }
+        }
+    }
+
+    private func scrollToNow(_ proxy: ScrollViewProxy) {
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        if Calendar.current.isDateInToday(day) {
+            proxy.scrollTo("hour_\(currentHour)", anchor: .top)
         }
     }
 
@@ -718,9 +733,6 @@ private struct TimelineColumn: View {
                             .padding(.top, hour == 0 ? 0 : hourHeight - 1)
                     }
                 }
-                if showsNowLine {
-                    nowLine
-                }
                 if let slot = dragSlot {
                     let offsetY = CGFloat(slot.start) / 60.0 * hourHeight
                     let height = CGFloat(max(slot.end - slot.start, 15)) / 60.0 * hourHeight
@@ -736,6 +748,11 @@ private struct TimelineColumn: View {
                 }
                 ForEach(timedEvents) { event in
                     eventBlock(event, containerWidth: geometry.size.width)
+                }
+                if showsNowLine {
+                    // Jetzt-Linie bewusst ZULETZT zeichnen - immer sichtbar,
+                    // auch im Landscape, über allen Event-Blöcken.
+                    nowLine
                 }
             }
             .contentShape(Rectangle())
@@ -913,6 +930,11 @@ private struct ThreeDayTimelineView: View {
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
     var onCreate: ((Date, Date) -> Void)? = nil
     var compact: Bool = false
+    var onPrev: () -> Void = {}
+    var onNext: () -> Void = {}
+    /// Zählt bei jedem Erscheinen des Kalenders hoch (Tab-Wechsel) ->
+    /// Scroll zur Jetzt-Linie.
+    var scrollTrigger: Int = 0
 
     private let hours = Array(0..<24)
     private var hourHeight: CGFloat { compact ? 40 : 44 }
@@ -920,7 +942,8 @@ private struct ThreeDayTimelineView: View {
     var body: some View {
         ScrollViewReader { proxy in
             VStack(spacing: 0) {
-                // Feste Tagesköpfe: bleiben beim Scrollen stehen.
+                // Feste Tagesköpfe: bleiben beim Scrollen stehen; die
+                // Pfeile liegen IN dieser Zeile (links/rechts der Tage).
                 HStack(alignment: .top, spacing: 0) {
                     Color.clear.frame(width: 34, height: compact ? 32 : 40)
                     ForEach(days, id: \.self) { day in
@@ -935,6 +958,26 @@ private struct ThreeDayTimelineView: View {
                         .frame(maxWidth: .infinity)
                         .frame(height: compact ? 32 : 40)
                     }
+                }
+                .overlay(alignment: .leading) {
+                    Button(action: onPrev) {
+                        Image(systemName: "chevron.left")
+                            .font(.subheadline)
+                            .frame(width: 30, height: compact ? 32 : 40)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.leading, 36)
+                }
+                .overlay(alignment: .trailing) {
+                    Button(action: onNext) {
+                        Image(systemName: "chevron.right")
+                            .font(.subheadline)
+                            .frame(width: 30, height: compact ? 32 : 40)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 2)
                 }
                 Divider()
                 ScrollView {
@@ -966,11 +1009,18 @@ private struct ThreeDayTimelineView: View {
                 }
             }
             .onAppear {
-                let currentHour = Calendar.current.component(.hour, from: Date())
-                if days.contains(where: { Calendar.current.isDateInToday($0) }) {
-                    proxy.scrollTo("hour_\(currentHour)", anchor: .top)
-                }
+                scrollToNow(proxy)
             }
+            .onChange(of: scrollTrigger) { _, _ in
+                scrollToNow(proxy)
+            }
+        }
+    }
+
+    private func scrollToNow(_ proxy: ScrollViewProxy) {
+        let currentHour = Calendar.current.component(.hour, from: Date())
+        if days.contains(where: { Calendar.current.isDateInToday($0) }) {
+            proxy.scrollTo("hour_\(currentHour)", anchor: .top)
         }
     }
 }
@@ -1094,6 +1144,16 @@ private struct CalendarEventEditSheet: View {
     }
     @State private var saving = false
     @State private var errorMessage: String?
+
+    private var selectedCalendarName: String {
+        viewModel.writableCalendars.first(where: { $0.href == draft.calendarHref })?.displayName
+            ?? viewModel.defaultCalendar?.displayName
+            ?? ""
+    }
+
+    private var calendarDisplayName: String {
+        viewModel.calendars.first(where: { $0.href == existing?.calendarHref })?.displayName ?? ""
+    }
     @State private var attendeeInput = ""
     @State private var attendeeSuggestions: [RecipientSuggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
@@ -1106,6 +1166,38 @@ private struct CalendarEventEditSheet: View {
                 Section {
                     TextField(NSLocalizedString("_calendar_title_", comment: ""), text: $draft.title)
                     Toggle(NSLocalizedString("_calendar_all_day_", comment: ""), isOn: $draft.allDay)
+                }
+                if existing == nil {
+                    // Neue Termine: Ziel-Kalender wählbar (nur schreibbare).
+                    Section(NSLocalizedString("_calendar_select_calendar_", comment: "")) {
+                        Menu {
+                            ForEach(viewModel.writableCalendars, id: \.href) { calendar in
+                                Button {
+                                    draft.calendarHref = calendar.href
+                                } label: {
+                                    if draft.calendarHref == calendar.href {
+                                        Label(calendar.displayName, systemImage: "checkmark")
+                                    } else {
+                                        Text(calendar.displayName)
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack {
+                                Text(selectedCalendarName)
+                                    .foregroundStyle(.primary)
+                                Spacer()
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                } else {
+                    // Bestehende Termine: Kalender nur anzeigen.
+                    Section(NSLocalizedString("_calendar_select_calendar_", comment: "")) {
+                        Label(calendarDisplayName, systemImage: "calendar")
+                    }
                 }
                 Section {
                     DatePicker(NSLocalizedString("_calendar_start_", comment: ""), selection: $draft.start, displayedComponents: draft.allDay ? .date : [.date, .hourAndMinute])
@@ -1283,6 +1375,12 @@ private struct CalendarEventEditSheet: View {
                              ? NSLocalizedString("_calendar_new_event_", comment: "")
                              : NSLocalizedString("_contact_edit_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                // Default-Zielkalender für neue Termine: persönlicher.
+                if existing == nil, draft.calendarHref.isEmpty {
+                    draft.calendarHref = viewModel.defaultCalendar?.href ?? ""
+                }
+            }
             .sheet(isPresented: $showContactPicker) {
                 ContactPickerSheet { email in
                     addAttendee(email)
