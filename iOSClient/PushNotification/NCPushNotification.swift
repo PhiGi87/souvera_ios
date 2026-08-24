@@ -68,17 +68,15 @@ class NCPushNotification {
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
         SouveraLog.write("Push", "NC registration OK \(urlBase)")
 
-        // Combined "normal voip" token: the push proxy routes alert pushes to
-        // the normal APNs token and voip pushes to the PushKit token. Single
-        // fallback works too (only one half present at the time).
+        // KANAL-TRENNUNG: Diese Registrierung läuft als Nextcloud-Client
+        // (apptype=nextcloud) mit dem REINEN Normal-Token - sie bekommt
+        // Mail-/Chat-/Admin-Benachrichtigungen. Die Talk-Registrierung
+        // (kombiniertes Token, VoIP) übernimmt LinkVoIPManager.
         // Registrierung tolerant: 2xx = Erfolg (der Proxy antwortet mit
         // leerem Body, was NextcloudKit als Fehler wertet).
-        let combinedToken = SouveraPushRegistrar.combinedToken(
-            normal: preferences.deviceTokenPushNotification,
-            voip: LinkVoIPManager.shared.voipToken
-        )
+        let normalToken = preferences.deviceTokenPushNotification
         let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
-                                                                 pushToken: combinedToken,
+                                                                 pushToken: normalToken,
                                                                  deviceIdentifier: deviceIdentifier,
                                                                  signature: signature,
                                                                  publicKey: subscribingPublicKey)

@@ -1357,7 +1357,14 @@ private struct MailDetailView: View {
             }
             .padding(.vertical, 24)
         case let .error(m):
-            Text(m).foregroundStyle(.secondary).padding(.vertical, 12)
+            VStack(spacing: 8) {
+                Text(m).foregroundStyle(.secondary)
+                Button(NSLocalizedString("_mail_detail_retry_", comment: "")) {
+                    viewModel.openMessage(message)
+                }
+                .font(.subheadline)
+            }
+            .padding(.vertical, 12)
         case let .success(body):
             if let html = body.html, !html.isEmpty {
                 // Self-sizing web view: the content flows directly below the

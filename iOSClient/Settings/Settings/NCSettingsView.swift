@@ -4,6 +4,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import SwiftUI
+import UIKit
 import NextcloudKit
 import FirebaseCrashlytics
 
@@ -452,8 +453,21 @@ struct NCSettingsView: View {
             case .failure(let error):
                 SouveraLog.write("Settings", "logs send failed: \(error.localizedDescription)")
                 logsResult = (false, NSLocalizedString("_settings_logs_failed_", comment: ""))
+                // Fallback: Share-Sheet, damit die Logs trotzdem rauskommen.
+                presentShareFallback()
             }
         }
+    }
+
+    /// Share-Sheet-Fallback, wenn der Mail-Versand der Logs fehlschlägt.
+    private func presentShareFallback() {
+        guard let url = SouveraLogSender.combinedLogFileURL(),
+              let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController else { return }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let activityVC = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        top.present(activityVC, animated: true)
     }
 }
 

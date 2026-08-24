@@ -91,6 +91,9 @@ final class MailViewModel: ObservableObject {
     private var identityId: String?
     private var allIdentities: [[String: Any]] = []
     private var hasRecoveredCredential = false
+    /// Zeitpunkt des letzten Recovery-Versuchs - nach 10 Minuten wird ein
+    /// neuer Versuch erlaubt (kein Dauer-Offline nach einmaligem Fehlschlag).
+    private var lastRecoveryAttempt: Date?
     private var cameFromSearch = false
     private var lastSearchQuery = ""
 
@@ -203,9 +206,14 @@ final class MailViewModel: ObservableObject {
     }
 
     private func recoverCredentialAndReload() async {
-        guard !hasRecoveredCredential else { return }
+        if hasRecoveredCredential {
+            guard let lastRecoveryAttempt, Date().timeIntervalSince(lastRecoveryAttempt) >= 600 else { return }
+        }
         hasRecoveredCredential = true
+        lastRecoveryAttempt = Date()
+        SouveraLog.write("Mail", "credential recovery attempt (renewCombinedCredential)")
         guard let renewed = await SouveraMailCredentialManager().renewCredential() else {
+            SouveraLog.write("Mail", "credential recovery FAILED")
             mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
             return
         }
@@ -359,6 +367,8 @@ final class MailViewModel: ObservableObject {
 
             let sorted = sortMailboxGroups(filterNonStandardSentFolders(all))
             applyMailboxes(sorted)
+            // Verbindung steht wieder: Recovery-Sperre zurücksetzen.
+            hasRecoveredCredential = false
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
             if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         } catch {
@@ -600,6 +610,7 @@ final class MailViewModel: ObservableObject {
         pageState = (nil, false)
         hasMoreMessages = false
         isLoadingMore = false
+        prefetchGeneration += 1
         Task { await syncMessages() }
     }
 
@@ -709,20 +720,32 @@ final class MailViewModel: ObservableObject {
             var lastId: String?
             var hasMore = false
             var state = ""
-            let maxPages = 10
+            let maxPages = 3
             var oldestDate: Date?
             for _ in 0..<maxPages {
-                let resp = try await api.queryEmails(
-                    accountId: accId,
-                    inMailboxId: jmapMailboxId,
-                    limit: pageSize,
-                    anchor: lastId,
-                    position: lastId == nil ? 0 : 1
-                )
-                let ids = (resp["ids"] as? [String]) ?? []
-                state = resp.optString("queryState") ?? state
-                guard !ids.isEmpty else { break }
-                let page = try await api.getEmails(accountId: accId, ids: ids)
+                // Pro-Seite-Fehlerisolation: Schlägt eine Folgeseite fehl,
+                // bricht der Loop ab und die bereits geladenen Mails werden
+                // angezeigt - KEIN Offline-Fallback, nur weil Seite 2+
+                // zickt (das war die Offline-Regression des letzten Builds).
+                let ids: [String]
+                let page: [[String: Any]]
+                do {
+                    let resp = try await api.queryEmails(
+                        accountId: accId,
+                        inMailboxId: jmapMailboxId,
+                        limit: pageSize,
+                        anchor: lastId,
+                        position: lastId == nil ? 0 : 1
+                    )
+                    ids = (resp["ids"] as? [String]) ?? []
+                    state = resp.optString("queryState") ?? state
+                    guard !ids.isEmpty else { break }
+                    page = try await api.getEmails(accountId: accId, ids: ids)
+                } catch {
+                    JmapLog.write("sync \(mailbox.name): page failed after \(byId.count) mails - \(error.localizedDescription)")
+                    if byId.isEmpty { throw error }
+                    break
+                }
                 var addedCount = 0
                 for email in page {
                     guard let id = email.optString("id") else { continue }
@@ -751,6 +774,7 @@ final class MailViewModel: ObservableObject {
             dirtyFlagIds[cacheKey] = nil
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collected, queryState: state)
             messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+            prefetchBodies(mailbox: mailbox)
         } catch {
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
@@ -807,12 +831,68 @@ final class MailViewModel: ObservableObject {
                 hasMoreMessages = hasMore
                 MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: emails, queryState: snapshot?.queryState ?? "")
                 messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })
+                prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
             } catch {
                 hasMoreMessages = false
                 JmapLog.write("loadMore failed for \(mailbox.id): \(error.localizedDescription)")
             }
         }
+    }
+
+    /// Generation des aktuellen Postfachs - ein Wechsel bricht laufende
+    /// Prefetch-Queues ab.
+    private var prefetchGeneration = 0
+
+    /// IMAP-artiger Voll-Cache: lädt die Bodies der geladenen Mails im
+    /// Hintergrund nach (gedrosselt, abbrechbar, überspringt Gecachtes).
+    private func prefetchBodies(mailbox: Mailbox) {
+        guard useJmap else { return }
+        prefetchGeneration += 1
+        let generation = prefetchGeneration
+        guard case let .success(items) = messages else { return }
+        let accountName = mailAccount?.account ?? ""
+        let targets = items.prefix(25).filter {
+            MailCache.loadBody(account: accountName, emailId: $0.emailId) == nil
+        }
+        guard !targets.isEmpty else { return }
+        Task { [weak self] in
+            for message in targets {
+                guard let self, self.prefetchGeneration == generation,
+                      self.currentMailbox?.id == mailbox.id else { return }
+                if MailCache.loadBody(account: accountName, emailId: message.emailId) != nil { continue }
+                if let fetched = await self.loadBodyFor(message) {
+                    MailCache.saveBody(account: accountName, emailId: message.emailId, body: fetched)
+                }
+                try? await Task.sleep(nanoseconds: 300_000_000)
+            }
+            JmapLog.write("prefetch done for \(mailbox.name) (\(targets.count) mails)")
+        }
+    }
+
+    /// Lädt den Body einer Mail (JSON → mapBody → Blob-Downloads).
+    private func loadBodyFor(_ message: MailMessage) async -> MessageBody? {
+        guard let json = await fetchMessageJson(message) else { return nil }
+        var mapped = JmapMapper.mapBody(json: json)
+        let accId = message.accountId
+        if mapped.plainText == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
+           let blobId = textPart.optString("blobId"), !blobId.isEmpty {
+            mapped = MessageBody(
+                plainText: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
+                html: mapped.html,
+                attachments: mapped.attachments
+            )
+        }
+        if mapped.html == nil, let htmlPart = (json["htmlBody"] as? [[String: Any]])?.first,
+           htmlPart.optString("type") == "text/html",
+           let blobId = htmlPart.optString("blobId"), !blobId.isEmpty {
+            mapped = MessageBody(
+                plainText: mapped.plainText,
+                html: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
+                attachments: mapped.attachments
+            )
+        }
+        return mapped
     }
 
     /// JMAP-Datum (receivedAt) parsen (ISO8601 mit/ohne Bruchteile).
@@ -953,8 +1033,17 @@ final class MailViewModel: ObservableObject {
     }
 
     private func openMessageJmap(_ message: MailMessage) async {
+        let accountName = mailAccount?.account ?? ""
+        // Cache-First: Gecachten Body SOFORT anzeigen (auch offline lesbar),
+        // der Live-Load ersetzt ihn im Hintergrund.
+        if let cached = MailCache.loadBody(account: accountName, emailId: message.emailId) {
+            body = .success(cached)
+        }
         guard let json = await fetchMessageJson(message) else {
             JmapLog.write("openMessage failed: no Email/get JSON for \(message.emailId)")
+            if case .success = body {
+                return // Cache-Stand bleibt sichtbar
+            }
             body = .error(errorText("Message not found"))
             return
         }
@@ -999,6 +1088,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
         }
+        MailCache.saveBody(account: accountName, emailId: message.emailId, body: mapped)
         body = .success(mapped)
         if !message.isRead { await setRead([message], true) }
     }

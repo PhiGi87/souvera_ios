@@ -128,7 +128,23 @@ actor JmapClient {
             "using": using,
             "methodCalls": methodCalls
         ]
-        let response = try await httpPost(apiUrl, body: requestObj)
+        var response: [String: Any]
+        do {
+            response = try await httpPost(apiUrl, body: requestObj)
+        } catch let error as JmapException {
+            if case .authNeedsBearer = error {
+                throw error
+            }
+            // Transienter Fehler (Server-Zucken/Verbindung): gecachte
+            // Session verwerfen, Session neu laden und EINMAL retryen -
+            // sonst hält eine zwischenzeitliche Störung die App offline.
+            JmapLog.write("JMAP call failed (\(error)) - invalidating session and retrying once")
+            jmapSession = nil
+            resolvedApiUrl = nil
+            resolvedJson = nil
+            let retryUrl = try await resolveApiUrl()
+            response = try await httpPost(retryUrl, body: requestObj)
+        }
 
         guard let responses = response["methodResponses"] as? [Any] else {
             throw JmapException.protocolError("No methodResponses in JMAP response")

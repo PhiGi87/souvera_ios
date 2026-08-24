@@ -50,6 +50,61 @@ enum MailCache {
         try? FileManager.default.removeItem(at: fileURL(account: account, mailboxId: mailboxId))
     }
 
+    // MARK: - Body-Cache (IMAP-artig: Inhalte aller geladenen Mails)
+
+    private static func bodyDirectory(account: String) -> URL {
+        let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return rootDirectory.appendingPathComponent("bodies-\(safeAccount)", isDirectory: true)
+    }
+
+    private static func bodyURL(account: String, emailId: String) -> URL {
+        let safeId = emailId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return bodyDirectory(account: account).appendingPathComponent("\(safeId).json")
+    }
+
+    /// Speichert den aufbereiteten Body einer Mail (Text/HTML/Anhänge).
+    static func saveBody(account: String, emailId: String, body: MessageBody) {
+        let attachments: [[String: Any]] = body.attachments.map {
+            [
+                "name": $0.name,
+                "sizeBytes": $0.sizeBytes,
+                "mimeType": $0.mimeType,
+                "blobId": $0.blobId ?? NSNull(),
+                "partId": $0.partId ?? NSNull()
+            ]
+        }
+        let payload: [String: Any] = [
+            "plainText": body.plainText ?? NSNull(),
+            "html": body.html ?? NSNull(),
+            "attachments": attachments
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: payload) else { return }
+        try? FileManager.default.createDirectory(at: bodyDirectory(account: account), withIntermediateDirectories: true)
+        try? data.write(to: bodyURL(account: account, emailId: emailId), options: .atomic)
+    }
+
+    /// Liefert den gecachten Body einer Mail (Offline-Lesen).
+    static func loadBody(account: String, emailId: String) -> MessageBody? {
+        guard let data = try? Data(contentsOf: bodyURL(account: account, emailId: emailId)),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        let attachments = (json["attachments"] as? [[String: Any]])?.compactMap { att -> AttachmentMeta? in
+            guard let name = att["name"] as? String else { return nil }
+            return AttachmentMeta(
+                name: name,
+                sizeBytes: att["sizeBytes"] as? Int64 ?? 0,
+                mimeType: att["mimeType"] as? String ?? "application/octet-stream",
+                blobId: att["blobId"] as? String,
+                partId: att["partId"] as? String
+            )
+        } ?? []
+        return MessageBody(
+            plainText: json["plainText"] as? String,
+            html: json["html"] as? String,
+            attachments: attachments
+        )
+    }
+    }
+
     // MARK: - Mailbox list snapshot
 
     private static func mailboxesURL(account: String) -> URL {

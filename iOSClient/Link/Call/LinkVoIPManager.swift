@@ -199,11 +199,17 @@ final class LinkVoIPManager: NSObject {
                 }
 
                 nkLog(tag: global.logTagPN, emoji: .start, message: "Registering Link VoIP push for \(urlBase) via proxy \(proxyServerUrl)")
+                // KANAL-TRENNUNG: Talk-User-Agent, damit der Server diese
+                // Registrierung als Talk-Gerät (apptype=talk) klassifiziert
+                // - Call-Pushes laufen dann über den VoIP-Kanal.
+                let talkUserAgent = "Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)"
+                let options = NKRequestOptions(customUserAgent: talkUserAgent)
                 let responsePN = await NextcloudKit.shared.subscribingPushNotificationAsync(serverUrl: urlBase,
                                                                                             pushTokenHash: pushTokenHash,
                                                                                             devicePublicKey: devicePublicKey,
                                                                                             proxyServerUrl: proxyServerUrl,
-                                                                                            account: account)
+                                                                                            account: account,
+                                                                                            options: options)
                 guard responsePN.error == .success,
                       let deviceIdentifier = responsePN.deviceIdentifier,
                       let signature = responsePN.signature,

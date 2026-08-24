@@ -13,6 +13,7 @@ struct SouveraPushDiagnosticsView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var testResult: String?
     @State private var isTesting = false
+    @State private var isTalkTest = false
 
     var body: some View {
         NavigationStack {
@@ -31,14 +32,28 @@ struct SouveraPushDiagnosticsView: View {
                     }
                 }
                 Section {
+                    // Differenzierte Tests: Mail/Chat (normaler Kanal) und
+                    // Call (Talk-Kanal via Talk-User-Agent).
                     Button {
-                        runTestPush()
+                        runTestPush(talk: false)
                     } label: {
                         HStack {
-                            if isTesting {
+                            if isTesting && !isTalkTest {
                                 ProgressView()
                             } else {
-                                Label(NSLocalizedString("_settings_push_diag_test_", comment: ""), systemImage: "paperplane.fill")
+                                Label(NSLocalizedString("_settings_push_diag_test_mail_", comment: ""), systemImage: "envelope.badge")
+                            }
+                        }
+                    }
+                    .disabled(isTesting)
+                    Button {
+                        runTestPush(talk: true)
+                    } label: {
+                        HStack {
+                            if isTesting && isTalkTest {
+                                ProgressView()
+                            } else {
+                                Label(NSLocalizedString("_settings_push_diag_test_call_", comment: ""), systemImage: "phone.badge.waveform")
                             }
                         }
                     }
@@ -70,12 +85,13 @@ struct SouveraPushDiagnosticsView: View {
         return Text("\(token.count)").foregroundStyle(.green)
     }
 
-    private func runTestPush() {
+    private func runTestPush(talk: Bool) {
         guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else {
             testResult = NSLocalizedString("_settings_push_diag_no_account_", comment: "")
             return
         }
         isTesting = true
+        isTalkTest = talk
         testResult = nil
         Task {
             defer { isTesting = false }
@@ -91,6 +107,11 @@ struct SouveraPushDiagnosticsView: View {
             req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
             req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
             req.setValue("application/json", forHTTPHeaderField: "Accept")
+            if talk {
+                // Talk-UA: der Server erzeugt dann eine Talk-Test-
+                // Benachrichtigung, die an TALK-Geräte (dein iPhone) geht.
+                req.setValue("Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)", forHTTPHeaderField: "User-Agent")
+            }
             do {
                 let (data, response) = try await URLSession.shared.data(for: req)
                 let status = (response as? HTTPURLResponse)?.statusCode ?? -1
@@ -101,8 +122,11 @@ struct SouveraPushDiagnosticsView: View {
                     testResult = "HTTP \(status)"
                     return
                 }
-                testResult = payload["message"] as? String ?? NSLocalizedString("_settings_push_diag_sent_", comment: "")
-                SouveraLog.write("PushDiagnostics", "test push result: \(testResult ?? "")")
+                let result = payload["message"] as? String ?? NSLocalizedString("_settings_push_diag_sent_", comment: "")
+                testResult = result
+                let label = talk ? "call" : "mail/chat"
+                SouveraLog.write("PushDiagnostics", "test push (\(label)) result: \(result)")
+                UserDefaults.standard.set("\(label): \(result)", forKey: "SouveraLastTestPushResult")
             } catch {
                 testResult = error.localizedDescription
             }

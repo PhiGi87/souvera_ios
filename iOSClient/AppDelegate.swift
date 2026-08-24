@@ -79,6 +79,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         nkLog(start: "Start session with level \(NCPreferences().log) " + versionSouveraiOS)
 
+        // Startup-Marker mit Build-Nummer in die Log-Datei (für alle
+        // "Logs teilen"-Sendungen nachvollziehbar).
+        SouveraLog.write("App-Start: \(SouveraBuildInfo.label) \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") | iOS \(UIDevice.current.systemVersion) | \(UIDevice.current.model)")
+
         // Push Notification & display notification
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             self.notificationSettings = settings
@@ -246,7 +250,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let app = data["app"] as? String
 
         func openNotification(controller: NCMainTabBarController) {
-            if app == NCGlobal.shared.termsOfServiceName {
+            if app == "souvera_mail" || app == "souvera_mail_notifications" {
+                // Mail-Benachrichtigung: direkt ins Mail-Modul springen.
+                controller.selectedIndex = 0
+            } else if app == NCGlobal.shared.termsOfServiceName {
                 Task {
                     await NCNetworking.shared.transferDispatcher.notifyAllDelegatesAsync { delegate in
                         try? await Task.sleep(for: .seconds(0.5))

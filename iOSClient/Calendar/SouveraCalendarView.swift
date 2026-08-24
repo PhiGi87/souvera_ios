@@ -777,9 +777,13 @@ private struct TimelineColumn: View {
                 }
             }
             .contentShape(Rectangle())
-            // WICHTIG: simultaneousGesture statt gesture - sonst blockiert
-            // die Long-Press-Geste das Scrollen der ScrollView komplett.
-            .simultaneousGesture(createGesture())
+            // Reiner Long-Press setzt nur ein Flag; der Slot-Drag läuft
+            // simultan und zeichnet erst nach dem Long-Press. Beides
+            // blockiert das Scrollen der ScrollView nicht.
+            .simultaneousGesture(slotDrag)
+            .onLongPressGesture(minimumDuration: 0.45, maximumDistance: 14) {
+                longPressActive = true
+            }
             .onChange(of: dragSlot != nil) { _, active in
                 onSlotActive?(active)
             }
@@ -907,36 +911,6 @@ private struct TimelineColumn: View {
     /// (Start abrunden, Ende aufrunden, mindestens 15 Minuten) und der Slot
     /// wird während des Ziehens sichtbar markiert.
     @GestureState private var dragSlot: (start: Int, end: Int)?
-
-    private func createGesture() -> some Gesture {
-        // Terminanlage erst nach einem LONG-PRESS (~0,45 s) auf den Zeitslot:
-        // normales Tippen/Scrollen darf keinen Termin auslösen. Nach dem
-        // Long-Press kann der Finger den Slot noch vergrößern (Drag), bevor
-        // er loslässt - der Slot-Rahmen folgt live mit.
-        LongPressGesture(minimumDuration: 0.45, maximumDistance: 10)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .updating($dragSlot) { value, state, _ in
-                guard case let .second(true, drag?) = value else { return }
-                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
-                let a = Self.snapDown(min(startMinute, endMinute))
-                let b = Self.snapUp(max(startMinute, endMinute))
-                state = (a, max(b, a + 15))
-            }
-            .onEnded { value in
-                guard case let .second(true, drag?) = value, let onCreate else { return }
-                let calendar = Calendar.current
-                let dayStart = calendar.startOfDay(for: day)
-                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
-                let a = Self.snapDown(min(startMinute, endMinute))
-                let b = Self.snapUp(max(startMinute, endMinute))
-                let slotDuration = max(15, b - a)
-                guard let slotStart = calendar.date(byAdding: .minute, value: a, to: dayStart),
-                      let slotEnd = calendar.date(byAdding: .minute, value: a + slotDuration, to: dayStart) else { return }
-                onCreate(slotStart, slotEnd)
-            }
-    }
 
     private static func minute(for y: CGFloat, hourHeight: CGFloat) -> Int {
         let minutes = Int((y / hourHeight) * 60)

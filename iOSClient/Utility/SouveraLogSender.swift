@@ -29,6 +29,7 @@ enum SouveraLogSender {
         parts.append("APNs-Token: \(normalToken.isEmpty ? "fehlt" : "vorhanden (\(normalToken.count) Zeichen)")")
         parts.append("VoIP-Token: \(voipToken.isEmpty ? "fehlt" : "vorhanden (\(voipToken.count) Zeichen)")")
         parts.append("Push-Registrierung: \(pushRegistrationStatus())")
+        parts.append("Letzter Push-Test: \(UserDefaults.standard.string(forKey: "SouveraLastTestPushResult") ?? "-")")
         parts.append("")
         parts.append("=== souvera-app.log ===")
         parts.append(SouveraLog.fileContent())
@@ -38,6 +39,19 @@ enum SouveraLogSender {
             parts.append((try? String(contentsOf: mailLog, encoding: .utf8)) ?? "(keine Mail-Logs)")
         }
         return parts.joined(separator: "\n")
+    }
+
+    /// Schreibt das kombinierte Log-Dokument in eine temporäre Datei (für
+    /// den Share-Sheet-Fallback, wenn der Mail-Versand nicht möglich ist).
+    static func combinedLogFileURL() -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("souvera-logs.txt")
+        do {
+            try combinedLog().write(to: url, atomically: true, encoding: .utf8)
+            return url
+        } catch {
+            SouveraLog.write("LogSender", "share file write failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     /// Letzter Push-Registrierungsstatus (aus UserDefaults, geschrieben von

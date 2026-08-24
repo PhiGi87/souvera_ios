@@ -1095,3 +1095,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_delete_folder_only_" = "Delete folder only";
 "_cache_active_" = "Server error: cache active";
 "_calendar_select_calendar_" = "Calendar";
+"_mail_detail_retry_" = "Retry";
+"_settings_push_diag_test_mail_" = "Test push: Mail/Chat";
+"_settings_push_diag_test_call_" = "Test push: Call";
