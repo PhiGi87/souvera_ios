@@ -230,8 +230,9 @@ struct LinkChatMessage: Decodable, Identifiable {
             let nsText = plain as NSString
             for match in detector.matches(in: plain, options: [], range: NSRange(location: 0, length: nsText.length)) {
                 guard let url = match.url,
-                      let start = AttributedString.Index(match.range.location, within: output),
-                      let end = AttributedString.Index(match.range.location + match.range.length, within: output) else { continue }
+                      match.range.location + match.range.length <= output.characters.count,
+                      let start = output.index(output.startIndex, offsetByCharacters: match.range.location),
+                      let end = output.index(output.startIndex, offsetByCharacters: match.range.location + match.range.length) else { continue }
                 output[start..<end].link = url
                 output[start..<end].underlineStyle = .single
             }

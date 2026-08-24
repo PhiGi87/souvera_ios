@@ -11,9 +11,6 @@ import Foundation
 import Combine
 
 extension Notification.Name {
-    /// Posted when another module (e.g. the calendar) wants the Link tab to
-    /// open a specific conversation.
-    static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
     /// Posted whenever the active call state changes (started/ended).
     static let linkCallStateChanged = Notification.Name("SouveraLinkCallStateChanged")
     /// Posted with the total number of unread messages (Link tab badge).

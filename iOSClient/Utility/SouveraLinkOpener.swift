@@ -3,6 +3,12 @@
 
 import UIKit
 
+extension Notification.Name {
+    /// Posted when another module (e.g. the calendar) wants the Link tab to
+    /// open a specific conversation.
+    static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
+}
+
 /// Öffnet URLs einheitlich in der App: interne App-Links (Talk-Räume,
 /// `/call/<token>`) öffnen das Link-Modul, eigene Schemes laufen über das
 /// Deep-Link-Handling der App, alles andere öffnet der Standard-Browser.
@@ -15,7 +21,9 @@ enum SouveraLinkOpener {
             )
             return
         }
+        #if !EXTENSION
         UIApplication.shared.open(url)
+        #endif
     }
 
     /// Erkennt URLs in Plaintext und liefert ein AttributedString, in dem
@@ -26,10 +34,12 @@ enum SouveraLinkOpener {
             return attributed
         }
         let nsText = text as NSString
-        for match in detector.matches(in: text, options: [], range: NSRange(location: 0, length: nsText.length)) {
+        let length = nsText.length
+        for match in detector.matches(in: text, options: [], range: NSRange(location: 0, length: length)) {
             guard let url = match.url,
-                  let start = AttributedString.Index(match.range.location, within: attributed),
-                  let end = AttributedString.Index(match.range.location + match.range.length, within: attributed) else { continue }
+                  match.range.location + match.range.length <= attributed.characters.count,
+                  let start = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location),
+                  let end = attributed.index(attributed.startIndex, offsetByCharacters: match.range.location + match.range.length) else { continue }
             attributed[start..<end].link = url
             attributed[start..<end].underlineStyle = .single
         }
