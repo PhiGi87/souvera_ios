@@ -5005,6 +5005,8 @@
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
 				B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */,
 				A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */,
+				1C6FBB7FDB584688B17B19A0 /* CallPermissions.swift in Sources */,
+				96B5CBF7A3E14DE0BD9CBF5D /* SouveraCacheBannerGate.swift in Sources */,
 				D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */,
 				B7E3D1A5C8F2496E02B4A7C1 /* SouveraMaintenanceMonitor.swift in Sources */,
 				FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */,
