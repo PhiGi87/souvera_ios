@@ -80,7 +80,7 @@ final class LinkVoIPManager: NSObject {
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: title)
         update.hasVideo = withVideo
-        provider.reportNewOutgoingCall(with: uuid)
+        provider.reportOutgoingCall(with: uuid, startedConnectingAt: nil)
         CallDebugLog.log("LinkVoIPManager", "outgoing call reported to CallKit token=\(token)")
     }
 
