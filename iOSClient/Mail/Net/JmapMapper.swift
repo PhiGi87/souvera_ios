@@ -113,6 +113,10 @@ enum JmapMapper {
             }
             if let htmlParts = json["htmlBody"] as? [[String: Any]],
                let first = htmlParts.first,
+               // Nur echte text/html-Parts als HTML rendern; text/plain-Parts
+               // (z. B. bei gesendeten Mails) würden sonst ihre Zeilenumbrüche
+               // im WKWebView verlieren.
+               first.optString("type") == "text/html",
                let partId = first.optString("partId"),
                let value = bodyValues[partId] as? [String: Any] {
                 html = value.optString("value")

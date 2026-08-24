@@ -60,10 +60,13 @@ class NCPushNotification {
               let subscribingPublicKey = responsePN.publicKey
         else {
             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Nextcloud instance push registration FAILED for \(urlBase), status \(responsePN.error.errorCode): \(responsePN.error.errorDescription)")
+            UserDefaults.standard.set("failed NC \(responsePN.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusNormal")
+            SouveraLog.write("Push", "NC registration FAILED \(urlBase) status \(responsePN.error.errorCode)")
             return
         }
 
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
+        SouveraLog.write("Push", "NC registration OK \(urlBase)")
 
         let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
         let options = NKRequestOptions(customUserAgent: userAgent)
@@ -92,10 +95,14 @@ class NCPushNotification {
 
         guard responsePushProxy.error == .success else {
             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration FAILED at \(proxyServerUrl), status \(responsePushProxy.error.errorCode): \(responsePushProxy.error.errorDescription)")
+            UserDefaults.standard.set("failed proxy \(responsePushProxy.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusNormal")
+            SouveraLog.write("Push", "proxy registration FAILED \(proxyServerUrl) status \(responsePushProxy.error.errorCode)")
             return
         }
 
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy registration OK at \(proxyServerUrl)")
+        UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusNormal")
+        SouveraLog.write("Push", "proxy registration OK \(proxyServerUrl)")
 
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
         preferences.setPushNotificationDeviceIdentifierSignature(account: account, deviceIdentifierSignature: signature)

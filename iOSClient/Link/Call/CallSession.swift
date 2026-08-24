@@ -61,33 +61,55 @@ final class CallSession: NSObject, HpbSignalingListener {
     func start() {
         Task {
             CallDebugLog.log("CallSession", "start token=\(token)")
-            guard let ncSession = await api.joinRoom(token: token) else {
-                CallDebugLog.log("CallSession", "joinRoom failed"); return end()
+            // Audio-Session SOFORT konfigurieren (vor Track-Erstellung und
+            // Signaling) - das WebRTC-Audio-Device braucht die aktive
+            // playAndRecord-Session, sonst bleibt das Mikrofon stumm und der
+            // Browser zeigt den Teilnehmer mit durchgestrichenem Mikrofon.
+            Self.activateCallAudioSession()
+            await startMedia()
+        }
+    }
+
+    /// Startet die Medienebene ohne Video (z. B. wenn die Kamera bei einem
+    /// eingehenden Video-Call verweigert wurde).
+    func startAudioOnly() {
+        Task {
+            CallDebugLog.log("CallSession", "startAudioOnly token=\(token)")
+            Self.activateCallAudioSession()
+            await startMedia(forceAudioOnly: true)
+        }
+    }
+
+    private func startMedia(forceAudioOnly: Bool = false) async {
+        if forceAudioOnly {
+            callFlags &= ~4
+        }
+        guard let ncSession = await api.joinRoom(token: token) else {
+            CallDebugLog.log("CallSession", "joinRoom failed"); return end()
+        }
+        guard let settings = await api.getSignalingSettings(token: token) else {
+            CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
+        }
+        // joinCall runs after the signaling room join (onRoomJoined) -
+        // mirroring the Android client. Opening the call earlier makes
+        // the MCU ignore our publisher.
+        await MainActor.run {
+            let audio = self.webRtc.createLocalAudioTrack()
+            // "Stiller Anruf" startet lokal stumm (Talk-Standard).
+            audio.isEnabled = !self.silent
+            self.localAudio = audio
+            CallDebugLog.log("CallSession", "audio track created, muted=\(self.silent)")
+            if self.withVideo && !forceAudioOnly {
+                self.createVideoTrackIfNeeded()
             }
-            guard let settings = await api.getSignalingSettings(token: token) else {
-                CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
-            }
-            // joinCall runs after the signaling room join (onRoomJoined) -
-            // mirroring the Android client. Opening the call earlier makes
-            // the MCU ignore our publisher.
-            await MainActor.run {
-                let audio = self.webRtc.createLocalAudioTrack()
-                // "Stiller Anruf" startet lokal stumm (Talk-Standard).
-                audio.isEnabled = !self.silent
-                self.localAudio = audio
-                CallDebugLog.log("CallSession", "audio track created, muted=\(self.silent)")
-                if self.withVideo {
-                    self.createVideoTrackIfNeeded()
-                }
-            }
-            pendingIceServers = settings.iceServers()
-            if settings.hasExternalServer {
-                let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: ncSession, listener: self)
-                signaling = client
-                client.connect()
-            } else {
-                CallDebugLog.log("CallSession", "No external signaling server; 1:1 internal not implemented")
-            }
+        }
+        pendingIceServers = settings.iceServers()
+        if settings.hasExternalServer {
+            let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: ncSession, listener: self)
+            signaling = client
+            client.connect()
+        } else {
+            CallDebugLog.log("CallSession", "No external signaling server; 1:1 internal not implemented")
         }
     }
 
@@ -106,9 +128,6 @@ final class CallSession: NSObject, HpbSignalingListener {
         Task {
             await api.joinCall(token: token, flags: callFlags, silent: silent)
             CallDebugLog.log("CallSession", "joinCall sent flags=\(callFlags) (after room join)")
-            // Audio-Session beim Call-Start aktivieren (Hörmuschel-Default).
-            // Ohne aktive playAndRecord-Session überträgt WebRTC kein Audio.
-            Self.activateCallAudioSession()
         }
     }
 
@@ -235,6 +254,15 @@ final class CallSession: NSObject, HpbSignalingListener {
             localVideo?.isEnabled = false
             webRtc.stopVideoCapture()
             isVideoEnabled = false
+            // Server-Flags zurücksetzen (ohne WITH_VIDEO), damit andere
+            // Clients sofort sehen, dass die Kamera aus ist.
+            if callFlags & 4 != 0 {
+                callFlags &= ~4
+                Task {
+                    await api.joinCall(token: token, flags: callFlags, silent: silent)
+                    CallDebugLog.log("CallSession", "joinCall flags updated to \(callFlags) (video off)")
+                }
+            }
         }
     }
 
@@ -390,8 +418,50 @@ private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
     func peerConnection(_ pc: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
     func peerConnection(_ pc: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
     func peerConnectionShouldNegotiate(_ pc: RTCPeerConnection) {}
-    func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {}
-    func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceGatheringState) {}
+    func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
+        CallDebugLog.log("PeerObserver", "session=\(session) ICE connection -> \(Self.stateName(newState))")
+    }
+    func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
+        CallDebugLog.log("PeerObserver", "session=\(session) ICE gathering -> \(Self.stateName(newState))")
+    }
+    func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCPeerConnectionState) {
+        CallDebugLog.log("PeerObserver", "session=\(session) connection -> \(Self.stateName(newState))")
+    }
     func peerConnection(_ pc: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
     func peerConnection(_ pc: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+
+    private static func stateName(_ state: RTCIceConnectionState) -> String {
+        switch state {
+        case .new: return "new"
+        case .checking: return "checking"
+        case .connected: return "connected"
+        case .completed: return "completed"
+        case .failed: return "failed"
+        case .disconnected: return "disconnected"
+        case .closed: return "closed"
+        case .count: return "count"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func stateName(_ state: RTCIceGatheringState) -> String {
+        switch state {
+        case .new: return "new"
+        case .gathering: return "gathering"
+        case .complete: return "complete"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static func stateName(_ state: RTCPeerConnectionState) -> String {
+        switch state {
+        case .new: return "new"
+        case .connecting: return "connecting"
+        case .connected: return "connected"
+        case .disconnected: return "disconnected"
+        case .failed: return "failed"
+        case .closed: return "closed"
+        @unknown default: return "unknown"
+        }
+    }
 }

@@ -54,6 +54,31 @@ platform :ios do
     )
   end
 
+  desc "Upload the IPA to App Store Connect (App Store release). Optional: submit for review via SUBMIT_FOR_REVIEW=1"
+  lane :upload_appstore do |options|
+    souvera_api_key
+    ipa = options[:ipa] || Dir[File.join(EXPORT_DIR, "*.ipa")].first
+    UI.user_error!("No IPA found in #{EXPORT_DIR} — run the archive steps first") unless ipa && File.exist?(ipa)
+
+    pilot(
+      ipa: ipa,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+      changelog: ENV["TESTFLIGHT_CHANGELOG"]
+    )
+
+    if ENV["SUBMIT_FOR_REVIEW"] == "1"
+      deliver(
+        submit_for_review: true,
+        automatic_release: true,
+        force: true
+      )
+      UI.message("Submitted the build for App Store review")
+    else
+      UI.message("App Store upload done - submit for review manually in App Store Connect or re-run with SUBMIT_FOR_REVIEW=1")
+    end
+  end
+
   desc "Build, sign and upload a beta build to TestFlight"
   lane :beta do |options|
     souvera_api_key

@@ -15,6 +15,7 @@ actor LinkOcsApi {
     private let root: String
     private let session: URLSession
     private let longPollSession: URLSession
+    private let uploadSession: URLSession
     private let decoder = JSONDecoder()
 
     init(account: LinkAccount) {
@@ -31,6 +32,13 @@ actor LinkOcsApi {
         long.timeoutIntervalForRequest = Self.longPollTimeout
         long.timeoutIntervalForResource = Self.longPollTimeout
         self.longPollSession = URLSession(configuration: long)
+
+        // Uploads (DAV-PUT von Anhängen) dürfen deutlich länger dauern als
+        // normale API-Calls - eigenes großzügiges Timeout.
+        let upload = URLSessionConfiguration.ephemeral
+        upload.timeoutIntervalForRequest = 120
+        upload.timeoutIntervalForResource = 600
+        self.uploadSession = URLSession(configuration: upload)
     }
 
     // MARK: - Rooms & chat
@@ -329,42 +337,93 @@ actor LinkOcsApi {
         _ = try? await session.data(for: req)
     }
 
-    /// Uploads a local file into the chat (multipart POST to the v1 chat
-    /// endpoint - the v4 chat route does not exist for uploads).
+    /// Uploads a local file into the chat using Talk 24+'s conversation
+    /// subfolder attachment flow (the legacy multipart chat POST only creates
+    /// a text message - the file part is ignored server-side):
+    /// 1. Probe the conversation Draft folder (and filename conflicts).
+    /// 2. Upload the file via WebDAV into the Draft folder (random temp name).
+    /// 3. Post the attachment - the server moves the file into the shared
+    ///    room subfolder and creates the chat message with the file rich object.
     func uploadFileToChat(token: String, data: Data, fileName: String, mimeType: String) async -> Bool {
-        guard let url = URL(string: "\(base)/api/v1/chat/\(token)") else { return false }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
-        req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
-        let boundary = "SouveraBoundary\(UUID().uuidString)"
-        req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-
-        var body = Data()
-        func append(_ string: String) {
-            if let chunk = string.data(using: .utf8) { body.append(chunk) }
-        }
-        // Talk requires a non-empty message field alongside the file
-        // (an empty message part is rejected with 400). The Content-
-        // Disposition header must stay ASCII - non-ASCII file names would
-        // break the multipart parsing server-side (the file part gets
-        // dropped and only the name is shown).
         let headerName = fileName
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        append("--\(boundary)\r\n")
-        append("Content-Disposition: form-data; name=\"message\"\r\n\r\n\(fileName)\r\n")
-        append("--\(boundary)\r\n")
-        append("Content-Disposition: form-data; name=\"file\"; filename=\"\(headerName.isEmpty ? "file" : headerName)\"\r\n")
-        append("Content-Type: \(mimeType)\r\n\r\n")
-        body.append(data)
-        append("\r\n--\(boundary)--\r\n")
-        req.httpBody = body
+        let safeName = headerName.isEmpty ? "file" : headerName
 
+        // 1) Draft-Ordner ermitteln (Namens-Konflikte werden serverseitig geprüft).
+        guard let draftFolder = await probeAttachmentFolder(token: token, fileName: safeName) else {
+            CallDebugLog.log("OcsApi", "uploadFileToChat: probeAttachmentFolder failed")
+            return false
+        }
+        // 2) Datei per DAV in den Draft-Ordner legen (zufälliger Temp-Name).
+        let tempName = "\(UUID().uuidString.lowercased()).\( (safeName as NSString).pathExtension.isEmpty ? "bin" : (safeName as NSString).pathExtension )"
+        guard await davUpload(toFolder: draftFolder, tempName: tempName, data: data, mimeType: mimeType) else {
+            CallDebugLog.log("OcsApi", "uploadFileToChat: davUpload failed folder=\(draftFolder)")
+            return false
+        }
+        // 3) Als Chat-Nachricht posten (Server verschiebt die Datei in den
+        //    geteilten Raum-Ordner und erzeugt die Datei-Nachricht).
+        let ok = await postAttachment(token: token, filePath: "\(draftFolder)/\(tempName)", fileName: safeName)
+        CallDebugLog.log("OcsApi", "uploadFileToChat http=\(ok ? "ok" : "failed") name=\(safeName)")
+        return ok
+    }
+
+    /// POST chat/{token}/attachment/folder - returns the Draft folder path
+    /// relative to the user root (e.g. "Souvera/Link/<room>/Draft").
+    private func probeAttachmentFolder(token: String, fileName: String) async -> String? {
+        var req = signed(url: "\(base)/api/v1/chat/\(token)/attachment/folder", method: "POST")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["fileNames": [fileName], "allowUpdate": false])
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let env = try? decoder.decode(OcsEnvelope<AttachmentFolderProbe>.self, from: data),
+              let folder = env.ocs.data?.folder, !folder.isEmpty else { return nil }
+        return folder
+    }
+
+    /// PUT the file into the Draft folder via WebDAV (same credentials as the
+    /// rest of the app; the folder path is URL-encoded per component).
+    private func davUpload(toFolder folder: String, tempName: String, data: Data, mimeType: String) async -> Bool {
+        let encodedFolder = folder.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? folder
+        guard let url = URL(string: "\(root)/remote.php/dav/files/\(account.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? account.username)/\(encodedFolder)/\(tempName)") else {
+            return false
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "PUT"
+        req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
+        req.setValue(mimeType.isEmpty ? "application/octet-stream" : mimeType, forHTTPHeaderField: "Content-Type")
+        req.httpBody = data
+        guard let (_, response) = try? await uploadSession.data(for: req) else { return false }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        return (200..<300).contains(status)
+    }
+
+    /// POST chat/{token}/attachment - finalizes the upload and posts the chat
+    /// message with the file rich object.
+    private func postAttachment(token: String, filePath: String, fileName: String) async -> Bool {
+        var req = signed(url: "\(base)/api/v1/chat/\(token)/attachment", method: "POST")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        var params: [String: String] = [
+            "filePath": filePath,
+            "referenceId": UUID().uuidString,
+            "fileName": fileName,
+            "allowUpdate": "false"
+        ]
+        if let metaData = try? JSONSerialization.data(withJSONObject: ["caption": fileName]),
+           let metaDataString = String(data: metaData, encoding: .utf8) {
+            params["talkMetaData"] = metaDataString
+        }
+        let form = params.map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
+            .joined(separator: "&")
+        req.httpBody = form.data(using: .utf8)
         guard let (_, response) = try? await session.data(for: req) else { return false }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
-        CallDebugLog.log("OcsApi", "uploadFileToChat http=\(status)")
         return (200..<300).contains(status)
+    }
+
+    private struct AttachmentFolderProbe: Decodable {
+        let folder: String?
+        let renames: [[String: String]]?
     }
 
     /// Shares a Souvera/Nextcloud file into the conversation via the
@@ -412,18 +471,23 @@ actor LinkOcsApi {
 
     private struct CallParticipant: Decodable {
         let displayName: String?
+        let actorType: String?
         let inCall: Int?
     }
 
     /// Display names of the room participants currently in a call.
+    /// Geister-Einträge (gelöschte Nutzer, beendete Gast-Sessions) werden
+    /// ausgeblendet.
     func callParticipantNames(token: String) async -> [String] {
         guard let body = await get("\(base)/api/v4/room/\(token)/participants"),
               let data = body.data(using: .utf8),
               let env = try? decoder.decode(OcsEnvelope<[CallParticipant]>.self, from: data) else { return [] }
+        let deletedNames = ["Deleted user", "Gelöschter Benutzer", "Gelöschte Benutzerin", "Deleted user (Guest)", "Gelöschter Benutzer (Gast)"]
         return (env.ocs.data ?? [])
             .filter { ($0.inCall ?? 0) != 0 }
+            .filter { $0.actorType != "deleted_users" }
             .compactMap { $0.displayName }
-            .filter { !$0.isEmpty }
+            .filter { !$0.isEmpty && !deletedNames.contains($0) }
     }
 
     // MARK: - HTTP plumbing

@@ -147,7 +147,12 @@ struct MailView: View {
     private var toolbar: some ToolbarContent {
         if !isFolders {
             ToolbarItem(placement: .topBarLeading) {
-                Button { viewModel.back() } label: { Image(systemName: "chevron.backward") }
+                Button { viewModel.back() } label: {
+                    Image(systemName: "chevron.backward")
+                        .frame(width: 28, height: 28)
+                }
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
             }
         }
         if case let .messages(mailbox) = viewModel.route {
@@ -161,6 +166,7 @@ struct MailView: View {
                         .lineLimit(1)
                     Spacer(minLength: 0)
                 }
+                .allowsHitTesting(false)
             }
         }
         if case let .detail(message) = viewModel.route {
@@ -238,22 +244,27 @@ struct MailView: View {
         case .folders:
             MailFolderListView(viewModel: viewModel)
         case .messages:
-            MailMessageListView(viewModel: viewModel)
+            SouveraBackSwipe(onBack: { viewModel.back() }) {
+                MailFolderListView(viewModel: viewModel)
+            } content: {
+                MailMessageListView(viewModel: viewModel)
+            }
         case let .detail(message):
-            // Die Nachrichtenliste bleibt UNTER der Detailansicht gemountet
-            // (unsichtbar + nicht interaktiv), damit ihre Scrollposition
-            // beim Zurückkehren exakt erhalten bleibt - kein Anchor-Restore
-            // nötig.
-            ZStack {
+            // Die Nachrichtenliste bleibt als Back-Preview gemountet - ihre
+            // Scrollposition bleibt beim Zurückkehren exakt erhalten.
+            SouveraBackSwipe(onBack: { viewModel.back() }) {
                 MailMessageListView(viewModel: viewModel, toolbarActive: false)
-                    .opacity(0)
-                    .allowsHitTesting(false)
+            } content: {
                 MailDetailView(viewModel: viewModel, message: message)
             }
         case .compose:
             MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
         case .search:
-            MailSearchView(viewModel: viewModel)
+            SouveraBackSwipe(onBack: { viewModel.back() }) {
+                MailFolderListView(viewModel: viewModel)
+            } content: {
+                MailSearchView(viewModel: viewModel)
+            }
         }
     }
 }

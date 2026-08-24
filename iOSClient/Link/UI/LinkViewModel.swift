@@ -330,11 +330,17 @@ final class LinkViewModel: ObservableObject {
                     self.conversations = .success(sorted)
                 }
                 // Call-Status des geöffneten Raums nachziehen (hasCall), damit
-                // der "Teilnehmen"-Button sofort umschaltet.
+                // der "Teilnehmen"-Button sofort umschaltet. Offene Räume mit
+                // leerem Titel (z. B. über /call/-Links geöffnet) bekommen
+                // ihren Namen aus der Liste.
                 if let room = self.currentRoom,
-                   let fresh = sorted.first(where: { $0.token == room.token }),
-                   fresh.hasCall != room.hasCall {
-                    self.currentRoom = fresh
+                   let fresh = sorted.first(where: { $0.token == room.token }) {
+                    if fresh.hasCall != room.hasCall {
+                        self.currentRoom = fresh
+                    }
+                    if case let .chat(token, title) = self.route, token == fresh.token, title.isEmpty {
+                        self.route = .chat(token: token, title: fresh.displayName)
+                    }
                 }
                 Self.postUnreadTotal(list)
                 self.offlineNotice = nil
@@ -580,7 +586,9 @@ final class LinkViewModel: ObservableObject {
     }
 
     /// Opens the folder of a chat file in the Files module (the user's
-    /// request: tapping a shared file shows it in the Dateien tab).
+    /// request: tapping a shared file shows it in the Dateien tab). Files at
+    /// the user root (shared Souvera files) have no folder - the Files tab
+    /// opens the home folder instead.
     func openFileInFiles(_ info: LinkFileInfo) {
         let raw = info.path ?? ""
         let folderPath = (raw as NSString).deletingLastPathComponent
@@ -590,11 +598,20 @@ final class LinkViewModel: ObservableObject {
 
     // MARK: - Attachments
 
-    /// Uploads a local file into the current chat.
+    /// Uploads a local file into the current chat (Talk 24+ attachment flow:
+    /// Draft-Ordner → DAV-Upload → Attachment-Post).
     func sendAttachment(data: Data, fileName: String, mimeType: String) {
         guard let api else { return }
         guard case let .chat(token, _) = route else { return }
-        Task { await api.uploadFileToChat(token: token, data: data, fileName: fileName, mimeType: mimeType) }
+        Task {
+            let ok = await api.uploadFileToChat(token: token, data: data, fileName: fileName, mimeType: mimeType)
+            if !ok {
+                actionFeedback = LinkActionFeedback(
+                    success: false,
+                    message: NSLocalizedString("_link_upload_failed_", comment: "")
+                )
+            }
+        }
     }
 
     /// Shares an existing Souvera/Nextcloud file into the current chat.
@@ -621,6 +638,7 @@ final class LinkViewModel: ObservableObject {
 
     deinit {
         pollTask?.cancel()
+        roomPollTask?.cancel()
         let client = signaling
         Task { @MainActor in
             client.disconnect()
@@ -645,6 +663,76 @@ final class LinkViewModel: ObservableObject {
             guard let settings = await api?.fetchSignalingSettings() else { return }
             signaling.connect(account: account, token: token, roomId: roomId, settings: settings)
         }
+    }
+
+    /// Trennt die Chat-Signaling-Verbindung (Typing/Call-Events). Wichtig
+    /// für Push-Notifications: Solange eine Session aktiv ist, unterdrückt
+    /// Talk Pushes - deshalb beim Tab-Wechsel/Background sofort trennen.
+    func disconnectSignaling() {
+        signaling.disconnect()
+        typingNames = []
+    }
+
+    /// Stellt die Signaling-Verbindung wieder her, wenn ein Chat offen ist
+    /// (Rückkehr in den Tab).
+    func reconnectSignalingIfNeeded() {
+        guard case let .chat(token, _) = route else { return }
+        connectSignaling(token: token)
+    }
+
+    // MARK: - In-App-Incoming-Call (Vordergrund)
+
+    /// Raum mit laufendem Call, für den noch keine In-App-Anruf-UI gezeigt
+    /// wurde (Foreground: PushKit liefert keine VoIP-Pushes).
+    @Published var incomingCallRoom: LinkConversation?
+
+    private var notifiedCallTokens: Set<String> = []
+    private var roomPollTask: Task<Void, Never>?
+
+    /// Periodischer Vordergrund-Poll der Raumliste (alle 10 s): erkennt
+    /// laufende Calls, aktualisiert hasCall und löst die In-App-Anruf-UI aus.
+    func startRoomPolling() {
+        roomPollTask?.cancel()
+        roomPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard let self, !Task.isCancelled else { return }
+                self.loadConversations()
+                self.detectIncomingCall()
+            }
+        }
+    }
+
+    func stopRoomPolling() {
+        roomPollTask?.cancel()
+        roomPollTask = nil
+    }
+
+    /// Zeigt die In-App-Anruf-UI, wenn ein Call im Raum läuft und wir selbst
+    /// nicht im Call sind; jeder Call wird nur einmal gemeldet.
+    private func detectIncomingCall() {
+        guard LinkVoIPManager.shared.activeSession == nil,
+              incomingCallRoom == nil,
+              case let .success(rooms) = conversations else { return }
+        for room in rooms {
+            guard room.hasCall else {
+                if notifiedCallTokens.contains(room.token) {
+                    notifiedCallTokens.remove(room.token)
+                }
+                continue
+            }
+            if notifiedCallTokens.insert(room.token).inserted {
+                CallDebugLog.log("LinkViewModel", "in-app incoming call detected room=\(room.token)")
+                incomingCallRoom = room
+                return
+            }
+        }
+    }
+
+    /// Ablehnen der In-App-Anruf-UI (Raum wird für diesen Call nicht erneut
+    /// gemeldet).
+    func dismissIncomingCall() {
+        incomingCallRoom = nil
     }
 }
 

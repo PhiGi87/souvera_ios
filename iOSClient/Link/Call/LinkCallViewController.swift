@@ -80,12 +80,16 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 // erzeugt den Track lazy bzw. bleibt bei Audio-only aus.
                 session.setVideoEnabled(isVideoOn)
                 session.start()
-                // Talk-Standard: ausgehenden Call an CallKit melden.
-                LinkVoIPManager.shared.reportOutgoingCall(token: token, title: title_, withVideo: isVideoOn)
             }
         }
         NotificationCenter.default.addObserver(self, selector: #selector(externalEnd), name: .linkEndCall, object: nil)
         loadParticipants()
+        // Display während des Calls wach halten (kein Sperrbildschirm, bis
+        // aufgelegt wird) - Apple-Standard für Call-UIs.
+        UIApplication.shared.isIdleTimerDisabled = true
+        participantRefreshTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
+            self?.loadParticipants()
+        }
     }
 
     /// Initiale Button-Zustände für re-attached Sessions (Rückkehr aus dem
@@ -126,6 +130,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     // MARK: - Participants overlay
 
     private let participantsLabel = UILabel()
+
+    private var participantRefreshTimer: Timer?
 
     private func setupParticipantsOverlay() {
         participantsLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -300,6 +306,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        participantRefreshTimer?.invalidate()
+        participantRefreshTimer = nil
+        UIApplication.shared.isIdleTimerDisabled = false
         // Safety net: never leave the call audio session active.
         let audioSession = RTCAudioSession.sharedInstance()
         audioSession.lockForConfiguration()

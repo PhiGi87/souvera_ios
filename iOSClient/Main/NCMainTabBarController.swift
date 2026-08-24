@@ -94,9 +94,10 @@ class NCMainTabBarController: UITabBarController {
         }
 
         // The Link chat can ask the app to show a chat file's folder in the
-        // Files tab (shared files are stored under "Souvera/Link/<room>/…").
+        // Files tab (shared files are stored under "Souvera/Link/<room>/…";
+        // files at the user root pass an empty path and open the home folder).
         NotificationCenter.default.addObserver(forName: .openFileInFiles, object: nil, queue: .main) { [weak self] notification in
-            guard let self, let folderPath = notification.object as? String, !folderPath.isEmpty else { return }
+            guard let self, let folderPath = notification.object as? String else { return }
             Task { @MainActor in
                 self.openFilesFolder(folderPath)
             }
@@ -104,16 +105,24 @@ class NCMainTabBarController: UITabBarController {
     }
 
     /// Wechselt in den Dateien-Tab und navigiert in den Ordner mit dem
-    /// relativen Pfad (ohne führenden Slash, relativ zur Nutzer-Wurzel).
-    /// Wiederverwendung bestehender Navigation oder Push einer neuen
-    /// Ordner-Ansicht - identisch zum internen pushMetadata-Fluss.
+    /// relativen Pfad (ohne führenden Slash, relativ zur Nutzer-Wurzel;
+    /// leer = Nutzer-Root/Home). Wiederverwendung bestehender Navigation oder
+    /// Push einer neuen Ordner-Ansicht - identisch zum internen
+    /// pushMetadata-Fluss.
     private func openFilesFolder(_ relativeFolderPath: String) {
         guard let filesNav = viewControllers?.first(where: { $0 is NCFilesNavigationController }) as? NCFilesNavigationController else { return }
         let session = NCSession.shared.getSession(controller: self)
         let home = NCUtilityFileSystem().getHomeServer(session: session)
-        let serverUrl = NCUtilityFileSystem().createServerUrl(serverUrl: home, fileName: relativeFolderPath)
+        let serverUrl = relativeFolderPath.isEmpty
+            ? home
+            : NCUtilityFileSystem().createServerUrl(serverUrl: home, fileName: relativeFolderPath)
 
         selectedIndex = ControllerConstants.filesIndex
+
+        if serverUrl == home {
+            filesNav.popToRootViewController(animated: false)
+            return
+        }
 
         if let existing = navigationCollectionViewCommon.first(where: {
             $0.navigationController === filesNav && $0.serverUrl == serverUrl

@@ -15,6 +15,14 @@ on:
         required: true
         default: false
         type: boolean
+      upload_target:
+        description: 'Upload target: TestFlight or App Store'
+        required: false
+        default: 'testflight'
+        type: choice
+        options:
+          - testflight
+          - appstore
 
 env:
   PROJECT: Souvera.xcodeproj
@@ -273,7 +281,7 @@ jobs:
           path: build/export/*.ipa
           retention-days: 14
 
-      - name: Upload to TestFlight via fastlane pilot
+      - name: Upload via fastlane (TestFlight or App Store)
         if: |
           steps.archive.outcome == 'success' &&
           github.event_name == 'workflow_dispatch' &&
@@ -281,7 +289,13 @@ jobs:
         env:
           ASC_API_KEY_ID: ${{ secrets.ASC_API_KEY_ID }}
           ASC_API_ISSUER_ID: ${{ secrets.ASC_API_ISSUER_ID }}
-        run: bundle exec fastlane upload_beta
+          UPLOAD_TARGET: ${{ github.event.inputs.upload_target }}
+        run: |
+          if [ "$UPLOAD_TARGET" = "appstore" ]; then
+            bundle exec fastlane upload_appstore
+          else
+            bundle exec fastlane upload_beta
+          fi
 
   simulator:
     name: Simulator App (.app)
@@ -291,6 +305,7 @@ jobs:
     if: |
       always() &&
       !cancelled() &&
+      github.event_name != 'workflow_dispatch' &&
       (github.event_name != 'pull_request' || needs.build-check.result == 'success') &&
       startsWith(github.ref, 'refs/heads/souvera/')
 

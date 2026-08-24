@@ -21,6 +21,12 @@ struct NCSettingsView: View {
     @State private var showBrowser = false
     // State to control the visibility of the Source Code  view
     @State private var showSourceCode = false
+    // Logs teilen: Bestätigung, Sendestatus und Ergebnis-Overlay
+    @State private var showLogsConfirm = false
+    @State private var isSendingLogs = false
+    @State private var logsResult: (success: Bool, message: String)?
+    // Push-Diagnose-Sheet
+    @State private var showPushDiagnostics = false
     // Object of ViewModel of this view
     @ObservedObject var model: NCSettingsModel
 
@@ -335,6 +341,87 @@ struct NCSettingsView: View {
                 Text(model.footerApp + model.footerServer + model.footerSlogan)
                     .font(.footnote)
             })
+
+            // `Diagnose` Section - ganz unten in den Einstellungen
+            Section(header: Text(NSLocalizedString("_settings_diagnostics_", comment: "")).font(.headline), content: {
+                Button(action: {
+                    logsResult = nil
+                    showLogsConfirm = true
+                }, label: {
+                    HStack {
+                        Image(systemName: "doc.text.magnifyingglass")
+                            .font(.icon())
+                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
+                            .frame(width: 39)
+                        Text(NSLocalizedString("_settings_logs_", comment: ""))
+                            .font(.body)
+                    }
+                })
+                .tint(Color(NCBrandColor.shared.textColor))
+
+                Button(action: {
+                    showPushDiagnostics = true
+                }, label: {
+                    HStack {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                            .font(.icon())
+                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
+                            .frame(width: 39)
+                        Text(NSLocalizedString("_settings_push_diag_", comment: ""))
+                            .font(.body)
+                    }
+                })
+                .tint(Color(NCBrandColor.shared.textColor))
+            })
+        }
+        .confirmationDialog(
+            NSLocalizedString("_settings_logs_confirm_title_", comment: ""),
+            isPresented: $showLogsConfirm,
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_settings_logs_confirm_send_", comment: "")) {
+                sendLogs()
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+        } message: {
+            Text(NSLocalizedString("_settings_logs_confirm_message_", comment: ""))
+        }
+        .overlay(alignment: .bottom) {
+            if isSendingLogs {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(NSLocalizedString("_settings_logs_sending_", comment: ""))
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let logsResult {
+                HStack(spacing: 8) {
+                    Image(systemName: logsResult.success ? "checkmark.circle.fill" : "xmark.circle.fill")
+                        .foregroundStyle(logsResult.success ? .green : .red)
+                    Text(logsResult.message).font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onChange(of: logsResult == nil) { _, _ in
+            guard let logsResult else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                self.logsResult = nil
+            }
+        }
+        .sheet(isPresented: $showPushDiagnostics) {
+            SouveraPushDiagnosticsView()
         }
         .sheet(isPresented: $showPasscode) {
             SetupPasscodeView(isLockActive: $model.isLockActive, controller: model.controller)
@@ -348,6 +435,24 @@ struct NCSettingsView: View {
             Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
         } message: {
             Text(NSLocalizedString("_language_restart_", comment: ""))
+        }
+    }
+
+    /// Sendet die Logs per JMAP-Mail an die feste Host-On-Adresse
+    /// (Bestätigung erfolgte im Dialog; Ergebnis als Overlay).
+    private func sendLogs() {
+        isSendingLogs = true
+        logsResult = nil
+        Task {
+            let result = await SouveraLogSender.sendLogs()
+            isSendingLogs = false
+            switch result {
+            case .success:
+                logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
+            case .failure(let error):
+                SouveraLog.write("Settings", "logs send failed: \(error.localizedDescription)")
+                logsResult = (false, NSLocalizedString("_settings_logs_failed_", comment: ""))
+            }
         }
     }
 }

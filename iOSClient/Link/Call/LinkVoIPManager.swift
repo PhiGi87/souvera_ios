@@ -72,9 +72,15 @@ final class LinkVoIPManager: NSObject {
     }
 
     /// Meldet einen ausgehenden Call an CallKit (Talk-Standard: System-
-    /// Integration, Hintergrund-Audio). Die zugehörige UUID wird gemerkt,
-    /// damit hangup/end die Transaktion sauber schließen.
+    /// Integration, Hintergrund-Audio). AKTUELL DEAKTIVIERT: Der Report
+    /// ohne `connectedAt` kann die Audio-Session dauerhaft blockieren
+    /// (kein Ton in beide Richtungen) - erst nach sauberem Medien-Handshake
+    /// wieder aktivieren.
     func reportOutgoingCall(token: String, title: String, withVideo: Bool) {
+        guard Self.reportOutgoingToCallKit else {
+            CallDebugLog.log("LinkVoIPManager", "outgoing CallKit report disabled (flag off)")
+            return
+        }
         let uuid = UUID()
         activeCalls[uuid] = token
         let update = CXCallUpdate()
@@ -84,15 +90,38 @@ final class LinkVoIPManager: NSObject {
         CallDebugLog.log("LinkVoIPManager", "outgoing call reported to CallKit token=\(token)")
     }
 
+    private static let reportOutgoingToCallKit = false
+
     /// Starts an INCOMING call session (after the user accepted): same
     /// lifecycle as outgoing calls so banners and CallKit stay in sync.
+    /// Der Berechtigungs-Flow läuft vor dem Session-Start (einmalig, Dialoge
+    /// nur beim ersten Mal); ohne Kamera-Recht startet der Video-Call
+    /// audio-only.
     @discardableResult
     func startIncomingCall(account: LinkAccount, token: String, title: String, withVideo: Bool) -> CallSession? {
-        let session = CallSession(account: account, token: token, callbacks: nil, withVideo: withVideo)
+        // Session erst nach der Berechtigungs-Prüfung anlegen, damit ein
+        // abgelehnter Kamera-Zugriff gar nicht erst einen Video-Track
+        // erzeugt (audio-only statt kaputtem Capture).
+        let session = CallSession(account: account, token: token, callbacks: nil, withVideo: withVideo, silent: false)
         activeSession = session
         activeCallInfo = (token, title, withVideo)
-        session.start()
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+        Task {
+            let audioOk = await CallPermissions.ensureAudio()
+            CallDebugLog.log("LinkVoIPManager", "incoming call: microphone granted=\(audioOk)")
+            if audioOk, withVideo {
+                let cameraOk = await CallPermissions.ensureCamera()
+                CallDebugLog.log("LinkVoIPManager", "incoming call: camera granted=\(cameraOk)")
+                if cameraOk {
+                    session.start()
+                    return
+                }
+                // Kamera verweigert: Call ohne Video weiterführen.
+                session.startAudioOnly()
+                return
+            }
+            session.start()
+        }
         return session
     }
 
@@ -180,9 +209,12 @@ final class LinkVoIPManager: NSObject {
                       let signature = responsePN.signature,
                       let subscribingPublicKey = responsePN.publicKey else {
                     nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP Nextcloud registration FAILED for \(urlBase), status \(responsePN.error.errorCode)")
+                    UserDefaults.standard.set("failed NC \(responsePN.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusVoip")
+                    SouveraLog.write("PushVoip", "NC registration FAILED \(urlBase) status \(responsePN.error.errorCode)")
                     continue
                 }
                 nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
+                SouveraLog.write("PushVoip", "NC registration OK \(urlBase)")
 
                 let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
                 let options = NKRequestOptions(customUserAgent: userAgent)
@@ -199,8 +231,12 @@ final class LinkVoIPManager: NSObject {
                                                                                         options: options)
                 if responseProxy.error == .success {
                     nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
+                    UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
+                    SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
                 } else {
                     nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl), status \(responseProxy.error.errorCode)")
+                    UserDefaults.standard.set("failed proxy \(responseProxy.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusVoip")
+                    SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl) status \(responseProxy.error.errorCode)")
                 }
             }
         }

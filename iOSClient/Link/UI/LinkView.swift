@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 /// Root Link screen; switches between the conversation list and an open chat.
 struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
+    @Environment(\.scenePhase) private var scenePhase
     @State private var callContext: CallContext?
     @State private var showCallBanner = false
     @State private var returnToCall = false
@@ -49,7 +50,10 @@ struct LinkView: View {
                                 viewModel.back()
                             } label: {
                                 Image(systemName: "chevron.backward")
+                                    .frame(width: 28, height: 28)
                             }
+                            .frame(width: 44, height: 44)
+                            .contentShape(Rectangle())
                         }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
@@ -100,9 +104,32 @@ struct LinkView: View {
         }
         .onAppear {
             viewModel.start()
-            if let pending = LinkViewModel.pendingOpenRoom {
+            viewModel.reconnectSignalingIfNeeded()
+            viewModel.startRoomPolling()
+            // Ein von außen angeforderter Raum wird nur geöffnet, wenn der
+            // Nutzer nicht bereits in einem Chat navigiert (sonst würde die
+            // Route mitten in der Bedienung überschrieben).
+            if let pending = LinkViewModel.pendingOpenRoom, case .home = viewModel.route {
                 LinkViewModel.pendingOpenRoom = nil
                 viewModel.openConversation(token: pending.token, title: pending.title)
+            }
+        }
+        .onDisappear {
+            // Tab verlassen: Signaling trennen, damit Talk Push-Notifications
+            // nicht länger unterdrückt.
+            viewModel.disconnectSignaling()
+            viewModel.stopRoomPolling()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            switch phase {
+            case .background, .inactive:
+                viewModel.disconnectSignaling()
+                viewModel.stopRoomPolling()
+            case .active:
+                viewModel.reconnectSignalingIfNeeded()
+                viewModel.startRoomPolling()
+            @unknown default:
+                break
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
@@ -149,6 +176,19 @@ struct LinkView: View {
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 viewModel.actionFeedback = nil
             }
+        }
+        .fullScreenCover(item: $viewModel.incomingCallRoom) { room in
+            IncomingCallOverlayView(
+                title: room.displayName,
+                hasVideo: false,
+                onAccept: {
+                    viewModel.dismissIncomingCall()
+                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+                },
+                onDecline: {
+                    viewModel.dismissIncomingCall()
+                }
+            )
         }
         .fullScreenCover(item: $callContext) { context in
             if let account = LinkAccount.active() {
@@ -282,7 +322,15 @@ struct LinkView: View {
                 callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
             }
         case let .chat(token, title):
-            LinkChatView(viewModel: viewModel, token: token, title: title)
+            // Apple-like Back-Swipe: die Raumübersicht liegt als Preview
+            // hinter dem Chat und gleitet beim Kanten-Zug herein.
+            SouveraBackSwipe(onBack: { viewModel.back() }) {
+                LinkConversationListView(viewModel: viewModel) { room in
+                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+                }
+            } content: {
+                LinkChatView(viewModel: viewModel, token: token, title: title)
+            }
         }
     }
 }
@@ -303,9 +351,9 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}
 }
 
-#if DEBUG
-/// Full-screen incoming call overlay for the simulator (CallKit cannot show
-/// incoming calls there): accept starts the call session, decline dismisses.
+/// Full-screen incoming call overlay (In-App-Call-UI im Vordergrund sowie
+/// Simulator-Tests, wo CallKit keine eingehenden Anrufe zeigt): Annehmen
+/// startet die Call-Session, Ablehnen schließt das Overlay.
 struct IncomingCallOverlayView: View {
     let title: String
     let hasVideo: Bool
@@ -368,7 +416,6 @@ struct IncomingCallOverlayView: View {
         }
     }
 }
-#endif
 
 /// The list of conversations with a "start new conversation" search bar.
 struct LinkConversationListView: View {
@@ -523,6 +570,7 @@ private struct LinkConversationRow: View {
             }
             Spacer()
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.vertical, 4)
         .contentShape(Rectangle())
     }
@@ -630,17 +678,12 @@ struct LinkChatView: View {
     @State private var reactionTarget: LinkChatMessage?
     @State private var replyingTo: LinkChatMessage?
     @State private var forwardTarget: LinkChatMessage?
-    /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht.
-    @State private var backDragOffset: CGFloat = 0
-
     var body: some View {
         VStack(spacing: 0) {
             messageList
             Divider()
             composer
         }
-        .offset(x: backDragOffset)
-        .gesture(edgeSwipeBack)
         .overlay {
             if let target = reactionTarget {
                 EmojiReactionOverlay(
@@ -690,30 +733,6 @@ struct LinkChatView: View {
                 viewModel.signaling.notifyTyping()
             }
         }
-    }
-
-    /// Kanten-Geste von der linken Bildschirmkante nach rechts: zurück zur
-    /// Raumübersicht (analog zum System-Back-Gesture; die Ansicht folgt dem
-    /// Finger und federt zurück, wenn die Schwelle nicht erreicht wird).
-    private var edgeSwipeBack: some Gesture {
-        DragGesture(minimumDistance: 20)
-            .onChanged { value in
-                guard value.startLocation.x < 32,
-                      value.translation.width > 0,
-                      abs(value.translation.height) < abs(value.translation.width) else { return }
-                backDragOffset = min(value.translation.width, 140)
-            }
-            .onEnded { value in
-                let qualifies = value.startLocation.x < 32
-                    && value.translation.width > 80
-                    && abs(value.translation.height) < abs(value.translation.width)
-                if qualifies {
-                    viewModel.back()
-                }
-                withAnimation(.easeOut(duration: 0.2)) {
-                    backDragOffset = 0
-                }
-            }
     }
 
     private func updateMentions() {
@@ -1318,7 +1337,7 @@ struct LinkParticipantsSheet: View {
                         Text(NSLocalizedString("_link_no_participants_", comment: ""))
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(viewModel.participants) { participant in
+                        ForEach(viewModel.participants.filter { $0.actorType != "deleted_users" }) { participant in
                             HStack(spacing: 10) {
                                 Image(systemName: participantIcon(participant.actorType))
                                     .foregroundStyle(.secondary)

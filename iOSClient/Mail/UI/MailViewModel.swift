@@ -856,6 +856,7 @@ final class MailViewModel: ObservableObject {
             )
         }
         if mapped.html == nil, let htmlPart = (json["htmlBody"] as? [[String: Any]])?.first,
+           htmlPart.optString("type") == "text/html",
            let blobId = htmlPart.optString("blobId"), !blobId.isEmpty {
             mapped = MessageBody(
                 plainText: mapped.plainText,
@@ -863,6 +864,10 @@ final class MailViewModel: ObservableObject {
                 attachments: mapped.attachments
             )
         }
+        // Gesendete Mails haben oft NUR einen text/plain-Part (der dann auch
+        // als htmlBody auftaucht) - der darf nicht als HTML gerendert werden,
+        // sonst kollabiert das WKWebView alle Zeilenumbrüche. Ohne echtes
+        // HTML bleibt html=nil und der Text-Pfad zeigt die Umbrüche korrekt.
         // Letzter Fallback: weder Inline- noch Blob-Body bekommen - die Mail
         // noch einmal mit den Standard-Properties (ohne bodyProperties)
         // nachladen, bevor eine leere Ansicht entsteht.
@@ -1132,6 +1137,11 @@ final class MailViewModel: ObservableObject {
             searchResults = .success(results)
         }
         if let mailbox = currentMailbox {
+            // Route nur erzwingen, wenn der Nutzer nicht inzwischen zur
+            // Ordnerliste zurückgegangen ist - sonst würde eine fertige
+            // Lösch-Task die Navigation überschreiben (Zurück-Button
+            // wirkungslos).
+            if case .folders = route { return }
             route = .messages(mailbox: mailbox)
             // Voller Sync statt Inkrementalpfad: queryChanges meldet
             // Verschieben/Löschen nicht zuverlässig, der Cache-Snapshot

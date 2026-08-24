@@ -363,7 +363,15 @@ struct SouveraCalendarView: View {
             .refreshable { await viewModel.load() }
         }
         .offset(x: swipeOffset)
+        .id("day_\(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970)")
+        .transition(swipeTransition)
         .gesture(horizontalSwipe(step: 1))
+    }
+
+    /// Apple-like Push-Transition: der neue Tag fliegt von rechts herein
+    /// (nach links gewischt) bzw. von links (zurück).
+    private var swipeTransition: AnyTransition {
+        .push(from: swipedLeft ? .trailing : .leading)
     }
 
     /// Datum + Pfeile (der Wochentag kommt aus dem Timeline-Kopf, sonst
@@ -371,7 +379,10 @@ struct SouveraCalendarView: View {
     private func dateOnlySwitcher(day: Date, compact: Bool = false) -> some View {
         HStack {
             Button {
-                shiftSelectedDay(by: -1)
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    swipedLeft = false
+                    shiftSelectedDay(by: -1)
+                }
             } label: {
                 Image(systemName: "chevron.left")
             }
@@ -379,7 +390,10 @@ struct SouveraCalendarView: View {
             Text(day, style: .date).font(.headline)
             Spacer()
             Button {
-                shiftSelectedDay(by: 1)
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    swipedLeft = true
+                    shiftSelectedDay(by: 1)
+                }
             } label: {
                 Image(systemName: "chevron.right")
             }
@@ -392,13 +406,19 @@ struct SouveraCalendarView: View {
     private func arrowsOnlySwitcher(step: Int, compact: Bool = false) -> some View {
         HStack {
             Button {
-                shiftSelectedDay(by: -step)
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    swipedLeft = false
+                    shiftSelectedDay(by: -step)
+                }
             } label: {
                 Image(systemName: "chevron.left")
             }
             Spacer()
             Button {
-                shiftSelectedDay(by: step)
+                withAnimation(.easeInOut(duration: 0.22)) {
+                    swipedLeft = true
+                    shiftSelectedDay(by: step)
+                }
             } label: {
                 Image(systemName: "chevron.right")
             }
@@ -409,8 +429,12 @@ struct SouveraCalendarView: View {
 
     /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter. Die
     /// Ansicht folgt dem Finger und federt beim Loslassen zurück bzw.
-    /// wechselt fließend den Tag (Apple-Stil).
+    /// wechselt fließend den Tag (Apple-Stil). Die Richtung steuert die
+    /// Push-Transition des neuen Inhalts.
     @GestureState private var swipeOffset: CGFloat = 0
+    /// Zuletzt nach links gewischt (nächster Zeitraum) - steuert die
+    /// Einflugrichtung der Push-Transition.
+    @State private var swipedLeft = true
 
     private func horizontalSwipe(step: Int) -> some Gesture {
         DragGesture(minimumDistance: 20)
@@ -426,11 +450,8 @@ struct SouveraCalendarView: View {
                 let threshold: CGFloat = 90
                 if abs(h) >= threshold {
                     withAnimation(.easeInOut(duration: 0.22)) {
+                        swipedLeft = h < 0
                         shiftSelectedDay(by: h < 0 ? step : -step)
-                    }
-                } else {
-                    withAnimation(.easeOut(duration: 0.2)) {
-                        // Nur zurückfedern - die Geste-State-Animierung erledigt das.
                     }
                 }
             }
@@ -474,6 +495,8 @@ struct SouveraCalendarView: View {
             )
         }
         .offset(x: swipeOffset)
+        .id("three_\(threeDayRange.first?.timeIntervalSince1970 ?? 0)")
+        .transition(swipeTransition)
         .refreshable { await viewModel.load() }
         .gesture(horizontalSwipe(step: 3))
     }
@@ -606,6 +629,8 @@ private struct CalendarEventRow: View {
                 }
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
         .padding(.vertical, 2)
     }
 
@@ -903,7 +928,7 @@ private struct TimelineColumn: View {
         // normales Tippen/Scrollen darf keinen Termin auslösen. Nach dem
         // Long-Press kann der Finger den Slot noch vergrößern (Drag), bevor
         // er loslässt - der Slot-Rahmen folgt live mit.
-        LongPressGesture(minimumDuration: 0.45, maximumDistance: 28)
+        LongPressGesture(minimumDuration: 0.45, maximumDistance: 10)
             .sequenced(before: DragGesture(minimumDistance: 0))
             .updating($dragSlot) { value, state, _ in
                 guard case let .second(true, drag?) = value else { return }
@@ -1062,11 +1087,44 @@ private struct CalendarEventDetailSheet: View {
                 Section {
                     Label(dateLabel, systemImage: "clock")
                     if let location = event.location, !location.isEmpty {
-                        HStack(alignment: .firstTextBaseline, spacing: 8) {
-                            Image(systemName: "mappin")
-                                .foregroundStyle(.secondary)
-                            Text(SouveraLinkOpener.linkified(location))
-                                .souveraOpenURLAction()
+                        if let callToken = SouveraLinkOpener.talkRoomToken(in: location) {
+                            // Der Ort enthält den Videoanruf-Link: ganze Zeile
+                            // als Button - öffnet das Link-Modul direkt.
+                            Button {
+                                if event.talkRoomToken != nil {
+                                    viewModel.openTalkRoom(for: event)
+                                } else {
+                                    NotificationCenter.default.post(
+                                        name: .openLinkRoom,
+                                        object: ["token": callToken, "title": event.title]
+                                    )
+                                }
+                                dismiss()
+                            } label: {
+                                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                    Image(systemName: "video.fill")
+                                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(location)
+                                            .font(.subheadline)
+                                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                            .lineLimit(2)
+                                        Text(NSLocalizedString("_calendar_join_video_call_", comment: ""))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                                Image(systemName: "mappin")
+                                    .foregroundStyle(.secondary)
+                                Text(SouveraLinkOpener.linkified(location))
+                                    .souveraOpenURLAction()
+                            }
                         }
                     }
                 }

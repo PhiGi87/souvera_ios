@@ -139,7 +139,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         scheduleAppRefresh()
     }
 
-    func applicationWillTerminate(_ application: UIApplication) {        if self.notificationSettings?.authorizationStatus != .denied && UIApplication.shared.backgroundRefreshStatus == .available {
+    func applicationWillTerminate(_ application: UIApplication) {
+        // Hinweis "App laufen lassen" nur EINMAL zeigen (beim ersten Beenden
+        // nach der Installation), danach nie wieder. Das Flag überlebt
+        // App-Neustarts und wird bei einer Deinstallation automatisch
+        // gelöscht - nach Neuinstallation erscheint der Hinweis wieder genau
+        // einmal.
+        if self.notificationSettings?.authorizationStatus != .denied && UIApplication.shared.backgroundRefreshStatus == .available,
+           !UserDefaults.standard.bool(forKey: Self.keepRunningNotificationShownKey) {
+            UserDefaults.standard.set(true, forKey: Self.keepRunningNotificationShownKey)
             let content = UNMutableNotificationContent()
             content.title = NCBrandOptions.shared.brand
             content.body = NSLocalizedString("_keep_running_", comment: "")
@@ -150,6 +158,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         nkLog(debug: "App is terminating")
     }
+
+    private static let keepRunningNotificationShownKey = "SouveraKeepRunningNotificationShown"
 
     // MARK: - UISceneSession Lifecycle
 
