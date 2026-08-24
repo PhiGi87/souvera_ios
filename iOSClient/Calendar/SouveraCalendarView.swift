@@ -912,6 +912,41 @@ private struct TimelineColumn: View {
     /// wird während des Ziehens sichtbar markiert.
     @GestureState private var dragSlot: (start: Int, end: Int)?
 
+    /// Terminanlage: NUR nach einem Long-Press (~0,45 s). Der Long-Press
+    /// setzt lediglich ein Flag (er blockiert das Scrollen NICHT - die
+    /// Geste läuft als onLongPressGesture); der separate Slot-Drag zeichnet
+    /// den Termin erst, wenn das Flag gesetzt ist.
+    @State private var longPressActive = false
+
+    private var slotDrag: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .updating($dragSlot) { value, state, _ in
+                guard longPressActive else { return }
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let a = Self.snapDown(min(startMinute, endMinute))
+                let b = Self.snapUp(max(startMinute, endMinute))
+                state = (a, max(b, a + 15))
+            }
+            .onEnded { value in
+                guard longPressActive, let onCreate else {
+                    longPressActive = false
+                    return
+                }
+                longPressActive = false
+                let calendar = Calendar.current
+                let dayStart = calendar.startOfDay(for: day)
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let a = Self.snapDown(min(startMinute, endMinute))
+                let b = Self.snapUp(max(startMinute, endMinute))
+                let slotDuration = max(15, b - a)
+                guard let slotStart = calendar.date(byAdding: .minute, value: a, to: dayStart),
+                      let slotEnd = calendar.date(byAdding: .minute, value: a + slotDuration, to: dayStart) else { return }
+                onCreate(slotStart, slotEnd)
+            }
+    }
+
     private static func minute(for y: CGFloat, hourHeight: CGFloat) -> Int {
         let minutes = Int((y / hourHeight) * 60)
         return max(0, min(24 * 60 - 1, minutes))
