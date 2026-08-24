@@ -66,6 +66,12 @@ final class MailViewModel: ObservableObject {
     /// in der Ordnerübersicht); nil = Auto-Refresh deaktiviert.
     @Published var nextAutoRefreshAt: Date?
     @Published var sortOrder: MailSortOrder = .dateDesc
+    /// Scroll-Nachladen: gibt es ältere Mails im aktuellen Ordner?
+    @Published var hasMoreMessages = false
+    /// Scroll-Nachladen läuft gerade (Sentinel zeigt Spinner).
+    @Published var isLoadingMore = false
+    /// Pagination-State des aktuellen Ordners (letzte geladene Id + mehr?).
+    private var pageState: (lastId: String?, hasMore: Bool) = (nil, false)
 
     private var imapClient: MailImapClient?
     private var jmapClient: JmapClient?
@@ -591,6 +597,9 @@ final class MailViewModel: ObservableObject {
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
         messages = .loading
+        pageState = (nil, false)
+        hasMoreMessages = false
+        isLoadingMore = false
         Task { await syncMessages() }
     }
 
@@ -616,7 +625,10 @@ final class MailViewModel: ObservableObject {
     private func syncMessagesImap(_ mailbox: Mailbox) async {
         guard let client = imapClient else { return }
         switch await client.syncMessages(mailboxPath: mailbox.path) {
-        case let .success(list): messages = .success(list)
+        case let .success(list):
+            hasMoreMessages = false
+            pageState = (nil, false)
+            messages = .success(list)
         case let .failure(message): messages = .error(errorText(message))
         }
     }
@@ -670,6 +682,8 @@ final class MailViewModel: ObservableObject {
                     queryStates[cacheKey] = newState
                     MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
                     messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                    pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
+                    hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
                     return
                 } catch {
@@ -677,21 +691,66 @@ final class MailViewModel: ObservableObject {
                 }
             }
 
-            // 2) Full refresh.
-            let resp = try await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId, limit: 100)
-            let ids = (resp["ids"] as? [String]) ?? []
-            let state = resp.optString("queryState")
-            queryStates[cacheKey] = state
-            guard !ids.isEmpty else {
-                messages = .success([])
-                dirtyFlagIds[cacheKey] = nil
-                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: [], queryState: state)
-                return
+            // 2) Full refresh: Seiten à 100 laden und an die bestehende
+            //    Liste anhängen (Merge + Dedupe), bis (a) eine Seite
+            //    unvollständig ist (Ende des Postfachs) oder (b) mindestens
+            //    30 Tage abgedeckt sind. Der Rest kommt per Scroll nach.
+            let pageSize = 100
+            let minimumCoverage = Date().addingTimeInterval(-30 * 86400)
+            // Bestehenden Cache-Snapshot als Basis behalten: bereits per
+            // Scroll geladene ältere Mails bleiben erhalten, frische Seiten
+            // überschreiben überlappende Einträge.
+            var byId: [String: [String: Any]] = [:]
+            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: cacheKey) {
+                for email in snapshot.emails {
+                    if let id = email.optString("id") { byId[id] = email }
+                }
             }
-            let list = try await api.getEmails(accountId: accId, ids: ids)
-            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: list, queryState: state)
+            var lastId: String?
+            var hasMore = false
+            var state = ""
+            let maxPages = 10
+            var oldestDate: Date?
+            for _ in 0..<maxPages {
+                let resp = try await api.queryEmails(
+                    accountId: accId,
+                    inMailboxId: jmapMailboxId,
+                    limit: pageSize,
+                    anchor: lastId,
+                    position: lastId == nil ? 0 : 1
+                )
+                let ids = (resp["ids"] as? [String]) ?? []
+                state = resp.optString("queryState")
+                guard !ids.isEmpty else { break }
+                let page = try await api.getEmails(accountId: accId, ids: ids)
+                var addedCount = 0
+                for email in page {
+                    guard let id = email.optString("id") else { continue }
+                    if byId[id] == nil { addedCount += 1 }
+                    byId[id] = email
+                }
+                lastId = ids.last
+                // Ältestes Datum der Seite für die 30-Tage-Abdeckung.
+                if let oldest = page.compactMap({ ($0["receivedAt"] as? String) }).sorted().first,
+                   let parsed = Self.jmapDate(oldest) {
+                    oldestDate = parsed
+                }
+                if ids.count < pageSize {
+                    hasMore = false
+                    break
+                }
+                hasMore = true
+                if addedCount > 0, let oldestDate, oldestDate <= minimumCoverage {
+                    break
+                }
+            }
+            let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+            queryStates[cacheKey] = state
+            pageState = (lastId: lastId, hasMore: hasMore)
+            hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
-            messages = .success(list.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collected, queryState: state)
+            messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
         } catch {
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
@@ -707,6 +766,61 @@ final class MailViewModel: ObservableObject {
             JmapLog.write("sync failed for \(mailbox.id): \(error.localizedDescription)")
             messages = .error(errorText(error.localizedDescription))
         }
+    }
+
+    /// Scroll-Nachladen: lädt die nächste Seite älterer Mails des aktuellen
+    /// Ordners und hängt sie an die Liste an (Merge + Dedupe, Cache-Save).
+    /// Kein Paging-UI - die Liste wächst nahtlos beim Scrollen.
+    func loadMore() {
+        guard useJmap, !isLoadingMore, hasMoreMessages,
+              let mailbox = currentMailbox, let api = jmapApi,
+              let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty,
+              let lastId = pageState.lastId, !lastId.isEmpty else { return }
+        isLoadingMore = true
+        Task {
+            defer { isLoadingMore = false }
+            do {
+                _ = try await jmapClient?.refreshSession()
+                let accId = mailbox.accountId
+                let accountName = mailAccount?.account ?? ""
+                let resp = try await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId, limit: 100, anchor: lastId, position: 1)
+                let ids = (resp["ids"] as? [String]) ?? []
+                guard !ids.isEmpty else {
+                    hasMoreMessages = false
+                    pageState = (lastId: lastId, hasMore: false)
+                    return
+                }
+                let page = try await api.getEmails(accountId: accId, ids: ids)
+                let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id)
+                var emails = snapshot?.emails ?? []
+                var known = Set(emails.compactMap { $0.optString("id") })
+                var added = 0
+                for email in page {
+                    guard let id = email.optString("id"), !known.contains(id) else { continue }
+                    emails.append(email)
+                    known.insert(id)
+                    added += 1
+                }
+                emails.sort { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+                let hasMore = ids.count >= 100
+                pageState = (lastId: ids.last, hasMore: hasMore)
+                hasMoreMessages = hasMore
+                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: emails, queryState: snapshot?.queryState ?? "")
+                messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })
+                JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
+            } catch {
+                hasMoreMessages = false
+                JmapLog.write("loadMore failed for \(mailbox.id): \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// JMAP-Datum (receivedAt) parsen (ISO8601 mit/ohne Bruchteile).
+    private static func jmapDate(_ value: String) -> Date? {
+        let iso = ISO8601DateFormatter()
+        if let date = iso.date(from: value) { return date }
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return iso.date(from: value)
     }
 
     /// True for network-level failures (no/slow connection), false for
@@ -1250,7 +1364,7 @@ final class MailViewModel: ObservableObject {
         }
         let accId = session.primaryAccountId
         do {
-            let resp = try await api.queryEmails(accountId: accId, inMailboxId: "", limit: 50, filterText: trimmed)
+            let resp = try await api.queryEmails(accountId: accId, inMailboxId: "", limit: 100, filterText: trimmed)
             let ids = (resp["ids"] as? [String]) ?? []
             guard !ids.isEmpty else {
                 searchResults = .success([])

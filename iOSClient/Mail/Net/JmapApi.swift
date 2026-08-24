@@ -91,10 +91,11 @@ final class JmapApi {
         inMailboxId: String = "",
         sort: [Any]? = nil,
         limit: Int = 50,
-        anchor: Int64? = nil,
+        anchor: String? = nil,
         filterText: String? = nil,
         calculateTotal: Bool = false,
-        notKeyword: String? = nil
+        notKeyword: String? = nil,
+        position: Int = 0
     ) async throws -> [String: Any] {
         var filter: [String: Any] = [:]
         if !inMailboxId.isEmpty {
@@ -116,7 +117,7 @@ final class JmapApi {
         } else {
             args["sort"] = [["property": "receivedAt", "isAscending": false]]
         }
-        args["position"] = 0
+        args["position"] = position
         if let anchor {
             args["anchor"] = anchor
         }

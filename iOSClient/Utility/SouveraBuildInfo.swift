@@ -105,4 +105,46 @@ enum SouveraPushRegistrar {
         let parts = [normal, voip].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         return parts.joined(separator: " ")
     }
+
+    /// Registriert das Gerät direkt am Push-Proxy. Eigene Implementierung
+    /// statt NextcloudKit: Der Souvera-Proxy antwortet mit HTTP 200 und
+    /// LEEREM Body - Alamofire/NextcloudKit werten das als Fehler
+    /// ("failed proxy 200") und das Gerät bleibt unregistriert. Hier zählt
+    /// jeder 2xx-Status als Erfolg; der Body wird zu Diagnose-Zwecken
+    /// geloggt.
+    static func registerAtProxy(proxyServerUrl: String,
+                                pushToken: String,
+                                deviceIdentifier: String,
+                                signature: String,
+                                publicKey: String) async -> Bool {
+        let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(trimmed)/devices?format=json") else {
+            SouveraLog.write("PushProxy", "invalid proxy URL \(proxyServerUrl)")
+            return false
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        // Felder exakt wie der Nextcloud-Standard (Vertrag zum Proxy).
+        let params = [
+            "pushToken": pushToken,
+            "deviceIdentifier": deviceIdentifier,
+            "deviceIdentifierSignature": signature,
+            "userPublicKey": publicKey
+        ]
+        let form = params
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
+            .joined(separator: "&")
+        req.httpBody = form.data(using: .utf8)
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            let body = String(data: data.prefix(400), encoding: .utf8) ?? ""
+            SouveraLog.write("PushProxy", "register \(trimmed) -> http \(status) body=\(body)")
+            return (200..<300).contains(status)
+        } catch {
+            SouveraLog.write("PushProxy", "register \(trimmed) failed: \(error.localizedDescription)")
+            return false
+        }
+    }
 }

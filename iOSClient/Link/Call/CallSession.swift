@@ -10,11 +10,17 @@
 // without an MCU.
 
 import Foundation
+import AVFoundation
 import WebRTC
 
 protocol CallSessionCallbacks: AnyObject {
     func onLocalVideo(track: RTCVideoTrack)
-    func onRemoteVideo(track: RTCVideoTrack)
+    /// Neuer Remote-Video-Stream (session + Stream-Typ: "video"/"screen").
+    func onRemoteVideo(session: String, roomType: String, track: RTCVideoTrack)
+    /// Remote-Stream wurde entfernt (z. B. Bildschirmfreigabe beendet).
+    func onRemoteVideoRemoved(session: String, roomType: String)
+    /// Aktiver Sprecher gewechselt (Fokus-Modus).
+    func onActiveSpeaker(session: String, roomType: String)
     func onEnded()
 }
 
@@ -33,7 +39,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var observers: [String: PeerObserver] = [:]
     private var requestedOffers: Set<String> = []
     private var pendingIceServers: [RTCIceServer] = []
-    private var ownSessionId = ""
+    fileprivate var ownSessionId = ""
     private var mcuActive = false
     private var endedOnce = false
     private let silent: Bool
@@ -43,6 +49,15 @@ final class CallSession: NSObject, HpbSignalingListener {
     var isMutedLocally: Bool { !(localAudio?.isEnabled ?? true) }
     private var publisherCreated = false
     private var videoCreationInFlight = false
+    /// Remote-Video-Streams (Key = session|roomType) für den Fokus-Modus.
+    struct RemoteStream {
+        let session: String
+        let roomType: String
+        let track: RTCVideoTrack
+    }
+    private(set) var remoteStreams: [String: RemoteStream] = [:]
+    private var speakerTimer: Timer?
+    private var activeSpeakerKey: String?
 
     private var callFlags: Int
 
@@ -158,17 +173,75 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     private func createPublisher() {
-        let peer = peerFor(session: ownSessionId, addLocalTracks: true, isPublisher: true)
+        let peer = peerFor(key: ownSessionId, session: ownSessionId, addLocalTracks: true, isPublisher: true, roomType: "video")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
             peer.setLocalDescription(sdp) { _ in }
             self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
         }
+        startSpeakerPolling()
+    }
+
+    // MARK: - Aktiver Sprecher (Fokus-Modus)
+
+    private func startSpeakerPolling() {
+        speakerTimer?.invalidate()
+        speakerTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+            self?.pollActiveSpeaker()
+        }
+    }
+
+    private func stopSpeakerPolling() {
+        speakerTimer?.invalidate()
+        speakerTimer = nil
+        activeSpeakerKey = nil
+    }
+
+    /// Pollt die Audio-Level aller Subscriber-Peers und meldet den lautesten
+    /// Teilnehmer als aktiven Sprecher (Schwelle + Halten des letzten).
+    private func pollActiveSpeaker() {
+        guard mcuActive else { return }
+        let subscriberPeers = peers.filter { $0.key != ownSessionId }
+        guard !subscriberPeers.isEmpty else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            var best: (level: Double, key: String)?
+            for (key, peer) in subscriberPeers {
+                let level = await self.audioLevel(of: peer)
+                if level > (best?.level ?? -1) {
+                    best = (level, key)
+                }
+            }
+            guard let best, best.level >= 0.05 else { return }
+            guard best.key != self.activeSpeakerKey else { return }
+            self.activeSpeakerKey = best.key
+            let parts = best.key.split(separator: "|").map(String.init)
+            let session = parts.first ?? ""
+            let roomType = parts.count > 1 ? parts[1] : "video"
+            CallDebugLog.log("CallSession", "active speaker -> \(session.prefix(8)) type=\(roomType) level=\(best.level)")
+            self.callbacks?.onActiveSpeaker(session: session, roomType: roomType)
+        }
+    }
+
+    private func audioLevel(of peer: RTCPeerConnection) async -> Double {
+        await withCheckedContinuation { continuation in
+            peer.statistics { report in
+                let level = report.statistics.values
+                    .filter { ($0.values["type"] as? String) == "inbound-rtp" && ($0.values["mediaType"] as? String) == "audio" }
+                    .compactMap { ($0.values["audioLevel"] as? NSNumber)?.doubleValue }
+                    .max() ?? -1
+                continuation.resume(returning: level)
+            }
+        }
     }
 
     func onParticipants(sessionIds: [String]) {
         if mcuActive {
-            for session in sessionIds where requestedOffers.insert(session).inserted {
+            // NIE ein Angebot für die eigene Session anfordern - das
+            // korrumpiert den Publisher-Zustand am MCU (Uplink stirbt).
+            for session in sessionIds where session != ownSessionId
+                && !session.isEmpty
+                && requestedOffers.insert(session).inserted {
                 signaling?.sendRequestOffer(toSession: session)
             }
             return
@@ -185,8 +258,11 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
     }
 
-    func onOffer(fromSession: String, sdp: String) {
-        let peer = peerFor(session: fromSession, addLocalTracks: !mcuActive, isPublisher: false)
+    func onOffer(fromSession: String, sdp: String, roomType: String) {
+        // Peers pro Session UND Stream-Typ (Bildschirmfreigabe kommt als
+        // zweites Angebot derselben Session).
+        let key = Self.streamKey(session: fromSession, roomType: roomType)
+        let peer = peerFor(key: key, session: fromSession, addLocalTracks: !mcuActive, isPublisher: false, roomType: roomType)
         let remote = RTCSessionDescription(type: .offer, sdp: sdp)
         peer.setRemoteDescription(remote) { [weak self] _ in
             guard let self else { return }
@@ -199,7 +275,12 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onAnswer(fromSession: String, sdp: String) {
-        peers[fromSession]?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { _ in }
+        let peer = peers[fromSession] ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
+        peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { _ in }
+    }
+
+    static func streamKey(session: String, roomType: String) -> String {
+        "\(session)|\(roomType)"
     }
 
     func onCandidate(fromSession: String, candidate: [String: Any]) {
@@ -291,7 +372,8 @@ final class CallSession: NSObject, HpbSignalingListener {
                 CallDebugLog.log("CallSession", "publisher re-offer sent after video change")
             }
         } else {
-            for (session, peer) in peers where !session.isEmpty {
+            for (key, peer) in peers where key != ownSessionId && !key.isEmpty {
+                let session = key.split(separator: "|").map(String.init).first ?? ""
                 peer.offer(for: receiveConstraints()) { [weak self] sdp, _ in
                     guard let self, let sdp else { return }
                     peer.setLocalDescription(sdp) { _ in }
@@ -304,6 +386,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     func hangup() {
         if endedOnce { return }
         endedOnce = true
+        stopSpeakerPolling()
         CallDebugLog.log("CallSession", "hangup start")
         Task { await api.leaveCall(token: token) }
         signaling?.close()
@@ -338,10 +421,10 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     // MARK: - Peer helpers
 
-    private func peerFor(session: String, addLocalTracks: Bool, isPublisher: Bool) -> RTCPeerConnection {
-        if let existing = peers[session] { return existing }
-        let observer = PeerObserver(session: session, owner: self)
-        observers[session] = observer
+    private func peerFor(key: String, session: String, addLocalTracks: Bool, isPublisher: Bool, roomType: String) -> RTCPeerConnection {
+        if let existing = peers[key] { return existing }
+        let observer = PeerObserver(session: session, roomType: roomType, key: key, owner: self)
+        observers[key] = observer
         guard let peer = webRtc.createPeerConnection(iceServers: pendingIceServers, delegate: observer) else {
             fatalError("Cannot create peer connection")
         }
@@ -349,7 +432,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             if let audio = localAudio { peer.add(audio, streamIds: ["link"]) }
             if let video = localVideo { peer.add(video, streamIds: ["link"]) }
         }
-        peers[session] = peer
+        peers[key] = peer
         return peer
     }
 
@@ -366,22 +449,27 @@ final class CallSession: NSObject, HpbSignalingListener {
         LinkVoIPManager.shared.callSessionDidEnd(self)
     }
 
-    fileprivate func emitCandidate(session: String, candidate: RTCIceCandidate) {
+    fileprivate func emitCandidate(session: String, roomType: String, candidate: RTCIceCandidate) {
         let json: [String: Any] = [
             "candidate": candidate.sdp,
             "sdpMid": candidate.sdpMid ?? "",
             "sdpMLineIndex": Int(candidate.sdpMLineIndex)
         ]
-        signaling?.sendCandidate(toSession: session, candidate: json)
+        signaling?.sendCandidate(toSession: session, candidate: json, roomType: roomType)
     }
 
-    private(set) var remoteVideoTracks: [RTCVideoTrack] = []
+    fileprivate func emitRemoteVideo(session: String, roomType: String, track: RTCVideoTrack) {
+        let key = Self.streamKey(session: session, roomType: roomType)
+        remoteStreams[key] = RemoteStream(session: session, roomType: roomType, track: track)
+        callbacks?.onRemoteVideo(session: session, roomType: roomType, track: track)
+        CallDebugLog.log("CallSession", "remote stream added session=\(session.prefix(8)) type=\(roomType)")
+    }
 
-    fileprivate func emitRemoteVideo(_ track: RTCVideoTrack) {
-        if !remoteVideoTracks.contains(where: { $0 === track }) {
-            remoteVideoTracks.append(track)
-        }
-        callbacks?.onRemoteVideo(track: track)
+    fileprivate func emitRemoteVideoRemoved(session: String, roomType: String) {
+        let key = Self.streamKey(session: session, roomType: roomType)
+        guard remoteStreams.removeValue(forKey: key) != nil else { return }
+        callbacks?.onRemoteVideoRemoved(session: session, roomType: roomType)
+        CallDebugLog.log("CallSession", "remote stream removed session=\(session.prefix(8)) type=\(roomType)")
     }
 
     /// Re-attaches a new call UI (e.g. after returning from the chat) to the
@@ -389,37 +477,52 @@ final class CallSession: NSObject, HpbSignalingListener {
     func reattach(callbacks: CallSessionCallbacks) {
         self.callbacks = callbacks
         if let local = localVideo { callbacks.onLocalVideo(track: local) }
-        for track in remoteVideoTracks { callbacks.onRemoteVideo(track: track) }
+        for (_, stream) in remoteStreams {
+            callbacks.onRemoteVideo(session: stream.session, roomType: stream.roomType, track: stream.track)
+        }
     }
 }
 
 /// Per-remote-participant RTCPeerConnectionDelegate; forwards ICE candidates and remote video.
 private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
     private let session: String
+    private let roomType: String
+    private let key: String
     private weak var owner: CallSession?
 
-    init(session: String, owner: CallSession) {
+    init(session: String, roomType: String, key: String, owner: CallSession) {
         self.session = session
+        self.roomType = roomType
+        self.key = key
         self.owner = owner
     }
 
     func peerConnection(_ pc: RTCPeerConnection, didGenerate candidate: RTCIceCandidate) {
-        owner?.emitCandidate(session: session, candidate: candidate)
+        owner?.emitCandidate(session: session, roomType: roomType, candidate: candidate)
     }
 
     func peerConnection(_ pc: RTCPeerConnection, didAdd rtpReceiver: RTCRtpReceiver, streams: [RTCMediaStream]) {
         if let video = rtpReceiver.track as? RTCVideoTrack {
-            owner?.emitRemoteVideo(video)
+            owner?.emitRemoteVideo(session: session, roomType: roomType, track: video)
         }
     }
 
     // Unused delegate requirements.
     func peerConnection(_ pc: RTCPeerConnection, didChange stateChanged: RTCSignalingState) {}
     func peerConnection(_ pc: RTCPeerConnection, didAdd stream: RTCMediaStream) {}
-    func peerConnection(_ pc: RTCPeerConnection, didRemove stream: RTCMediaStream) {}
+    func peerConnection(_ pc: RTCPeerConnection, didRemove stream: RTCMediaStream) {
+        owner?.emitRemoteVideoRemoved(session: session, roomType: roomType)
+    }
     func peerConnectionShouldNegotiate(_ pc: RTCPeerConnection) {}
     func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
-        CallDebugLog.log("PeerObserver", "session=\(session) ICE connection -> \(Self.stateName(newState))")
+        CallDebugLog.log("PeerObserver", "key=\(key.prefix(12)) ICE connection -> \(Self.stateName(newState))")
+        if newState == .connected, key == owner?.ownSessionId {
+            // Publisher steht: Audio-Session-Zustand für die Diagnose loggen.
+            let audio = RTCAudioSession.sharedInstance()
+            CallDebugLog.log("PeerObserver", "publisher connected; audioSession active=\(audio.isActive)")
+            let av = AVAudioSession.sharedInstance()
+            CallDebugLog.log("PeerObserver", "AVAudioSession category=\(av.category.rawValue) mode=\(av.mode.rawValue) otherAudio=\(av.isOtherAudioPlaying)")
+        }
     }
     func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
         CallDebugLog.log("PeerObserver", "session=\(session) ICE gathering -> \(Self.stateName(newState))")

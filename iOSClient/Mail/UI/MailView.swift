@@ -244,27 +244,22 @@ struct MailView: View {
         case .folders:
             MailFolderListView(viewModel: viewModel)
         case .messages:
-            SouveraBackSwipe(onBack: { viewModel.back() }) {
-                MailFolderListView(viewModel: viewModel)
-            } content: {
-                MailMessageListView(viewModel: viewModel)
-            }
+            MailMessageListView(viewModel: viewModel)
         case let .detail(message):
-            // Die Nachrichtenliste bleibt als Back-Preview gemountet - ihre
-            // Scrollposition bleibt beim Zurückkehren exakt erhalten.
-            SouveraBackSwipe(onBack: { viewModel.back() }) {
+            // Die Nachrichtenliste bleibt UNTER der Detailansicht gemountet
+            // (unsichtbar + nicht interaktiv), damit ihre Scrollposition
+            // beim Zurückkehren exakt erhalten bleibt - kein Anchor-Restore
+            // nötig.
+            ZStack {
                 MailMessageListView(viewModel: viewModel, toolbarActive: false)
-            } content: {
+                    .opacity(0)
+                    .allowsHitTesting(false)
                 MailDetailView(viewModel: viewModel, message: message)
             }
         case .compose:
             MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
         case .search:
-            SouveraBackSwipe(onBack: { viewModel.back() }) {
-                MailFolderListView(viewModel: viewModel)
-            } content: {
-                MailSearchView(viewModel: viewModel)
-            }
+            MailSearchView(viewModel: viewModel)
         }
     }
 }
@@ -838,6 +833,17 @@ private struct MailMessageListView: View {
                 ForEach(sorted) { message in
                     row(message)
                         .id(message.id)
+                }
+                // Sentinel: beim Erreichen des Listenendes ältere Mails
+                // nachladen (kein Paging-UI, nahtloses Wachsen).
+                if viewModel.hasMoreMessages && !editing {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .onAppear { viewModel.loadMore() }
                 }
             }
             .listStyle(.plain)

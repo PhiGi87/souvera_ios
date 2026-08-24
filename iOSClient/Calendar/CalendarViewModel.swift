@@ -257,6 +257,8 @@ final class CalendarViewModel: ObservableObject {
 
         cachedEntries = entries
         Self.saveCachedEntries(entries, month: visibleMonth)
+        loadedStart = start
+        loadedEnd = end
 
         let all = Self.parseEntries(entries)
         let sortedAll = all.sorted { $0.start < $1.start }
@@ -276,6 +278,47 @@ final class CalendarViewModel: ObservableObject {
     }
 
     // MARK: - Mutations
+
+    /// Geladenes Zeitfenster (aus dem letzten load()) - Tage außerhalb
+    /// werden bei Bedarf gezielt nachgeladen.
+    private var loadedStart: Date?
+    private var loadedEnd: Date?
+
+    /// Stellt sicher, dass der übergebene Tag vom geladenen Fenster
+    /// abgedeckt ist; lädt sonst gezielt die Events genau dieses Tages nach
+    /// (CalDAV-REPORT mit Tages-range). So zeigt die Tagesliste in der
+    /// Monatsansicht IMMER alle Termine des ausgewählten Tags - egal wie
+    /// weit er außerhalb des Monatsfensters liegt (keine Zeitbeschränkung).
+    func ensureDayCovered(_ day: Date) async {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: day)
+        if let loadedStart, let loadedEnd, dayStart >= loadedStart && dayStart <= loadedEnd {
+            return
+        }
+        guard !selectedCalendarHrefs.isEmpty else { return }
+
+        var entries = cachedEntries
+        var known = Set(entries.map(\.href))
+        let dayEnd = dayStart.addingTimeInterval(86400)
+        for cal in calendars where selectedCalendarHrefs.contains(cal.href) {
+            let fetched = await client.fetchEvents(calendarHref: cal.href, start: dayStart, end: dayEnd)
+            for entry in fetched where !known.contains(entry.href) {
+                entries.append(entry)
+                known.insert(entry.href)
+            }
+        }
+        cachedEntries = entries
+        loadedStart = [loadedStart, dayStart].compactMap { $0 }.min()
+        loadedEnd = [loadedEnd, dayEnd].compactMap { $0 }.max()
+        Self.saveCachedEntries(entries, month: visibleMonth)
+
+        let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
+        if signature != eventsSignature {
+            eventsSignature = signature
+            events = .success(Self.parseEntries(entries).sorted { $0.start < $1.start })
+        }
+        JmapLog.write("Calendar ensureDayCovered \(day): entries=\(entries.count)")
+    }
 
     func saveEvent(_ draft: EventDraft, existing: CalendarEventModel?) async -> Bool {
         let account = NCManageDatabase.shared.getActiveTableAccount()

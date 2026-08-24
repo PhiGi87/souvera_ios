@@ -68,35 +68,24 @@ class NCPushNotification {
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
         SouveraLog.write("Push", "NC registration OK \(urlBase)")
 
-        let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
-        let options = NKRequestOptions(customUserAgent: userAgent)
-
         // Combined "normal voip" token: the push proxy routes alert pushes to
         // the normal APNs token and voip pushes to the PushKit token. Single
         // fallback works too (only one half present at the time).
+        // Registrierung tolerant: 2xx = Erfolg (der Proxy antwortet mit
+        // leerem Body, was NextcloudKit als Fehler wertet).
         let combinedToken = SouveraPushRegistrar.combinedToken(
             normal: preferences.deviceTokenPushNotification,
             voip: LinkVoIPManager.shared.voipToken
         )
-        let responsePushProxy = await NextcloudKit.shared.subscribingPushProxyAsync(proxyServerUrl: proxyServerUrl,
-                                                                                    pushToken: combinedToken,
-                                                                                    deviceIdentifier: deviceIdentifier,
-                                                                                    signature: signature,
-                                                                                    publicKey: subscribingPublicKey,
-                                                                                    account: account,
-                                                                                    options: options, taskHandler: { task in
-            Task {
-                let identifier = await NCNetworking.shared.networkingTasks.createIdentifier(account: account,
-                                                                                            path: proxyServerUrl,
-                                                                                            name: "subscribingPushProxy")
-                await NCNetworking.shared.networkingTasks.track(identifier: identifier, task: task)
-            }
-        })
-
-        guard responsePushProxy.error == .success else {
-            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration FAILED at \(proxyServerUrl), status \(responsePushProxy.error.errorCode): \(responsePushProxy.error.errorDescription)")
-            UserDefaults.standard.set("failed proxy \(responsePushProxy.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusNormal")
-            SouveraLog.write("Push", "proxy registration FAILED \(proxyServerUrl) status \(responsePushProxy.error.errorCode)")
+        let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
+                                                                 pushToken: combinedToken,
+                                                                 deviceIdentifier: deviceIdentifier,
+                                                                 signature: signature,
+                                                                 publicKey: subscribingPublicKey)
+        guard proxyOk else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration FAILED at \(proxyServerUrl)")
+            UserDefaults.standard.set("failed proxy \(Date())", forKey: "SouveraPushRegStatusNormal")
+            SouveraLog.write("Push", "proxy registration FAILED \(proxyServerUrl)")
             return
         }
 

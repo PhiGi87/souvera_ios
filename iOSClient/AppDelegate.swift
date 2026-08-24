@@ -140,6 +140,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
+        // Laufenden Call sauber beenden (leaveCall), damit keine Geister-
+        // Session im Raum zurückbleibt.
+        LinkVoIPManager.shared.endActiveCall()
         // Hinweis "App laufen lassen" nur EINMAL zeigen (beim ersten Beenden
         // nach der Installation), danach nie wieder. Das Flag überlebt
         // App-Neustarts und wird bei einer Deinstallation automatisch

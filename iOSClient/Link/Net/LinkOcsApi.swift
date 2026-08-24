@@ -93,13 +93,15 @@ actor LinkOcsApi {
     /// initial history fetch `lastKnownId` is 0 and MUST be omitted — sending `lastKnownMessageId=0`
     /// with lookIntoFuture=0 means "messages older than 0" and returns nothing. The long-poll always
     /// sends it (0 = from the beginning).
-    func getMessages(token: String, lastKnownId: Int64, future: Bool, timeoutSeconds: Int) async -> [LinkChatMessage] {
+    func getMessages(token: String, lastKnownId: Int64, future: Bool, timeoutSeconds: Int, saveCache: Bool = true) async -> [LinkChatMessage] {
         let includeLastKnown = future || lastKnownId > 0
         let lastKnownParam = includeLastKnown ? "&lastKnownMessageId=\(lastKnownId)" : ""
         let url = "\(base)/api/v1/chat/\(token)?lookIntoFuture=\(future ? 1 : 0)" +
             "\(lastKnownParam)&timeout=\(timeoutSeconds)&limit=\(Self.pageLimit)&setReadMarker=1"
         guard let body = await get(url, longPoll: future) else { return [] }
-        if !future {
+        if !future, saveCache {
+            // Nur die NEUESTE Seite cachen - der Historie-Loop würde sonst
+            // mit jeder älteren Seite den Cache überschreiben.
             LinkCache.saveMessages(token: token, raw: Data(body.utf8))
         }
         return decodeList(body)

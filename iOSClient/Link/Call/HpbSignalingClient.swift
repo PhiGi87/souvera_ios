@@ -20,7 +20,7 @@ protocol HpbSignalingListener: AnyObject {
     /// publishers).
     func onSelfInCall()
     func onParticipants(sessionIds: [String])
-    func onOffer(fromSession: String, sdp: String)
+    func onOffer(fromSession: String, sdp: String, roomType: String)
     func onAnswer(fromSession: String, sdp: String)
     func onCandidate(fromSession: String, candidate: [String: Any])
     func onClosed()
@@ -99,9 +99,9 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         sendMessage(to: toSession, data: ["to": toSession, "type": "requestoffer", "roomType": roomTypeVideo])
     }
 
-    func sendCandidate(toSession: String, candidate: [String: Any]) {
+    func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = "video") {
         let data: [String: Any] = [
-            "to": toSession, "type": "candidate", "roomType": roomTypeVideo,
+            "to": toSession, "type": "candidate", "roomType": roomType,
             "payload": ["type": "candidate", "candidate": candidate]
         ]
         sendMessage(to: toSession, data: data)
@@ -184,6 +184,9 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
             }
         case "event": handleEvent(root)
         case "message": handleMessage(root)
+        case "error":
+            // Fehler-Details loggen (MCU/HPB-Ablehnungen sind sonst unsichtbar).
+            CallDebugLog.log("HpbSignaling", "recv error body: \(String(text.prefix(600)))")
         default: break
         }
     }
@@ -237,8 +240,10 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
               let from = (message["sender"] as? [String: Any])?["sessionid"] as? String,
               let data = message["data"] as? [String: Any] else { return }
         let payload = data["payload"] as? [String: Any]
+        let roomType = data["roomType"] as? String ?? "video"
+        CallDebugLog.log("HpbSignaling", "recv msg from=\(from.prefix(8)) type=\(data["type"] as? String ?? "?") roomType=\(roomType)")
         switch data["type"] as? String {
-        case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sdp: sdp) }
+        case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sdp: sdp, roomType: roomType) }
         case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, sdp: sdp) }
         case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, candidate: cand) }
         default: break

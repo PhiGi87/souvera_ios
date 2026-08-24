@@ -46,6 +46,8 @@ final class LinkViewModel: ObservableObject {
     @Published var avatarCache: [String: Data] = [:]
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
+    /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
+    @Published var hasMoreHistory = false
     /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner.
     @Published var cacheBannerActive = false
 
@@ -425,7 +427,57 @@ final class LinkViewModel: ObservableObject {
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
+            // Kompletter Verlauf: ältere Nachrichten seitenweise nachladen,
+            // bis der Anfang erreicht ist (keine Zeitgrenze, kein Paging-UI).
+            await self.loadFullHistory(token: token)
             await self.pollNewMessages(token: token)
+        }
+    }
+
+    /// Lädt den kompletten Chat-Verlauf (Seite für Seite nach oben älter),
+    /// bis eine Seite unvollständig ist. Die Liste wächst dabei inkrementell;
+    /// die Scrollposition bleibt unten. Kein Zeitlimit.
+    private func loadFullHistory(token: String) async {
+        guard let api else { return }
+        var all: [LinkChatMessage]
+        if case let .success(current) = messages {
+            all = current
+        } else {
+            return
+        }
+        var known = Set(all.map(\.id))
+        var anchor = all.map(\.id).min() ?? 0
+        hasMoreHistory = anchor > 0
+        var pages = 0
+        while anchor > 0, pages < 200, !Task.isCancelled {
+            let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+            if older.isEmpty { break }
+            let fresh = older.filter { known.insert($0.id).inserted && !$0.isReactionEvent }
+            let newAnchor = older.map(\.id).min() ?? anchor
+            guard newAnchor < anchor else { break }
+            anchor = newAnchor
+            if !fresh.isEmpty {
+                all.append(contentsOf: fresh)
+                if !Task.isCancelled {
+                    self.messages = .success(all.sorted { $0.id < $1.id })
+                }
+            }
+            if older.count < 100 { break }
+            pages += 1
+        }
+        hasMoreHistory = false
+        if !Task.isCancelled, case let .success(list) = messages {
+            self.messages = .success(list.sorted { $0.id < $1.id })
+        }
+        CallDebugLog.log("LinkViewModel", "full history loaded for \(token): \(all.count) messages")
+    }
+
+    /// Nachladen älterer Nachrichten beim Scrollen nach oben (Sicherheitsnetz,
+    /// falls der Historie-Loop unterbrochen wurde).
+    func loadEarlierHistory() {
+        guard let api, case let .chat(token, _) = route, hasMoreHistory else { return }
+        Task {
+            await loadFullHistory(token: token)
         }
     }
 

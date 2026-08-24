@@ -14,10 +14,37 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private let title_: String
 
     private var session: CallSession?
-    private let remoteView = RTCMTLVideoView()
     private let localView = RTCMTLVideoView()
-    private var remoteTrack: RTCVideoTrack?
     private var localTrack: RTCVideoTrack?
+
+    /// Kachel eines Remote-Streams (Fokus-Modus); Key = session|roomType.
+    private final class StreamTile {
+        let container = UIView()
+        let videoView = RTCMTLVideoView()
+        let session: String
+        let roomType: String
+        var track: RTCVideoTrack?
+
+        init(session: String, roomType: String) {
+            self.session = session
+            self.roomType = roomType
+            container.backgroundColor = .black
+            container.layer.cornerRadius = 10
+            container.clipsToBounds = true
+            videoView.videoContentMode = .scaleAspectFill
+            videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            videoView.frame = container.bounds
+            container.addSubview(videoView)
+        }
+    }
+
+    private var tiles: [String: StreamTile] = [:]
+    /// Manuell fokussierte Kachel (Tap auf eine kleine Kachel).
+    private var manualFocusKey: String?
+    /// Vom aktiven Sprecher fokussierte Kachel.
+    private var speakerFocusKey: String?
+    /// Zuletzt angezeigte Fokus-Kachel.
+    private var lastFocusedKey: String?
 
     private var isMuted = false
     private var isVideoOn: Bool
@@ -158,16 +185,6 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     private func setupVideoViews() {
-        remoteView.videoContentMode = .scaleAspectFill
-        remoteView.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(remoteView)
-        NSLayoutConstraint.activate([
-            remoteView.topAnchor.constraint(equalTo: view.topAnchor),
-            remoteView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-            remoteView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            remoteView.trailingAnchor.constraint(equalTo: view.trailingAnchor)
-        ])
-
         localView.videoContentMode = .scaleAspectFill
         localView.translatesAutoresizingMaskIntoConstraints = false
         localView.layer.cornerRadius = 8
@@ -179,6 +196,82 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             localView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
             localView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16)
         ])
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutTiles()
+    }
+
+    /// Fokus-Modus-Layout: 1:1 = ein Vollbild-Stream (wie bisher);
+    /// mehrere Streams = große Fokus-Kachel + kleine Kacheln unten.
+    /// Screen-Share hat Vorrang vor dem aktiven Sprecher.
+    private func layoutTiles() {
+        let width = view.bounds.width
+        let height = view.bounds.height
+        let safeTop = view.safeAreaInsets.top
+        let safeBottom = view.safeAreaInsets.bottom
+
+        let focusKey = resolveFocusKey()
+        guard let focusKey, let focusTile = tiles[focusKey] else { return }
+
+        // Screen-Kacheln kommen nicht in den Streifen (nur Fokus).
+        let stripKeys = tiles.keys
+            .filter { $0 != focusKey && tiles[$0]?.roomType != "screen" }
+            .sorted()
+
+        focusTile.container.layer.cornerRadius = stripKeys.isEmpty ? 0 : 12
+        focusTile.container.layer.borderWidth = 0
+
+        if stripKeys.isEmpty {
+            // 1:1-Modus: Fokus füllt den gesamten Bildschirm.
+            focusTile.container.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        } else {
+            let focusHeight = height * 0.66
+            focusTile.container.frame = CGRect(x: 0, y: safeTop, width: width, height: focusHeight)
+
+            let tileWidth: CGFloat = 96
+            let tileHeight: CGFloat = 136
+            let gap: CGFloat = 8
+            let controlsHeight: CGFloat = 92
+            var x: CGFloat = 12
+            for key in stripKeys {
+                guard let tile = tiles[key] else { continue }
+                tile.container.layer.cornerRadius = 10
+                tile.container.layer.borderWidth = 1.5
+                tile.container.layer.borderColor = UIColor.white.withAlphaComponent(0.6).cgColor
+                tile.container.frame = CGRect(
+                    x: x,
+                    y: height - safeBottom - controlsHeight - tileHeight - 8,
+                    width: tileWidth,
+                    height: tileHeight
+                )
+                x += tileWidth + gap
+            }
+        }
+        lastFocusedKey = focusKey
+    }
+
+    /// Vorrang: Screen-Share > aktiver Sprecher > manueller Fokus > zuletzt
+    /// fokussierte Kachel > erste Kachel.
+    private func resolveFocusKey() -> String? {
+        if let screenKey = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }) {
+            return screenKey
+        }
+        if let speaker = speakerFocusKey, tiles[speaker] != nil {
+            return speaker
+        }
+        if let manual = manualFocusKey, tiles[manual] != nil {
+            return manual
+        }
+        if let last = lastFocusedKey, tiles[last] != nil {
+            return last
+        }
+        return tiles.keys.sorted().first
+    }
+
+    private static func key(session: String, roomType: String) -> String {
+        "\(session)|\(roomType)"
     }
 
     private func setupControls() {
@@ -291,11 +384,53 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
     }
 
-    func onRemoteVideo(track: RTCVideoTrack) {
+    func onRemoteVideo(session: String, roomType: String, track: RTCVideoTrack) {
         DispatchQueue.main.async {
-            self.remoteTrack = track
-            track.add(self.remoteView)
+            let key = Self.key(session: session, roomType: roomType)
+            let tile: StreamTile
+            if let existing = self.tiles[key] {
+                tile = existing
+            } else {
+                tile = StreamTile(session: session, roomType: roomType)
+                let tap = UITapGestureRecognizer(target: self, action: #selector(self.tileTapped(_:)))
+                tile.container.addGestureRecognizer(tap)
+                tile.container.isUserInteractionEnabled = true
+                self.tiles[key] = tile
+                self.view.insertSubview(tile.container, at: 0)
+            }
+            tile.track = track
+            track.add(tile.videoView)
+            CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
+            self.layoutTiles()
         }
+    }
+
+    func onRemoteVideoRemoved(session: String, roomType: String) {
+        DispatchQueue.main.async {
+            let key = Self.key(session: session, roomType: roomType)
+            self.tiles.removeValue(forKey: key)?.container.removeFromSuperview()
+            if self.manualFocusKey == key { self.manualFocusKey = nil }
+            if self.speakerFocusKey == key { self.speakerFocusKey = nil }
+            if self.lastFocusedKey == key { self.lastFocusedKey = nil }
+            CallDebugLog.log("CallVC", "remote tile removed \(key.prefix(14))")
+            self.layoutTiles()
+        }
+    }
+
+    func onActiveSpeaker(session: String, roomType: String) {
+        DispatchQueue.main.async {
+            self.speakerFocusKey = Self.key(session: session, roomType: roomType)
+            self.layoutTiles()
+        }
+    }
+
+    @objc private func tileTapped(_ gesture: UITapGestureRecognizer) {
+        guard let container = gesture.view,
+              let tile = self.tiles.values.first(where: { $0.container === container }) else { return }
+        let key = Self.key(session: tile.session, roomType: tile.roomType)
+        manualFocusKey = key
+        CallDebugLog.log("CallVC", "manual focus \(key.prefix(14))")
+        layoutTiles()
     }
 
     func onEnded() {

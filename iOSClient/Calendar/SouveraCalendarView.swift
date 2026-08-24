@@ -323,6 +323,7 @@ struct SouveraCalendarView: View {
             } else {
                 selectedDay = day
                 viewModel.ensureMonth(contains: day)
+                Task { await viewModel.ensureDayCovered(day) }
             }
         } label: {
             VStack(spacing: compact ? 1 : 3) {
@@ -363,15 +364,7 @@ struct SouveraCalendarView: View {
             .refreshable { await viewModel.load() }
         }
         .offset(x: swipeOffset)
-        .id("day_\(Calendar.current.startOfDay(for: selectedDay).timeIntervalSince1970)")
-        .transition(swipeTransition)
         .gesture(horizontalSwipe(step: 1))
-    }
-
-    /// Apple-like Push-Transition: der neue Tag fliegt von rechts herein
-    /// (nach links gewischt) bzw. von links (zurück).
-    private var swipeTransition: AnyTransition {
-        .push(from: swipedLeft ? .trailing : .leading)
     }
 
     /// Datum + Pfeile (der Wochentag kommt aus dem Timeline-Kopf, sonst
@@ -379,10 +372,7 @@ struct SouveraCalendarView: View {
     private func dateOnlySwitcher(day: Date, compact: Bool = false) -> some View {
         HStack {
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    swipedLeft = false
-                    shiftSelectedDay(by: -1)
-                }
+                shiftSelectedDay(by: -1)
             } label: {
                 Image(systemName: "chevron.left")
             }
@@ -390,10 +380,7 @@ struct SouveraCalendarView: View {
             Text(day, style: .date).font(.headline)
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    swipedLeft = true
-                    shiftSelectedDay(by: 1)
-                }
+                shiftSelectedDay(by: 1)
             } label: {
                 Image(systemName: "chevron.right")
             }
@@ -406,19 +393,13 @@ struct SouveraCalendarView: View {
     private func arrowsOnlySwitcher(step: Int, compact: Bool = false) -> some View {
         HStack {
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    swipedLeft = false
-                    shiftSelectedDay(by: -step)
-                }
+                shiftSelectedDay(by: -step)
             } label: {
                 Image(systemName: "chevron.left")
             }
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.22)) {
-                    swipedLeft = true
-                    shiftSelectedDay(by: step)
-                }
+                shiftSelectedDay(by: step)
             } label: {
                 Image(systemName: "chevron.right")
             }
@@ -429,12 +410,8 @@ struct SouveraCalendarView: View {
 
     /// Swipe horizontal: Tag (step=1) bzw. 3 Tage (step=3) weiter. Die
     /// Ansicht folgt dem Finger und federt beim Loslassen zurück bzw.
-    /// wechselt fließend den Tag (Apple-Stil). Die Richtung steuert die
-    /// Push-Transition des neuen Inhalts.
+    /// wechselt den Tag.
     @GestureState private var swipeOffset: CGFloat = 0
-    /// Zuletzt nach links gewischt (nächster Zeitraum) - steuert die
-    /// Einflugrichtung der Push-Transition.
-    @State private var swipedLeft = true
 
     private func horizontalSwipe(step: Int) -> some Gesture {
         DragGesture(minimumDistance: 20)
@@ -449,10 +426,7 @@ struct SouveraCalendarView: View {
                 guard abs(h) > abs(v) else { return }
                 let threshold: CGFloat = 90
                 if abs(h) >= threshold {
-                    withAnimation(.easeInOut(duration: 0.22)) {
-                        swipedLeft = h < 0
-                        shiftSelectedDay(by: h < 0 ? step : -step)
-                    }
+                    shiftSelectedDay(by: h < 0 ? step : -step)
                 }
             }
     }
@@ -475,6 +449,9 @@ struct SouveraCalendarView: View {
         if let shifted = calendar.date(byAdding: .day, value: days, to: selectedDay) {
             selectedDay = shifted
             viewModel.ensureMonth(contains: shifted)
+            // Tag außerhalb des geladenen Fensters? Events gezielt nachladen,
+            // damit die Tagesliste/Timeline nie leer ist.
+            Task { await viewModel.ensureDayCovered(shifted) }
         }
     }
 
@@ -495,8 +472,6 @@ struct SouveraCalendarView: View {
             )
         }
         .offset(x: swipeOffset)
-        .id("three_\(threeDayRange.first?.timeIntervalSince1970 ?? 0)")
-        .transition(swipeTransition)
         .refreshable { await viewModel.load() }
         .gesture(horizontalSwipe(step: 3))
     }
@@ -661,6 +636,7 @@ private struct TimelineDayView: View {
     var scrollTrigger: Int = 0
 
     private let hours = Array(0..<24)
+    @State private var slotActive = false
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -670,11 +646,12 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, onCreate: onCreate)
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, onCreate: onCreate, onSlotActive: { slotActive = $0 })
                     }
                 }
                 .padding(.bottom, bottomPadding)
             }
+            .scrollDisabled(slotActive)
             .onAppear {
                 scrollToNow(proxy)
             }
@@ -759,6 +736,9 @@ private struct TimelineColumn: View {
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
     var onCreate: ((Date, Date) -> Void)? = nil
     var showTrailingBorder: Bool = false
+    /// Meldet nach oben, ob gerade ein Terminslot gezeichnet wird - dann
+    /// sperrt die übergeordnete ScrollView das Scrollen.
+    var onSlotActive: ((Bool) -> Void)? = nil
 
     private let hours = Array(0..<24)
 
@@ -797,7 +777,12 @@ private struct TimelineColumn: View {
                 }
             }
             .contentShape(Rectangle())
-            .gesture(createGesture())
+            // WICHTIG: simultaneousGesture statt gesture - sonst blockiert
+            // die Long-Press-Geste das Scrollen der ScrollView komplett.
+            .simultaneousGesture(createGesture())
+            .onChange(of: dragSlot != nil) { _, active in
+                onSlotActive?(active)
+            }
         }
         .overlay(alignment: .trailing) {
             if showTrailingBorder {
@@ -971,6 +956,7 @@ private struct TimelineColumn: View {
 /// The 3-day view: ONE shared hour scale on the left and three day columns
 /// that scroll together in a single scroll view.
 private struct ThreeDayTimelineView: View {
+    @State private var slotActive = false
     let days: [Date]
     let eventsProvider: (Date) -> [CalendarEventModel]
     let onSelect: (CalendarEventModel) -> Void
@@ -1047,13 +1033,15 @@ private struct ThreeDayTimelineView: View {
                                 onSelect: onSelect,
                                 colorFor: colorFor,
                                 onCreate: onCreate,
-                                showTrailingBorder: true
+                                showTrailingBorder: true,
+                                onSlotActive: { slotActive = $0 }
                             )
                             .frame(maxWidth: .infinity)
                         }
                     }
                     .padding(.bottom, compact ? 12 : 40)
                 }
+                .scrollDisabled(slotActive)
             }
             .onAppear {
                 scrollToNow(proxy)

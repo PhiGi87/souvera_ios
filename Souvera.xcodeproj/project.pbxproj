@@ -21,7 +21,6 @@
 		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */; };
 		A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */; };
-		5FA073489C65476BB7A3497D /* SouveraBackSwipe.swift in Sources */ = {isa = PBXBuildFile; fileRef = C1E57B4F69C3427797997228 /* SouveraBackSwipe.swift */; };
 		2F84FEED17DC47E3A50B934B /* SouveraLog.swift in Sources */ = {isa = PBXBuildFile; fileRef = D53F1C1AA50B4C3DA7DBC3E7 /* SouveraLog.swift */; };
 		7E94742FA51A4A408BFDE316 /* SouveraLogSender.swift in Sources */ = {isa = PBXBuildFile; fileRef = C16E540662EA477BBD780FEB /* SouveraLogSender.swift */; };
 		3885718598A7412BA5DBA240 /* SouveraPushDiagnosticsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3FB8FC7D22C4E6BA0FE56DD /* SouveraPushDiagnosticsView.swift */; };
@@ -1269,7 +1268,6 @@
 		B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraAppearance.swift"; sourceTree = SOURCE_ROOT; };
 		C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
 		C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBanner.swift"; sourceTree = SOURCE_ROOT; };
-		C1E57B4F69C3427797997228 /* SouveraBackSwipe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraBackSwipe.swift"; sourceTree = SOURCE_ROOT; };
 		D53F1C1AA50B4C3DA7DBC3E7 /* SouveraLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLog.swift"; sourceTree = SOURCE_ROOT; };
 		C16E540662EA477BBD780FEB /* SouveraLogSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLogSender.swift"; sourceTree = SOURCE_ROOT; };
 		E3FB8FC7D22C4E6BA0FE56DD /* SouveraPushDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Settings/Settings/SouveraPushDiagnosticsView.swift"; sourceTree = SOURCE_ROOT; };
@@ -3276,7 +3274,6 @@
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
 				D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */,
 				C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */,
-				C1E57B4F69C3427797997228 /* SouveraBackSwipe.swift */,
 				D53F1C1AA50B4C3DA7DBC3E7 /* SouveraLog.swift */,
 				C16E540662EA477BBD780FEB /* SouveraLogSender.swift */,
 				E3FB8FC7D22C4E6BA0FE56DD /* SouveraPushDiagnosticsView.swift */,
@@ -5017,7 +5014,6 @@
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
 				B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */,
 				A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */,
-				5FA073489C65476BB7A3497D /* SouveraBackSwipe.swift in Sources */,
 				2F84FEED17DC47E3A50B934B /* SouveraLog.swift in Sources */,
 				7E94742FA51A4A408BFDE316 /* SouveraLogSender.swift in Sources */,
 				3885718598A7412BA5DBA240 /* SouveraPushDiagnosticsView.swift in Sources */,

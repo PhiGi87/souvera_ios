@@ -322,15 +322,7 @@ struct LinkView: View {
                 callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
             }
         case let .chat(token, title):
-            // Apple-like Back-Swipe: die Raumübersicht liegt als Preview
-            // hinter dem Chat und gleitet beim Kanten-Zug herein.
-            SouveraBackSwipe(onBack: { viewModel.back() }) {
-                LinkConversationListView(viewModel: viewModel) { room in
-                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
-                }
-            } content: {
-                LinkChatView(viewModel: viewModel, token: token, title: title)
-            }
+            LinkChatView(viewModel: viewModel, token: token, title: title)
         }
     }
 }
@@ -678,12 +670,18 @@ struct LinkChatView: View {
     @State private var reactionTarget: LinkChatMessage?
     @State private var replyingTo: LinkChatMessage?
     @State private var forwardTarget: LinkChatMessage?
+    /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht (einfache
+    /// Variante: Ansicht folgt dem Finger, kein Preview-Overlay).
+    @State private var backDragOffset: CGFloat = 0
+
     var body: some View {
         VStack(spacing: 0) {
             messageList
             Divider()
             composer
         }
+        .offset(x: backDragOffset)
+        .gesture(edgeSwipeBack)
         .overlay {
             if let target = reactionTarget {
                 EmojiReactionOverlay(
@@ -735,6 +733,29 @@ struct LinkChatView: View {
         }
     }
 
+    /// Kanten-Geste: von der linken Bildschirmkante nach rechts ziehen
+    /// führt zurück zur Raumübersicht.
+    private var edgeSwipeBack: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                guard value.startLocation.x < 32,
+                      value.translation.width > 0,
+                      abs(value.translation.height) < abs(value.translation.width) else { return }
+                backDragOffset = min(value.translation.width, 140)
+            }
+            .onEnded { value in
+                let qualifies = value.startLocation.x < 32
+                    && value.translation.width > 80
+                    && abs(value.translation.height) < abs(value.translation.width)
+                if qualifies {
+                    viewModel.back()
+                }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    backDragOffset = 0
+                }
+            }
+    }
+
     private func updateMentions() {
         guard let lastAt = draft.lastIndex(of: "@") else {
             mentionSuggestions = []
@@ -770,6 +791,17 @@ struct LinkChatView: View {
         case let .success(items):
             ScrollViewReader { proxy in
                 List {
+                    // Sentinel oben: lädt ältere Nachrichten nach, falls der
+                    // Historie-Loop noch nicht fertig ist (kein Paging-UI).
+                    if viewModel.hasMoreHistory {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                        .onAppear { viewModel.loadEarlierHistory() }
+                    }
                     ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)

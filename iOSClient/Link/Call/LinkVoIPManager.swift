@@ -216,27 +216,25 @@ final class LinkVoIPManager: NSObject {
                 nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
                 SouveraLog.write("PushVoip", "NC registration OK \(urlBase)")
 
-                let userAgent = String(format: "%@  (Strict VoIP)", NCBrandOptions.shared.getUserAgent())
-                let options = NKRequestOptions(customUserAgent: userAgent)
                 let combined = SouveraPushRegistrar.combinedToken(
                     normal: NCPreferences().deviceTokenPushNotification,
                     voip: voipToken
                 )
-                let responseProxy = await NextcloudKit.shared.subscribingPushProxyAsync(proxyServerUrl: proxyServerUrl,
-                                                                                        pushToken: combined,
-                                                                                        deviceIdentifier: deviceIdentifier,
-                                                                                        signature: signature,
-                                                                                        publicKey: subscribingPublicKey,
-                                                                                        account: account,
-                                                                                        options: options)
-                if responseProxy.error == .success {
+                // Tolerante Registrierung: 2xx = Erfolg (Proxy antwortet
+                // mit leerem Body).
+                let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
+                                                                         pushToken: combined,
+                                                                         deviceIdentifier: deviceIdentifier,
+                                                                         signature: signature,
+                                                                         publicKey: subscribingPublicKey)
+                if proxyOk {
                     nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
                     UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
                     SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
                 } else {
-                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl), status \(responseProxy.error.errorCode)")
-                    UserDefaults.standard.set("failed proxy \(responseProxy.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusVoip")
-                    SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl) status \(responseProxy.error.errorCode)")
+                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl)")
+                    UserDefaults.standard.set("failed proxy \(Date())", forKey: "SouveraPushRegStatusVoip")
+                    SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl)")
                 }
             }
         }
