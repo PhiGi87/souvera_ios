@@ -92,6 +92,48 @@ class NCMainTabBarController: UITabBarController {
                 self.selectedIndex = 2
             }
         }
+
+        // The Link chat can ask the app to show a chat file's folder in the
+        // Files tab (shared files are stored under "Souvera/Link/<room>/…").
+        NotificationCenter.default.addObserver(forName: .openFileInFiles, object: nil, queue: .main) { [weak self] notification in
+            guard let self, let folderPath = notification.object as? String, !folderPath.isEmpty else { return }
+            Task { @MainActor in
+                self.openFilesFolder(folderPath)
+            }
+        }
+    }
+
+    /// Wechselt in den Dateien-Tab und navigiert in den Ordner mit dem
+    /// relativen Pfad (ohne führenden Slash, relativ zur Nutzer-Wurzel).
+    /// Wiederverwendung bestehender Navigation oder Push einer neuen
+    /// Ordner-Ansicht - identisch zum internen pushMetadata-Fluss.
+    private func openFilesFolder(_ relativeFolderPath: String) {
+        guard let filesNav = viewControllers?.first(where: { $0 is NCFilesNavigationController }) as? NCFilesNavigationController else { return }
+        let session = NCSession.shared.getSession(controller: self)
+        let home = NCUtilityFileSystem().getHomeServer(session: session)
+        let serverUrl = NCUtilityFileSystem().createServerUrl(serverUrl: home, fileName: relativeFolderPath)
+
+        selectedIndex = ControllerConstants.filesIndex
+
+        if let existing = navigationCollectionViewCommon.first(where: {
+            $0.navigationController === filesNav && $0.serverUrl == serverUrl
+        }) {
+            filesNav.popToViewController(existing.viewController, animated: true)
+            return
+        }
+        guard let viewController = UIStoryboard(name: "NCFiles", bundle: nil).instantiateInitialViewController() as? NCFiles else { return }
+        viewController.serverUrl = serverUrl
+        viewController.titlePreviusFolder = filesNav.topViewController?.navigationItem.title
+        viewController.titleCurrentFolder = (serverUrl as NSString).lastPathComponent
+        filesNav.popToRootViewController(animated: false)
+        navigationCollectionViewCommon.append(
+            NavigationCollectionViewCommon(
+                serverUrl: serverUrl,
+                navigationController: filesNav,
+                viewController: viewController
+            )
+        )
+        filesNav.pushViewController(viewController, animated: true)
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -109,6 +151,16 @@ class NCMainTabBarController: UITabBarController {
     private func configureTabBarAppearance() {
         let appearance = UITabBarAppearance()
         appearance.configureWithDefaultBackground()
+        // Inaktive Tab-Icons im hellen Modus immer schwarz (nicht grau);
+        // im dunklen Modus das Systemgrau beibehalten.
+        appearance.stackedLayoutAppearance.normal.iconColor = UIColor { trait in
+            trait.userInterfaceStyle == .dark ? .secondaryLabel : .black
+        }
+        appearance.stackedLayoutAppearance.normal.titleTextAttributes = [.foregroundColor: UIColor { trait in
+            trait.userInterfaceStyle == .dark ? .secondaryLabel : .black
+        }]
+        appearance.inlineLayoutAppearance.normal.iconColor = appearance.stackedLayoutAppearance.normal.iconColor
+        appearance.inlineLayoutAppearance.normal.titleTextAttributes = appearance.stackedLayoutAppearance.normal.titleTextAttributes
 
         tabBar.standardAppearance = appearance
         tabBar.scrollEdgeAppearance = appearance

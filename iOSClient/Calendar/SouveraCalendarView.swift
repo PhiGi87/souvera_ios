@@ -60,8 +60,16 @@ struct SouveraCalendarView: View {
                 let isWide = geometry.size.width > geometry.size.height
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 VStack(spacing: 0) {
-                    // Suchfeld nur auf Knopfdruck: eigene Zeile (schiebt den
-                    // Inhalt nach unten statt ihn zu überlagern).
+                    if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
+                    } else {
+                        searchResults
+                    }
+                }
+                .padding(.top, 8)
+                .overlay(alignment: .top) {
+                    // Suchfeld als Overlay: überlagert den Inhalt, ohne ihn
+                    // zu verschieben (nur auf Knopfdruck sichtbar).
                     if showSearch {
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
@@ -77,17 +85,15 @@ struct SouveraCalendarView: View {
                             }
                         }
                         .padding(.horizontal, 16)
-                        .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground))
-                    }
-
-                    if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
-                    } else {
-                        searchResults
+                        .padding(.vertical, 10)
+                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        .shadow(radius: 4)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 4)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                     }
                 }
-                .padding(.top, 8)
+                .animation(.easeInOut(duration: 0.2), value: showSearch)
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
@@ -473,10 +479,20 @@ struct SouveraCalendarView: View {
     }
 
     private var threeDayRange: [Date] {
+        // Der aktuelle Tag steht IMMER in der ersten Spalte: die Fenster
+        // sind an heute verankert (heute + 3*k Tage), die Pfeile/Swipe
+        // schieben um ganze Fenster (±3).
         let calendar = Calendar.current
-        guard let previous = calendar.date(byAdding: .day, value: -1, to: selectedDay),
-              let next = calendar.date(byAdding: .day, value: 1, to: selectedDay) else { return [selectedDay] }
-        return [previous, selectedDay, next]
+        let today = calendar.startOfDay(for: Date())
+        let selected = calendar.startOfDay(for: selectedDay)
+        let dayDiff = calendar.dateComponents([.day], from: today, to: selected).day ?? 0
+        let offset = dayDiff >= 0 ? (dayDiff / 3) * 3 : ((dayDiff - 2) / 3) * 3
+        guard let base = calendar.date(byAdding: .day, value: offset, to: today),
+              let second = calendar.date(byAdding: .day, value: 1, to: base),
+              let third = calendar.date(byAdding: .day, value: 2, to: base) else {
+            return [selectedDay]
+        }
+        return [base, second, third]
     }
 
     // MARK: - Event rows
@@ -883,20 +899,26 @@ private struct TimelineColumn: View {
     @GestureState private var dragSlot: (start: Int, end: Int)?
 
     private func createGesture() -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        // Terminanlage erst nach einem LONG-PRESS (~0,45 s) auf den Zeitslot:
+        // normales Tippen/Scrollen darf keinen Termin auslösen. Nach dem
+        // Long-Press kann der Finger den Slot noch vergrößern (Drag), bevor
+        // er loslässt - der Slot-Rahmen folgt live mit.
+        LongPressGesture(minimumDuration: 0.45, maximumDistance: 28)
+            .sequenced(before: DragGesture(minimumDistance: 0))
             .updating($dragSlot) { value, state, _ in
-                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                guard case let .second(true, drag?) = value else { return }
+                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
                 let a = Self.snapDown(min(startMinute, endMinute))
                 let b = Self.snapUp(max(startMinute, endMinute))
                 state = (a, max(b, a + 15))
             }
             .onEnded { value in
-                guard let onCreate else { return }
+                guard case let .second(true, drag?) = value, let onCreate else { return }
                 let calendar = Calendar.current
                 let dayStart = calendar.startOfDay(for: day)
-                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
                 let a = Self.snapDown(min(startMinute, endMinute))
                 let b = Self.snapUp(max(startMinute, endMinute))
                 let slotDuration = max(15, b - a)
@@ -1040,11 +1062,11 @@ private struct CalendarEventDetailSheet: View {
                 Section {
                     Label(dateLabel, systemImage: "clock")
                     if let location = event.location, !location.isEmpty {
-                        Label {
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: "mappin")
+                                .foregroundStyle(.secondary)
                             Text(SouveraLinkOpener.linkified(location))
                                 .souveraOpenURLAction()
-                        } icon: {
-                            Image(systemName: "mappin")
                         }
                     }
                 }

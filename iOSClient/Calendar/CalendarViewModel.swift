@@ -29,6 +29,7 @@ final class CalendarViewModel: ObservableObject {
     private var eventsSignature = ""
     /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner.
     @Published var cacheBannerActive = false
+    private let cacheBannerGate = SouveraCacheBannerGate()
     @Published var visibleMonth: Date = Date()
     /// Active calendars; defaults to ALL available calendars and persists
     /// across launches until the user changes the selection.
@@ -238,7 +239,7 @@ final class CalendarViewModel: ObservableObject {
             // Server nicht erreichbar: Kalenderliste aus dem Cache.
             calendars = cachedCalendars
             restoreSelection(cachedCalendars)
-            cacheBannerActive = true
+            cacheBannerActive = cacheBannerGate.shouldTrigger()
         }
 
         var entries: [CalDavEventEntry] = []
@@ -251,7 +252,7 @@ final class CalendarViewModel: ObservableObject {
         if entries.isEmpty, let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
             entries = cached
             offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
-            cacheBannerActive = true
+            cacheBannerActive = cacheBannerGate.shouldTrigger()
         }
 
         cachedEntries = entries

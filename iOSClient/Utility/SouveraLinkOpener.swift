@@ -7,6 +7,10 @@ extension Notification.Name {
     /// Posted when another module (e.g. the calendar) wants the Link tab to
     /// open a specific conversation.
     static let openLinkRoom = Notification.Name("SouveraOpenLinkRoom")
+    /// Posted when the Link chat wants the Files tab to show a specific
+    /// folder; object = folder path relative to the user root (no leading
+    /// slash, e.g. "Souvera/Link/Intern-36icekye").
+    static let openFileInFiles = Notification.Name("SouveraOpenFileInFiles")
 }
 
 /// Öffnet URLs einheitlich in der App: interne App-Links (Talk-Räume,

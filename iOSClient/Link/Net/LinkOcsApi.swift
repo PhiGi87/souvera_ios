@@ -429,13 +429,41 @@ actor LinkOcsApi {
     // MARK: - HTTP plumbing
 
     private func get(_ url: String, longPoll: Bool = false) async -> String? {
-        let req = signed(url: url, method: "GET")
         let used = longPoll ? longPollSession : session
-        guard let (data, response) = try? await used.data(for: req),
-              let http = response as? HTTPURLResponse else { return nil }
-        if http.statusCode == Self.notModified { return nil }
-        guard (200..<300).contains(http.statusCode) else { return nil }
-        return String(data: data, encoding: .utf8)
+        let maxAttempts = longPoll ? 1 : 3
+        for attempt in 0..<maxAttempts {
+            let req = signed(url: url, method: "GET")
+            do {
+                let (data, response) = try await used.data(for: req)
+                guard let http = response as? HTTPURLResponse else { return nil }
+                if http.statusCode == Self.notModified { return nil }
+                guard (200..<300).contains(http.statusCode) else {
+                    if attempt + 1 < maxAttempts, Self.isTransient(status: http.statusCode) {
+                        try? await Task.sleep(nanoseconds: Self.retryDelay(attempt))
+                        continue
+                    }
+                    return nil
+                }
+                return String(data: data, encoding: .utf8)
+            } catch {
+                // Kurze Transport-/Serverzuckungen abfedern, bevor der
+                // Cache-Fallback der Aufrufer greift (bis zu 2 Retries).
+                if attempt + 1 < maxAttempts {
+                    try? await Task.sleep(nanoseconds: Self.retryDelay(attempt))
+                    continue
+                }
+                return nil
+            }
+        }
+        return nil
+    }
+
+    private static func isTransient(status: Int) -> Bool {
+        status == 429 || status >= 500
+    }
+
+    private static func retryDelay(_ attempt: Int) -> UInt64 {
+        UInt64(500_000_000 * (attempt + 1))
     }
 
     private func signed(url: String, method: String) -> URLRequest {

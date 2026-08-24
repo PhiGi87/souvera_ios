@@ -107,6 +107,17 @@ struct MailMessage: Identifiable {
         if let name = fromDisplayName, !name.isEmpty { return name }
         return fromAddress
     }
+
+    /// Empfänger-Anzeige für den Gesendet-Ordner: erste Adresse (bei mehreren
+    /// mit +N-Suffix, wenn keine Namen verfügbar sind).
+    var displayTo: String {
+        let addresses = toAddresses.commaSeparated()
+        guard let first = addresses.first, !first.isEmpty else { return "" }
+        if addresses.count > 1 {
+            return "\(first) +\(addresses.count - 1)"
+        }
+        return first
+    }
 }
 
 struct MessageBody {

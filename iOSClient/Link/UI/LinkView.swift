@@ -61,15 +61,27 @@ struct LinkView: View {
                             .accessibilityLabel(NSLocalizedString("_link_participants_", comment: ""))
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
-                            Button {
-                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
-                            } label: {
-                                Image(systemName: "phone.fill").foregroundStyle(.green)
-                            }
-                            Button {
-                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: true)
-                            } label: {
-                                Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
+                            if viewModel.currentRoom?.hasCall == true {
+                                // Läuft im Raum bereits ein Call: direkt
+                                // teilnehmen statt neu anzurufen.
+                                Button {
+                                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                                } label: {
+                                    Label(NSLocalizedString("_link_join_call_", comment: ""), systemImage: "phone.fill.arrow.up.right")
+                                        .foregroundStyle(.green)
+                                        .labelStyle(.titleAndIcon)
+                                }
+                            } else {
+                                Button {
+                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
+                                } label: {
+                                    Image(systemName: "phone.fill").foregroundStyle(.green)
+                                }
+                                Button {
+                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: true)
+                                } label: {
+                                    Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
+                                }
                             }
                         }
                     }
@@ -614,11 +626,12 @@ struct LinkChatView: View {
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
     @State private var editingMessage: LinkChatMessage?
-    @State private var previewURL: URL?
     @State private var mentionSuggestions: [LinkParticipant] = []
     @State private var reactionTarget: LinkChatMessage?
     @State private var replyingTo: LinkChatMessage?
     @State private var forwardTarget: LinkChatMessage?
+    /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht.
+    @State private var backDragOffset: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -626,6 +639,8 @@ struct LinkChatView: View {
             Divider()
             composer
         }
+        .offset(x: backDragOffset)
+        .gesture(edgeSwipeBack)
         .overlay {
             if let target = reactionTarget {
                 EmojiReactionOverlay(
@@ -664,7 +679,6 @@ struct LinkChatView: View {
                 viewModel.shareAttachment(selection)
             }
         }
-        .quickLookPreview($previewURL)
         .sheet(item: $forwardTarget) { message in
             ForwardPickerSheet(viewModel: viewModel, message: message)
         }
@@ -676,6 +690,30 @@ struct LinkChatView: View {
                 viewModel.signaling.notifyTyping()
             }
         }
+    }
+
+    /// Kanten-Geste von der linken Bildschirmkante nach rechts: zurück zur
+    /// Raumübersicht (analog zum System-Back-Gesture; die Ansicht folgt dem
+    /// Finger und federt zurück, wenn die Schwelle nicht erreicht wird).
+    private var edgeSwipeBack: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .onChanged { value in
+                guard value.startLocation.x < 32,
+                      value.translation.width > 0,
+                      abs(value.translation.height) < abs(value.translation.width) else { return }
+                backDragOffset = min(value.translation.width, 140)
+            }
+            .onEnded { value in
+                let qualifies = value.startLocation.x < 32
+                    && value.translation.width > 80
+                    && abs(value.translation.height) < abs(value.translation.width)
+                if qualifies {
+                    viewModel.back()
+                }
+                withAnimation(.easeOut(duration: 0.2)) {
+                    backDragOffset = 0
+                }
+            }
     }
 
     private func updateMentions() {
@@ -728,12 +766,10 @@ struct LinkChatView: View {
                                 showTime: showsTime(index: index, message: message, items: items),
                                 showsAvatar: showsAvatar(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
-                                onOpenFile: { info in
-                                    Task {
-                                        if let url = await viewModel.downloadAttachment(info) {
-                                            previewURL = url
-                                        }
-                                    }
+                                onFileTap: { info in
+                                    // Datei im Dateien-Modul anzeigen (Ordner
+                                    // des Talk-Uploads statt lokaler Vorschau).
+                                    viewModel.openFileInFiles(info)
                                 },
                                 onStartReply: { replyingTo = message },
                                 onStartForward: { forwardTarget = message },
@@ -963,7 +999,7 @@ private struct LinkMessageRow: View {
     var showTime: Bool = true
     var showsAvatar: Bool = true
     let onStartEdit: () -> Void
-    let onOpenFile: (LinkFileInfo) -> Void
+    let onFileTap: (LinkFileInfo) -> Void
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
@@ -1063,7 +1099,7 @@ private struct LinkMessageRow: View {
                 replyQuote
                 if let file = message.fileInfo() {
                     Button {
-                        onOpenFile(file)
+                        onFileTap(file)
                     } label: {
                         HStack(spacing: 6) {
                             Image(systemName: "paperclip").font(.caption)
@@ -1297,7 +1333,7 @@ struct LinkParticipantsSheet: View {
                                 Spacer()
                             }
                             .swipeActions(edge: .trailing) {
-                                if viewModel.currentRoom?.canManage == true {
+                                if canRemove(participant) {
                                     Button(role: .destructive) {
                                         removeCandidate = participant
                                     } label: {
@@ -1352,6 +1388,15 @@ struct LinkParticipantsSheet: View {
         case "email_guest": return "envelope.badge.person.crop"
         default: return "person.crop.circle"
         }
+    }
+
+    /// Entfernen nur mit Moderator-Recht UND weder für die eigene Person
+    /// noch für den Besitzer (participantType == 1).
+    private func canRemove(_ participant: LinkParticipant) -> Bool {
+        guard viewModel.currentRoom?.canManage == true else { return false }
+        let isOwn = participant.actorType == "users" && participant.actorId == viewModel.currentUserId
+        let isOwner = participant.participantType == 1
+        return !isOwn && !isOwner
     }
 
     private func participantIcon(_ actorType: String) -> String {

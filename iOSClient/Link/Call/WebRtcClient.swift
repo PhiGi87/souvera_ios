@@ -14,6 +14,9 @@ final class WebRtcClient {
     private let factory: RTCPeerConnectionFactory
     private var videoCapturer: RTCCameraVideoCapturer?
     private var videoSource: RTCVideoSource?
+    private var captureDevice: AVCaptureDevice?
+    private var captureFormat: AVCaptureDevice.Format?
+    private var captureFps: Int = 30
     private var disposed = false
 
     init() {
@@ -53,11 +56,27 @@ final class WebRtcClient {
             let rd = CMVideoFormatDescriptionGetDimensions(rhs.formatDescription)
             return abs(Int(ld.width) - 1280) < abs(Int(rd.width) - 1280)
         }) ?? formats.first
+        captureDevice = device
+        captureFormat = format
         if let format {
             let fps = (format.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 30)
-            capturer.startCapture(with: device, format: format, fps: Int(min(fps, 30)))
+            captureFps = Int(min(fps, 30))
+            capturer.startCapture(with: device, format: format, fps: captureFps)
         }
         return factory.videoTrack(with: source, trackId: "link_video0")
+    }
+
+    /// Restarts the camera capture (video was re-enabled after a stop).
+    func startVideoCapture() {
+        guard let capturer = videoCapturer,
+              let device = captureDevice,
+              let format = captureFormat else { return }
+        capturer.startCapture(with: device, format: format, fps: captureFps)
+    }
+
+    /// Stops the camera capture (video off - the camera LED must go out).
+    func stopVideoCapture() {
+        videoCapturer?.stopCapture()
     }
 
     func dispose() {
@@ -66,6 +85,8 @@ final class WebRtcClient {
         videoCapturer?.stopCapture()
         videoCapturer = nil
         videoSource = nil
+        captureDevice = nil
+        captureFormat = nil
         RTCCleanupSSL()
     }
 }

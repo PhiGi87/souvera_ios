@@ -55,7 +55,22 @@ struct MailView: View {
         .onAppear { viewModel.start() }
         .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
-            if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
+            if viewModel.isSending {
+                // Solange die Mail gesendet wird: Info-Overlay unten (wie der
+                // "Email gesendet"-Banner), verschwindet beim Abschluss.
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(NSLocalizedString("_mail_sending_", comment: ""))
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
                 MailSendBanner(feedback: feedback)
                     .padding(.horizontal)
                     .padding(.bottom, 24)
@@ -918,7 +933,7 @@ private struct MailMessageListView: View {
             .buttonStyle(.plain)
         } else {
             Button { viewModel.openMessage(message) } label: {
-                MailRow(message: message)
+                MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
             .buttonStyle(.plain)
             .swipeActions(edge: .trailing) {
@@ -1187,22 +1202,27 @@ private struct MailSearchView: View {
 
 private struct MailRow: View {
     let message: MailMessage
+    var showsRecipient = false
 
     var body: some View {
-        MailRowContent(message: message)
+        MailRowContent(message: message, showsRecipient: showsRecipient)
             .padding(.vertical, 2)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }
 
 private struct MailRowContent: View {
     let message: MailMessage
+    var showsRecipient = false
 
     var body: some View {
         HStack(spacing: 10) {
             Circle().fill(message.isRead ? Color.clear : Color(NCBrandColor.shared.customer)).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
-                    Text(message.displayFrom).fontWeight(message.isRead ? .regular : .semibold).lineLimit(1)
+                    Text(showsRecipient ? message.displayTo : message.displayFrom)
+                        .fontWeight(message.isRead ? .regular : .semibold).lineLimit(1)
                     Spacer()
                     if message.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption2) }
                     Text(MailDateFormatter.listLabel(for: message.dateSent)).font(.caption2).foregroundStyle(.secondary)
@@ -1211,6 +1231,7 @@ private struct MailRowContent: View {
                     .font(.subheadline).lineLimit(1).foregroundStyle(message.isRead ? .secondary : .primary)
             }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

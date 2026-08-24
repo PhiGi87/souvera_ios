@@ -37,15 +37,22 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var mcuActive = false
     private var endedOnce = false
     private let silent: Bool
+    private let withVideo: Bool
+    /// Aktueller Video-Zustand (für Re-Attach der Call-UI).
+    private(set) var isVideoEnabled: Bool
+    var isMutedLocally: Bool { !(localAudio?.isEnabled ?? true) }
     private var publisherCreated = false
+    private var videoCreationInFlight = false
 
-    private let callFlags: Int
+    private var callFlags: Int
 
     init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks?, withVideo: Bool = true, silent: Bool = false) {
         self.account = account
         self.token = token
         self.callbacks = callbacks
         self.silent = silent
+        self.withVideo = withVideo
+        self.isVideoEnabled = withVideo
         self.callFlags = withVideo ? 7 : 3 // FLAG_IN_CALL|WITH_AUDIO|WITH_VIDEO : IN_CALL|AUDIO
         self.api = LinkOcsApi(account: account)
         super.init()
@@ -64,10 +71,13 @@ final class CallSession: NSObject, HpbSignalingListener {
             // mirroring the Android client. Opening the call earlier makes
             // the MCU ignore our publisher.
             await MainActor.run {
-                self.localAudio = self.webRtc.createLocalAudioTrack()
-                if let video = self.webRtc.createLocalVideoTrack() {
-                    self.localVideo = video
-                    self.callbacks?.onLocalVideo(track: video)
+                let audio = self.webRtc.createLocalAudioTrack()
+                // "Stiller Anruf" startet lokal stumm (Talk-Standard).
+                audio.isEnabled = !self.silent
+                self.localAudio = audio
+                CallDebugLog.log("CallSession", "audio track created, muted=\(self.silent)")
+                if self.withVideo {
+                    self.createVideoTrackIfNeeded()
                 }
             }
             pendingIceServers = settings.iceServers()
@@ -96,7 +106,27 @@ final class CallSession: NSObject, HpbSignalingListener {
         Task {
             await api.joinCall(token: token, flags: callFlags, silent: silent)
             CallDebugLog.log("CallSession", "joinCall sent flags=\(callFlags) (after room join)")
+            // Audio-Session beim Call-Start aktivieren (Hörmuschel-Default).
+            // Ohne aktive playAndRecord-Session überträgt WebRTC kein Audio.
+            Self.activateCallAudioSession()
         }
+    }
+
+    /// Aktiviert die Call-Audio-Session: playAndRecord + voiceChat (Standard
+    /// = Hörmuschel); der Speaker-Button schaltet auf .speaker/.videoChat um.
+    static func activateCallAudioSession() {
+        let audioSession = RTCAudioSession.sharedInstance()
+        audioSession.lockForConfiguration()
+        do {
+            try audioSession.setCategory(.playAndRecord, with: [.allowBluetooth, .allowBluetoothA2DP])
+            try audioSession.setMode(.voiceChat)
+            try audioSession.setActive(true)
+            try audioSession.overrideOutputAudioPort(.none)
+            CallDebugLog.log("CallSession", "audio session active (playAndRecord/voiceChat/earpiece)")
+        } catch {
+            CallDebugLog.log("CallSession", "audio session error: \(error.localizedDescription)")
+        }
+        audioSession.unlockForConfiguration()
     }
 
     /// The server confirmed our session is in-call; only now may we publish
@@ -163,8 +193,85 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     // MARK: - Controls
 
-    func setMuted(_ muted: Bool) { localAudio?.isEnabled = !muted }
-    func setVideoEnabled(_ enabled: Bool) { localVideo?.isEnabled = enabled }
+    func setMuted(_ muted: Bool) {
+        CallDebugLog.log("CallSession", "setMuted \(muted)")
+        localAudio?.isEnabled = !muted
+    }
+
+    /// Video an/aus. Im Audio-Call existiert der Video-Track noch nicht -
+    /// er wird hier LAZY erzeugt (Kamera startet erst dann), dem Publisher
+    /// hinzugefügt und neu verhandelt; zusätzlich werden die Call-Flags auf
+    /// "mit Video" angehoben (Talk-Standard). Aus: Capture stoppen (Kamera
+    /// aus), Track deaktivieren.
+    func setVideoEnabled(_ enabled: Bool) {
+        CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")
+        if enabled {
+            Task { @MainActor in
+                self.createVideoTrackIfNeeded()
+                guard let video = self.localVideo else {
+                    CallDebugLog.log("CallSession", "video enable failed: no camera track")
+                    return
+                }
+                if !video.isEnabled {
+                    video.isEnabled = true
+                }
+                self.webRtc.startVideoCapture()
+                // Der neue Track muss in bestehende lokale Verbindungen
+                // aufgenommen werden (Publisher bzw. 1:1-Peers).
+                for (session, peer) in self.peers where !self.mcuActive || session == self.ownSessionId {
+                    peer.add(video, streamIds: ["link"])
+                }
+                // Call-Flags aktualisieren, damit der Raum als Video-Call gilt.
+                if self.callFlags & 4 == 0 {
+                    self.callFlags |= 4
+                    await self.api.joinCall(token: self.token, flags: self.callFlags, silent: self.silent)
+                    CallDebugLog.log("CallSession", "joinCall flags updated to \(self.callFlags)")
+                }
+                // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
+                self.renegotiateAfterVideoChange()
+            }
+            isVideoEnabled = true
+        } else {
+            localVideo?.isEnabled = false
+            webRtc.stopVideoCapture()
+            isVideoEnabled = false
+        }
+    }
+
+    /// Erzeugt den lokalen Video-Track (nur einmal); die Kamera-Capture
+    /// startet erst beim Video-Call oder beim ersten Aktivieren.
+    private func createVideoTrackIfNeeded() {
+        guard localVideo == nil, !videoCreationInFlight else { return }
+        videoCreationInFlight = true
+        if let video = webRtc.createLocalVideoTrack() {
+            localVideo = video
+            callbacks?.onLocalVideo(track: video)
+            CallDebugLog.log("CallSession", "local video track created")
+        }
+        videoCreationInFlight = false
+    }
+
+    /// Nach einer Video-Änderung: vorhandene Verbindungen neu aushandeln.
+    /// Im MCU-Modus betrifft das die eigene Publisher-Verbindung; im 1:1-
+    /// Fall alle Peers, die lokale Tracks tragen.
+    private func renegotiateAfterVideoChange() {
+        if mcuActive, let peer = peers[ownSessionId] {
+            peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
+                guard let self, let sdp else { return }
+                peer.setLocalDescription(sdp) { _ in }
+                self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
+                CallDebugLog.log("CallSession", "publisher re-offer sent after video change")
+            }
+        } else {
+            for (session, peer) in peers where !session.isEmpty {
+                peer.offer(for: receiveConstraints()) { [weak self] sdp, _ in
+                    guard let self, let sdp else { return }
+                    peer.setLocalDescription(sdp) { _ in }
+                    self.signaling?.sendOffer(toSession: session, sdp: sdp.sdp)
+                }
+            }
+        }
+    }
 
     func hangup() {
         if endedOnce { return }

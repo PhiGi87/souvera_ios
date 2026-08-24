@@ -74,6 +74,7 @@ final class MailViewModel: ObservableObject {
     var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
     private var queryStates: [String: String] = [:]
+    private let cacheBannerGate = SouveraCacheBannerGate()
     /// Signatur der Postfachliste (Redundanz-Guard gegen identische
     /// SwiftUI-Updates).
     private var mailboxesSignature = ""
@@ -257,7 +258,13 @@ final class MailViewModel: ObservableObject {
     /// gewünscht, niemals bei internen Aktualisierungen (Badge-Abgleich etc.),
     /// weil der Routen-Wechsel den Nutzer aus der aktuellen Ansicht wirft.
     func loadMailboxes(autoOpenInbox: Bool = true) async {
-        mailboxes = .loading
+        // Cache-First: letzten Postfach-Stand sofort anzeigen (kein Spinner
+        // nach dem ersten Login), Live-Load ersetzt ihn im Hintergrund.
+        if case .loading = mailboxes,
+           let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
+            let boxes = sortMailboxGroups(filterNonStandardSentFolders(cached.map { mailbox(from: $0) }))
+            applyMailboxes(boxes)
+        }
         if useJmap {
             await loadMailboxesJmap(autoOpenInbox: autoOpenInbox)
         } else {
@@ -360,7 +367,7 @@ final class MailViewModel: ObservableObject {
                 let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
                 applyMailboxes(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
-                cacheBannerActive = true
+                cacheBannerActive = cacheBannerGate.shouldTrigger()
                 if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
                 return
             }
@@ -583,12 +590,22 @@ final class MailViewModel: ObservableObject {
     func openMailbox(_ mailbox: Mailbox) {
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
+        messages = .loading
         Task { await syncMessages() }
     }
 
     func syncMessages() async {
         guard let mailbox = currentMailbox else { return }
-        messages = .loading
+        // Cache-First: letzten Nachrichten-Snapshot SOFORT anzeigen, der
+        // Live-Sync ersetzt ihn im Hintergrund. Spinner nur ohne Cache
+        // (erster Aufruf nach Login).
+        let accountName = mailAccount?.account ?? ""
+        if case .loading = messages,
+           let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+            messages = .success(snapshot.emails.map {
+                JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
+            })
+        }
         if useJmap {
             await syncMessagesJmap(mailbox)
         } else {
@@ -684,7 +701,7 @@ final class MailViewModel: ObservableObject {
                     JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
                 })
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
-                cacheBannerActive = true
+                cacheBannerActive = cacheBannerGate.shouldTrigger()
                 return
             }
             JmapLog.write("sync failed for \(mailbox.id): \(error.localizedDescription)")
@@ -714,9 +731,9 @@ final class MailViewModel: ObservableObject {
     }
 
     /// Pull-to-refresh: always a full query so read/unread states stay fresh.
+    /// Der bestehende Listenstand bleibt während des Ladens sichtbar.
     func refreshMessages() async {
         guard let mailbox = currentMailbox else { return }
-        messages = .loading
         if useJmap {
             await syncMessagesJmap(mailbox, forceFullRefresh: true)
         } else {
@@ -823,11 +840,13 @@ final class MailViewModel: ObservableObject {
 
     private func openMessageJmap(_ message: MailMessage) async {
         guard let json = await fetchMessageJson(message) else {
+            JmapLog.write("openMessage failed: no Email/get JSON for \(message.emailId)")
             body = .error(errorText("Message not found"))
             return
         }
         var mapped = JmapMapper.mapBody(json: json)
         let accId = message.accountId
+        JmapLog.write("openMessage \(message.emailId): keys=\(json.keys.sorted().joined(separator: ",")) plain=\(mapped.plainText != nil) html=\(mapped.html != nil)")
         if mapped.plainText == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
            let blobId = textPart.optString("blobId"), !blobId.isEmpty {
             mapped = MessageBody(
@@ -844,19 +863,37 @@ final class MailViewModel: ObservableObject {
                 attachments: mapped.attachments
             )
         }
+        // Letzter Fallback: weder Inline- noch Blob-Body bekommen - die Mail
+        // noch einmal mit den Standard-Properties (ohne bodyProperties)
+        // nachladen, bevor eine leere Ansicht entsteht.
+        if mapped.plainText == nil, mapped.html == nil {
+            JmapLog.write("openMessage \(message.emailId): body empty, retrying with default properties")
+            if let fallback = await fetchMessageJson(message, withBodyProperties: false) {
+                let retried = JmapMapper.mapBody(json: fallback)
+                if retried.plainText != nil || retried.html != nil {
+                    JmapLog.write("openMessage \(message.emailId): fallback body loaded")
+                    mapped = MessageBody(
+                        plainText: retried.plainText,
+                        html: retried.html,
+                        attachments: retried.attachments
+                    )
+                }
+            }
+        }
         body = .success(mapped)
         if !message.isRead { await setRead([message], true) }
     }
 
     /// Fetches the full Email/get JSON for a message (Android-parity body
-    /// properties).
-    private func fetchMessageJson(_ message: MailMessage) async -> [String: Any]? {
+    /// properties). With `withBodyProperties` false the default property set
+    /// is used (fallback when the trimmed set yields no body).
+    private func fetchMessageJson(_ message: MailMessage, withBodyProperties: Bool = true) async -> [String: Any]? {
         guard let api = jmapApi,
               let client = jmapClient,
               let session = try? await client.refreshSession()
         else { return nil }
         let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
-        let bodyProperties: [String] = ["partId", "blobId", "size", "type", "name"]
+        let bodyProperties: [String]? = withBodyProperties ? ["partId", "blobId", "size", "type", "name"] : nil
         guard let list = try? await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties) else {
             return nil
         }

@@ -21,6 +21,8 @@
 		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */; };
 		A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */; };
+		1C6FBB7FDB584688B17B19A0 /* CallPermissions.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFDA95B014A14ADDA28C20E0 /* CallPermissions.swift */; };
+		96B5CBF7A3E14DE0BD9CBF5D /* SouveraCacheBannerGate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96DAFF788EFA47598882CC9E /* SouveraCacheBannerGate.swift */; };
 		B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */; };
 		FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */; };
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
@@ -1263,6 +1265,8 @@
 		B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraAppearance.swift"; sourceTree = SOURCE_ROOT; };
 		C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
 		C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBanner.swift"; sourceTree = SOURCE_ROOT; };
+		CFDA95B014A14ADDA28C20E0 /* CallPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/CallPermissions.swift"; sourceTree = SOURCE_ROOT; };
+		96DAFF788EFA47598882CC9E /* SouveraCacheBannerGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBannerGate.swift"; sourceTree = SOURCE_ROOT; };
 		D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLinkOpener.swift"; sourceTree = SOURCE_ROOT; };
 		FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapTypes.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1ADD802F125C3224605E0 /* JmapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapClient.swift"; sourceTree = SOURCE_ROOT; };
@@ -3264,6 +3268,8 @@
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
 				D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */,
 				C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */,
+				CFDA95B014A14ADDA28C20E0 /* CallPermissions.swift */,
+				96DAFF788EFA47598882CC9E /* SouveraCacheBannerGate.swift */,
 				C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */,
 				E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */,
 			);
@@ -4756,6 +4762,8 @@
 				A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */,
 				B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */,
 				A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */,
+				1C6FBB7FDB584688B17B19A0 /* CallPermissions.swift in Sources */,
+				96B5CBF7A3E14DE0BD9CBF5D /* SouveraCacheBannerGate.swift in Sources */,
 				F71DFA222F59FB9A003A93C5 /* View+Extension.swift in Sources */,
 				AF22B20C277C6F4D00DAB0CC /* NCShareCell.swift in Sources */,
 				F7B769AB2B7A0B2000C1AAEB /* NCManageDatabase+Metadata+Session.swift in Sources */,

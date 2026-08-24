@@ -49,18 +49,78 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         if let attached = attachedSession {
             self.session = attached
             attached.reattach(callbacks: self)
+            applyInitialControlStates()
         } else {
             let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn, silent: silent)
             self.session = session
-            session.start()
+            applyMuteStateOnly()
+            // Berechtigungs-Flow VOR dem Call-Start; die Dialoge erscheinen
+            // nur beim allerersten Mal (Talk-Standard). Ohne Mikrofon kein
+            // Call; ohne Kamera läuft der Video-Call audio-only weiter.
+            Task {
+                let audioOk = await CallPermissions.ensureAudio()
+                if !audioOk {
+                    CallDebugLog.log("CallVC", "microphone denied - aborting call")
+                    await MainActor.run { self.showPermissionDeniedHint() }
+                    return
+                }
+                if isVideoOn {
+                    let cameraOk = await CallPermissions.ensureCamera()
+                    CallDebugLog.log("CallVC", "camera permission granted=\(cameraOk)")
+                    if !cameraOk {
+                        await MainActor.run {
+                            self.isVideoOn = false
+                            self.videoButton?.setImage(UIImage(systemName: "video.slash.fill"), for: .normal)
+                            self.participantsLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
+                        }
+                    }
+                }
+                if session.hasEnded { return }
+                // Erst jetzt Video einschalten (Kamera-Rechte liegen vor):
+                // erzeugt den Track lazy bzw. bleibt bei Audio-only aus.
+                session.setVideoEnabled(isVideoOn)
+                session.start()
+                // Talk-Standard: ausgehenden Call an CallKit melden.
+                LinkVoIPManager.shared.reportOutgoingCall(token: token, title: title_, withVideo: isVideoOn)
+            }
         }
-        // Initialzustand: Video nur senden, wenn der Anruf mit Video
-        // beantwortet wurde; der Toggle in der Leiste schaltet live um.
-        session?.setVideoEnabled(isVideoOn)
-        videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
-
         NotificationCenter.default.addObserver(self, selector: #selector(externalEnd), name: .linkEndCall, object: nil)
         loadParticipants()
+    }
+
+    /// Initiale Button-Zustände für re-attached Sessions (Rückkehr aus dem
+    /// Chat): der tatsächliche Session-Zustand gewinnt - ein im Call
+    /// aktiviertes/deaktiviertes Video oder Mute wird NICHT zurückgesetzt.
+    private func applyInitialControlStates() {
+        if let session {
+            isVideoOn = session.isVideoEnabled
+            videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
+            isMuted = session.isMutedLocally
+            muteButton?.setImage(UIImage(systemName: isMuted ? "mic.slash.fill" : "mic.fill"), for: .normal)
+        }
+    }
+
+    /// Nur der Mute-Zustand (frische Sessions: der Video-Zustand folgt nach
+    /// dem Berechtigungs-Flow).
+    private func applyMuteStateOnly() {
+        videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
+        if silent {
+            isMuted = true
+            session?.setMuted(true)
+            muteButton?.setImage(UIImage(systemName: "mic.slash.fill"), for: .normal)
+        }
+    }
+
+    private func showPermissionDeniedHint() {
+        let alert = UIAlertController(
+            title: NSLocalizedString("_link_mic_denied_", comment: ""),
+            message: NSLocalizedString("_link_mic_denied_hint_", comment: ""),
+            preferredStyle: .alert
+        )
+        alert.addAction(UIAlertAction(title: NSLocalizedString("_ok_", comment: ""), style: .default) { [weak self] _ in
+            self?.dismiss(animated: true)
+        })
+        present(alert, animated: true)
     }
 
     // MARK: - Participants overlay
@@ -162,12 +222,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         isMuted.toggle()
         session?.setMuted(isMuted)
         muteButton?.setImage(UIImage(systemName: isMuted ? "mic.slash.fill" : "mic.fill"), for: .normal)
+        CallDebugLog.log("CallVC", "mute \(isMuted ? "on" : "off")")
     }
 
     @objc private func toggleVideo() {
         isVideoOn.toggle()
         session?.setVideoEnabled(isVideoOn)
         videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
+        CallDebugLog.log("CallVC", "video \(isVideoOn ? "on" : "off")")
     }
 
     @objc private func toggleSpeaker() {
@@ -176,7 +238,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         audioSession.lockForConfiguration()
         do {
             try audioSession.setCategory(.playAndRecord, with: [.allowBluetooth, .allowBluetoothA2DP])
-            try audioSession.setMode(.videoChat)
+            // Talk-Standard: Hörmuschel = voiceChat, Lautsprecher = videoChat.
+            try audioSession.setMode(isSpeakerOn ? .videoChat : .voiceChat)
             try audioSession.setActive(true)
             try audioSession.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
         } catch {
@@ -184,6 +247,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
         audioSession.unlockForConfiguration()
         speakerButton?.setImage(UIImage(systemName: isSpeakerOn ? "speaker.wave.3.fill" : "speaker.fill"), for: .normal)
+        CallDebugLog.log("CallVC", "speaker \(isSpeakerOn ? "on" : "off")")
     }
 
     /// Hands the running call over to the shared manager and opens the chat.

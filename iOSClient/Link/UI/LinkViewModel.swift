@@ -54,6 +54,7 @@ final class LinkViewModel: ObservableObject {
     private var api: LinkOcsApi?
     private var pollTask: Task<Void, Never>?
     private var lastMessageId: Int64 = 0
+    private let cacheBannerGate = SouveraCacheBannerGate()
 
     private let pollTimeout = 30
     private let historyAnchor: Int64 = 2_000_000_000
@@ -328,6 +329,13 @@ final class LinkViewModel: ObservableObject {
                     self.conversationsSignature = signature
                     self.conversations = .success(sorted)
                 }
+                // Call-Status des geöffneten Raums nachziehen (hasCall), damit
+                // der "Teilnehmen"-Button sofort umschaltet.
+                if let room = self.currentRoom,
+                   let fresh = sorted.first(where: { $0.token == room.token }),
+                   fresh.hasCall != room.hasCall {
+                    self.currentRoom = fresh
+                }
                 Self.postUnreadTotal(list)
                 self.offlineNotice = nil
             } else if let cached = LinkCache.loadConversations() {
@@ -340,7 +348,7 @@ final class LinkViewModel: ObservableObject {
                 }
                 Self.postUnreadTotal(cached)
                 self.offlineNotice = NSLocalizedString("_link_offline_", comment: "")
-                self.cacheBannerActive = true
+                self.cacheBannerActive = self.cacheBannerGate.shouldTrigger()
             }
         }
     }
@@ -403,7 +411,7 @@ final class LinkViewModel: ObservableObject {
                 // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
                 history = cached
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
-                cacheBannerActive = true
+                cacheBannerActive = cacheBannerGate.shouldTrigger()
             } else {
                 offlineNotice = nil
             }
@@ -545,7 +553,10 @@ final class LinkViewModel: ObservableObject {
         guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let user = tbl.user.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? tbl.user
-        let relative = info.path ?? "/Talk/\(info.name)"
+        // Talk liefert den Pfad relativ zur Nutzer-Wurzel ("Souvera/Link/...")
+        // - die DAV-URL braucht einen führenden Slash, sonst 404.
+        let rawRelative = info.path ?? "/Talk/\(info.name)"
+        let relative = rawRelative.hasPrefix("/") ? rawRelative : "/\(rawRelative)"
         guard let url = URL(string: "\(root)/remote.php/dav/files/\(user)\(relative)") else { return nil }
 
         var req = URLRequest(url: url)
@@ -566,6 +577,15 @@ final class LinkViewModel: ObservableObject {
         } catch {
             return nil
         }
+    }
+
+    /// Opens the folder of a chat file in the Files module (the user's
+    /// request: tapping a shared file shows it in the Dateien tab).
+    func openFileInFiles(_ info: LinkFileInfo) {
+        let raw = info.path ?? ""
+        let folderPath = (raw as NSString).deletingLastPathComponent
+        CallDebugLog.log("LinkViewModel", "openFileInFiles path=\(raw) folder=\(folderPath)")
+        NotificationCenter.default.post(name: .openFileInFiles, object: folderPath)
     }
 
     // MARK: - Attachments

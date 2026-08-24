@@ -18,6 +18,7 @@ import Foundation
 import PushKit
 import CallKit
 import AVFoundation
+import WebRTC
 import NextcloudKit
 
 final class LinkVoIPManager: NSObject {
@@ -68,6 +69,19 @@ final class LinkVoIPManager: NSObject {
         activeCallInfo = (token, title, withVideo)
         session.start()
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// Meldet einen ausgehenden Call an CallKit (Talk-Standard: System-
+    /// Integration, Hintergrund-Audio). Die zugehörige UUID wird gemerkt,
+    /// damit hangup/end die Transaktion sauber schließen.
+    func reportOutgoingCall(token: String, title: String, withVideo: Bool) {
+        let uuid = UUID()
+        activeCalls[uuid] = token
+        let update = CXCallUpdate()
+        update.remoteHandle = CXHandle(type: .generic, value: title)
+        update.hasVideo = withVideo
+        provider.reportNewOutgoingCall(with: uuid)
+        CallDebugLog.log("LinkVoIPManager", "outgoing call reported to CallKit token=\(token)")
     }
 
     /// Starts an INCOMING call session (after the user accepted): same
@@ -299,8 +313,18 @@ extension LinkVoIPManager: CXProviderDelegate {
         NotificationCenter.default.post(name: .linkEndCall, object: nil)
     }
 
-    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {}
-    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {}
+    func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
+        CallDebugLog.log("LinkVoIPManager", "CallKit didActivate audioSession")
+        CallSession.activateCallAudioSession()
+    }
+
+    func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        CallDebugLog.log("LinkVoIPManager", "CallKit didDeactivate audioSession")
+        let session = RTCAudioSession.sharedInstance()
+        session.lockForConfiguration()
+        try? session.setActive(false)
+        session.unlockForConfiguration()
+    }
 }
 
 extension Notification.Name {
