@@ -323,8 +323,8 @@ final class LinkVoIPManager: NSObject {
         req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
         req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
         req.setValue("Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)", forHTTPHeaderField: "User-Agent")
-        let (_, response) = try? await URLSession.shared.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let result = try? await URLSession.shared.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
         SouveraLog.write("PushVoip", "NC talk-device unregister http \(status)")
     }
 

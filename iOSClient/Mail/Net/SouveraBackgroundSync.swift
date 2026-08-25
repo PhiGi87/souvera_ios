@@ -186,10 +186,11 @@ final class SouveraBackgroundSync {
             let sender = last.actorDisplayName.isEmpty ? room.displayName : last.actorDisplayName
             let preview = last.displayText()
             let content = UNMutableNotificationContent()
-            // WhatsApp-Stil: Raumname FETT (Titelzeile), Nachricht darunter
-            // in normaler Schrift.
+            // iOS-Push-Standard: Titel (fett) = Raumname, Subtitle (fett) =
+            // Absender, Body (normal) = Nachrichtentext.
             content.title = SouveraNotificationText.title(room.displayName)
-            content.body = SouveraNotificationText.body(preview.isEmpty ? sender : preview)
+            content.subtitle = SouveraNotificationText.title(sender)
+            content.body = SouveraNotificationText.body(preview)
             content.sound = .default
             // Gruppierung pro Raum im Sperrbildschirm (Talk-Standard).
             content.threadIdentifier = room.token

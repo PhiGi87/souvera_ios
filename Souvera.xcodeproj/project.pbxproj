@@ -1273,7 +1273,7 @@
 		D53F1C1AA50B4C3DA7DBC3E7 /* SouveraLog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLog.swift"; sourceTree = SOURCE_ROOT; };
 		C16E540662EA477BBD780FEB /* SouveraLogSender.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLogSender.swift"; sourceTree = SOURCE_ROOT; };
 		E3FB8FC7D22C4E6BA0FE56DD /* SouveraPushDiagnosticsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Settings/Settings/SouveraPushDiagnosticsView.swift"; sourceTree = SOURCE_ROOT; };
-		558286736923C4AD0EC82184 /* SouveraAboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraAboutView.swift; sourceTree = "<group>"; };
+		558286736923C4AD0EC82184 /* SouveraAboutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Settings/Settings/SouveraAboutView.swift"; sourceTree = SOURCE_ROOT; };
 		CFDA95B014A14ADDA28C20E0 /* CallPermissions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/CallPermissions.swift"; sourceTree = SOURCE_ROOT; };
 		96DAFF788EFA47598882CC9E /* SouveraCacheBannerGate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBannerGate.swift"; sourceTree = SOURCE_ROOT; };
 		D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraLinkOpener.swift"; sourceTree = SOURCE_ROOT; };
@@ -1297,7 +1297,7 @@
 		FEA00C7B621D23C828496936 /* CallSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/CallSession.swift"; sourceTree = SOURCE_ROOT; };
 		FEA03CF0A228DACCC36C3F26 /* LinkVoIPManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/LinkVoIPManager.swift"; sourceTree = SOURCE_ROOT; };
 		FEA06EC5E1E993E38327B630 /* LinkCallViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/LinkCallViewController.swift"; sourceTree = SOURCE_ROOT; };
-		B007D37341179C33718DBC83 /* SouveraCallLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraCallLiveActivity.swift; sourceTree = "<group>"; };
+		B007D37341179C33718DBC83 /* SouveraCallLiveActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/SouveraCallLiveActivity.swift"; sourceTree = SOURCE_ROOT; };
 		FEA03ABC991BF0A1FB72E6E6 /* SouveraMailLoginFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Auth/SouveraMailLoginFlow.swift"; sourceTree = SOURCE_ROOT; };
 		FEA0D4E1B1506E00946D99AA /* SouveraMailCredentialManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Auth/SouveraMailCredentialManager.swift"; sourceTree = SOURCE_ROOT; };
 		FEA002689B11873630AAE8FD /* MailModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Model/MailModels.swift"; sourceTree = SOURCE_ROOT; };

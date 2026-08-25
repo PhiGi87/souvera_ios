@@ -131,8 +131,8 @@ enum SouveraPushRegistrar {
             .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
             .joined(separator: "&")
         req.httpBody = form.data(using: .utf8)
-        let (_, response) = try? await URLSession.shared.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let result = try? await URLSession.shared.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
         SouveraLog.write("PushProxy", "unregister \(trimmed) -> http \(status)")
     }
 

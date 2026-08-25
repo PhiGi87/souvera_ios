@@ -123,8 +123,8 @@ actor LinkOcsApi {
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         let body = "lastReadMessage=\(lastReadMessage)"
         req.httpBody = body.data(using: .utf8)
-        let (_, response) = try? await session.data(for: req)
-        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let result = try? await session.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
         CallDebugLog.log("LinkOcsApi", "markRoomRead \(token) -> \(status)")
     }
 
