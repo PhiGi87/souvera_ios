@@ -64,6 +64,7 @@ final class LinkVoIPManager: NSObject {
     /// Starts an outgoing call; the session stays alive independently of the
     /// call view controller so the UI can be re-attached later.
     func startOutgoingCall(account: LinkAccount, token: String, title: String, withVideo: Bool, callbacks: CallSessionCallbacks?) {
+        endActiveCall()
         let session = CallSession(account: account, token: token, callbacks: callbacks, withVideo: withVideo)
         activeSession = session
         activeCallInfo = (token, title, withVideo)
@@ -99,6 +100,8 @@ final class LinkVoIPManager: NSObject {
     /// audio-only.
     @discardableResult
     func startIncomingCall(account: LinkAccount, token: String, title: String, withVideo: Bool) -> CallSession? {
+        // Nur EINE Call-Session gleichzeitig (Parallele-Session-Schutz).
+        endActiveCall()
         // Session erst nach der Berechtigungs-Prüfung anlegen, damit ein
         // abgelehnter Kamera-Zugriff gar nicht erst einen Video-Track
         // erzeugt (audio-only statt kaputtem Capture).

@@ -217,8 +217,12 @@ final class MailViewModel: ObservableObject {
             mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
             return
         }
+        // Frisches MailAccount anwenden: baut den JmapClient komplett neu
+        // auf (Session-Cache weg), danach voller Reload.
         applyAccount(renewed)
-        await loadMailboxes()
+        mailboxes = .loading
+        SouveraLog.write("Mail", "credential renewed (stalwart=\(renewed.stalwartId)) - reloading")
+        await loadMailboxes(autoOpenInbox: false)
     }
 
     private func errorText(_ message: String) -> String {
@@ -372,9 +376,16 @@ final class MailViewModel: ObservableObject {
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
             if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
         } catch {
-            if isJmapAuthRecoverable(error), !hasRecoveredCredential {
-                await recoverCredentialAndReload()
-                return
+            // Auth-Fehler: Recovery (mit 10-Minuten-Sperre im Gate) statt
+            // dauerhaftem Cache/Offline.
+            if isJmapAuthRecoverable(error) {
+                let blocked = hasRecoveredCredential
+                    && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
+                if !blocked {
+                    SouveraLog.write("Mail", "mailboxes 401 - renewing credential")
+                    await recoverCredentialAndReload()
+                    return
+                }
             }
             // Cache-Fallback bei JEDEM Fehler (auch 404/HTML/nicht-JSON vom
             // Server): letzten Stand anzeigen statt Fehlerbildschirm.
@@ -474,11 +485,13 @@ final class MailViewModel: ObservableObject {
 
     private func isJmapAuthRecoverable(_ error: Error) -> Bool {
         guard let jmapError = error as? JmapException else { return false }
-        // Only genuine auth rejections trigger a credential re-mint; a
-        // missing session is a connectivity issue and must not re-mint.
+        // Echte Auth-Ablehnungen (Session-GET-401 UND POST-401) lösen eine
+        // Credential-Erneuerung aus - ein Verbindungsproblem nicht.
         switch jmapError {
         case .authNeedsBearer:
             return true
+        case .httpError(let code, _):
+            return code == 401
         default:
             return false
         }
@@ -776,6 +789,19 @@ final class MailViewModel: ObservableObject {
             messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
             prefetchBodies(mailbox: mailbox)
         } catch {
+            // 401: Credential erneuern und den aktuellen Ordner neu laden.
+            if isJmapAuthRecoverable(error) {
+                let blocked = hasRecoveredCredential
+                    && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
+                if !blocked {
+                    SouveraLog.write("Mail", "sync 401 for \(mailbox.id) - renewing credential")
+                    await recoverCredentialAndReload()
+                    if let mailbox = currentMailbox {
+                        openMailbox(mailbox)
+                    }
+                    return
+                }
+            }
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
             if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {

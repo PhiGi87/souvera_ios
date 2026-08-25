@@ -78,6 +78,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             attached.reattach(callbacks: self)
             applyInitialControlStates()
         } else {
+            // Nur EINE Call-Session gleichzeitig: eine noch laufende Session
+            // sauber beenden, bevor eine neue startet (sonst entstehen
+            // parallele eigene Sessions im Raum -> MCU-Chaos, kein Medien-
+            // Fluss, "Gelöschter Benutzer"-Geister).
+            LinkVoIPManager.shared.endActiveCall()
             let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn, silent: silent)
             self.session = session
             applyMuteStateOnly()

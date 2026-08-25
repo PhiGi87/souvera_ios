@@ -132,8 +132,14 @@ enum SouveraPushRegistrar {
             "deviceIdentifierSignature": signature,
             "userPublicKey": publicKey
         ]
+        // Form-Werte korrekt kodieren (wie Alamofire URLEncoding): nur
+        // Alphanumerics + "-._~" erlauben. Base64-Felder (Signatur,
+        // PublicKey) enthalten '+', '/', '=' - rohes '+' würde vom
+        // Form-Parser als Leerzeichen interpretiert und die Signatur-
+        // Prüfung am Proxy scheitert mit HTTP 400.
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         let form = params
-            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0.value)" }
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
             .joined(separator: "&")
         req.httpBody = form.data(using: .utf8)
         do {

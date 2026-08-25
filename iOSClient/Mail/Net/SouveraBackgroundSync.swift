@@ -26,14 +26,44 @@ final class SouveraBackgroundSync {
     // MARK: - Mail
 
     private func syncMail() async {
-        guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential() else { return }
-        let client = JmapClient(
-            baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-            username: credential.saslUser,
-            password: credential.mailPassword
+        var credential = await SouveraMailCredentialManager().ensureCombinedCredential()
+        guard credential != nil else { return }
+        var client = JmapClient(
+            baseUrl: credential!.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            username: credential!.saslUser,
+            password: credential!.mailPassword
         )
-        let api = JmapApi(client: client)
-        guard let session = try? await client.refreshSession() else { return }
+        var api = JmapApi(client: client)
+        var session: JmapSessionInfo?
+        do {
+            session = try await client.refreshSession()
+        } catch {
+            // Nur bei Auth-Fehlern erneuern; Netzfehler sauber überspringen.
+            var isAuthError = false
+            if let jmapError = error as? JmapException {
+                switch jmapError {
+                case .authNeedsBearer: isAuthError = true
+                case .httpError(let code, _): isAuthError = (code == 401)
+                default: break
+                }
+            }
+            guard isAuthError else {
+                SouveraLog.write("BackgroundSync", "mail session failed (non-auth): \(error.localizedDescription)")
+                return
+            }
+            SouveraLog.write("BackgroundSync", "mail session 401 - renewing credential")
+            if let renewed = await SouveraMailCredentialManager().renewCredential() {
+                credential = renewed
+                client = JmapClient(
+                    baseUrl: renewed.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                    username: renewed.saslUser,
+                    password: renewed.mailPassword
+                )
+                api = JmapApi(client: client)
+                session = try? await client.refreshSession()
+            }
+        }
+        guard let session else { return }
         let accId = session.primaryAccountId
         guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
               let inboxId = inbox.optString("id") else { return }

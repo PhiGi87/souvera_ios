@@ -93,12 +93,16 @@ struct SouveraMailCredentialManager {
     }
 
     private func mint(account: String, baseUrl: String, username: String, davPassword: String) async -> MailAccount? {
-        guard let combined = try? await SouveraMailLoginFlow.fetchCombinedAppPassword(baseUrl: baseUrl, username: username, currentAppPassword: davPassword) else {
+        do {
+            let combined = try await SouveraMailLoginFlow.fetchCombinedAppPassword(baseUrl: baseUrl, username: username, currentAppPassword: davPassword)
+            try? keychain.set(combined.appPassword, key: Self.keyPassword + account)
+            try? keychain.set(combined.stalwartId, key: Self.keyStalwartId + account)
+            try? keychain.set(combined.loginName, key: Self.keyLoginName + account)
+            SouveraLog.write("MailCredential", "mint OK stalwart=\(combined.stalwartId)")
+            return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: combined.loginName, mailPassword: combined.appPassword, stalwartId: combined.stalwartId)
+        } catch {
+            SouveraLog.write("MailCredential", "mint FAILED: \(error.localizedDescription)")
             return nil
         }
-        try? keychain.set(combined.appPassword, key: Self.keyPassword + account)
-        try? keychain.set(combined.stalwartId, key: Self.keyStalwartId + account)
-        try? keychain.set(combined.loginName, key: Self.keyLoginName + account)
-        return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: combined.loginName, mailPassword: combined.appPassword, stalwartId: combined.stalwartId)
     }
 }
