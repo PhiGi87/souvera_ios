@@ -249,7 +249,23 @@ class NCMainTabBarController: UITabBarController {
 
         viewControllers = [mailController, calendarController, linkController, filesController, moreController]
         selectedIndex = 0
+
+        // App-weite Leiste für minimierte (klingelnde) Calls: oben über dem
+        // Tab-Inhalt, in allen Tabs sichtbar - Annehmen/Ablehnen, während
+        // man in der App weiterarbeitet.
+        let bannerHost = UIHostingController(rootView: SouveraIncomingCallBannerView())
+        bannerHost.view.backgroundColor = .clear
+        bannerHost.view.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(bannerHost.view)
+        NSLayoutConstraint.activate([
+            bannerHost.view.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            bannerHost.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            bannerHost.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
+        ])
+        callBannerHost = bannerHost
     }
+
+    private var callBannerHost: UIHostingController<SouveraIncomingCallBannerView>?
 
     // MARK: - Badges
 

@@ -201,13 +201,45 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
-        if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
-           let data = pref.object(forKey: "NOTIFICATION_DATA") as? [String: AnyObject] {
+        // Lokale Souvera-Notifications: Deep-Link direkt ans Ziel (Mail,
+        // Termin-Detail, Chat-Raum) statt Notification-Übersicht.
+        let request = response.notification.request
+        let info = request.content.userInfo
+        let identifier = request.identifier
+        if identifier.hasPrefix("mail_"), let emailId = info["emailId"] as? String, !emailId.isEmpty {
+            let account = info["account"] as? String ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            souveraOpenDeepLink(target: .mail(account: account, emailId: emailId), tabIndex: 0)
+        } else if identifier.hasPrefix("eventreminder_"), let uid = info["uid"] as? String, !uid.isEmpty {
+            let start = (info["start"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970
+            souveraOpenDeepLink(target: .event(uid: uid, start: start), tabIndex: 1)
+        } else if identifier.hasPrefix("talk_"), let token = info["token"] as? String, !token.isEmpty {
+            souveraOpenDeepLink(target: .room(token: token, title: info["title"] as? String ?? ""), tabIndex: 2)
+        } else if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
+                  let data = pref.object(forKey: "NOTIFICATION_DATA") as? [String: AnyObject] {
             nextcloudPushNotificationAction(data: data)
             pref.set(nil, forKey: "NOTIFICATION_DATA")
         }
 
         completionHandler()
+    }
+
+    /// Wechselt auf den Ziel-Tab und liefert den Deep-Link an das Modul
+    /// (mit kurzem Verzug, damit die SwiftUI-Roots bereit sind).
+    private func souveraOpenDeepLink(target: SouveraPushDeepLink.Target, tabIndex: Int) {
+        func apply(controller: NCMainTabBarController) {
+            controller.selectedIndex = tabIndex
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                SouveraPushDeepLink.deliver(target)
+            }
+        }
+        let activeAccount = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+        if let controller = SceneManager.shared.getControllers().first(where: { $0.account == activeAccount }) {
+            apply(controller: controller)
+        } else if let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
+            apply(controller: controller)
+        } else {
+            SouveraPushDeepLink.deliver(target)
+        }
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
@@ -255,6 +287,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             if app == "souvera_mail" || app == "souvera_mail_notifications" {
                 // Mail-Benachrichtigung: direkt ins Mail-Modul springen.
                 controller.selectedIndex = 0
+            } else if app == "spreed" || app == "talk" {
+                // Talk-Benachrichtigung (Chat/Call): Link-Tab + Raum öffnen.
+                controller.selectedIndex = 2
+                if let token = data["id"] as? String, !token.isEmpty {
+                    let title = data["subject"] as? String ?? ""
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        SouveraPushDeepLink.deliver(.room(token: token, title: title))
+                    }
+                }
             } else if app == NCGlobal.shared.termsOfServiceName {
                 Task {
                     await NCNetworking.shared.transferDispatcher.notifyAllDelegatesAsync { delegate in

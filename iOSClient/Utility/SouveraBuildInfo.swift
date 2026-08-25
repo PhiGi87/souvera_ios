@@ -154,3 +154,80 @@ enum SouveraPushRegistrar {
         }
     }
 }
+
+
+/// Push-Deep-Links: Zielt beim Antippen einer Benachrichtigung direkt auf
+/// die jeweilige Mail, den Termin oder den Chat-Raum. AppDelegate routet
+/// (Tab-Wechsel) und postet das Ziel; die Module beobachten das Event.
+enum SouveraPushDeepLink {
+    /// Klasse statt Enum: NotificationCenter benötigt ein Objekt (Reference
+    /// Type) als object-Payload.
+    final class Target: NSObject {
+        enum Kind {
+            case mail, event, room
+        }
+
+        let kind: Kind
+        let account: String
+        let emailId: String
+        let uid: String
+        let start: TimeInterval
+        let token: String
+        let title: String
+
+        private init(kind: Kind, account: String, emailId: String, uid: String, start: TimeInterval, token: String, title: String) {
+            self.kind = kind
+            self.account = account
+            self.emailId = emailId
+            self.uid = uid
+            self.start = start
+            self.token = token
+            self.title = title
+        }
+
+        static func mail(account: String, emailId: String) -> Target {
+            Target(kind: .mail, account: account, emailId: emailId, uid: "", start: 0, token: "", title: "")
+        }
+
+        static func event(uid: String, start: TimeInterval) -> Target {
+            Target(kind: .event, account: "", emailId: "", uid: uid, start: start, token: "", title: "")
+        }
+
+        static func room(token: String, title: String) -> Target {
+            Target(kind: .room, account: "", emailId: "", uid: "", start: 0, token: token, title: title)
+        }
+    }
+
+    static let opened = Notification.Name("souveraPushDeepLinkOpened")
+
+    static func deliver(_ target: Target) {
+        NotificationCenter.default.post(name: opened, object: target)
+    }
+}
+
+
+
+/// Text-Kürzung für Push-Notifications (Apple-Mail/WhatsApp-Stil):
+/// Titelzeile (fett) auf ~1 Zeile, Body auf ~2-3 Zeilen begrenzt - iOS
+/// zeigt beim Aufklappen mehr an.
+enum SouveraNotificationText {
+    static func title(_ raw: String) -> String {
+        trim(raw, limit: 60)
+    }
+
+    static func body(_ raw: String) -> String {
+        trim(raw, limit: 180)
+    }
+
+    private static func trim(_ raw: String, limit: Int) -> String {
+        let cleaned = raw
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .split(separator: " ", omittingEmptySubsequences: true)
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard cleaned.count > limit else { return cleaned }
+        let cut = String(cleaned.prefix(max(0, limit - 1))).trimmingCharacters(in: .whitespaces)
+        return cut + "…"
+    }
+}

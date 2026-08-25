@@ -829,7 +829,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_start_conversation_"     = "Start conversation";
 "_link_no_conversations_"       = "No conversations yet";
 "_link_search_people_"          = "Search people";
-"_link_message_"                = "Message";
+"_link_message_"                = "Message";"_push_event_title_"              = "Event: %@";
+
 "_link_incoming_call_"          = "Incoming call";
 "_mail_"                        = "Mail";
 "_mail_compose_"                = "New message";
@@ -837,8 +838,11 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_subject_"                = "Subject";
 "_mail_send_"                   = "Send";
 "_mail_no_subject_"             = "(no subject)";
-"_mail_yesterday_"              = "Yesterday";
-"_mail_credential_failed_"      = "Could not set up mail. Please try again.";"_mail_loading_"                 = "Loading mailbox…";
+"_mail_yesterday_"              = "Yesterday";"_mail_deep_link_missing_"        = "Mail no longer exists";
+
+"_mail_credential_failed_"      = "Could not set up mail. Please try again.";"_mail_loading_"                 = "Loading mailbox…";"_mail_deep_link_failed_"          = "Could not load the mail";"_mail_fetching_"                  = "Fetching mail…";
+
+
 
 "_mail_retry_"                  = "Try again";
 "_mail_cc_"                     = "Cc";
@@ -986,7 +990,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_shield_release_whitelist_"    = "Deliver and add sender to whitelist";
 "_shield_released_whitelisted_" = "Delivered and sender added to the whitelist";
 "_link_video_call_"               = "Video call";
-"_link_decline_"                  = "Decline";
+"_link_decline_"                  = "Decline";"_link_call_minimize_"              = "Minimize";
+
 "_link_accept_"                   = "Accept";
 "_qr_code_"                       = "QR code login";
 "_qr_code_simulator_hint_"        = "The simulator has no camera - paste the QR code content:";

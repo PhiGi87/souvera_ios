@@ -70,6 +70,22 @@ struct MailView: View {
                 .padding(.horizontal)
                 .padding(.bottom, 24)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if viewModel.isFetchingMail {
+                // Erstladung ohne Cache bzw. Scroll-Nachladen: die Übersicht
+                // wächst bereits sichtbar, das Overlay zeigt den laufenden
+                // Abruf an (wie "Mail wird gesendet…").
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(NSLocalizedString("_mail_fetching_", comment: ""))
+                        .font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
                 MailSendBanner(feedback: feedback)
                     .padding(.horizontal)

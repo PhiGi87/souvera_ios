@@ -54,6 +54,22 @@ struct SouveraCalendarView: View {
         var id: String { existing?.id ?? "new" }
     }
 
+    /// Termin-Deep-Link: Tag wählen und die Detail-Ansicht direkt öffnen.
+    private func handleDeepLink(_ target: SouveraPushDeepLink.Target) {
+        guard target.kind == .event else { return }
+        let date = Date(timeIntervalSince1970: target.start)
+        viewMode = .day
+        selectedDay = date
+        Task {
+            let event = await viewModel.findEvent(uid: target.uid, on: date)
+            if let event {
+                await MainActor.run {
+                    detailEvent = event
+                }
+            }
+        }
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -151,6 +167,10 @@ struct SouveraCalendarView: View {
             scrollToNowTrigger += 1
             Task { await viewModel.load() }
             viewModel.startAutoRefresh()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: SouveraPushDeepLink.opened)) { notification in
+            guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
+            handleDeepLink(target)
         }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             Task { await viewModel.load() }
@@ -777,13 +797,16 @@ private struct TimelineColumn: View {
                 }
             }
             .contentShape(Rectangle())
-            // EINE sequenzierte Geste: Long-Press (0,45 s) -> Drag. Während
-            // der Wartezeit scheitert der Long-Press bei Bewegung > 14 px,
-            // dadurch scrollt die ScrollView auf der GESAMTEN Breite normal
-            // (ein permanent aktiver Min-0-Drag hatte das Scrollen zuvor
-            // blockiert). Erst nach dem Halten zeichnet die Drag-Phase den
-            // Slot; das Scrollen ist dann via onSlotActive deaktiviert.
-            .gesture(slotGesture)
+            // Bewährte Struktur: Long-Press (simultan, setzt nur ein Flag
+            // + merkt den Auflagepunkt) und separater Slot-Drag mit
+            // minimumDistance 20. Der Drag erkennt erst NACH der Pan-
+            // Schwelle (~10 px) der ScrollView -> beim normalen Scrollen
+            // gewinnt das Pan und die Ansicht scrollt auf voller Breite.
+            .simultaneousGesture(longPressGesture)
+            .simultaneousGesture(slotDrag)
+            .onChange(of: longPressActive) { _, active in
+                onSlotActive?(active)
+            }
         }
         .overlay(alignment: .trailing) {
             if showTrailingBorder {
@@ -907,40 +930,40 @@ private struct TimelineColumn: View {
     /// Slot-Bereich. Zeiten rasten in 15-Minuten-Schritten ein (Start
     /// abrunden, Ende aufrunden, mindestens 15 Minuten) und der Slot wird
     /// während des Ziehens sichtbar markiert.
-    @State private var dragSlot: (start: Int, end: Int)?
+    @GestureState private var dragSlot: (start: Int, end: Int)?
 
-    /// Terminanlage: NUR nach einem Long-Press (~0,45 s). Die Geste ist
-    /// eine Sequenz LongPress -> Drag: Der Long-Press blockiert das
-    /// Scrollen nicht (er scheitert bei Bewegung), die Drag-Phase existiert
-    /// erst NACH dem erfolgreichen Halten.
-    private var slotGesture: some Gesture {
+    /// Terminanlage: NUR nach einem Long-Press (~0,45 s). Der Long-Press
+    /// blockiert das Scrollen NICHT (er scheitert bei Bewegung > 14 px);
+    /// der Drag (minimumDistance 20, über der Pan-Schwelle) liefert mit
+    /// value.startLocation den Auflagepunkt für einen exakten Slot-Start.
+    @State private var longPressActive = false
+
+    private var longPressGesture: some Gesture {
         LongPressGesture(minimumDuration: 0.45, maximumDistance: 14)
-            .sequenced(before: DragGesture(minimumDistance: 0))
-            .onChanged { value in
-                switch value {
-                case .first(true):
-                    onSlotActive?(true)
-                case .second(true, let drag?):
-                    let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
-                    let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
-                    let a = Self.snapDown(min(startMinute, endMinute))
-                    let b = Self.snapUp(max(startMinute, endMinute))
-                    dragSlot = (a, max(b, a + 15))
-                default:
-                    break
-                }
+            .onEnded { _ in
+                longPressActive = true
+            }
+    }
+
+    private var slotDrag: some Gesture {
+        DragGesture(minimumDistance: 20)
+            .updating($dragSlot) { value, state, _ in
+                guard longPressActive else { return }
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let a = Self.snapDown(min(startMinute, endMinute))
+                let b = Self.snapUp(max(startMinute, endMinute))
+                state = (a, max(b, a + 15))
             }
             .onEnded { value in
                 defer {
-                    dragSlot = nil
-                    onSlotActive?(false)
+                    longPressActive = false
                 }
-                guard case .second(true, let drag?) = value else { return }
-                guard let onCreate else { return }
+                guard longPressActive, let onCreate else { return }
                 let calendar = Calendar.current
                 let dayStart = calendar.startOfDay(for: day)
-                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
+                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
                 let a = Self.snapDown(min(startMinute, endMinute))
                 let b = Self.snapUp(max(startMinute, endMinute))
                 let slotDuration = max(15, b - a)

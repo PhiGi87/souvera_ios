@@ -177,6 +177,11 @@ struct LinkView: View {
                 viewModel.actionFeedback = nil
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: SouveraCallBannerModel.acceptNotification)) { notification in
+            guard let room = notification.object as? LinkConversation else { return }
+            viewModel.dismissIncomingCall()
+            callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+        }
         .fullScreenCover(item: $viewModel.incomingCallRoom) { room in
             IncomingCallOverlayView(
                 title: room.displayName,
@@ -187,6 +192,9 @@ struct LinkView: View {
                 },
                 onDecline: {
                     viewModel.dismissIncomingCall()
+                },
+                onMinimize: {
+                    viewModel.minimizeIncomingCall()
                 }
             )
         }
@@ -346,11 +354,85 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
 /// Full-screen incoming call overlay (In-App-Call-UI im Vordergrund sowie
 /// Simulator-Tests, wo CallKit keine eingehenden Anrufe zeigt): Annehmen
 /// startet die Call-Session, Ablehnen schließt das Overlay.
+/// App-weiter Zustand für die "Anruf minimiert"-Leiste: Der In-App-Call-
+/// Fullscreen lässt sich minimieren, die Leiste zeigt den klingelnden Anruf
+/// oben in der App (Annehmen/Ablehnen) - man kann weiterarbeiten.
+final class SouveraCallBannerModel: ObservableObject {
+    static let shared = SouveraCallBannerModel()
+    /// Annehmen aus der Leiste: LinkView präsentiert die Call-UI.
+    static let acceptNotification = Notification.Name("souveraCallBannerAccept")
+
+    @Published var minimizedIncoming: LinkConversation?
+
+    private init() {}
+}
+
+/// Schmale Leiste oben in der App (über allen Tabs): klingelnder Anruf mit
+/// Annehmen/Ablehnen, wenn der Fullscreen minimiert wurde.
+struct SouveraIncomingCallBannerView: View {
+    @ObservedObject private var model = SouveraCallBannerModel.shared
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let room = model.minimizedIncoming {
+                HStack(spacing: 12) {
+                    Image(systemName: "phone.ring.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.white)
+                        .frame(width: 32, height: 32)
+                        .background(Circle().fill(Color.green))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(room.displayName)
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                        Text(NSLocalizedString("_link_incoming_call_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                    Spacer()
+                    Button {
+                        model.minimizedIncoming = nil
+                    } label: {
+                        Image(systemName: "phone.down.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(Color.red))
+                    }
+                    .accessibilityLabel(NSLocalizedString("_link_decline_", comment: ""))
+                    Button {
+                        let target = room
+                        model.minimizedIncoming = nil
+                        NotificationCenter.default.post(name: SouveraCallBannerModel.acceptNotification, object: target)
+                    } label: {
+                        Image(systemName: "phone.fill")
+                            .font(.subheadline)
+                            .foregroundStyle(.white)
+                            .frame(width: 36, height: 36)
+                            .background(Circle().fill(Color.green))
+                    }
+                    .accessibilityLabel(NSLocalizedString("_link_accept_", comment: ""))
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(Capsule().fill(Color(red: 0.12, green: 0.14, blue: 0.2)))
+                .shadow(radius: 8)
+                .padding(.horizontal, 12)
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: model.minimizedIncoming == nil)
+    }
+}
+
 struct IncomingCallOverlayView: View {
     let title: String
     let hasVideo: Bool
     let onAccept: () -> Void
     let onDecline: () -> Void
+    var onMinimize: () -> Void = {}
 
     var body: some View {
         ZStack {
@@ -362,6 +444,19 @@ struct IncomingCallOverlayView: View {
             .ignoresSafeArea()
 
             VStack(spacing: 28) {
+                HStack {
+                    Spacer()
+                    Button(action: onMinimize) {
+                        Image(systemName: "chevron.down")
+                            .font(.title3.bold())
+                            .foregroundStyle(.white.opacity(0.9))
+                            .frame(width: 44, height: 44)
+                            .background(Circle().fill(Color.white.opacity(0.15)))
+                    }
+                    .accessibilityLabel(NSLocalizedString("_link_call_minimize_", comment: ""))
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 12)
                 Spacer()
                 Text(NSLocalizedString("_link_incoming_call_", comment: ""))
                     .font(.subheadline)

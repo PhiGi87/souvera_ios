@@ -31,9 +31,22 @@ enum SouveraReminderScheduler {
                     let fireDate = event.start.addingTimeInterval(-Double(minutes) * 60)
                     guard fireDate > now else { continue }
                     let content = UNMutableNotificationContent()
-                    content.title = event.title
-                    content.body = DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .short)
+                    // Kalender-Stil: "Termin: <Name>" FETT (Titelzeile),
+                    // Datum + Uhrzeit darunter in normaler Schrift.
+                    let name = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                    content.title = SouveraNotificationText.title(
+                        String(format: NSLocalizedString("_push_event_title_", comment: ""), name.isEmpty ? "—" : name)
+                    )
+                    content.body = SouveraNotificationText.body(
+                        DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .short)
+                    )
                     content.sound = .default
+                    // Deep-Link-Payload: Tap öffnet direkt die Detail-Ansicht
+                    // des Termins.
+                    content.userInfo = [
+                        "uid": event.uid,
+                        "start": event.start.timeIntervalSince1970
+                    ]
                     let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
                     let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
                     let request = UNNotificationRequest(

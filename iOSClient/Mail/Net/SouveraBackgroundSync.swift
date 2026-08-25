@@ -108,9 +108,18 @@ final class SouveraBackgroundSync {
                 ?? ""
             let subject = email.optString("subject") ?? ""
             let content = UNMutableNotificationContent()
-            content.title = NSLocalizedString("_mail_", comment: "")
-            content.body = fromName.isEmpty ? subject : "\(fromName): \(subject)"
+            // Apple-Mail-Stil: Absender FETT (Titelzeile), Betreff darunter
+            // in normaler Schrift.
+            let sender = SouveraNotificationText.title(fromName.isEmpty ? NSLocalizedString("_mail_", comment: "") : fromName)
+            content.title = sender
+            content.body = SouveraNotificationText.body(subject)
             content.sound = .default
+            // Deep-Link-Payload: Tap öffnet direkt die jeweilige Mail.
+            content.userInfo = [
+                "account": accountName,
+                "emailId": email.optString("id") ?? "",
+                "baseUrl": credential.baseUrl
+            ]
             let request = UNNotificationRequest(
                 identifier: "mail_\(email.optString("id") ?? UUID().uuidString)",
                 content: content,
@@ -172,9 +181,16 @@ final class SouveraBackgroundSync {
             let sender = last.actorDisplayName.isEmpty ? room.displayName : last.actorDisplayName
             let preview = last.displayText()
             let content = UNMutableNotificationContent()
-            content.title = room.displayName
-            content.body = preview.isEmpty ? sender : "\(sender): \(preview)"
+            // WhatsApp-Stil: Raumname FETT (Titelzeile), Nachricht darunter
+            // in normaler Schrift.
+            content.title = SouveraNotificationText.title(room.displayName)
+            content.body = SouveraNotificationText.body(preview.isEmpty ? sender : preview)
             content.sound = .default
+            // Deep-Link-Payload: Tap öffnet direkt den Raum-Chat.
+            content.userInfo = [
+                "token": room.token,
+                "title": room.displayName
+            ]
             let request = UNNotificationRequest(
                 identifier: "talk_\(room.token)_\(last.id)",
                 content: content,

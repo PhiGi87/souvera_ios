@@ -53,6 +53,31 @@ final class LinkViewModel: ObservableObject {
 
     private(set) var currentUserId: String = ""
 
+    /// Push-Deep-Link-Beobachter (Chat-Raum direkt öffnen).
+    private var deepLinkObserver: NSObjectProtocol?
+
+    init() {
+        deepLinkObserver = NotificationCenter.default.addObserver(
+            forName: SouveraPushDeepLink.opened,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
+            Task { @MainActor [weak self] in
+                self?.handleDeepLink(target)
+            }
+        }
+    }
+
+    private func handleDeepLink(_ target: SouveraPushDeepLink.Target) {
+        switch target.kind {
+        case .room:
+            openConversation(token: target.token, title: target.title)
+        default:
+            break
+        }
+    }
+
     private var api: LinkOcsApi?
     private var pollTask: Task<Void, Never>?
     private var lastMessageId: Int64 = 0
@@ -405,15 +430,11 @@ final class LinkViewModel: ObservableObject {
         connectSignaling(token: token)
         guard let api else { return }
         pollTask = Task {
-            // Cache-first: letzten Stand SOFORT anzeigen (kein Spinner bei
-            // langsamem Server), danach frisch nachladen und ersetzen.
-            if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
-                let ordered = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
-                self.lastMessageId = ordered.last?.id ?? 0
-                self.messages = .success(ordered)
-            }
-            // Load the newest messages: lookIntoFuture=0 pages backwards from a high anchor id, so
-            // it returns the most recent page (there is no "give me the latest" without an anchor).
+            // Kein Cache-Zwischenstand mehr: Die Liste rendert erst mit der
+            // ERSTEN Live-Seite (neueste Nachrichten), damit
+            // defaultScrollAnchor(.bottom) auf echtem Inhalt greift und
+            // beim Raumeintritt KEIN sichtbarer Scroll/Sprung entsteht.
+            // Der Cache bleibt Offline-Fallback im Empty-Branch.
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
             if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
@@ -691,6 +712,9 @@ final class LinkViewModel: ObservableObject {
     deinit {
         pollTask?.cancel()
         roomPollTask?.cancel()
+        if let deepLinkObserver {
+            NotificationCenter.default.removeObserver(deepLinkObserver)
+        }
         let client = signaling
         Task { @MainActor in
             client.disconnect()
@@ -792,6 +816,14 @@ final class LinkViewModel: ObservableObject {
     /// gemeldet).
     func dismissIncomingCall() {
         incomingCallRoom = nil
+    }
+
+    /// Fullscreen minimieren: Der klingelnde Anruf wandert in die schmale
+    /// Leiste oben in der App (Annehmen/Ablehnen), man kann weiterarbeiten.
+    func minimizeIncomingCall() {
+        guard let room = incomingCallRoom else { return }
+        SouveraCallBannerModel.shared.minimizedIncoming = room
+        dismissIncomingCall()
     }
 }
 

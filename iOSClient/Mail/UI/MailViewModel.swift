@@ -82,6 +82,11 @@ final class MailViewModel: ObservableObject {
     @Published var hasMoreMessages = false
     /// Scroll-Nachladen läuft gerade (Sentinel zeigt Spinner).
     @Published var isLoadingMore = false
+    /// Netz-Ladevorgang mit LEERER Übersicht (Erstladung ohne Cache bzw.
+    /// Scroll-Nachladen): zeigt das Overlay "Mail-Abruf läuft…". Bei
+    /// vorhandener (Cache-)Liste bleibt die Ansicht sichtbar und der
+    /// Refresh läuft ohne Overlay im Hintergrund.
+    @Published private(set) var isFetchingMail = false
     /// Pagination-State des aktuellen Ordners (letzte geladene Id + mehr?).
     private var pageState: (lastId: String?, hasMore: Bool) = (nil, false)
 
@@ -113,6 +118,84 @@ final class MailViewModel: ObservableObject {
     var transportLabel: String { useJmap ? "JMAP" : "IMAP" }
     var availableMailboxes: [Mailbox] { allMailboxes }
 
+    /// Deep-Link-Beobachter + Pending für den Kaltstart (Link kommt an,
+    /// bevor der erste Mailbox-Load fertig ist).
+    private var deepLinkObserver: NSObjectProtocol?
+    private var pendingDeepLink: SouveraPushDeepLink.Target?
+
+    init() {
+        deepLinkObserver = NotificationCenter.default.addObserver(
+            forName: SouveraPushDeepLink.opened,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
+            Task { @MainActor [weak self] in
+                self?.handleDeepLink(target)
+            }
+        }
+    }
+
+    deinit {
+        if let deepLinkObserver {
+            NotificationCenter.default.removeObserver(deepLinkObserver)
+        }
+    }
+
+    private func handleDeepLink(_ target: SouveraPushDeepLink.Target) {
+        switch target.kind {
+        case .mail:
+            if case .success = mailboxes {
+                Task { await openMailByJmapId(account: target.account, emailId: target.emailId) }
+            } else {
+                pendingDeepLink = target
+            }
+        default:
+            break
+        }
+    }
+
+    /// Öffnet eine Mail direkt aus einer Push-Notification (Deep-Link):
+    /// INBOX als Kontext sicherstellen, die Mail per JMAP laden und die
+    /// Detail-Ansicht öffnen. "Zurück" führt in die INBOX.
+    func openMailByJmapId(account: String, emailId: String) async {
+        if case let .success(boxes) = mailboxes,
+           let inbox = boxes.first(where: { $0.kind == .inbox }),
+           currentMailbox?.id != inbox.id {
+            openMailbox(inbox)
+        }
+        guard let api = jmapApi, let client = jmapClient else {
+            SouveraLog.write("Mail", "deep link: no jmap client")
+            return
+        }
+        do {
+            let session = try await client.refreshSession()
+            let accId = currentMailbox?.accountId ?? session.primaryAccountId
+            let emails = try await api.getEmails(accountId: accId, ids: [emailId])
+            guard let json = emails.first else {
+                actionFeedback = MailSendFeedback(
+                    success: false,
+                    message: NSLocalizedString("_mail_deep_link_missing_", comment: "")
+                )
+                return
+            }
+            let mailboxId = currentMailbox?.id ?? ""
+            let message = JmapMapper.mapMessage(
+                account: mailAccount?.account ?? "",
+                accountId: accId,
+                mailboxId: mailboxId,
+                json: json
+            )
+            route = .detail(message: message)
+        } catch {
+            SouveraLog.write("Mail", "deep link mail failed: \(error.localizedDescription)")
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_deep_link_failed_", comment: "")
+            )
+        }
+    }
+
     /// Applies the selected sort order to a loaded message list.
     func sortMessages(_ list: [MailMessage]) -> [MailMessage] {
         switch sortOrder {
@@ -141,6 +224,10 @@ final class MailViewModel: ObservableObject {
             applyAccount(account)
             await loadMailboxes()
             isInitialLoad = false
+            if let pending = pendingDeepLink {
+                pendingDeepLink = nil
+                handleDeepLink(pending)
+            }
             await loadAliases()
             await loadIdentities()
         }
@@ -844,6 +931,16 @@ final class MailViewModel: ObservableObject {
                     if let id = email.optString("id") { byId[id] = email }
                 }
             }
+            // Cache-first: gespeicherten Stand SOFORT anzeigen (Übersicht
+            // bleibt nie leer); der Refresh läuft dann im Hintergrund ohne
+            // Overlay. Ohne Cache: Overlay "Mail-Abruf läuft…" zeigen und
+            // die Liste progressiv aufbauen.
+            if byId.isEmpty {
+                isFetchingMail = true
+            } else {
+                let cachedList = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+                messages = .success(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+            }
             var lastId: String?
             var hasMore = false
             var state = ""
@@ -891,11 +988,19 @@ final class MailViewModel: ObservableObject {
                    let parsed = Self.jmapDate(oldest) {
                     oldestDate = parsed
                 }
-                if ids.count < pageSize {
-                    hasMore = false
+                let pageHasMore = ids.count >= pageSize
+                hasMore = pageHasMore
+                // PROGRESSIVER Aufbau: nach jeder Seite die kumulierte Liste
+                // publizieren - die Übersicht wächst sichtbar, statt die
+                // ganze Zeit nur zu kreiseln.
+                let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+                queryStates[cacheKey] = state
+                pageState = (lastId: lastId, hasMore: pageHasMore)
+                hasMoreMessages = pageHasMore
+                messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                if !pageHasMore {
                     break
                 }
-                hasMore = true
                 if addedCount > 0, let oldestDate, oldestDate <= minimumCoverage {
                     break
                 }
@@ -907,8 +1012,10 @@ final class MailViewModel: ObservableObject {
             dirtyFlagIds[cacheKey] = nil
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collected, queryState: state)
             messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+            isFetchingMail = false
             prefetchBodies(mailbox: mailbox)
         } catch {
+            isFetchingMail = false
             // 401: Credential erneuern und den aktuellen Ordner neu laden.
             if isJmapAuthRecoverable(error) {
                 let blocked = hasRecoveredCredential
@@ -947,6 +1054,8 @@ final class MailViewModel: ObservableObject {
               let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty,
               let lastId = pageState.lastId, !lastId.isEmpty else { return }
         isLoadingMore = true
+        // Nachgeladene Mails sind nicht im Cache: Overlay zeigen.
+        isFetchingMail = true
         Task {
             defer { isLoadingMore = false }
             do {
@@ -979,8 +1088,10 @@ final class MailViewModel: ObservableObject {
                 messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
+                isFetchingMail = false
             } catch {
                 hasMoreMessages = false
+                isFetchingMail = false
                 JmapLog.write("loadMore failed for \(mailbox.id): \(error.localizedDescription)")
             }
         }

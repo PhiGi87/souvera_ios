@@ -289,6 +289,13 @@ final class CalendarViewModel: ObservableObject {
     /// (CalDAV-REPORT mit Tages-range). So zeigt die Tagesliste in der
     /// Monatsansicht IMMER alle Termine des ausgewählten Tags - egal wie
     /// weit er außerhalb des Monatsfensters liegt (keine Zeitbeschränkung).
+    /// Deep-Link aus einer Termin-Erinnerung: lädt den Tag nach (falls noch
+    /// nicht abgedeckt) und sucht den Termin anhand der uid.
+    func findEvent(uid: String, on day: Date) async -> CalendarEventModel? {
+        await ensureDayCovered(day)
+        return events(on: day).first(where: { $0.uid == uid })
+    }
+
     func ensureDayCovered(_ day: Date) async {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: day)
