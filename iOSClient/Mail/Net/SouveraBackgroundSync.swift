@@ -62,7 +62,10 @@ final class SouveraBackgroundSync {
                 session = try? await client.refreshSession()
             }
         }
-        guard let session, !session.primaryAccountId.isEmpty, !session.accounts.isEmpty else {
+        var usableSession: JmapSessionInfo? = session
+        if usableSession == nil
+            || usableSession!.primaryAccountId.isEmpty
+            || usableSession!.accounts.isEmpty {
             // Leere Accounts = tote Credential: einmal erneuern und neu
             // aufsetzen (best effort im Hintergrund).
             SouveraLog.write("BackgroundSync", "session with empty accounts - renewing credential")
@@ -74,10 +77,10 @@ final class SouveraBackgroundSync {
                     password: renewed.mailPassword
                 )
                 api = JmapApi(client: client)
-                session = try? await client.refreshSession()
+                usableSession = try? await client.refreshSession()
             }
-            guard let session, !session.primaryAccountId.isEmpty else { return }
         }
+        guard let usableSession, !usableSession.primaryAccountId.isEmpty else { return }
         let accId = session.primaryAccountId
         guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
               let inboxId = inbox.optString("id") else { return }
