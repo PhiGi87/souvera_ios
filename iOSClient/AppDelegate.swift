@@ -79,6 +79,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         nkLog(start: "Start session with level \(NCPreferences().log) " + versionSouveraiOS)
 
+        // Übergroße Log-Dateien einmalig aufs Limit trimmen (älteste zuerst).
+        SouveraLog.trimStartupLogs()
         // Startup-Marker mit Build-Nummer in die Log-Datei (für alle
         // "Logs teilen"-Sendungen nachvollziehbar).
         SouveraLog.write("App-Start: \(SouveraBuildInfo.label) \(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?") | iOS \(UIDevice.current.systemVersion) | \(UIDevice.current.model)")

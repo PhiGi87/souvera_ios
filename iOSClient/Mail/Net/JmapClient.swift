@@ -480,6 +480,8 @@ enum JmapLog {
             handle.write(Data(line.utf8))
             try? handle.close()
         }
+        // Gleiche Begrenzung wie SouveraLog: älteste Einträge zuerst löschen.
+        SouveraLog.trimToLimit(at: url)
     }
 }
 

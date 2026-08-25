@@ -218,10 +218,25 @@ final class MailViewModel: ObservableObject {
             return
         }
         // Frisches MailAccount anwenden: baut den JmapClient komplett neu
-        // auf (Session-Cache weg), danach voller Reload.
+        // auf (Session-Cache weg).
         applyAccount(renewed)
+        // Validierung: Liefert die neue Credential eine Session MIT Accounts?
+        // Falls nicht (Server-Mint-Problem), EINMAL erneut minten.
+        var validated = false
+        if let session = try? await jmapClient?.refreshSession(), isSessionUsable(session) {
+            validated = true
+        }
+        if !validated {
+            SouveraLog.write("Mail", "mint validation failed - retrying once")
+            if let renewed2 = await SouveraMailCredentialManager().renewCredential() {
+                applyAccount(renewed2)
+                if let session = try? await jmapClient?.refreshSession(), isSessionUsable(session) {
+                    validated = true
+                }
+            }
+        }
         mailboxes = .loading
-        SouveraLog.write("Mail", "credential renewed (stalwart=\(renewed.stalwartId)) - reloading")
+        SouveraLog.write("Mail", "credential renewed (validated=\(validated)) - reloading")
         await loadMailboxes(autoOpenInbox: false)
     }
 
@@ -333,6 +348,18 @@ final class MailViewModel: ObservableObject {
         guard let api = jmapApi else { return }
         do {
             let session = try await jmapClient?.refreshSession()
+            // Leere Accounts = tote Credential: sofort erneuern.
+            if !isSessionUsable(session) {
+                SouveraLog.write("Mail", "session with empty accounts - recovering credential")
+                let blocked = hasRecoveredCredential
+                    && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
+                if !blocked {
+                    await recoverCredentialAndReload()
+                    return
+                }
+                mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
+                return
+            }
             let primaryAccId = session?.primaryAccountId ?? ""
             let accountName = mailAccount?.account ?? ""
             ownEmailLabel = session?.username ?? mailAccount?.username ?? ownEmailLabel
@@ -660,7 +687,18 @@ final class MailViewModel: ObservableObject {
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
         do {
-            _ = try await jmapClient?.refreshSession()
+            let session = try await jmapClient?.refreshSession()
+            // Leere Accounts = tote Credential: erneuern und neu laden.
+            if !isSessionUsable(session) {
+                SouveraLog.write("Mail", "sync: session with empty accounts - recovering credential")
+                let blocked = hasRecoveredCredential
+                    && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
+                if !blocked {
+                    await recoverCredentialAndReload()
+                    if let mailbox = currentMailbox { openMailbox(mailbox) }
+                    return
+                }
+            }
             let accId = mailbox.accountId
             guard !accId.isEmpty else {
                 messages = .error(errorText("Mailbox has no JMAP account id"))
@@ -755,6 +793,12 @@ final class MailViewModel: ObservableObject {
                     guard !ids.isEmpty else { break }
                     page = try await api.getEmails(accountId: accId, ids: ids)
                 } catch {
+                    // Auth-Fehler NIE verschlucken: der äußere Catch stößt
+                    // sonst nie die Credential-Recovery an.
+                    if isJmapAuthRecoverable(error) {
+                        JmapLog.write("sync \(mailbox.name): auth error on page - \(error.localizedDescription)")
+                        throw error
+                    }
                     JmapLog.write("sync \(mailbox.name): page failed after \(byId.count) mails - \(error.localizedDescription)")
                     if byId.isEmpty { throw error }
                     break
@@ -883,8 +927,13 @@ final class MailViewModel: ObservableObject {
         }
         guard !targets.isEmpty else { return }
         Task { [weak self] in
+            guard let self else { return }
+            // Keine (verwertbare) Session = tote Credential: Prefetch
+            // aussetzen, sonst feuern 25x Email/get sinnlos gegen 401.
+            guard let session = try? await self.jmapClient?.refreshSession(),
+                  self.isSessionUsable(session) else { return }
             for message in targets {
-                guard let self, self.prefetchGeneration == generation,
+                guard self.prefetchGeneration == generation,
                       self.currentMailbox?.id == mailbox.id else { return }
                 if MailCache.loadBody(account: accountName, emailId: message.emailId) != nil { continue }
                 if let fetched = await self.loadBodyFor(message) {
@@ -927,6 +976,14 @@ final class MailViewModel: ObservableObject {
         if let date = iso.date(from: value) { return date }
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return iso.date(from: value)
+    }
+
+    /// True, wenn die JMAP-Session gültige Accounts hat. Stalwart liefert
+    /// bei toter/abgelaufener Credential eine LEERE Gast-Session (200 mit
+    /// accounts={}) statt 401 - das muss als Auth-Problem erkannt werden.
+    private func isSessionUsable(_ session: JmapSessionInfo?) -> Bool {
+        guard let session else { return false }
+        return !session.primaryAccountId.isEmpty && !session.accounts.isEmpty
     }
 
     /// True for network-level failures (no/slow connection), false for
