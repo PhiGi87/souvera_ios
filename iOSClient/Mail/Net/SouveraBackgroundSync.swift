@@ -81,7 +81,7 @@ final class SouveraBackgroundSync {
             }
         }
         guard let usableSession, !usableSession.primaryAccountId.isEmpty else { return }
-        let accId = session.primaryAccountId
+        let accId = usableSession.primaryAccountId
         guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
               let inboxId = inbox.optString("id") else { return }
 
