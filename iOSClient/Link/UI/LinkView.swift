@@ -789,19 +789,18 @@ struct LinkChatView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
-            ScrollViewReader { proxy in
-                List {
-                    // Sentinel oben: lädt ältere Nachrichten nach, falls der
-                    // Historie-Loop noch nicht fertig ist (kein Paging-UI).
-                    if viewModel.hasMoreHistory {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
-                        }
-                        .listRowSeparator(.hidden)
-                        .onAppear { viewModel.loadEarlierHistory() }
+            List {
+                // Sentinel oben: lädt ältere Nachrichten nach, falls der
+                // Historie-Loop noch nicht fertig ist (kein Paging-UI).
+                if viewModel.hasMoreHistory {
+                    HStack {
+                        Spacer()
+                        ProgressView()
+                        Spacer()
                     }
+                    .listRowSeparator(.hidden)
+                    .onAppear { viewModel.loadEarlierHistory() }
+                }
                     ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
@@ -835,15 +834,11 @@ struct LinkChatView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                .onChange(of: items.last?.id) { _, _ in
-                    // Neue Nachricht angekommen: ans Ende springen.
-                    scrollToBottom(proxy, items: items)
-                }
-                .onAppear {
-                    // Beim Öffnen immer die neueste Nachricht im Fokus.
-                    scrollToBottom(proxy, items: items)
-                }
-            }
+                // Chat-Standard: Liste startet an der NEUESTEN Nachricht
+                // verankert (kein sichtbarer Sprung beim Öffnen) und bleibt
+                // bei neuen Nachrichten unten; das Nachladen älterer
+                // Nachrichten oben reißt die Leseposition nicht mit.
+                .defaultScrollAnchor(.bottom)
         }
     }
 
@@ -876,14 +871,6 @@ struct LinkChatView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyyMMddHHmm"
         return formatter.string(from: Date(timeIntervalSince1970: message.timestamp))
-    }
-
-    private func scrollToBottom(_ proxy: ScrollViewProxy, items: [LinkChatMessage]) {
-        guard let last = items.last else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-            // Ohne Animation, damit der Sprung ans Ende zuverlässig landet.
-            proxy.scrollTo(last.id, anchor: .bottom)
-        }
     }
 
     /// Talk-Logik: 1 Person "X schreibt…", 2 "X und Y schreiben…",

@@ -543,9 +543,10 @@ private struct MailboxTreeRowBase: View {
                         .font(.body)
                     Spacer()
                     if showsUnread {
-                        if !isExpanded, !node.children.isEmpty, node.totalUnread > 0 {
-                            Text("\(node.totalUnread)").foregroundStyle(.secondary)
-                        } else if node.mailbox.unreadCount > 0 {
+                        // Immer die EIGENEN Ungelesenen des Ordners zeigen -
+                        // die Summe der Unterordner steht in deren Zeilen,
+                        // sobald der Ordner aufgeklappt ist.
+                        if node.mailbox.unreadCount > 0 {
                             Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
                         }
                     }

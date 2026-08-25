@@ -583,16 +583,52 @@ final class MailViewModel: ObservableObject {
     }
 
     func emptyTrash() async {
-        guard let mailbox = currentMailbox,
-              case let .success(items) = messages,
-              !items.isEmpty else { return }
+        guard let mailbox = currentMailbox else { return }
         var ok = false
         if useJmap {
+            guard let api = jmapApi, let client = jmapClient,
+                  let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty else {
+                actionFeedback = MailSendFeedback(
+                    success: false,
+                    message: NSLocalizedString("_mail_trash_empty_failed_", comment: "")
+                )
+                return
+            }
             do {
-                _ = try await jmapApi?.deleteEmails(accountId: mailbox.accountId, emailIds: items.map(\.id))
-                ok = true
+                _ = try await client.refreshSession()
+                // ALLE Mails des Papierkorbs erfassen (paginiert) - nicht nur
+                // die aktuell geladene Seite.
+                var allIds: [String] = []
+                var lastId: String?
+                for _ in 0..<50 {
+                    let resp = try await api.queryEmails(
+                        accountId: mailbox.accountId,
+                        inMailboxId: jmapMailboxId,
+                        limit: 100,
+                        anchor: lastId,
+                        position: lastId == nil ? 0 : 1
+                    )
+                    let ids = (resp["ids"] as? [String]) ?? []
+                    guard !ids.isEmpty else { break }
+                    allIds.append(contentsOf: ids)
+                    if ids.count < 100 { break }
+                    lastId = ids.last
+                }
+                // In Batches löschen und das Ergebnis PRÜFEN (notDestroyed).
+                var notDestroyed = 0
+                var index = 0
+                while index < allIds.count {
+                    let end = min(index + 100, allIds.count)
+                    let batch = Array(allIds[index..<end])
+                    let resp = try await api.deleteEmails(accountId: mailbox.accountId, emailIds: batch)
+                    notDestroyed += (resp["notDestroyed"] as? [Any])?.count ?? 0
+                    index = end
+                }
+                ok = notDestroyed == 0
+                JmapLog.write("emptyTrash: \(allIds.count) mails, notDestroyed=\(notDestroyed)")
             } catch {
                 JmapLog.write("emptyTrash jmap failed: \(error)")
+                ok = false
             }
         } else {
             ok = await imapClient?.emptyMailbox(mailboxPath: mailbox.path) ?? false
@@ -604,7 +640,14 @@ final class MailViewModel: ObservableObject {
                 : NSLocalizedString("_mail_trash_empty_failed_", comment: "")
         )
         if ok {
-            await syncMessages()
+            // Cache/Query-State des Papierkorbs invalidieren, Liste leeren.
+            let accountName = mailAccount?.account ?? ""
+            MailCache.remove(account: accountName, mailboxId: mailbox.id)
+            queryStates.removeValue(forKey: mailbox.id)
+            dirtyFlagIds.removeValue(forKey: mailbox.id)
+            pageState = (nil, false)
+            hasMoreMessages = false
+            messages = .success([])
             await loadMailboxes(autoOpenInbox: false)
         }
     }
