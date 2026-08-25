@@ -980,7 +980,7 @@ struct LinkChatView: View {
 
     /// "Runter zu den neuesten Nachrichten": identisches Design wie der
     /// Mail-Up-Pfeil (Kreis, Material, Schatten), Icon arrow.down.
-    private func scrollBottomButton(proxy: ScrollViewProxy, lastId: String) -> some View {
+    private func scrollBottomButton(proxy: ScrollViewProxy, lastId: Int64) -> some View {
         Button {
             withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
         } label: {
@@ -1018,7 +1018,6 @@ struct LinkChatView: View {
             }
         }
     }
-}
 
 /// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start
     /// einer Autoren-Gruppe (dort sitzt der Stempel neben dem Avatar).
