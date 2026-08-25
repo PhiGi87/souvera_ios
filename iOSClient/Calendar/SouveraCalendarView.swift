@@ -916,13 +916,18 @@ private struct TimelineColumn: View {
                     .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .padding(3)
-            .background(colorFor(event).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
         }
         .buttonStyle(.plain)
-        .offset(x: x, y: offsetY + 2)
+        // ERST die volle Blockgröße (Dauer des Termins) setzen, DANN den
+        // Hintergrund darüberlegen und ZULETZT positionieren - so deckt die
+        // farbige Fläche die exakte Termindauer ab, statt nur die Höhe des
+        // Textinhalts (das war der Anzeigefehler: 1h-Termin wirkte wie
+        // ~30-45 Minuten).
         .frame(width: max(width - 3, 0), height: max(height - 4, 28), alignment: .top)
+        .background(colorFor(event).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
+        .offset(x: x, y: offsetY + 2)
         .zIndex(1)
     }
 

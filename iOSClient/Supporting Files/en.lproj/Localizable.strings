@@ -989,7 +989,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_shield_release_only_"         = "Deliver only";
 "_shield_release_whitelist_"    = "Deliver and add sender to whitelist";
 "_shield_released_whitelisted_" = "Delivered and sender added to the whitelist";
-"_link_video_call_"               = "Video call";
+"_link_video_call_"               = "Video call";"_link_scroll_bottom_"             = "Jump to newest messages";
+
 "_link_decline_"                  = "Decline";"_link_call_minimize_"              = "Minimize";
 
 "_link_accept_"                   = "Accept";

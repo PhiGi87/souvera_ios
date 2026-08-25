@@ -674,9 +674,9 @@ private struct MailMessageListView: View {
             }
             switch viewModel.messages {
             case .loading:
-                Spacer()
-                ProgressView()
-                Spacer()
+                // Kein Ladekreis: Der Fortschritt läuft über das Overlay
+                // "Mail-Abruf läuft…" und die Liste wächst progressiv nach.
+                Spacer(minLength: 0)
             case let .error(message):
                 Spacer()
                 VStack(spacing: 12) {
@@ -866,15 +866,15 @@ private struct MailMessageListView: View {
                         .id(message.id)
                 }
                 // Sentinel: beim Erreichen des Listenendes ältere Mails
-                // nachladen (kein Paging-UI, nahtloses Wachsen).
+                // nachladen (kein Paging-UI, nahtloses Wachsen). Unsichtbarer
+                // Trigger ohne Ladekreis - der Fortschritt ist über das
+                // Overlay "Mail-Abruf läuft…" sichtbar.
                 if viewModel.hasMoreMessages && !editing {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
-                    }
-                    .listRowSeparator(.hidden)
-                    .onAppear { viewModel.loadMore() }
+                    Color.clear
+                        .frame(height: 1)
+                        .listRowSeparator(.hidden)
+                        .listRowInsets(EdgeInsets())
+                        .onAppear { viewModel.loadMore() }
                 }
             }
             .listStyle(.plain)

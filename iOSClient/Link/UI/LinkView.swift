@@ -768,6 +768,11 @@ struct LinkChatView: View {
     /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht (einfache
     /// Variante: Ansicht folgt dem Finger, kein Preview-Overlay).
     @State private var backDragOffset: CGFloat = 0
+    /// Chat-Eintritt: Liste wird einmalig UNSICHTBAR an die neueste Nachricht
+    /// positioniert, bevor sie eingeblendet wird (kein sichtbarer Sprung).
+    @State private var initialPositioned = false
+    /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
+    @State private var showScrollBottom = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -884,18 +889,19 @@ struct LinkChatView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
-            List {
-                // Sentinel oben: lädt ältere Nachrichten nach, falls der
-                // Historie-Loop noch nicht fertig ist (kein Paging-UI).
-                if viewModel.hasMoreHistory {
-                    HStack {
-                        Spacer()
-                        ProgressView()
-                        Spacer()
+            ScrollViewReader { proxy in
+                List {
+                    // Sentinel oben: lädt ältere Nachrichten nach, falls der
+                    // Historie-Loop noch nicht fertig ist (kein Paging-UI).
+                    if viewModel.hasMoreHistory {
+                        HStack {
+                            Spacer()
+                            ProgressView()
+                            Spacer()
+                        }
+                        .listRowSeparator(.hidden)
+                        .onAppear { viewModel.loadEarlierHistory() }
                     }
-                    .listRowSeparator(.hidden)
-                    .onAppear { viewModel.loadEarlierHistory() }
-                }
                     ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
@@ -934,10 +940,87 @@ struct LinkChatView: View {
                 // bei neuen Nachrichten unten; das Nachladen älterer
                 // Nachrichten oben reißt die Leseposition nicht mit.
                 .defaultScrollAnchor(.bottom)
+                .overlay(alignment: .bottom) {
+                    // "Zu den neuesten Nachrichten"-Button (Design-Pendant
+                    // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
+                    // Nachrichten hochgescrollt ist.
+                    if let lastId = items.last?.id {
+                        scrollBottomButton(proxy: proxy, lastId: lastId)
+                            .padding(.bottom, 16)
+                            .opacity(showScrollBottom ? 1 : 0)
+                            .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
+                    }
+                }
+                .modifier(SouveraScrollBottomObserver { visible in
+                    if visible != showScrollBottom {
+                        withAnimation(.easeInOut(duration: 0.25)) {
+                            showScrollBottom = visible
+                        }
+                    }
+                })
+                .onChange(of: token) { _, _ in
+                    initialPositioned = false
+                    showScrollBottom = false
+                }
+                // Position-vor-Sichtbarkeit: EINMALIG unsichtbar ans untere
+                // Ende springen, dann einblenden - der allererste sichtbare
+                // Frame zeigt bereits die neueste Nachricht, es gibt keinerlei
+                // sichtbare Scroll-Bewegung beim Raumeintritt.
+                .opacity(initialPositioned ? 1 : 0)
+                .onAppear {
+                    guard !initialPositioned, let lastId = items.last?.id else { return }
+                    proxy.scrollTo(lastId, anchor: .bottom)
+                    DispatchQueue.main.async {
+                        initialPositioned = true
+                    }
+                }
+            }
         }
     }
 
-    /// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start
+    /// "Runter zu den neuesten Nachrichten": identisches Design wie der
+    /// Mail-Up-Pfeil (Kreis, Material, Schatten), Icon arrow.down.
+    private func scrollBottomButton(proxy: ScrollViewProxy, lastId: String) -> some View {
+        Button {
+            withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
+        } label: {
+            Image(systemName: "arrow.down")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                .frame(width: 44, height: 44)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
+    }
+
+    /// Beobachtet den Abstand zum unteren Listenende (iOS 18+): meldet
+    /// `true`, sobald man mehr als 120 px von den neuesten Nachrichten
+    /// entfernt ist (Button "runter" wird eingeblendet). Unter iOS 18:
+    /// kein Callback.
+    private struct SouveraScrollBottomObserver: ViewModifier {
+        let onChange: (Bool) -> Void
+
+        func body(content: Content) -> some View {
+            if #available(iOS 18.0, *) {
+                content.onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
+                    geometry
+                } action: { _, geometry in
+                    let bottomDistance = geometry.contentSize.height
+                        - geometry.contentInsets.bottom
+                        - (geometry.contentOffset.y + geometry.containerSize.height)
+                    onChange(bottomDistance > 120)
+                }
+            } else {
+                content
+            }
+        }
+    }
+}
+
+/// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start
     /// einer Autoren-Gruppe (dort sitzt der Stempel neben dem Avatar).
     private func showsTime(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> Bool {
         let visible = items.filter { $0.systemMessage != "message_deleted" }
