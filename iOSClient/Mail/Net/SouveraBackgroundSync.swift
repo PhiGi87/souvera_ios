@@ -26,12 +26,11 @@ final class SouveraBackgroundSync {
     // MARK: - Mail
 
     private func syncMail() async {
-        var credential = await SouveraMailCredentialManager().ensureCombinedCredential()
-        guard credential != nil else { return }
+        guard var credential = await SouveraMailCredentialManager().ensureCombinedCredential() else { return }
         var client = JmapClient(
-            baseUrl: credential!.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-            username: credential!.saslUser,
-            password: credential!.mailPassword
+            baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            username: credential.saslUser,
+            password: credential.mailPassword
         )
         var api = JmapApi(client: client)
         var session: JmapSessionInfo?
