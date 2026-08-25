@@ -242,7 +242,21 @@ struct MailView: View {
     private var content: some View {
         switch viewModel.route {
         case .folders:
-            MailFolderListView(viewModel: viewModel)
+            if viewModel.isInitialLoad {
+                // Während des ERSTEN Ladens nach dem App-Start: neutraler
+                // Spinner statt Ordnerliste - danach öffnet sich direkt der
+                // letzte Ordner (üblicherweise die INBOX).
+                VStack(spacing: 12) {
+                    Spacer()
+                    ProgressView()
+                    Text(NSLocalizedString("_mail_loading_", comment: ""))
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+            } else {
+                MailFolderListView(viewModel: viewModel)
+            }
         case .messages:
             MailMessageListView(viewModel: viewModel)
         case let .detail(message):

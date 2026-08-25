@@ -738,7 +738,12 @@ final class LinkViewModel: ObservableObject {
     /// wurde (Foreground: PushKit liefert keine VoIP-Pushes).
     @Published var incomingCallRoom: LinkConversation?
 
-    private var notifiedCallTokens: Set<String> = []
+    /// Call-Zustand pro Raum aus dem letzten Poll: Die In-App-Anruf-UI
+    /// erscheint NUR beim Übergang kein Call -> Call (frisch gestarteter
+    /// Call, während die App läuft). Läuft der Call bereits beim ersten
+    /// Poll (App-Start oder Raum-Öffnen), gibt es KEINEN Fullscreen - man
+    /// steigt über den "Teilnehmen"-Button im Chat ein.
+    private var previousCallState: [String: Bool] = [:]
     private var roomPollTask: Task<Void, Never>?
 
     /// Periodischer Vordergrund-Poll der Raumliste (alle 10 s): erkennt
@@ -760,25 +765,27 @@ final class LinkViewModel: ObservableObject {
         roomPollTask = nil
     }
 
-    /// Zeigt die In-App-Anruf-UI, wenn ein Call im Raum läuft und wir selbst
-    /// nicht im Call sind; jeder Call wird nur einmal gemeldet.
+    /// Zeigt die In-App-Anruf-UI nur, wenn ein Call FRISCH startet (Übergang
+    /// false->true im Poll) und wir selbst nicht im Call sind. Ein bereits
+    /// laufender Call beim Öffnen der App/des Raums löst keinen Fullscreen
+    /// aus. Der Zustand wird auch während eines eigenen Calls nachgezogen,
+    /// damit nach dem Verlassen wieder frische Calls erkannt werden.
     private func detectIncomingCall() {
-        guard LinkVoIPManager.shared.activeSession == nil,
-              incomingCallRoom == nil,
-              case let .success(rooms) = conversations else { return }
+        guard case let .success(rooms) = conversations else { return }
+        var freshCall: LinkConversation?
         for room in rooms {
-            guard room.hasCall else {
-                if notifiedCallTokens.contains(room.token) {
-                    notifiedCallTokens.remove(room.token)
-                }
-                continue
-            }
-            if notifiedCallTokens.insert(room.token).inserted {
-                CallDebugLog.log("LinkViewModel", "in-app incoming call detected room=\(room.token)")
-                incomingCallRoom = room
-                return
+            let hasCall = room.hasCall
+            let previous = previousCallState[room.token]
+            previousCallState[room.token] = hasCall
+            if hasCall, previous == false, freshCall == nil {
+                freshCall = room
             }
         }
+        guard let freshCall,
+              LinkVoIPManager.shared.activeSession == nil,
+              incomingCallRoom == nil else { return }
+        CallDebugLog.log("LinkViewModel", "in-app incoming call detected (fresh) room=\(freshCall.token)")
+        incomingCallRoom = freshCall
     }
 
     /// Ablehnen der In-App-Anruf-UI (Raum wird für diesen Call nicht erneut

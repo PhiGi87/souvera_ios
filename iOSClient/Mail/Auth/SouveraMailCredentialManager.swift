@@ -50,6 +50,11 @@ struct SouveraMailCredentialManager {
     private static let keyPassword = "souvera_mail_password"
     private static let keyStalwartId = "souvera_stalwart_id"
     private static let keyLoginName = "souvera_mail_login_name"
+    private static let keyLastMint = "souvera_mail_last_mint_"
+    /// Mindestabstand zwischen zwei Mints: Jeder Mint ersetzt serverseitig
+    /// das App-Passwort dieser Beschreibung - zu schnelle Mints (Ping-Pong
+    /// zwischen Komponenten/Geräten) erzeugen Endlos-401-Schleifen.
+    private static let mintIntervalSeconds: TimeInterval = 120
 
     private var keychain: Keychain { Keychain(service: Self.service) }
 
@@ -61,19 +66,25 @@ struct SouveraMailCredentialManager {
         let davPassword = NCPreferences().getPassword(account: account)
         guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
 
-        if let stored = try? keychain.get(Self.keyPassword + account), !stored.isEmpty {
-            let stalwartId = (try? keychain.get(Self.keyStalwartId + account)) ?? ""
-            let loginName = (try? keychain.get(Self.keyLoginName + account)) ?? ""
-            return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: loginName, mailPassword: stored, stalwartId: stalwartId)
+        if let stored = storedAccount(account: account, baseUrl: baseUrl, username: username) {
+            return stored
         }
 
+        // Ohne gespeicherte Credential: erst nach Ablauf des Rate-Limits
+        // minten (verhindert Mint-Stürme mehrerer Instanzen).
+        if let last = lastMintDate(account: account),
+           Date().timeIntervalSince(last) < Self.mintIntervalSeconds {
+            SouveraLog.write("MailCredential", "mint throttled (no stored credential, last mint < 120s)")
+            return nil
+        }
         return await mint(account: account, baseUrl: baseUrl, username: username, davPassword: davPassword)
     }
 
-    /// Clears the stored mail credential and mints a fresh one via the server's
-    /// login-flow. Used when the mail server rejects the stored password with 401
-    /// (e.g. the credential was revoked server-side or became invalid after a
-    /// server-side upgrade).
+    /// Erneuert die Mail-Credential. WICHTIG: Vor dem Mint wird die
+    /// GESPEICHERTE Credential live validiert - ist sie noch gültig, stammte
+    /// der auslösende 401 von einem veralteten Client und es wird NICHT
+    /// neu gemintzt (jeder Mint entwertet serverseitig das vorherige
+    /// Passwort derselben Beschreibung).
     func renewCredential() async -> MailAccount? {
         guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
         let account = tbl.account
@@ -82,6 +93,16 @@ struct SouveraMailCredentialManager {
         let davPassword = NCPreferences().getPassword(account: account)
         guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
 
+        let stored = storedAccount(account: account, baseUrl: baseUrl, username: username)
+        if let last = lastMintDate(account: account),
+           Date().timeIntervalSince(last) < Self.mintIntervalSeconds {
+            SouveraLog.write("MailCredential", "mint throttled (last mint < 120s) - returning stored credential")
+            return stored
+        }
+        if let stored, await validate(stored) {
+            SouveraLog.write("MailCredential", "stored credential still valid - no mint needed")
+            return stored
+        }
         clear(account: account)
         return await mint(account: account, baseUrl: baseUrl, username: username, davPassword: davPassword)
     }
@@ -92,13 +113,54 @@ struct SouveraMailCredentialManager {
         try? keychain.remove(Self.keyLoginName + account)
     }
 
+    /// Letzte 4 Zeichen eines Passworts für die Diagnose-Logs: macht
+    /// sichtbar, OB ein 401-Passwort vom letzten Mint stammt oder nicht.
+    static func suffix(_ password: String) -> String {
+        guard password.count > 4 else { return password }
+        return String(password.suffix(4))
+    }
+
+    private func storedAccount(account: String, baseUrl: String, username: String) -> MailAccount? {
+        guard let stored = try? keychain.get(Self.keyPassword + account), !stored.isEmpty else { return nil }
+        let stalwartId = (try? keychain.get(Self.keyStalwartId + account)) ?? ""
+        let loginName = (try? keychain.get(Self.keyLoginName + account)) ?? ""
+        return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: loginName, mailPassword: stored, stalwartId: stalwartId)
+    }
+
+    private func lastMintDate(account: String) -> Date? {
+        let interval = UserDefaults.standard.double(forKey: Self.keyLastMint + account)
+        guard interval > 0 else { return nil }
+        return Date(timeIntervalSince1970: interval)
+    }
+
+    private func markMinted(account: String) {
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.keyLastMint + account)
+    }
+
+    /// Live-Validierung: Liefert die gespeicherte Credential eine
+    /// JMAP-Session MIT Accounts?
+    private func validate(_ account: MailAccount) async -> Bool {
+        let client = JmapClient(
+            baseUrl: account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            username: account.saslUser,
+            password: account.mailPassword
+        )
+        do {
+            let session = try await client.refreshSession()
+            return !session.primaryAccountId.isEmpty && !session.accounts.isEmpty
+        } catch {
+            return false
+        }
+    }
+
     private func mint(account: String, baseUrl: String, username: String, davPassword: String) async -> MailAccount? {
         do {
             let combined = try await SouveraMailLoginFlow.fetchCombinedAppPassword(baseUrl: baseUrl, username: username, currentAppPassword: davPassword)
             try? keychain.set(combined.appPassword, key: Self.keyPassword + account)
             try? keychain.set(combined.stalwartId, key: Self.keyStalwartId + account)
             try? keychain.set(combined.loginName, key: Self.keyLoginName + account)
-            SouveraLog.write("MailCredential", "mint OK stalwart=\(combined.stalwartId)")
+            markMinted(account: account)
+            SouveraLog.write("MailCredential", "mint OK stalwart=\(combined.stalwartId) pwd=…\(Self.suffix(combined.appPassword))")
             return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: combined.loginName, mailPassword: combined.appPassword, stalwartId: combined.stalwartId)
         } catch {
             SouveraLog.write("MailCredential", "mint FAILED: \(error.localizedDescription)")

@@ -59,6 +59,11 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var speakerTimer: Timer?
     private var activeSpeakerKey: String?
 
+    /// "status"-DataChannel pro MCU-Verbindung (Janus-Protokoll wie im
+    /// souvera_android-Pendant): Publisher + Subscriber. Über den Kanal
+    /// melden wir dem MCU unseren Medienzustand (unmute/mute/videoOn/off).
+    private var statusChannels: [String: RTCDataChannel] = [:]
+
     private var callFlags: Int
 
     init(account: LinkAccount, token: String, callbacks: CallSessionCallbacks?, withVideo: Bool = true, silent: Bool = false) {
@@ -296,6 +301,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     func setMuted(_ muted: Bool) {
         CallDebugLog.log("CallSession", "setMuted \(muted)")
         localAudio?.isEnabled = !muted
+        sendStatusMessage(muted ? "mute" : "unmute")
     }
 
     /// Video an/aus. Im Audio-Call existiert der Video-Track noch nicht -
@@ -329,12 +335,14 @@ final class CallSession: NSObject, HpbSignalingListener {
                 }
                 // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
                 self.renegotiateAfterVideoChange()
+                self.sendStatusMessage("videoOn")
             }
             isVideoEnabled = true
         } else {
             localVideo?.isEnabled = false
             webRtc.stopVideoCapture()
             isVideoEnabled = false
+            sendStatusMessage("videoOff")
             // Server-Flags zurücksetzen (ohne WITH_VIDEO), damit andere
             // Clients sofort sehen, dass die Kamera aus ist.
             if callFlags & 4 != 0 {
@@ -388,6 +396,9 @@ final class CallSession: NSObject, HpbSignalingListener {
         endedOnce = true
         stopSpeakerPolling()
         CallDebugLog.log("CallSession", "hangup start")
+        if let peer = peers[ownSessionId] {
+            dumpOutboundStats(peer: peer, tag: "final")
+        }
         Task { await api.leaveCall(token: token) }
         signaling?.close()
         peers.values.forEach { $0.close() }
@@ -432,8 +443,53 @@ final class CallSession: NSObject, HpbSignalingListener {
             if let audio = localAudio { peer.add(audio, streamIds: ["link"]) }
             if let video = localVideo { peer.add(video, streamIds: ["link"]) }
         }
+        // Janus erwartet den "status"-DataChannel auf jeder MCU-Verbindung;
+        // der Publisher ERSTELLT ihn (landet im Offer), Subscriber erhalten
+        // ihn über didOpen aus dem Gegenangebot.
+        if mcuActive, isPublisher {
+            if let channel = peer.dataChannel(forLabel: "status", configuration: RTCDataChannelConfiguration()) {
+                channel.delegate = self
+                statusChannels[key] = channel
+                CallDebugLog.log("CallSession", "status channel created key=\(key.prefix(12))")
+            }
+        }
         peers[key] = peer
         return peer
+    }
+
+    // MARK: - Status-Kanal (MCU-Medienzustand)
+
+    fileprivate func registerStatusChannel(key: String, channel: RTCDataChannel) {
+        statusChannels[key] = channel
+        channel.delegate = self
+        CallDebugLog.log("CallSession", "status channel opened key=\(key.prefix(12))")
+        if channel.readyState == .open {
+            sendInitialStatus()
+        }
+    }
+
+    /// Meldet dem MCU den aktuellen Medienzustand. Ohne diese Meldungen
+    /// bleibt der Publisher-Uplink am MCU stumm - das ist der Grund, warum
+    /// ausgehendes Audio/Video nicht ankam (Android-Pendant sendet sie
+    /// ebenfalls).
+    private func sendInitialStatus() {
+        guard mcuActive else { return }
+        sendStatusMessage(localAudio?.isEnabled == false ? "mute" : "unmute")
+        sendStatusMessage((localVideo != nil && localVideo?.isEnabled == true) ? "videoOn" : "videoOff")
+    }
+
+    private func sendStatusMessage(_ type: String) {
+        guard mcuActive else { return }
+        var sent = false
+        for (_, channel) in statusChannels where channel.readyState == .open {
+            let payload = ["type": type]
+            guard let data = try? JSONSerialization.data(withJSONObject: payload) else { continue }
+            channel.sendData(RTCDataBuffer(data: data, isBinary: false))
+            sent = true
+        }
+        if sent {
+            CallDebugLog.log("CallSession", "status message sent: \(type)")
+        }
     }
 
     private func publisherConstraints() -> RTCMediaConstraints {
@@ -481,6 +537,59 @@ final class CallSession: NSObject, HpbSignalingListener {
             callbacks.onRemoteVideo(session: stream.session, roomType: stream.roomType, track: stream.track)
         }
     }
+
+    // MARK: - Publisher-Diagnose (outbound RTP)
+
+    /// Loggt die outbound-rtp-Statistik des Publishers mehrfach nach dem
+    /// Verbindungsaufbau. Steigen bytesSent/packetsSent, fließen unsere
+    /// Medien zum MCU; bleiben sie 0, liegt das Problem in der lokalen
+    /// Capture-Kette.
+    fileprivate func logPublisherStats() {
+        guard mcuActive, let peer = peers[ownSessionId] else { return }
+        let delays: [Double] = [3, 10]
+        for delay in delays {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard let self, self.peers[self.ownSessionId] != nil else { return }
+                self.dumpOutboundStats(peer: peer, tag: "t+\(Int(delay))s")
+            }
+        }
+    }
+
+    private func dumpOutboundStats(peer: RTCPeerConnection, tag: String) {
+        peer.statistics { report in
+            let outbound = report.statistics.values
+                .filter { ($0.values["type"] as? String) == "outbound-rtp" }
+                .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
+            if outbound.isEmpty {
+                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none")
+            }
+            for stat in outbound {
+                let media = stat.values["mediaType"] as? String
+                    ?? stat.values["kind"] as? String ?? "?"
+                let bytes = stat.values["bytesSent"] as? NSNumber ?? 0
+                let packets = stat.values["packetsSent"] as? NSNumber ?? 0
+                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(media)] bytesSent=\(bytes) packetsSent=\(packets) [\(tag)]")
+            }
+        }
+    }
+}
+
+extension CallSession: RTCDataChannelDelegate {
+    func dataChannelDidChangeState(_ dataChannel: RTCDataChannel) {
+        CallDebugLog.log("CallSession", "status channel state \(dataChannel.label): \(dataChannel.readyState.rawValue)")
+        if dataChannel.readyState == .open {
+            sendInitialStatus()
+        }
+    }
+
+    func dataChannel(_ dataChannel: RTCDataChannel, didReceiveMessageWith buffer: RTCDataBuffer) {
+        if !buffer.isBinary, let payload = String(data: buffer.data, encoding: .utf8) {
+            CallDebugLog.log("CallSession", "status channel recv \(dataChannel.label): \(payload.prefix(120))")
+        }
+    }
+
+    func dataChannel(_ dataChannel: RTCDataChannel, didChangeBufferedAmount amount: UInt64) {}
 }
 
 /// Per-remote-participant RTCPeerConnectionDelegate; forwards ICE candidates and remote video.
@@ -522,6 +631,10 @@ private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
             CallDebugLog.log("PeerObserver", "publisher connected; audioSession active=\(audio.isActive)")
             let av = AVAudioSession.sharedInstance()
             CallDebugLog.log("PeerObserver", "AVAudioSession category=\(av.category.rawValue) mode=\(av.mode.rawValue) otherAudio=\(av.isOtherAudioPlaying)")
+            // Outbound-RTP-Statistik (bytesSent/packetsSent) nach 3 s und
+            // 10 s loggen - beweist im Log, ob Medien tatsächlich zum MCU
+            // fließen.
+            owner?.logPublisherStats()
         }
     }
     func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceGatheringState) {
@@ -531,7 +644,10 @@ private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
         CallDebugLog.log("PeerObserver", "session=\(session) connection -> \(Self.stateName(newState))")
     }
     func peerConnection(_ pc: RTCPeerConnection, didRemove candidates: [RTCIceCandidate]) {}
-    func peerConnection(_ pc: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {}
+    func peerConnection(_ pc: RTCPeerConnection, didOpen dataChannel: RTCDataChannel) {
+        CallDebugLog.log("PeerObserver", "data channel opened key=\(key.prefix(12)) label=\(dataChannel.label)")
+        owner?.registerStatusChannel(key: key, channel: dataChannel)
+    }
 
     private static func stateName(_ state: RTCIceConnectionState) -> String {
         switch state {

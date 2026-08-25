@@ -777,16 +777,13 @@ private struct TimelineColumn: View {
                 }
             }
             .contentShape(Rectangle())
-            // Reiner Long-Press setzt nur ein Flag; der Slot-Drag läuft
-            // simultan und zeichnet erst nach dem Long-Press. Beides
-            // blockiert das Scrollen der ScrollView nicht.
-            .simultaneousGesture(slotDrag)
-            .onLongPressGesture(minimumDuration: 0.45, maximumDistance: 14) {
-                longPressActive = true
-            }
-            .onChange(of: dragSlot != nil) { _, active in
-                onSlotActive?(active)
-            }
+            // EINE sequenzierte Geste: Long-Press (0,45 s) -> Drag. Während
+            // der Wartezeit scheitert der Long-Press bei Bewegung > 14 px,
+            // dadurch scrollt die ScrollView auf der GESAMTEN Breite normal
+            // (ein permanent aktiver Min-0-Drag hatte das Scrollen zuvor
+            // blockiert). Erst nach dem Halten zeichnet die Drag-Phase den
+            // Slot; das Scrollen ist dann via onSlotActive deaktiviert.
+            .gesture(slotGesture)
         }
         .overlay(alignment: .trailing) {
             if showTrailingBorder {
@@ -906,38 +903,44 @@ private struct TimelineColumn: View {
         .zIndex(1)
     }
 
-    /// Tap auf die freie Fläche = Termin im Zeitslot erstellen; Ziehen wählt
-    /// den Slot-Bereich. Zeiten rasten in 15-Minuten-Schritten ein
-    /// (Start abrunden, Ende aufrunden, mindestens 15 Minuten) und der Slot
-    /// wird während des Ziehens sichtbar markiert.
-    @GestureState private var dragSlot: (start: Int, end: Int)?
+    /// Terminanlage: Long-Press (~0,45 s) und dann Ziehen wählt den
+    /// Slot-Bereich. Zeiten rasten in 15-Minuten-Schritten ein (Start
+    /// abrunden, Ende aufrunden, mindestens 15 Minuten) und der Slot wird
+    /// während des Ziehens sichtbar markiert.
+    @State private var dragSlot: (start: Int, end: Int)?
 
-    /// Terminanlage: NUR nach einem Long-Press (~0,45 s). Der Long-Press
-    /// setzt lediglich ein Flag (er blockiert das Scrollen NICHT - die
-    /// Geste läuft als onLongPressGesture); der separate Slot-Drag zeichnet
-    /// den Termin erst, wenn das Flag gesetzt ist.
-    @State private var longPressActive = false
-
-    private var slotDrag: some Gesture {
-        DragGesture(minimumDistance: 0)
-            .updating($dragSlot) { value, state, _ in
-                guard longPressActive else { return }
-                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
-                let a = Self.snapDown(min(startMinute, endMinute))
-                let b = Self.snapUp(max(startMinute, endMinute))
-                state = (a, max(b, a + 15))
+    /// Terminanlage: NUR nach einem Long-Press (~0,45 s). Die Geste ist
+    /// eine Sequenz LongPress -> Drag: Der Long-Press blockiert das
+    /// Scrollen nicht (er scheitert bei Bewegung), die Drag-Phase existiert
+    /// erst NACH dem erfolgreichen Halten.
+    private var slotGesture: some Gesture {
+        LongPressGesture(minimumDuration: 0.45, maximumDistance: 14)
+            .sequenced(before: DragGesture(minimumDistance: 0))
+            .onChanged { value in
+                switch value {
+                case .first(true):
+                    onSlotActive?(true)
+                case .second(true, let drag?):
+                    let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
+                    let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
+                    let a = Self.snapDown(min(startMinute, endMinute))
+                    let b = Self.snapUp(max(startMinute, endMinute))
+                    dragSlot = (a, max(b, a + 15))
+                default:
+                    break
+                }
             }
             .onEnded { value in
-                guard longPressActive, let onCreate else {
-                    longPressActive = false
-                    return
+                defer {
+                    dragSlot = nil
+                    onSlotActive?(false)
                 }
-                longPressActive = false
+                guard case .second(true, let drag?) = value else { return }
+                guard let onCreate else { return }
                 let calendar = Calendar.current
                 let dayStart = calendar.startOfDay(for: day)
-                let startMinute = Self.minute(for: value.startLocation.y, hourHeight: hourHeight)
-                let endMinute = Self.minute(for: value.location.y, hourHeight: hourHeight)
+                let startMinute = Self.minute(for: drag.startLocation.y, hourHeight: hourHeight)
+                let endMinute = Self.minute(for: drag.location.y, hourHeight: hourHeight)
                 let a = Self.snapDown(min(startMinute, endMinute))
                 let b = Self.snapUp(max(startMinute, endMinute))
                 let slotDuration = max(15, b - a)

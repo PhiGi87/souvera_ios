@@ -202,28 +202,32 @@ final class LinkVoIPManager: NSObject {
                 }
 
                 nkLog(tag: global.logTagPN, emoji: .start, message: "Registering Link VoIP push for \(urlBase) via proxy \(proxyServerUrl)")
-                // KANAL-TRENNUNG: Talk-User-Agent, damit der Server diese
-                // Registrierung als Talk-Gerät (apptype=talk) klassifiziert
-                // - Call-Pushes laufen dann über den VoIP-Kanal.
+                // KANAL-TRENNUNG mit ZWEI Servertoken: Die Server-Tabelle
+                // dedupliziert Gerätezeilen pro (Benutzer, Session-Token).
+                // Diese Registrierung läuft daher über die MAIL-Credential
+                // Y (zweites NC-Login, eigener Token) - sonst würde sie die
+                // Normal-Push-Zeile überschreiben und der Talk-Kanal fehlt.
                 let talkUserAgent = "Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)"
-                let options = NKRequestOptions(customUserAgent: talkUserAgent)
-                let responsePN = await NextcloudKit.shared.subscribingPushNotificationAsync(serverUrl: urlBase,
-                                                                                            pushTokenHash: pushTokenHash,
-                                                                                            devicePublicKey: devicePublicKey,
-                                                                                            proxyServerUrl: proxyServerUrl,
-                                                                                            account: account,
-                                                                                            options: options)
-                guard responsePN.error == .success,
-                      let deviceIdentifier = responsePN.deviceIdentifier,
-                      let signature = responsePN.signature,
-                      let subscribingPublicKey = responsePN.publicKey else {
-                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP Nextcloud registration FAILED for \(urlBase), status \(responsePN.error.errorCode)")
-                    UserDefaults.standard.set("failed NC \(responsePN.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusVoip")
-                    SouveraLog.write("PushVoip", "NC registration FAILED \(urlBase) status \(responsePN.error.errorCode)")
+                let registration = await Self.registerTalkDevice(
+                    account: account,
+                    baseUrl: urlBase,
+                    username: tblAccount.user,
+                    pushTokenHash: pushTokenHash,
+                    devicePublicKey: devicePublicKey,
+                    proxyServerUrl: proxyServerUrl,
+                    talkUserAgent: talkUserAgent
+                )
+                guard let registration,
+                      let deviceIdentifier = registration.deviceIdentifier,
+                      let signature = registration.signature,
+                      let subscribingPublicKey = registration.publicKey else {
+                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP Nextcloud registration FAILED for \(urlBase)")
+                    UserDefaults.standard.set("failed NC \(Date())", forKey: "SouveraPushRegStatusVoip")
+                    SouveraLog.write("PushVoip", "NC registration FAILED \(urlBase)")
                     continue
                 }
                 nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
-                SouveraLog.write("PushVoip", "NC registration OK \(urlBase)")
+                SouveraLog.write("PushVoip", "NC registration OK \(urlBase) (via mail credential)")
 
                 let combined = SouveraPushRegistrar.combinedToken(
                     normal: NCPreferences().deviceTokenPushNotification,
@@ -246,6 +250,113 @@ final class LinkVoIPManager: NSObject {
                     SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl)")
                 }
             }
+        }
+    }
+
+    /// Registriert das Talk/VoIP-Gerät am Nextcloud-Server mit der
+    /// MAIL-Credential (Y): eigener Session-Token -> EIGENE Gerätezeile mit
+    /// apptype=talk. Ohne Mail-Credential: Fallback auf die normale
+    /// NextcloudKit-Session (Zeile bleibt dann nextcloud - Mail/Chat-Push
+    /// bleibt funktionsfähig, Call-Push fehlt).
+    private static func registerTalkDevice(
+        account: String,
+        baseUrl: String,
+        username: String,
+        pushTokenHash: String,
+        devicePublicKey: String,
+        proxyServerUrl: String,
+        talkUserAgent: String
+    ) async -> (deviceIdentifier: String?, signature: String?, publicKey: String?)? {
+        let manager = SouveraMailCredentialManager()
+        var mailAccount = await manager.ensureCombinedCredential()
+        if let mailAccount {
+            let attempt = await registerTalkDeviceOcs(
+                baseUrl: baseUrl,
+                username: username,
+                ncPassword: mailAccount.mailPassword,
+                pushTokenHash: pushTokenHash,
+                devicePublicKey: devicePublicKey,
+                proxyServerUrl: proxyServerUrl,
+                talkUserAgent: talkUserAgent
+            )
+            if let attempt { return attempt }
+            // 401/Fehler: Credential prüfen/erneuern und EINMAL wiederholen.
+            SouveraLog.write("PushVoip", "NC registration with mail credential failed - validating/renewing")
+            if let renewed = await manager.renewCredential(), renewed.mailPassword != mailAccount.mailPassword {
+                if let retry = await registerTalkDeviceOcs(
+                    baseUrl: baseUrl,
+                    username: username,
+                    ncPassword: renewed.mailPassword,
+                    pushTokenHash: pushTokenHash,
+                    devicePublicKey: devicePublicKey,
+                    proxyServerUrl: proxyServerUrl,
+                    talkUserAgent: talkUserAgent
+                ) {
+                    return retry
+                }
+            }
+            SouveraLog.write("PushVoip", "NC registration via mail credential unavailable - falling back to NextcloudKit session")
+        }
+        // Fallback: bisheriger Weg über die NextcloudKit-Session (X).
+        let responsePN = await NextcloudKit.shared.subscribingPushNotificationAsync(serverUrl: baseUrl,
+                                                                                    pushTokenHash: pushTokenHash,
+                                                                                    devicePublicKey: devicePublicKey,
+                                                                                    proxyServerUrl: proxyServerUrl,
+                                                                                    account: account,
+                                                                                    options: NKRequestOptions(customUserAgent: talkUserAgent))
+        guard responsePN.error == .success else { return nil }
+        return (responsePN.deviceIdentifier, responsePN.signature, responsePN.publicKey)
+    }
+
+    /// Eigener OCS-POST `ocs/v2.php/apps/notifications/api/v2/push` mit
+    /// Talk-User-Agent und der übergebenen NC-Credential (Y).
+    private static func registerTalkDeviceOcs(
+        baseUrl: String,
+        username: String,
+        ncPassword: String,
+        pushTokenHash: String,
+        devicePublicKey: String,
+        proxyServerUrl: String,
+        talkUserAgent: String
+    ) async -> (deviceIdentifier: String?, signature: String?, publicKey: String?)? {
+        let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(root)/ocs/v2.php/apps/notifications/api/v2/push") else { return nil }
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        let raw = "\(username):\(ncPassword)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        req.setValue(talkUserAgent, forHTTPHeaderField: "User-Agent")
+
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let params = [
+            "pushTokenHash": pushTokenHash,
+            "devicePublicKey": devicePublicKey,
+            "proxyServer": proxyServerUrl
+        ]
+        let form = params
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
+            .joined(separator: "&")
+        req.httpBody = form.data(using: .utf8)
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: req)
+            let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+            SouveraLog.write("PushVoip", "NC talk-device registration http \(status)")
+            guard (200..<300).contains(status),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let ocs = json["ocs"] as? [String: Any],
+                  let ocsData = ocs["data"] as? [String: Any] else { return nil }
+            return (
+                ocsData["deviceIdentifier"] as? String,
+                ocsData["signature"] as? String,
+                ocsData["publicKey"] as? String
+            )
+        } catch {
+            SouveraLog.write("PushVoip", "NC talk-device registration failed: \(error.localizedDescription)")
+            return nil
         }
     }
 

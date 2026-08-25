@@ -20,7 +20,21 @@ struct CombinedAppPassword: Decodable {
 }
 
 enum SouveraMailLoginFlow {
-    private static let description = "Souvera iOS"
+    /// Eindeutige Mint-Beschreibung PRO INSTALLATION: Der Server ersetzt
+    /// beim Mint das App-Passwort derselben Beschreibung. Ohne UUID würden
+    /// sich mehrere Instanzen (Gerät + Simulator, 2. Gerät) gegenseitig
+    /// entminten und eine Endlos-401-Schleife erzeugen.
+    private static var description: String {
+        let key = "souvera_mail_app_password_uuid"
+        let defaults = UserDefaults.standard
+        if let existing = defaults.string(forKey: key), !existing.isEmpty {
+            return "Souvera iOS \(existing)"
+        }
+        let uuid = UUID().uuidString
+        defaults.set(uuid, forKey: key)
+        return "Souvera iOS \(uuid)"
+    }
+
     private static let httpNotFound = 404
 
     static func fetchCombinedAppPassword(baseUrl: String, username: String, currentAppPassword: String) async throws -> CombinedAppPassword {

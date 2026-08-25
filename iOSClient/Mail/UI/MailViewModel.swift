@@ -40,6 +40,18 @@ enum MailRoute: Equatable {
 @MainActor
 final class MailViewModel: ObservableObject {
     @Published var route: MailRoute = .folders
+    /// true, solange der ERSTE Ladevorgang nach dem Öffnen der App läuft:
+    /// Die Ordnerliste wird dann noch nicht angezeigt (kein Flash), sondern
+    /// ein neutraler Spinner; danach wird direkt der letzte Ordner geöffnet.
+    @Published private(set) var isInitialLoad = true
+
+    /// Zuletzt geöffnete Mailbox (UserDefaults) - beim App-Start wird
+    /// direkt dieser Ordner statt der Ordnerliste angezeigt.
+    private static let lastMailboxKey = "souvera_mail_last_mailbox_id"
+    static var lastMailboxId: String? {
+        get { UserDefaults.standard.string(forKey: lastMailboxKey) }
+        set { UserDefaults.standard.set(newValue, forKey: lastMailboxKey) }
+    }
     @Published var mailboxes: MailUiState<[Mailbox]> = .loading
     @Published var messages: MailUiState<[MailMessage]> = .loading
     @Published var body: MailUiState<MessageBody> = .loading
@@ -123,10 +135,12 @@ final class MailViewModel: ObservableObject {
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
                 mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
+                isInitialLoad = false
                 return
             }
             applyAccount(account)
             await loadMailboxes()
+            isInitialLoad = false
             await loadAliases()
             await loadIdentities()
         }
@@ -334,7 +348,9 @@ final class MailViewModel: ObservableObject {
         switch await client.fetchMailboxes() {
         case let .success(boxes):
             applyMailboxes(sortMailboxGroups(boxes))
-            if autoOpenInbox, let inbox = allMailboxes.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+            if autoOpenInbox {
+                openPreferredMailbox(allMailboxes)
+            }
         case let .failure(message):
             if message.contains("[AUTH]"), !hasRecoveredCredential {
                 await recoverCredentialAndReload()
@@ -401,7 +417,9 @@ final class MailViewModel: ObservableObject {
             // Verbindung steht wieder: Recovery-Sperre zurücksetzen.
             hasRecoveredCredential = false
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
-            if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+            if autoOpenInbox {
+                openPreferredMailbox(sorted)
+            }
         } catch {
             // Auth-Fehler: Recovery (mit 10-Minuten-Sperre im Gate) statt
             // dauerhaftem Cache/Offline.
@@ -409,7 +427,7 @@ final class MailViewModel: ObservableObject {
                 let blocked = hasRecoveredCredential
                     && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
                 if !blocked {
-                    SouveraLog.write("Mail", "mailboxes 401 - renewing credential")
+                    SouveraLog.write("Mail", "mailboxes 401 (pwd=…\(SouveraMailCredentialManager.suffix(mailAccount?.mailPassword ?? ""))) - renewing credential")
                     await recoverCredentialAndReload()
                     return
                 }
@@ -422,7 +440,9 @@ final class MailViewModel: ObservableObject {
                 applyMailboxes(sorted)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
                 cacheBannerActive = cacheBannerGate.shouldTrigger()
-                if autoOpenInbox, let inbox = sorted.first(where: { $0.kind == .inbox }) { openMailbox(inbox) }
+                if autoOpenInbox {
+                    openPreferredMailbox(sorted)
+                }
                 return
             }
             JmapLog.write("mailbox load failed: \(error.localizedDescription)")
@@ -687,6 +707,7 @@ final class MailViewModel: ObservableObject {
     // MARK: - Messages
 
     func openMailbox(_ mailbox: Mailbox) {
+        Self.lastMailboxId = mailbox.id
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
         messages = .loading
@@ -695,6 +716,18 @@ final class MailViewModel: ObservableObject {
         isLoadingMore = false
         prefetchGeneration += 1
         Task { await syncMessages() }
+    }
+
+    /// Öffnet beim App-Start den ZULETZT benutzten Ordner (Fallback INBOX).
+    private func openPreferredMailbox(_ boxes: [Mailbox]) {
+        if let lastId = Self.lastMailboxId,
+           let last = boxes.first(where: { $0.id == lastId }) {
+            openMailbox(last)
+            return
+        }
+        if let inbox = boxes.first(where: { $0.kind == .inbox }) {
+            openMailbox(inbox)
+        }
     }
 
     func syncMessages() async {
@@ -881,7 +914,7 @@ final class MailViewModel: ObservableObject {
                 let blocked = hasRecoveredCredential
                     && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
                 if !blocked {
-                    SouveraLog.write("Mail", "sync 401 for \(mailbox.id) - renewing credential")
+                    SouveraLog.write("Mail", "sync 401 for \(mailbox.id) (pwd=…\(SouveraMailCredentialManager.suffix(mailAccount?.mailPassword ?? ""))) - renewing credential")
                     await recoverCredentialAndReload()
                     if let mailbox = currentMailbox {
                         openMailbox(mailbox)

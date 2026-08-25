@@ -838,7 +838,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_send_"                   = "Send";
 "_mail_no_subject_"             = "(no subject)";
 "_mail_yesterday_"              = "Yesterday";
-"_mail_credential_failed_"      = "Could not set up mail. Please try again.";
+"_mail_credential_failed_"      = "Could not set up mail. Please try again.";"_mail_loading_"                 = "Loading mailbox…";
+
 "_mail_retry_"                  = "Try again";
 "_mail_cc_"                     = "Cc";
 "_mail_bcc_"                    = "Bcc";
