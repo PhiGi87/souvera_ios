@@ -60,6 +60,8 @@ platform :ios do
       metadata_path: File.join(ROOT, "fastlane", "metadata"),
       skip_screenshots: true,
       skip_binary_upload: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
       force: true
     )
   end
@@ -81,6 +83,8 @@ platform :ios do
       metadata_path: File.join(ROOT, "fastlane", "metadata"),
       skip_screenshots: true,
       skip_binary_upload: true,
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
       force: true
     )
 
