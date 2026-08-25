@@ -14,6 +14,8 @@ import AVFoundation
 import WebRTC
 
 protocol CallSessionCallbacks: AnyObject {
+    /// Kamera-Zugriff beim Video-Einschalten verweigert (UI-Hinweis).
+    func onVideoPermissionDenied()
     func onLocalVideo(track: RTCVideoTrack)
     /// Neuer Remote-Video-Stream (session + Stream-Typ: "video"/"screen").
     func onRemoteVideo(session: String, roomType: String, track: RTCVideoTrack)
@@ -201,9 +203,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             guard let self, let sdp else { return }
             peer.setLocalDescription(sdp) { _ in }
             // Diagnose: m-Lines des Offers loggen (audio/video vorhanden?).
-            let kinds = sdp.sdp.components(separatedBy: "\r\n")
-                .filter { $0.hasPrefix("m=") }
-                .compactMap { $0.split(separator: " ").dropFirst().first }
+            let kinds = Self.mediaTypes(of: sdp.sdp)
             CallDebugLog.log("CallSession", "publisher offer m-lines=[\(kinds.joined(separator: ","))]")
             self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
         }
@@ -338,6 +338,17 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")
         if enabled {
             Task { @MainActor in
+                // Kamera-Rechte VOR der Track-Erstellung: Ohne Freigabe
+                // liefert der Capturer nur schwarze/keine Frames und der
+                // Browser zeigt ein leeres Tile.
+                guard await CallPermissions.ensureCamera() else {
+                    CallDebugLog.log("CallSession", "video enable failed: camera permission denied")
+                    await MainActor.run {
+                        self.isVideoEnabled = false
+                        self.callbacks?.onVideoPermissionDenied()
+                    }
+                    return
+                }
                 self.createVideoTrackIfNeeded()
                 guard let video = self.localVideo else {
                     CallDebugLog.log("CallSession", "video enable failed: no camera track")
@@ -361,8 +372,8 @@ final class CallSession: NSObject, HpbSignalingListener {
                 // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
                 self.renegotiateAfterVideoChange()
                 self.sendStatusMessage("videoOn")
+                self.isVideoEnabled = true
             }
-            isVideoEnabled = true
         } else {
             localVideo?.isEnabled = false
             webRtc.stopVideoCapture()
@@ -402,7 +413,8 @@ final class CallSession: NSObject, HpbSignalingListener {
                 guard let self, let sdp else { return }
                 peer.setLocalDescription(sdp) { _ in }
                 self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
-                CallDebugLog.log("CallSession", "publisher re-offer sent after video change")
+                let kinds = Self.mediaTypes(of: sdp.sdp)
+                CallDebugLog.log("CallSession", "publisher re-offer sent after video change m-lines=[\(kinds.joined(separator: ","))]")
             }
         } else {
             for (key, peer) in peers where key != ownSessionId && !key.isEmpty {
@@ -528,6 +540,17 @@ final class CallSession: NSObject, HpbSignalingListener {
         RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "true"], optionalConstraints: nil)
     }
 
+    /// Extrahiert die Medientypen der m=-Zeilen eines SDP-Angebots.
+    static func mediaTypes(of sdp: String) -> [String] {
+        sdp.components(separatedBy: "\r\n")
+            .filter { $0.hasPrefix("m=") }
+            .map { line in
+                let parts = line.split(separator: " ")
+                guard let first = parts.first else { return "?" }
+                return String(first.dropFirst(2))
+            }
+    }
+
     private func end() {
         callbacks?.onEnded()
         LinkVoIPManager.shared.callSessionDidEnd(self)
@@ -585,15 +608,26 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     private func dumpOutboundStats(peer: RTCPeerConnection, tag: String) {
-        peer.statistics { report in
-            let outbound = report.statistics.values
+        // Der Stats-Report kann beim ersten Abruf leer sein - bis zu 3x
+        // mit kurzem Abstand nachfragen (Retry-Loop).
+        fetchStats(peer: peer, attempt: 0, tag: tag)
+    }
+
+    private func fetchStats(peer: RTCPeerConnection, attempt: Int, tag: String) {
+        peer.statistics { [weak self] report in
+            guard let self else { return }
+            let values = report.statistics.values
+            if values.isEmpty, attempt < 2 {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self.fetchStats(peer: peer, attempt: attempt + 1, tag: tag)
+                }
+                return
+            }
+            let outbound = values
                 .filter { ($0.values["type"] as? String) == "outbound-rtp" }
                 .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
             if outbound.isEmpty {
-                // Diagnose: ALLE vorhandenen Statistik-Typen loggen, um zu
-                // sehen, was der Publisher überhaupt meldet.
-                let types = report.statistics.values
-                    .compactMap { $0.values["type"] as? String }
+                let types = values.compactMap { $0.values["type"] as? String }
                 let kindMap = Dictionary(grouping: types, by: { $0 }).mapValues { $0.count }
                 CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none; stat types=[\(kindMap.sorted { $0.key < $1.key }.map { "\($0.key)x\($0.value)" }.joined(separator: ","))]")
             }

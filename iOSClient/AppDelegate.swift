@@ -96,14 +96,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Link (Talk) VoIP: register the PushKit token and present incoming calls via CallKit.
         LinkVoIPManager.shared.register()
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
-            guard let token = notification.userInfo?["token"] as? String, !token.isEmpty,
+            // Die Session startet LinkVoIPManager selbst (auch bei
+            // gesperrtem Gerät); hier wird NUR die Call-UI präsentiert -
+            // und zwar ausschließlich im aktiven Vordergrund. Sonst
+            // übernimmt nach dem Entsperren der "Zurück zum Anruf"-Flow.
+            guard UIApplication.shared.applicationState == .active,
+                  let token = notification.userInfo?["token"] as? String, !token.isEmpty,
                   let account = LinkAccount.active(),
-                  let root = UIApplication.shared.mainAppWindow?.rootViewController else { return }
+                  let root = UIApplication.shared.mainAppWindow?.rootViewController,
+                  let session = LinkVoIPManager.shared.activeSession else { return }
             let title = (notification.userInfo?["title"] as? String) ?? NSLocalizedString("_link_incoming_call_", comment: "")
             let hasVideo = (notification.userInfo?["hasVideo"] as? Bool) ?? false
-            // Session zentral anlegen (wie beim ausgehenden Anruf), damit das
-            // "Zurück zum Anruf"-Banner und CallKit-Zustand funktionieren.
-            let session = LinkVoIPManager.shared.startIncomingCall(account: account, token: token, title: title, withVideo: hasVideo)
             let callVC = LinkCallViewController(account: account, token: token, title: title, withVideo: hasVideo, session: session)
             root.present(callVC, animated: true)
         }
@@ -285,8 +288,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         func openNotification(controller: NCMainTabBarController) {
             if app == "souvera_mail" || app == "souvera_mail_notifications" {
-                // Mail-Benachrichtigung: direkt ins Mail-Modul springen.
+                // Mail-Benachrichtigung: direkt ins Mail-Modul springen;
+                // trägt der Payload die Mail-Id (Server-Spec P51), öffnet
+                // sich direkt die jeweilige Mail.
                 controller.selectedIndex = 0
+                if let mailId = data["id"] as? String, !mailId.isEmpty {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        SouveraPushDeepLink.deliver(.mail(account: account, emailId: mailId))
+                    }
+                }
             } else if app == "spreed" || app == "talk" {
                 // Talk-Benachrichtigung (Chat/Call): Link-Tab + Raum öffnen.
                 controller.selectedIndex = 2

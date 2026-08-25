@@ -383,6 +383,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     // MARK: - CallSessionCallbacks
 
+    func onVideoPermissionDenied() {
+        DispatchQueue.main.async {
+            self.videoButton?.setImage(UIImage(systemName: "video.slash.fill"), for: .normal)
+            self.participantsLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
+        }
+    }
+
     func onLocalVideo(track: RTCVideoTrack) {
         DispatchQueue.main.async {
             self.localTrack = track

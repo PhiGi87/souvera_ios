@@ -549,6 +549,17 @@ extension LinkVoIPManager: CXProviderDelegate {
         if !roomToken.isEmpty {
             let pending = pendingIncomingCall
             pendingIncomingCall = nil
+            // Session ZENTRAL hier starten - funktioniert auch bei
+            // gesperrtem Gerät/Hintergrund (keine UI-Abhängigkeit). Der
+            // AppDelegate-Observer präsentiert danach nur noch die UI.
+            if let account = LinkAccount.active() {
+                _ = startIncomingCall(
+                    account: account,
+                    token: roomToken,
+                    title: pending?.title ?? "",
+                    withVideo: pending?.hasVideo ?? false
+                )
+            }
             NotificationCenter.default.post(
                 name: .linkAnswerCall,
                 object: nil,
@@ -566,6 +577,9 @@ extension LinkVoIPManager: CXProviderDelegate {
         activeCalls[action.callUUID] = nil
         pendingIncomingCall = nil
         action.fulfill()
+        // Auflegen beendet die aktive Session IMMER - auch wenn die
+        // Call-UI nie präsentiert werden konnte (gesperrtes Gerät).
+        endActiveCall()
         NotificationCenter.default.post(name: .linkEndCall, object: nil)
     }
 

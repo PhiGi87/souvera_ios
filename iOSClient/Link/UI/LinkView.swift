@@ -812,10 +812,9 @@ struct LinkChatView: View {
     /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht (einfache
     /// Variante: Ansicht folgt dem Finger, kein Preview-Overlay).
     @State private var backDragOffset: CGFloat = 0
-    /// Chat-Eintritt: Position (scrollPosition) wird gesetzt, bevor die
-    /// Liste eingeblendet wird (kein sichtbarer Sprung). Ziel: Trennlinie
-    /// (ungelesen) bzw. Ende (keine Ungelesenen).
-    @State private var scrollTarget: Int64?
+    /// Chat-Eintritt: Die Liste wird unsichtbar an die Trennlinie bzw.
+    /// ans Ende positioniert, bevor sie eingeblendet wird (kein
+    /// sichtbarer Sprung).
     @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
@@ -1002,7 +1001,6 @@ struct LinkChatView: View {
                 // Ende), bevor die Liste sichtbar wird - kein sichtbares
                 // Scrollen beim Raumeintritt.
                 .defaultScrollAnchor(.bottom)
-                .scrollPosition(id: $scrollTarget)
                 .overlay(alignment: .bottom) {
                     // "Zu den neuesten Nachrichten"-Button (Design-Pendant
                     // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
@@ -1026,20 +1024,27 @@ struct LinkChatView: View {
                     }
                 })
                 .onChange(of: token) { _, _ in
-                    scrollTarget = nil
                     chatPositioned = false
                     showScrollBottom = false
                 }
-                // Position-vor-Sichtbarkeit: scrollPosition wird gesetzt,
-                // bevor die Liste eingeblendet wird - der erste sichtbare
-                // Frame steht bereits an der Trennlinie bzw. am Ende.
+                // Position-vor-Sichtbarkeit: EINMALIG unsichtbar an die
+                // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
+                // springen, danach einblenden. Die Boundary kann erst nach
+                // dem Cache-Publish eintreffen - onChange positioniert
+                // daher solange nach, bis eingeblendet wird. Kein
+                // scrollPosition-Modifier: der hatte den Bottom-Anchor
+                // neutralisiert.
                 .opacity(chatPositioned ? 1 : 0)
                 .onAppear {
                     guard !chatPositioned else { return }
-                    scrollTarget = viewModel.unreadBoundary
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    positionChat(proxy: proxy, items: items)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         chatPositioned = true
                     }
+                }
+                .onChange(of: viewModel.unreadBoundary) { _, _ in
+                    guard !chatPositioned else { return }
+                    positionChat(proxy: proxy, items: items)
                 }
             }
         }
@@ -1092,6 +1097,16 @@ struct LinkChatView: View {
             await MainActor.run {
                 sharePayload = SouveraSharePayload(items: items)
             }
+        }
+    }
+
+    /// Setzt die Eintrittsposition: mit Ungelesenen an die Trennlinie
+    /// (oben), sonst an die neueste Nachricht (unten).
+    private func positionChat(proxy: ScrollViewProxy, items: [LinkChatMessage]) {
+        if let boundary = viewModel.unreadBoundary {
+            proxy.scrollTo(boundary, anchor: .top)
+        } else if let lastId = items.last?.id {
+            proxy.scrollTo(lastId, anchor: .bottom)
         }
     }
 
