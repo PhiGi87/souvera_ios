@@ -795,6 +795,12 @@ final class MailViewModel: ObservableObject {
 
     func openMailbox(_ mailbox: Mailbox) {
         Self.lastMailboxId = mailbox.id
+        // Talk-Muster (markNotificationsAsRead): Beim Öffnen des Post-
+        // eingangs zugestellte Mail-Notifications aus der Mitteilungs-
+        // zentrale entfernen.
+        if mailbox.kind == .inbox {
+            Self.clearDeliveredMailNotifications()
+        }
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
         messages = .loading
@@ -803,6 +809,18 @@ final class MailViewModel: ObservableObject {
         isLoadingMore = false
         prefetchGeneration += 1
         Task { await syncMessages() }
+    }
+
+    private static func clearDeliveredMailNotifications() {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = delivered
+                .filter { $0.request.identifier.hasPrefix("mail_") }
+                .map { $0.request.identifier }
+            if !ids.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: ids)
+            }
+        }
     }
 
     /// Öffnet beim App-Start den ZULETZT benutzten Ordner (Fallback INBOX).
@@ -1589,6 +1607,17 @@ final class MailViewModel: ObservableObject {
     }
 
     private func afterListMutation(_ removedIds: [String]) {
+        // Quell-Cache bereinigen: Ohne diesen Schritt würde der nächste
+        // Cache-first-Publish (Full-Refresh nach der Mutation) die
+        // verschobene/gelöschte Mail wieder einblenden - der Cache-Snapshot
+        // enthält sie ja noch.
+        if useJmap, let mailbox = currentMailbox {
+            let accountName = mailAccount?.account ?? ""
+            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+                let filtered = snapshot.emails.filter { !removedIds.contains($0.optString("id") ?? "") }
+                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+            }
+        }
         // Badge sofort: entfernte ungelesene Nachrichten des Posteingangs abziehen.
         if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
            case let .success(list) = messages {

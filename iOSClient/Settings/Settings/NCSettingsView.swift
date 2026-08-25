@@ -336,11 +336,20 @@ struct NCSettingsView: View {
             })
 #endif
 
-            // `Watermark` Section
+            // `Über die App` Section
             Section(content: {
-            }, footer: {
-                Text(model.footerApp + model.footerServer + model.footerSlogan)
-                    .font(.footnote)
+                NavigationLink(destination: LazyView {
+                    SouveraAboutView()
+                }) {
+                    HStack {
+                        Image(systemName: "info.circle")
+                            .font(.icon())
+                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
+                            .frame(width: 39)
+                        Text(NSLocalizedString("_settings_about_app_", comment: ""))
+                            .font(.body)
+                    }
+                }
             })
 
             // `Diagnose` Section - ganz unten in den Einstellungen

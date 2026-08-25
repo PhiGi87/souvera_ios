@@ -61,6 +61,22 @@ final class LinkVoIPManager: NSObject {
 
     // MARK: - Outgoing calls (shared session)
 
+    /// Registriert eine bereits laufende Session (z. B. die vom Call-VC
+    /// privat erzeugte) im Shared State: Damit greifen endActiveCall,
+    /// das "kein Fullscreen im eigenen Call"-Guard und die Geister-
+    /// Bereinigung (leaveCall) für JEDE Session.
+    func noteSessionStarted(_ session: CallSession, token: String, title: String, withVideo: Bool) {
+        activeSession = session
+        activeCallInfo = (token, title, withVideo)
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// true, solange ein eingehender Anruf über CallKit klingelt - der
+    /// In-App-Fullscreen muss dann NICHT zusätzlich erscheinen (Dedup).
+    var hasRingingCall: Bool {
+        pendingIncomingCall != nil || !activeCalls.isEmpty
+    }
+
     /// Starts an outgoing call; the session stays alive independently of the
     /// call view controller so the UI can be re-attached later.
     func startOutgoingCall(account: LinkAccount, token: String, title: String, withVideo: Bool, callbacks: CallSessionCallbacks?) {
@@ -183,8 +199,17 @@ final class LinkVoIPManager: NSObject {
             return
         }
         let proxyServerUrl = NCBrandOptions.shared.pushNotificationServerProxy
+        // TALK-STANDARD (wie talk-ios NCKeyChainController.pushTokenSHA512):
+        // Hash des KOMBINIERTEN Tokens ("normal voip") - genau der String,
+        // den wir am Proxy als pushToken registrieren. Sonst kennt der
+        // Proxy das Gerät nicht ("unknown device" -> Zeile wird gelöscht)
+        // und der Call-Push kommt nie an.
+        let combinedPushToken = SouveraPushRegistrar.combinedToken(
+            normal: NCPreferences().deviceTokenPushNotification,
+            voip: voipToken
+        )
         guard !proxyServerUrl.isEmpty,
-              let pushTokenHash = NCEndToEndEncryption.shared().createSHA512(voipToken) else {
+              let pushTokenHash = NCEndToEndEncryption.shared().createSHA512(combinedPushToken) else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: no proxy URL or token hash")
             return
         }
@@ -228,11 +253,12 @@ final class LinkVoIPManager: NSObject {
                 }
                 nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
                 SouveraLog.write("PushVoip", "NC registration OK \(urlBase) (via mail credential)")
+                // Für die Abmeldung beim Logout (P45a) die Gerätedaten merken.
+                UserDefaults.standard.set(deviceIdentifier, forKey: Self.voipDeviceIdentifierKey)
+                UserDefaults.standard.set(signature, forKey: Self.voipDeviceSignatureKey)
+                UserDefaults.standard.set(subscribingPublicKey, forKey: Self.voipDevicePublicKeyKey)
 
-                let combined = SouveraPushRegistrar.combinedToken(
-                    normal: NCPreferences().deviceTokenPushNotification,
-                    voip: voipToken
-                )
+                let combined = combinedPushToken
                 // Tolerante Registrierung: 2xx = Erfolg (Proxy antwortet
                 // mit leerem Body).
                 let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
@@ -251,6 +277,55 @@ final class LinkVoIPManager: NSObject {
                 }
             }
         }
+    }
+
+    private static let voipDeviceIdentifierKey = "souvera_voip_device_identifier"
+    private static let voipDeviceSignatureKey = "souvera_voip_device_signature"
+    private static let voipDevicePublicKeyKey = "souvera_voip_device_public_key"
+
+    /// Logout-Cleanup: Talk-Gerät am Proxy UND am Server abmelden
+    /// (Talk-Muster unsubscribeAccount) - keine toten Zeilen mehr.
+    static func unregisterVoipPush(baseUrl: String, username: String) async {
+        let defaults = UserDefaults.standard
+        let identifier = defaults.string(forKey: voipDeviceIdentifierKey)
+        let signature = defaults.string(forKey: voipDeviceSignatureKey)
+        let publicKey = defaults.string(forKey: voipDevicePublicKeyKey)
+        let proxy = NCBrandOptions.shared.pushNotificationServerProxy
+        if let identifier, let signature, let publicKey, !proxy.isEmpty {
+            await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxy,
+                                                         deviceIdentifier: identifier,
+                                                         signature: signature,
+                                                         publicKey: publicKey)
+        }
+        // NC-Zeile (Talk, Token Y) entfernen - best effort.
+        let manager = SouveraMailCredentialManager()
+        if let mailAccount = await manager.ensureCombinedCredential() {
+            await unregisterTalkDeviceOcs(baseUrl: baseUrl,
+                                          username: username,
+                                          ncPassword: mailAccount.mailPassword)
+        }
+        defaults.removeObject(forKey: voipDeviceIdentifierKey)
+        defaults.removeObject(forKey: voipDeviceSignatureKey)
+        defaults.removeObject(forKey: voipDevicePublicKeyKey)
+        SouveraLog.write("PushVoip", "voip push unregistered")
+    }
+
+    /// Eigener OCS-DELETE `ocs/v2.php/apps/notifications/api/v2/push` mit
+    /// der übergebenen NC-Credential (Y).
+    private static func unregisterTalkDeviceOcs(baseUrl: String,
+                                                username: String,
+                                                ncPassword: String) async {
+        let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(root)/ocs/v2.php/apps/notifications/api/v2/push") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        let raw = "\(username):\(ncPassword)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        req.setValue("Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)", forHTTPHeaderField: "User-Agent")
+        let (_, response) = try? await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        SouveraLog.write("PushVoip", "NC talk-device unregister http \(status)")
     }
 
     /// Registriert das Talk/VoIP-Gerät am Nextcloud-Server mit der
@@ -362,6 +437,10 @@ final class LinkVoIPManager: NSObject {
 
     // MARK: - Incoming call → CallKit
 
+    /// Talk-Muster (maxRingingTime): unbeantwortete Push-Calls nach
+    /// 45 s automatisch beenden - sonst klingelt das Gerät ewig.
+    private var ringingTimeoutTimer: Timer?
+
     private func reportIncomingCall(roomToken: String, displayName: String, hasVideo: Bool, completion: @escaping () -> Void) {
         let uuid = UUID()
         activeCalls[uuid] = roomToken
@@ -370,12 +449,33 @@ final class LinkVoIPManager: NSObject {
         update.remoteHandle = CXHandle(type: .generic, value: displayName)
         update.hasVideo = hasVideo
         update.localizedCallerName = displayName
-        provider.reportNewIncomingCall(with: uuid, update: update) { error in
+        provider.reportNewIncomingCall(with: uuid, update: update) { [weak self] error in
             if let error {
-                nkLog(tag: self.global.logTagPN, emoji: .error, message: "Link CallKit report failed: \(error.localizedDescription)")
+                nkLog(tag: self?.global.logTagPN ?? NCGlobal.shared.logTagPN, emoji: .error, message: "Link CallKit report failed: \(error.localizedDescription)")
+            } else {
+                self?.startRingingTimeout(for: uuid)
             }
             completion()
         }
+    }
+
+    private func startRingingTimeout(for uuid: UUID) {
+        DispatchQueue.main.async {
+            self.ringingTimeoutTimer?.invalidate()
+            self.ringingTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: false) { [weak self] _ in
+                guard let self, self.pendingIncomingCall != nil else { return }
+                CallDebugLog.log("LinkVoIPManager", "ringing timeout - ending unanswered call")
+                self.pendingIncomingCall = nil
+                self.activeCalls[uuid] = nil
+                self.provider.reportCall(with: uuid, endedAt: Date(), reason: .unanswered)
+                NotificationCenter.default.post(name: .linkEndCall, object: nil)
+            }
+        }
+    }
+
+    private func cancelRingingTimeout() {
+        ringingTimeoutTimer?.invalidate()
+        ringingTimeoutTimer = nil
     }
 
     /// Decrypts a VoIP payload with the account device private key and pulls out the call info.
@@ -442,6 +542,7 @@ extension LinkVoIPManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        cancelRingingTimeout()
         let roomToken = activeCalls[action.callUUID] ?? ""
         activeCalls[action.callUUID] = nil
         action.fulfill()
@@ -461,6 +562,7 @@ extension LinkVoIPManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
+        cancelRingingTimeout()
         activeCalls[action.callUUID] = nil
         pendingIncomingCall = nil
         action.fulfill()

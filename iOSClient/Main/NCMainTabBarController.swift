@@ -263,6 +263,44 @@ class NCMainTabBarController: UITabBarController {
             bannerHost.view.trailingAnchor.constraint(equalTo: view.trailingAnchor)
         ])
         callBannerHost = bannerHost
+
+        // Annehmen/Ablehnen funktionieren unabhängig von der LinkView:
+        // Session starten und die Call-UI direkt modal präsentieren.
+        let bannerModel = SouveraCallBannerModel.shared
+        bannerModel.onAccept = { [weak self] room in
+            guard let account = LinkAccount.active() else { return }
+            let session = LinkVoIPManager.shared.startIncomingCall(
+                account: account,
+                token: room.token,
+                title: room.displayName,
+                withVideo: false
+            )
+            if let session {
+                let callVC = LinkCallViewController(
+                    account: account,
+                    token: room.token,
+                    title: room.displayName,
+                    withVideo: false,
+                    session: session
+                )
+                callVC.modalPresentationStyle = .fullScreen
+                self?.present(callVC, animated: true)
+            }
+        }
+        bannerModel.onDecline = { _ in
+            // Raum bleibt für diese Call-Episode stumm (previousCallState
+            // verhindert einen erneuten Fullscreen).
+        }
+    }
+
+    /// Die Call-Leiste muss IMMER über dem Tab-Inhalt liegen - Tab-Views
+    /// werden später hinzugefügt und würden sie sonst verdecken (Buttons
+    /// reagieren dann nicht).
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        if let bannerView = callBannerHost?.view {
+            view.bringSubviewToFront(bannerView)
+        }
     }
 
     private var callBannerHost: UIHostingController<SouveraIncomingCallBannerView>?

@@ -6,6 +6,7 @@
 
 import SwiftUI
 import UniformTypeIdentifiers
+import PhotosUI
 
 /// Root Link screen; switches between the conversation list and an open chat.
 struct LinkView: View {
@@ -176,11 +177,6 @@ struct LinkView: View {
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 viewModel.actionFeedback = nil
             }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: SouveraCallBannerModel.acceptNotification)) { notification in
-            guard let room = notification.object as? LinkConversation else { return }
-            viewModel.dismissIncomingCall()
-            callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
         }
         .fullScreenCover(item: $viewModel.incomingCallRoom) { room in
             IncomingCallOverlayView(
@@ -356,13 +352,43 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
 /// startet die Call-Session, Ablehnen schließt das Overlay.
 /// App-weiter Zustand für die "Anruf minimiert"-Leiste: Der In-App-Call-
 /// Fullscreen lässt sich minimieren, die Leiste zeigt den klingelnden Anruf
-/// oben in der App (Annehmen/Ablehnen) - man kann weiterarbeiten.
+/// oben in der App (Annehmen/Ablehnen) - man kann weiterarbeiten. Zusätzlich
+/// läuft der Anruf als Live Activity (Dynamic Island), von dort sind
+/// Annehmen/Ablehnen per App-Intent möglich.
 final class SouveraCallBannerModel: ObservableObject {
     static let shared = SouveraCallBannerModel()
-    /// Annehmen aus der Leiste: LinkView präsentiert die Call-UI.
-    static let acceptNotification = Notification.Name("souveraCallBannerAccept")
 
-    @Published var minimizedIncoming: LinkConversation?
+    @Published var minimizedIncoming: LinkConversation? {
+        didSet {
+            if minimizedIncoming == nil {
+                SouveraCallLiveActivity.end()
+            }
+        }
+    }
+
+    /// Vom Host (NCMainTabBarController) gesetzt: funktionieren unabhängig
+    /// von der LinkView (auch wenn der Link-Tab nie geöffnet wurde).
+    var onAccept: ((LinkConversation) -> Void)?
+    var onDecline: ((LinkConversation) -> Void)?
+
+    func accept(_ room: LinkConversation) {
+        minimizedIncoming = nil
+        onAccept?(room)
+    }
+
+    func decline(_ room: LinkConversation) {
+        minimizedIncoming = nil
+        onDecline?(room)
+    }
+
+    /// Aufruf aus den Live-Activity-App-Intents (Insel-Buttons).
+    func acceptIfPresent() {
+        if let room = minimizedIncoming { accept(room) }
+    }
+
+    func declineIfPresent() {
+        if let room = minimizedIncoming { decline(room) }
+    }
 
     private init() {}
 }
@@ -371,6 +397,8 @@ final class SouveraCallBannerModel: ObservableObject {
 /// Annehmen/Ablehnen, wenn der Fullscreen minimiert wurde.
 struct SouveraIncomingCallBannerView: View {
     @ObservedObject private var model = SouveraCallBannerModel.shared
+    /// Vertikaler Zieh-Offset für das Hoch-Swipe-Schließen.
+    @GestureState private var dragY: CGFloat = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -392,7 +420,7 @@ struct SouveraIncomingCallBannerView: View {
                     }
                     Spacer()
                     Button {
-                        model.minimizedIncoming = nil
+                        model.decline(room)
                     } label: {
                         Image(systemName: "phone.down.fill")
                             .font(.subheadline)
@@ -402,9 +430,7 @@ struct SouveraIncomingCallBannerView: View {
                     }
                     .accessibilityLabel(NSLocalizedString("_link_decline_", comment: ""))
                     Button {
-                        let target = room
-                        model.minimizedIncoming = nil
-                        NotificationCenter.default.post(name: SouveraCallBannerModel.acceptNotification, object: target)
+                        model.accept(room)
                     } label: {
                         Image(systemName: "phone.fill")
                             .font(.subheadline)
@@ -419,8 +445,23 @@ struct SouveraIncomingCallBannerView: View {
                 .background(Capsule().fill(Color(red: 0.12, green: 0.14, blue: 0.2)))
                 .shadow(radius: 8)
                 .padding(.horizontal, 12)
-                .padding(.top, 6)
+                // Notch-Abstand: etwas großzügiger, damit die Leiste nicht
+                // hinter der Notch/Dynamic Island verschwindet.
+                .padding(.top, 10)
+                .padding(.bottom, 2)
                 .transition(.move(edge: .top).combined(with: .opacity))
+                .offset(y: dragY)
+                .gesture(
+                    DragGesture()
+                        .updating($dragY) { value, state, _ in
+                            state = min(0, value.translation.height)
+                        }
+                        .onEnded { value in
+                            if value.translation.height < -40 {
+                                model.minimizedIncoming = nil
+                            }
+                        }
+                )
             }
         }
         .animation(.easeInOut(duration: 0.25), value: model.minimizedIncoming == nil)
@@ -760,6 +801,9 @@ struct LinkChatView: View {
     @State private var draft = ""
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
+    @State private var showPhotoPicker = false
+    @State private var photoSelections: [PhotosPickerItem] = []
+    @State private var sharePayload: SouveraSharePayload?
     @State private var editingMessage: LinkChatMessage?
     @State private var mentionSuggestions: [LinkParticipant] = []
     @State private var reactionTarget: LinkChatMessage?
@@ -768,9 +812,11 @@ struct LinkChatView: View {
     /// Kanten-Swipe (links → rechts) zurück zur Raumübersicht (einfache
     /// Variante: Ansicht folgt dem Finger, kein Preview-Overlay).
     @State private var backDragOffset: CGFloat = 0
-    /// Chat-Eintritt: Liste wird einmalig UNSICHTBAR an die neueste Nachricht
-    /// positioniert, bevor sie eingeblendet wird (kein sichtbarer Sprung).
-    @State private var initialPositioned = false
+    /// Chat-Eintritt: Position (scrollPosition) wird gesetzt, bevor die
+    /// Liste eingeblendet wird (kein sichtbarer Sprung). Ziel: Trennlinie
+    /// (ungelesen) bzw. Ende (keine Ungelesenen).
+    @State private var scrollTarget: Int64?
+    @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
 
@@ -819,6 +865,13 @@ struct LinkChatView: View {
                 guard let selection else { return }
                 viewModel.shareAttachment(selection)
             }
+        }
+        .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelections, maxSelectionCount: 10, matching: .images)
+        .onChange(of: photoSelections) { _, items in
+            importPhotos(items)
+        }
+        .sheet(item: $sharePayload) { payload in
+            SouveraShareSheet(items: payload.items)
         }
         .sheet(item: $forwardTarget) { message in
             ForwardPickerSheet(viewModel: viewModel, message: message)
@@ -903,6 +956,12 @@ struct LinkChatView: View {
                         .onAppear { viewModel.loadEarlierHistory() }
                     }
                     ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
+                        // "Neue Nachrichten"-Trennlinie vor der ersten
+                        // ungelesenen Nachricht (Talk-Standard).
+                        if !viewModel.hideUnreadSeparator,
+                           viewModel.unreadBoundary == message.id {
+                            unreadSeparatorRow
+                        }
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
                                 .id(message.id)
@@ -924,7 +983,8 @@ struct LinkChatView: View {
                                 },
                                 onStartReply: { replyingTo = message },
                                 onStartForward: { forwardTarget = message },
-                                onLongPress: { target in reactionTarget = target }
+                                onLongPress: { target in reactionTarget = target },
+                                onShare: { target in prepareShare(for: target) }
                             )
                             .id(message.id)
                             .listRowSeparator(.hidden)
@@ -935,11 +995,14 @@ struct LinkChatView: View {
                 }
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
-                // Chat-Standard: Liste startet an der NEUESTEN Nachricht
-                // verankert (kein sichtbarer Sprung beim Öffnen) und bleibt
-                // bei neuen Nachrichten unten; das Nachladen älterer
-                // Nachrichten oben reißt die Leseposition nicht mit.
+                // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
+                // das Nachladen älterer Nachrichten oben reißt die
+                // Leseposition nicht mit. Die EINTRITTSPOSITION setzt
+                // scrollPosition(id:) deterministisch (Trennlinie bzw.
+                // Ende), bevor die Liste sichtbar wird - kein sichtbares
+                // Scrollen beim Raumeintritt.
                 .defaultScrollAnchor(.bottom)
+                .scrollPosition(id: $scrollTarget)
                 .overlay(alignment: .bottom) {
                     // "Zu den neuesten Nachrichten"-Button (Design-Pendant
                     // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
@@ -957,23 +1020,77 @@ struct LinkChatView: View {
                             showScrollBottom = visible
                         }
                     }
+                    // Am Ende angekommen: Trennlinie ausblenden + Read-Marker.
+                    if !visible {
+                        viewModel.noteScrolledToNewest()
+                    }
                 })
                 .onChange(of: token) { _, _ in
-                    initialPositioned = false
+                    scrollTarget = nil
+                    chatPositioned = false
                     showScrollBottom = false
                 }
-                // Position-vor-Sichtbarkeit: EINMALIG unsichtbar ans untere
-                // Ende springen, dann einblenden - der allererste sichtbare
-                // Frame zeigt bereits die neueste Nachricht, es gibt keinerlei
-                // sichtbare Scroll-Bewegung beim Raumeintritt.
-                .opacity(initialPositioned ? 1 : 0)
+                // Position-vor-Sichtbarkeit: scrollPosition wird gesetzt,
+                // bevor die Liste eingeblendet wird - der erste sichtbare
+                // Frame steht bereits an der Trennlinie bzw. am Ende.
+                .opacity(chatPositioned ? 1 : 0)
                 .onAppear {
-                    guard !initialPositioned, let lastId = items.last?.id else { return }
-                    proxy.scrollTo(lastId, anchor: .bottom)
-                    DispatchQueue.main.async {
-                        initialPositioned = true
+                    guard !chatPositioned else { return }
+                    scrollTarget = viewModel.unreadBoundary
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        chatPositioned = true
                     }
                 }
+            }
+        }
+    }
+
+    /// Dezente Trennlinie "Neue Nachrichten" (Talk-Standard).
+    private var unreadSeparatorRow: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
+            Text(NSLocalizedString("_link_new_messages_", comment: ""))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+    }
+
+    /// Fotos aus dem System-Picker übernehmen und in den Chat hochladen
+    /// (kein Berechtigungsdialog - der System-Picker läuft außerhalb der App).
+    private func importPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            var counter = 0
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                let type = item.supportedContentTypes.first
+                let ext = type?.preferredFilenameExtension ?? "jpg"
+                counter += 1
+                let name = "Foto_\(Int(Date().timeIntervalSince1970))_\(counter).\(ext)"
+                let mime = type?.preferredMIMEType ?? "image/jpeg"
+                viewModel.sendAttachment(data: data, fileName: name, mimeType: mime)
+            }
+            await MainActor.run { photoSelections = [] }
+        }
+    }
+
+    /// Baut die Teile-Liste für das iOS-Teilen-Sheet (Text, Links, Anhang).
+    private func prepareShare(for message: LinkChatMessage) {
+        Task {
+            let items = await viewModel.shareItems(for: message)
+            guard !items.isEmpty else { return }
+            await MainActor.run {
+                sharePayload = SouveraSharePayload(items: items)
             }
         }
     }
@@ -1153,6 +1270,11 @@ struct LinkChatView: View {
                     Label(NSLocalizedString("_link_attach_file_", comment: ""), systemImage: "doc.badge.plus")
                 }
                 Button {
+                    showPhotoPicker = true
+                } label: {
+                    Label(NSLocalizedString("_link_attach_photos_", comment: ""), systemImage: "photo.on.rectangle")
+                }
+                Button {
                     showNextcloudPicker = true
                 } label: {
                     Label(NSLocalizedString("_link_share_file_", comment: ""), systemImage: "building.columns")
@@ -1218,6 +1340,8 @@ private struct LinkMessageRow: View {
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
+    /// "Teilen…" aus dem Kontextmenü (iOS-Teilen-Sheet).
+    var onShare: (LinkChatMessage) -> Void = { _ in }
 
     private var messageTime: String {
         let formatter = DateFormatter()
@@ -1348,8 +1472,17 @@ private struct LinkMessageRow: View {
                 // Mit Reaktionen hängen die Pills über die Unterkante - der
                 // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
                 .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
-                .onLongPressGesture {
-                    onLongPress(message)
+                .contextMenu {
+                    Button {
+                        onShare(message)
+                    } label: {
+                        Label(NSLocalizedString("_link_share_message_", comment: ""), systemImage: "square.and.arrow.up")
+                    }
+                    Button {
+                        onLongPress(message)
+                    } label: {
+                        Label(NSLocalizedString("_link_react_message_", comment: ""), systemImage: "face.smiling")
+                    }
                 }
             }
             if isOwn {
@@ -1731,4 +1864,21 @@ struct EmojiReactionOverlay: View {
             emojiRow(Array(emojis.suffix(4)))
         }
     }
+}
+
+/// Payload für das iOS-Teilen-Sheet (UIActivityViewController).
+struct SouveraSharePayload: Identifiable {
+    let id = UUID()
+    let items: [Any]
+}
+
+/// UIActivityViewController-Wrapper: das typische iOS-Teilen-Menü.
+struct SouveraShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

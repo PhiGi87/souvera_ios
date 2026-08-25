@@ -129,6 +129,10 @@ class NCAccount: NSObject {
         // Unsubscribing Push Notification & Domain
         if let tblAccount {
             await NCPushNotification.shared.unsubscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
+            // Talk/VoIP-Kanal ebenfalls abmelden (Proxy + Server) - die
+            // Talk-Zeile läuft über die Mail-Credential Y und wird von der
+            // normalen Abmeldung nicht erfasst.
+            await LinkVoIPManager.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user)
             try? await FileProviderDomain().ensureDomainRemoved(userId: tblAccount.userId, urlBase: tblAccount.urlBase)
         }
 

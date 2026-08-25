@@ -48,6 +48,12 @@ final class LinkViewModel: ObservableObject {
     @Published var offlineNotice: String?
     /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
     @Published var hasMoreHistory = false
+    /// Erste ungelesene Nachricht (id > lastReadMessage) - Basis für die
+    /// "Neue Nachrichten"-Trennlinie und die Eintrittsposition.
+    @Published private(set) var unreadBoundary: Int64?
+    /// true, sobald der User bis zu den neuesten Nachrichten gescrollt hat -
+    /// die Trennlinie wird ausgeblendet, der Read-Marker gesetzt.
+    @Published private(set) var hideUnreadSeparator = false
     /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner.
     @Published var cacheBannerActive = false
 
@@ -209,7 +215,9 @@ final class LinkViewModel: ObservableObject {
         guard let api, case let .chat(token, _) = route else { return }
         Task {
             let list = await api.listParticipants(token: token)
-            self.participants = list
+            // Geister ("Gelöschter Benutzer") ausblenden: Sessions ohne
+            // gültigen Akteurstyp tauchen nicht in der Teilnehmerliste auf.
+            self.participants = list.filter { $0.actorType != "deleted_users" }
         }
     }
 
@@ -427,14 +435,25 @@ final class LinkViewModel: ObservableObject {
         messages = .loading
         lastMessageId = 0
         pollTask?.cancel()
+        // Ungelesen-Zustand VOR dem Laden merken (Basis für Trennlinie
+        // und Read-Marker); die Position wird daraus direkt bestimmt.
+        let roomUnread = currentRoom?.unreadMessages ?? 0
+        let roomLastRead = currentRoom?.lastReadMessage ?? 0
+        unreadBoundary = nil
+        hideUnreadSeparator = false
         connectSignaling(token: token)
         guard let api else { return }
         pollTask = Task {
-            // Kein Cache-Zwischenstand mehr: Die Liste rendert erst mit der
-            // ERSTEN Live-Seite (neueste Nachrichten), damit
-            // defaultScrollAnchor(.bottom) auf echtem Inhalt greift und
-            // beim Raumeintritt KEIN sichtbarer Scroll/Sprung entsteht.
-            // Der Cache bleibt Offline-Fallback im Empty-Branch.
+            // Cache-first: gecachte Nachrichten SOFORT anzeigen - die
+            // Eintrittsposition (Trennlinie bzw. Ende) wird im View über
+            // scrollPosition deterministisch gesetzt, es gibt kein
+            // sichtbares Scrollen. Der Cache bleibt Offline-Fallback.
+            if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
+                let ordered = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                self.lastMessageId = ordered.last?.id ?? 0
+                self.messages = .success(ordered)
+                self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+            }
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
             if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
@@ -448,11 +467,53 @@ final class LinkViewModel: ObservableObject {
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
-            // Kompletter Verlauf: ältere Nachrichten seitenweise nachladen,
-            // bis der Anfang erreicht ist (keine Zeitgrenze, kein Paging-UI).
-            await self.loadFullHistory(token: token)
+            self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+            // Verlauf beim Eintritt NUR bei ungelesenen Nachrichten komplett
+            // nachladen (sonst läuft das Netz unsichtbar im Hintergrund und
+            // ältere Seiten kommen per Scroll nach).
+            if roomUnread > 0 {
+                await self.loadFullHistory(token: token)
+                self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+            }
             await self.pollNewMessages(token: token)
         }
+    }
+
+    /// Berechnet die erste ungelesene Nachricht aus dem geladenen Fenster.
+    private func updateUnreadBoundary(roomLastRead: Int64, roomUnread: Int) {
+        guard roomUnread > 0, roomLastRead > 0 else {
+            unreadBoundary = nil
+            return
+        }
+        guard case let .success(items) = messages else {
+            unreadBoundary = nil
+            return
+        }
+        let sorted = items.sorted { $0.id < $1.id }
+        unreadBoundary = sorted.first(where: { $0.id > roomLastRead })?.id
+    }
+
+    private var markReadWorkItem: DispatchWorkItem?
+
+    /// Der User ist bis zu den neuesten Nachrichten gescrollt: Trennlinie
+    /// ausblenden und den Read-Marker setzen (Talk-Muster, 1 s debounced).
+    func noteScrolledToNewest() {
+        guard unreadBoundary != nil, !hideUnreadSeparator else { return }
+        hideUnreadSeparator = true
+        guard let room = currentRoom, room.unreadMessages > 0 else { return }
+        guard case let .chat(token, _) = route else { return }
+        markReadWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self, let api = self.api else { return }
+            let lastId = self.lastMessageId
+            Task {
+                await api.markRoomRead(token: token, lastReadMessage: lastId)
+                // Raum-Liste nachziehen: Unread-Zähler/Badge aktualisieren.
+                await self.loadConversations()
+            }
+        }
+        markReadWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
     }
 
     /// Lädt den kompletten Chat-Verlauf (Seite für Seite nach oben älter),
@@ -662,6 +723,28 @@ final class LinkViewModel: ObservableObject {
     /// request: tapping a shared file shows it in the Dateien tab). Files at
     /// the user root (shared Souvera files) have no folder - the Files tab
     /// opens the home folder instead.
+    /// Items für das iOS-Teilen-Sheet: Nachrichtentext, erkannte URL-Links
+    /// und ein geteilter Anhang als heruntergeladene Datei.
+    func shareItems(for message: LinkChatMessage) async -> [Any] {
+        var items: [Any] = []
+        let text = message.message.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.isEmpty {
+            items.append(text)
+            if let detector = try? NSDataDetector(types: NSTextCheckingResult.CheckingType.link.rawValue) {
+                let ns = text as NSString
+                let matches = detector.matches(in: text, range: NSRange(location: 0, length: ns.length))
+                for match in matches {
+                    if let url = match.url { items.append(url) }
+                }
+            }
+        }
+        if let info = message.fileInfo(), let path = info.path,
+           let fileURL = await api?.downloadChatAttachment(path: path) {
+            items.append(fileURL)
+        }
+        return items
+    }
+
     func openFileInFiles(_ info: LinkFileInfo) {
         let raw = info.path ?? ""
         let folderPath = (raw as NSString).deletingLastPathComponent
@@ -807,6 +890,7 @@ final class LinkViewModel: ObservableObject {
         }
         guard let freshCall,
               LinkVoIPManager.shared.activeSession == nil,
+              !LinkVoIPManager.shared.hasRingingCall,
               incomingCallRoom == nil else { return }
         CallDebugLog.log("LinkViewModel", "in-app incoming call detected (fresh) room=\(freshCall.token)")
         incomingCallRoom = freshCall
@@ -823,6 +907,9 @@ final class LinkViewModel: ObservableObject {
     func minimizeIncomingCall() {
         guard let room = incomingCallRoom else { return }
         SouveraCallBannerModel.shared.minimizedIncoming = room
+        // Dynamic Island / Lock-Screen: Live Activity für den klingelnden
+        // Anruf starten (Annehmen/Ablehnen per Insel-Buttons möglich).
+        SouveraCallLiveActivity.start(title: room.displayName)
         dismissIncomingCall()
     }
 }

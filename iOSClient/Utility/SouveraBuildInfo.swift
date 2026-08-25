@@ -106,6 +106,36 @@ enum SouveraPushRegistrar {
         return parts.joined(separator: " ")
     }
 
+    /// Meldet ein Gerät am Push-Proxy ab (DELETE /devices) - Talk-Muster
+    /// (unsubscribeAccount), hält die Geräteliste sauber (keine toten
+    /// Token-Zeilen mehr).
+    static func unregisterAtProxy(proxyServerUrl: String,
+                                  deviceIdentifier: String,
+                                  signature: String,
+                                  publicKey: String) async {
+        let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(trimmed)/devices?format=json") else {
+            SouveraLog.write("PushProxy", "unregister invalid proxy URL \(proxyServerUrl)")
+            return
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        let params = [
+            "deviceIdentifier": deviceIdentifier,
+            "deviceIdentifierSignature": signature,
+            "userPublicKey": publicKey
+        ]
+        let form = params
+            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
+            .joined(separator: "&")
+        req.httpBody = form.data(using: .utf8)
+        let (_, response) = try? await URLSession.shared.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        SouveraLog.write("PushProxy", "unregister \(trimmed) -> http \(status)")
+    }
+
     /// Registriert das Gerät direkt am Push-Proxy. Eigene Implementierung
     /// statt NextcloudKit: Der Souvera-Proxy antwortet mit HTTP 200 und
     /// LEEREM Body - Alamofire/NextcloudKit werten das als Fehler

@@ -52,6 +52,16 @@ platform :ios do
       skip_waiting_for_build_processing: true,
       changelog: ENV["TESTFLIGHT_CHANGELOG"]
     )
+
+    # App-Symbol-Metadaten automatisch mitsetzen (ASC "App-Symbol"): der
+    # Ordner enthält NUR app_icon.png - deliver lädt damit ausschließlich
+    # das Icon hoch und fasst keine anderen Metadaten an.
+    deliver(
+      metadata_path: File.join(ROOT, "fastlane", "metadata"),
+      skip_screenshots: true,
+      skip_binary_upload: true,
+      force: true
+    )
   end
 
   desc "Upload the IPA to App Store Connect (App Store release). Optional: submit for review via SUBMIT_FOR_REVIEW=1"
@@ -65,6 +75,13 @@ platform :ios do
       skip_waiting_for_build_processing: true,
       distribute_external: false,
       changelog: ENV["TESTFLIGHT_CHANGELOG"]
+    )
+
+    deliver(
+      metadata_path: File.join(ROOT, "fastlane", "metadata"),
+      skip_screenshots: true,
+      skip_binary_upload: true,
+      force: true
     )
 
     if ENV["SUBMIT_FOR_REVIEW"] == "1"

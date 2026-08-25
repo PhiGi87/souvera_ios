@@ -85,6 +85,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             LinkVoIPManager.shared.endActiveCall()
             let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn, silent: silent)
             self.session = session
+            // Shared State registrieren: endActiveCall/leaveCall/Fullscreen-
+            // Guard gelten damit auch für diese (bisher private) Session -
+            // das verhindert "Gelöschter Benutzer"-Geister und den
+            // Incoming-Fullscreen über dem eigenen Call.
+            LinkVoIPManager.shared.noteSessionStarted(session, token: token, title: title_, withVideo: isVideoOn)
             applyMuteStateOnly()
             // Berechtigungs-Flow VOR dem Call-Start; die Dialoge erscheinen
             // nur beim allerersten Mal (Talk-Standard). Ohne Mikrofon kein

@@ -114,6 +114,11 @@ final class SouveraBackgroundSync {
             content.title = sender
             content.body = SouveraNotificationText.body(subject)
             content.sound = .default
+            // Gruppierung pro E-Mail-Thread im Sperrbildschirm (wie Talk
+            // pro Raum) - fehlt die threadId, bleibt das Feld leer.
+            if let threadId = email.optString("threadId"), !threadId.isEmpty {
+                content.threadIdentifier = "mail_\(accountName)/\(threadId)"
+            }
             // Deep-Link-Payload: Tap öffnet direkt die jeweilige Mail.
             content.userInfo = [
                 "account": accountName,
@@ -186,6 +191,8 @@ final class SouveraBackgroundSync {
             content.title = SouveraNotificationText.title(room.displayName)
             content.body = SouveraNotificationText.body(preview.isEmpty ? sender : preview)
             content.sound = .default
+            // Gruppierung pro Raum im Sperrbildschirm (Talk-Standard).
+            content.threadIdentifier = room.token
             // Deep-Link-Payload: Tap öffnet direkt den Raum-Chat.
             content.userInfo = [
                 "token": room.token,

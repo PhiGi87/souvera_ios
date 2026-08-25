@@ -78,6 +78,20 @@ final class CallSession: NSObject, HpbSignalingListener {
         super.init()
     }
 
+    /// Safety-Net: Wird die Session ohne explizites hangup() freigegeben
+    /// (UI weg, App beendet, Crash-Pfade), bleibt sonst eine Geister-
+    /// Session ("Gelöschter Benutzer") im Raum zurück.
+    deinit {
+        if !endedOnce {
+            CallDebugLog.log("CallSession", "deinit without hangup - sending leaveCall")
+            let api = api
+            let token = token
+            Task.detached {
+                await api.leaveCall(token: token)
+            }
+        }
+    }
+
     func start() {
         Task {
             CallDebugLog.log("CallSession", "start token=\(token)")
@@ -179,9 +193,18 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     private func createPublisher() {
         let peer = peerFor(key: ownSessionId, session: ownSessionId, addLocalTracks: true, isPublisher: true, roomType: "video")
+        // Diagnose: Sender-Anzahl + Track-Arten (fehlen Sender, fließen
+        // keine Medien zum MCU).
+        let senders = peer.senders
+        CallDebugLog.log("CallSession", "publisher senders=\(senders.count) kinds=[\(senders.compactMap { $0.track?.kind }.joined(separator: ","))]")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
             peer.setLocalDescription(sdp) { _ in }
+            // Diagnose: m-Lines des Offers loggen (audio/video vorhanden?).
+            let kinds = sdp.sdp.components(separatedBy: "\r\n")
+                .filter { $0.hasPrefix("m=") }
+                .compactMap { $0.split(separator: " ").dropFirst().first }
+            CallDebugLog.log("CallSession", "publisher offer m-lines=[\(kinds.joined(separator: ","))]")
             self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
         }
         startSpeakerPolling()
@@ -301,7 +324,9 @@ final class CallSession: NSObject, HpbSignalingListener {
     func setMuted(_ muted: Bool) {
         CallDebugLog.log("CallSession", "setMuted \(muted)")
         localAudio?.isEnabled = !muted
-        sendStatusMessage(muted ? "mute" : "unmute")
+        // TALK-STANDARD: die MCU versteht "audioOn"/"audioOff" (nicht
+        // "mute"/"unmute") - falsche Typen lassen den Uplink stumm.
+        sendStatusMessage(muted ? "audioOff" : "audioOn")
     }
 
     /// Video an/aus. Im Audio-Call existiert der Video-Track noch nicht -
@@ -474,7 +499,10 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// ebenfalls).
     private func sendInitialStatus() {
         guard mcuActive else { return }
-        sendStatusMessage(localAudio?.isEnabled == false ? "mute" : "unmute")
+        // TALK-STANDARD (wie NCCallController.sendMediaState): initial
+        // "audioOn" nach dem Publisher-Connect, sonst bleibt der Uplink
+        // am MCU stumm.
+        sendStatusMessage(localAudio?.isEnabled == false ? "audioOff" : "audioOn")
         sendStatusMessage((localVideo != nil && localVideo?.isEnabled == true) ? "videoOn" : "videoOff")
     }
 
@@ -562,7 +590,12 @@ final class CallSession: NSObject, HpbSignalingListener {
                 .filter { ($0.values["type"] as? String) == "outbound-rtp" }
                 .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
             if outbound.isEmpty {
-                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none")
+                // Diagnose: ALLE vorhandenen Statistik-Typen loggen, um zu
+                // sehen, was der Publisher überhaupt meldet.
+                let types = report.statistics.values
+                    .compactMap { $0.values["type"] as? String }
+                let kindMap = Dictionary(grouping: types, by: { $0 }).mapValues { $0.count }
+                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none; stat types=[\(kindMap.sorted { $0.key < $1.key }.map { "\($0.key)x\($0.value)" }.joined(separator: ","))]")
             }
             for stat in outbound {
                 let media = stat.values["mediaType"] as? String

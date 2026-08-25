@@ -5,6 +5,7 @@
 // Mirrors android mail/ui Compose screens.
 
 import SwiftUI
+import PhotosUI
 import UniformTypeIdentifiers
 import WebKit
 
@@ -1484,6 +1485,8 @@ struct MailComposeView: View {
     @State private var attachments: [OutgoingAttachment]
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
+    @State private var showPhotoPicker = false
+    @State private var photoSelections: [PhotosPickerItem] = []
     @State private var contactPickerField: RecipientFieldKind?
     @State private var suggestions: [RecipientSuggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
@@ -1595,6 +1598,10 @@ struct MailComposeView: View {
                     ))
                 }
             }
+            .photosPicker(isPresented: $showPhotoPicker, selection: $photoSelections, maxSelectionCount: 10, matching: .images)
+            .onChange(of: photoSelections) { _, items in
+                importPhotos(items)
+            }
             .sheet(item: $contactPickerField) { kind in
                 ContactPickerSheet { email in
                     switch kind {
@@ -1662,6 +1669,11 @@ struct MailComposeView: View {
                             showFilePicker = true
                         } label: {
                             Label(NSLocalizedString("_mail_attachment_add_", comment: ""), systemImage: "plus.circle")
+                        }
+                        Button {
+                            showPhotoPicker = true
+                        } label: {
+                            Label(NSLocalizedString("_link_attach_photos_", comment: ""), systemImage: "photo.on.rectangle")
                         }
                         Button {
                             showNextcloudPicker = true
@@ -1782,6 +1794,32 @@ struct MailComposeView: View {
         case .forward: return NSLocalizedString("_mail_forward_", comment: "")
         }
     }
+    /// Fotos aus dem System-Picker übernehmen (kein Berechtigungsdialog -
+    /// der System-Picker läuft außerhalb der App).
+    private func importPhotos(_ items: [PhotosPickerItem]) {
+        guard !items.isEmpty else { return }
+        Task {
+            var counter = 0
+            for item in items {
+                guard let data = try? await item.loadTransferable(type: Data.self) else { continue }
+                let type = item.supportedContentTypes.first
+                let ext = type?.preferredFilenameExtension ?? "jpg"
+                counter += 1
+                let tmp = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("Foto_\(Int(Date().timeIntervalSince1970))_\(counter).\(ext)")
+                do {
+                    try data.write(to: tmp, options: .atomic)
+                    attachments.append(OutgoingAttachment(
+                        name: tmp.lastPathComponent,
+                        mimeType: type?.preferredMIMEType ?? "image/jpeg",
+                        fileURL: tmp
+                    ))
+                } catch {}
+            }
+            await MainActor.run { photoSelections = [] }
+        }
+    }
+
     private func importFiles(_ urls: [URL]) {
         for url in urls {
             let didStart = url.startAccessingSecurityScopedResource()

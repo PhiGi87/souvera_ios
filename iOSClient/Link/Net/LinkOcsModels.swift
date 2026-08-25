@@ -33,6 +33,9 @@ struct LinkConversation: Decodable, Identifiable {
     let lastActivity: TimeInterval
     /// `lastMessage` is a chat-message object, or `[]`/absent when none — decoded loosely.
     let lastMessage: LinkChatMessage?
+    /// Zuletzt gelesene Nachrichten-ID (Talk liefert sie im Raum-Objekt) -
+    /// Basis für die "Neue Nachrichten"-Trennlinie und den Read-Marker.
+    let lastReadMessage: Int64
     /// Talk participant type: 1 = owner, 2 = moderator, 3 = user, 4 = guest.
     /// Löschen einer Konversation erfordert Owner oder Moderator.
     let participantType: Int
@@ -51,7 +54,7 @@ struct LinkConversation: Decodable, Identifiable {
     var canManage: Bool { participantType == 1 || participantType == 2 }
 
     enum CodingKeys: String, CodingKey {
-        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar, roomId = "id"
+        case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar, lastReadMessage, roomId = "id"
     }
 
     init(from decoder: Decoder) throws {
@@ -62,6 +65,7 @@ struct LinkConversation: Decodable, Identifiable {
         unreadMessages = (try? c.decode(Int.self, forKey: .unreadMessages)) ?? 0
         hasCall = (try? c.decode(Bool.self, forKey: .hasCall)) ?? false
         lastActivity = (try? c.decode(TimeInterval.self, forKey: .lastActivity)) ?? 0
+        lastReadMessage = (try? c.decode(Int64.self, forKey: .lastReadMessage)) ?? 0
         // Server sends `[]` when there is no last message; that fails object decoding, so tolerate it.
         lastMessage = try? c.decode(LinkChatMessage.self, forKey: .lastMessage)
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0

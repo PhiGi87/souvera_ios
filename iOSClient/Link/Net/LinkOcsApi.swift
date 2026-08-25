@@ -117,6 +117,43 @@ actor LinkOcsApi {
         _ = try? await session.data(for: req)
     }
 
+    /// Talk-Standard: Read-Marker für den Raum setzen (POST chat/{token}/read).
+    func markRoomRead(token: String, lastReadMessage: Int64) async {
+        var req = signed(url: "\(base)/api/v1/chat/\(token)/read", method: "POST")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        let body = "lastReadMessage=\(lastReadMessage)"
+        req.httpBody = body.data(using: .utf8)
+        let (_, response) = try? await session.data(for: req)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("LinkOcsApi", "markRoomRead \(token) -> \(status)")
+    }
+
+    /// Lädt eine geteilte Datei aus einem Talk-Ordner (WebDAV) in eine
+    /// temporäre Datei (für das iOS-Teilen-Sheet).
+    func downloadChatAttachment(path: String) async -> URL? {
+        var components = path.split(separator: "/").map(String.init)
+        guard !components.isEmpty else { return nil }
+        let name = components.removeLast()
+        let folder = components.joined(separator: "/")
+        let encodedFolder = folder.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? folder
+        let encodedName = name.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? name
+        let encodedUser = account.username.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? account.username
+        guard let url = URL(string: "\(root)/remote.php/dav/files/\(encodedUser)/\(encodedFolder)/\(encodedName)") else { return nil }
+        var req = URLRequest(url: url)
+        req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
+        guard let (data, response) = try? await session.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent(name)
+        try? FileManager.default.removeItem(at: fileURL)
+        do {
+            try data.write(to: fileURL)
+            return fileURL
+        } catch {
+            return nil
+        }
+    }
+
     /// Autocomplete users/groups to start a new conversation with.
     func searchUsers(query: String) async -> [LinkSuggestion] {
         let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query

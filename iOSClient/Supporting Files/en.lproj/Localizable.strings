@@ -884,7 +884,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_sending_"                 = "Sending email…";
 "_link_upload_failed_"            = "File upload failed. Please try again.";
 "_calendar_join_video_call_"      = "Join video call";
-"_settings_diagnostics_"          = "Diagnostics";
+"_settings_diagnostics_"          = "Diagnostics";"_settings_about_app_"            = "About the app";
+
 "_settings_logs_"                 = "Share logs";
 "_settings_logs_confirm_title_"   = "Send logs to Host-On?";
 "_settings_logs_confirm_message_" = "The diagnostic logs will be sent by email to Host-On (a.raatz@host-on.de).";
@@ -989,7 +990,16 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_shield_release_only_"         = "Deliver only";
 "_shield_release_whitelist_"    = "Deliver and add sender to whitelist";
 "_shield_released_whitelisted_" = "Delivered and sender added to the whitelist";
-"_link_video_call_"               = "Video call";"_link_scroll_bottom_"             = "Jump to newest messages";
+"_link_video_call_"               = "Video call";"_link_scroll_bottom_"             = "Jump to newest messages";"_link_new_messages_"              = "New messages";"_link_share_message_"             = "Share…";"_link_react_message_"             = "React…";"_link_attach_photos_"             = "Photos";"_about_version_"                 = "Version %@ (%@)";"_about_based_on_"                = "This app is based on the Nextcloud iOS client and was modified by Host-On Service Provider GmbH. It is not an official Nextcloud GmbH application.";"_about_gpl_part_"                = "Parts of this application are licensed under the GNU General Public License Version 3 (GPLv3).";"_about_licenses_"                = "Open source licenses";"_about_source_"                  = "Source code";
+
+
+
+
+
+
+
+
+
 
 "_link_decline_"                  = "Decline";"_link_call_minimize_"              = "Minimize";
 

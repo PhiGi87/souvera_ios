@@ -27,9 +27,7 @@ class NCSettingsModel: ObservableObject, ViewOnAppearHandling {
     // Root View Controller
     @Published var controller: NCMainTabBarController?
     // Footer
-    var footerApp = ""
-    var footerServer = ""
-    var footerSlogan = ""
+
     // Get session
     @MainActor
     var session: NCSession.Session {
@@ -53,9 +51,7 @@ class NCSettingsModel: ObservableObject, ViewOnAppearHandling {
         privacyScreen = keychain.privacyScreenEnabled
         resetWrongAttempts = keychain.resetAppCounterFail
         accountRequest = keychain.accountRequest
-        footerApp = String(format: NCBrandOptions.shared.textCopyrightNextcloudiOS, NCUtility().getVersionBuild()) + "\n\n"
-        footerServer = String(format: NCBrandOptions.shared.textCopyrightNextcloudServer, capabilities.serverVersion) + "\n"
-        footerSlogan = capabilities.themingName + " - " + capabilities.themingSlogan + "\n\n"
+
     }
 
     // MARK: - All functions
