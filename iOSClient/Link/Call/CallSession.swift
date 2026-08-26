@@ -79,6 +79,14 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.callFlags = withVideo ? 7 : 3 // FLAG_IN_CALL|WITH_AUDIO|WITH_VIDEO : IN_CALL|AUDIO
         self.api = LinkOcsApi(account: account)
         super.init()
+        timingLog("session init")
+    }
+
+    /// P68g: Meilenstein-Logs für die Call-Aufbau-Latenz (Start -> audioOn).
+    private let sessionStartDate = Date()
+    private func timingLog(_ milestone: String) {
+        let elapsed = String(format: "%.2f", Date().timeIntervalSince(sessionStartDate))
+        CallDebugLog.log("CallTiming", "\(milestone) +\(elapsed)s")
     }
 
     /// Safety-Net: Wird die Session ohne explizites hangup() freigegeben
@@ -121,12 +129,18 @@ final class CallSession: NSObject, HpbSignalingListener {
         if forceAudioOnly {
             callFlags &= ~4
         }
-        guard let ncSession = await api.joinRoom(token: token) else {
+        timingLog("startMedia")
+        // P68g: joinRoom und getSignalingSettings PARALLEL laden (waren
+        // sequenziell - ~0,4 s Ersparnis beim Kaltstart).
+        async let roomResult = api.joinRoom(token: token)
+        async let settingsResult = api.getSignalingSettings(token: token)
+        guard let ncSession = await roomResult else {
             CallDebugLog.log("CallSession", "joinRoom failed"); return end()
         }
-        guard let settings = await api.getSignalingSettings(token: token) else {
+        guard let settings = await settingsResult else {
             CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
         }
+        timingLog("ocs calls done")
         // joinCall runs after the signaling room join (onRoomJoined) -
         // mirroring the Android client. Opening the call earlier makes
         // the MCU ignore our publisher.
@@ -158,13 +172,41 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.ownSessionId = ownSessionId
         self.mcuActive = mcuActive
         CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
+        timingLog("signaling connected")
+        // P68g: joinCall SOFORT beim Signaling-Connect senden (talk-iOS-
+        // Muster) - nicht erst nach dem Room-Join. Spart einen Roundtrip.
+        sendJoinCall()
     }
 
     /// The signaling room join is confirmed - now open the call via OCS.
     func onRoomJoined() {
-        Task {
-            await api.joinCall(token: token, flags: callFlags, silent: silent)
-            CallDebugLog.log("CallSession", "joinCall sent flags=\(callFlags) (after room join)")
+        timingLog("room joined")
+        sendJoinCall()
+    }
+
+    /// P68g: Idempotenter joinCall mit Retry (talk-iOS-Muster: bis zu 3
+    /// Versuche, sonst bricht unser Call aktuell bei einem einmaligen
+    /// OCS-Fehler komplett ab).
+    private var joinCallSent = false
+    private func sendJoinCall(retry: Int = 3) {
+        guard !joinCallSent, !endedOnce else { return }
+        joinCallSent = true
+        timingLog("joinCall sending")
+        Task { [weak self] in
+            guard let self else { return }
+            let flags = self.callFlags
+            let ok = await self.api.joinCall(token: self.token, flags: flags, silent: self.silent)
+            if ok {
+                CallDebugLog.log("CallSession", "joinCall sent flags=\(flags)")
+                self.timingLog("joinCall ok")
+            } else if retry > 0, !self.endedOnce {
+                CallDebugLog.log("CallSession", "joinCall failed - retry (\(retry) left)")
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                self.joinCallSent = false
+                self.sendJoinCall(retry: retry - 1)
+            } else {
+                CallDebugLog.log("CallSession", "joinCall FAILED after retries")
+            }
         }
     }
 
@@ -192,6 +234,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         publisherCreated = true
         audioOnResendGeneration += 1
         CallDebugLog.log("CallSession", "createPublisher to own=\(ownSessionId)")
+        timingLog("createPublisher")
         createPublisher()
     }
 
@@ -203,17 +246,16 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "publisher senders=\(senders.count) kinds=[\(senders.compactMap { $0.track?.kind }.joined(separator: ","))]")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
-            // P68b: H264 im Angebot ERZWINGEN - die MCU wählt sonst VP8,
-            // für das der HW-Encoder (nur H264) keine Frames liefert und
-            // das Remote-Bild schwarz bleibt. Gemungtes SDP wird lokal
-            // gesetzt UND gesendet.
-            let munged = Self.forcingH264(sdp.sdp)
-            let finalSdp = RTCSessionDescription(type: sdp.type, sdp: munged)
+            // P68f: H264 per REORDER bevorzugen (talk-iOS ARDSDPUtils-
+            // Muster) - der MCU wählt dann H264 statt VP8, das wir nicht
+            // encodieren können.
+            let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+            let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
             peer.setLocalDescription(finalSdp) { _ in }
-            let kinds = Self.mediaLines(of: munged)
+            let kinds = Self.mediaLines(of: preferred)
             CallDebugLog.log("CallSession", "publisher offer m-lines=[\(kinds.joined(separator: ","))]")
-            CallDebugLog.log("CallSession", "publisher offer video codecs: \(Self.videoCodecLines(of: munged))")
-            self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: munged)
+            CallDebugLog.log("CallSession", "publisher offer video codecs: \(Self.videoCodecLines(of: preferred))")
+            self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: preferred)
         }
         startSpeakerPolling()
         // P68a: Der initiale audioOn beim Verbinden wirkt am MCU teils
@@ -250,56 +292,35 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// P68a: zählt Call-Starts; veraltete Resend-Timer werden ignoriert.
     private var audioOnResendGeneration = 0
 
-    /// P68b: Entfernt Nicht-H264-Codecs aus den Video-m-Lines (inklusive
-    /// zugehöriger rtpmap/fmtp/rtcp-fb-Zeilen) und behält die H264-
-    /// Payload-Typen. Ohne H264-Zeilen bleibt das SDP unverändert.
-    /// P68d-Fix: NUR m=-Zeilen schalten die Sektion - die c=-Zeile direkt
-    /// nach m=video hatte vorher inVideo wieder ausgeschaltet, sodass die
-    /// rtpmap-Zeilen nie gesehen wurden und das SDP ungemungt blieb.
-    static func forcingH264(_ sdpText: String) -> String {
-        let lines = sdpText.components(separatedBy: "\r\n")
-        var inVideo = false
-        var h264Payloads: [String] = []
+    /// P68f: talk-iOS ARDSDPUtils-Port - verschiebt die Payload-Typen des
+    /// Ziel-Codecs an den ANFANG der m=video-Zeile (REORDER statt Removal).
+    /// Alle anderen Codecs bleiben erhalten; das SDP bleibt damit gültig
+    /// (kein verwaister rtx/ssrc-group-FID wie beim früheren Removal, das
+    /// die MCU-Ablehnung "m=video 0" auslöste).
+    static func preferringVideoCodec(_ sdpText: String, codec: String) -> String {
+        var lines = sdpText.components(separatedBy: "\n")
+        guard let mLineIndex = lines.firstIndex(where: { $0.hasPrefix("m=video") }) else {
+            return sdpText
+        }
+        // a=rtpmap:<payload> <codec>/<clock rate>[/<params>].
+        let pattern = "^a=rtpmap:(\\d+) \(codec)(/\\d+)+[\\r]?$"
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return sdpText }
+        var codecPayloads: [String] = []
         for line in lines {
-            if line.hasPrefix("m=") {
-                inVideo = line.hasPrefix("m=video")
-                continue
-            }
-            if inVideo, line.hasPrefix("a=rtpmap:"), line.lowercased().contains("h264") {
-                let payload = line.dropFirst("a=rtpmap:".count).split(separator: " ").first ?? ""
-                if !payload.isEmpty { h264Payloads.append(String(payload)) }
+            let ns = line as NSString
+            if let match = regex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: ns.length)) {
+                codecPayloads.append(ns.substring(with: match.range(at: 1)))
             }
         }
-        guard !h264Payloads.isEmpty else { return sdpText }
-        inVideo = false
-        var out: [String] = []
-        for line in lines {
-            if line.hasPrefix("m=") {
-                inVideo = line.hasPrefix("m=video")
-                if inVideo {
-                    let tokens = line.split(separator: " ")
-                    if tokens.count >= 4 {
-                        let payloads = tokens.dropFirst(3)
-                        let kept = payloads.filter { h264Payloads.contains(String($0)) }
-                        out.append((tokens.prefix(3) + (kept.isEmpty ? Array(payloads) : kept)).joined(separator: " "))
-                        continue
-                    }
-                }
-                out.append(line)
-                continue
-            }
-            if inVideo {
-                if line.hasPrefix("a=rtpmap:") || line.hasPrefix("a=fmtp:") || line.hasPrefix("a=rtcp-fb:") {
-                    let payload = line.split(separator: ":", maxSplits: 1).last?.split(separator: " ").first ?? ""
-                    if h264Payloads.contains(String(payload)) {
-                        out.append(line)
-                    }
-                    continue
-                }
-            }
-            out.append(line)
-        }
-        return out.joined(separator: "\r\n")
+        guard !codecPayloads.isEmpty else { return sdpText }
+        let parts = lines[mLineIndex].split(separator: " ")
+        guard parts.count > 3 else { return sdpText }
+        let header = parts.prefix(3).map(String.init)
+        var payloads = parts.dropFirst(3).map(String.init)
+        payloads.removeAll { codecPayloads.contains($0) }
+        let newParts = header + codecPayloads + payloads
+        lines[mLineIndex] = newParts.joined(separator: " ")
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Aktiver Sprecher (Fokus-Modus)
@@ -371,8 +392,10 @@ final class CallSession: NSObject, HpbSignalingListener {
             if ownSessionId > session {
                 peer.offer(for: receiveConstraints()) { [weak self] sdp, _ in
                     guard let self, let sdp else { return }
-                    peer.setLocalDescription(sdp) { _ in }
-                    self.signaling?.sendOffer(toSession: session, sdp: sdp.sdp)
+                    let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+                    let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
+                    peer.setLocalDescription(finalSdp) { _ in }
+                    self.signaling?.sendOffer(toSession: session, sdp: preferred)
                 }
             }
         }
@@ -383,7 +406,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         // zweites Angebot derselben Session).
         let key = Self.streamKey(session: fromSession, roomType: roomType)
         let peer = peerFor(key: key, session: fromSession, addLocalTracks: !mcuActive, isPublisher: false, roomType: roomType)
-        let remote = RTCSessionDescription(type: .offer, sdp: sdp)
+        // P68f: Remote-Offer ebenfalls mit H264-Präferenz setzen.
+        let remote = RTCSessionDescription(type: .offer, sdp: Self.preferringVideoCodec(sdp, codec: "H264"))
         peer.setRemoteDescription(remote) { [weak self] _ in
             guard let self else { return }
             peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { answer, _ in
@@ -401,7 +425,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "answer from \(fromSession.prefix(8)) m-lines=[\(kinds.joined(separator: ","))]")
         CallDebugLog.log("CallSession", "answer video codecs: \(Self.videoCodecLines(of: sdp))")
         let peer = peers[fromSession] ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
-        peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { [weak self] _ in
+        // P68f: auch die ANSWER mit H264-Präferenz setzen (talk-iOS-Muster:
+        // bestimmt unseren Sende-Codec).
+        let preferredAnswer = Self.preferringVideoCodec(sdp, codec: "H264")
+        peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: preferredAnswer)) { [weak self] _ in
             // Nach einer Re-Verhandlung den Medienzustand erneut melden -
             // der MCU kann den letzten Stand sonst verschlucken (verzögerte
             // Mute-/Video-Reaktion).
@@ -468,7 +495,7 @@ final class CallSession: NSObject, HpbSignalingListener {
                 // Call-Flags aktualisieren, damit der Raum als Video-Call gilt.
                 if self.callFlags & 4 == 0 {
                     self.callFlags |= 4
-                    await self.api.joinCall(token: self.token, flags: self.callFlags, silent: self.silent)
+                    _ = await self.api.joinCall(token: self.token, flags: self.callFlags, silent: self.silent)
                     CallDebugLog.log("CallSession", "joinCall flags updated to \(self.callFlags)")
                 }
                 // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
@@ -492,7 +519,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             if callFlags & 4 != 0 {
                 callFlags &= ~4
                 Task {
-                    await api.joinCall(token: token, flags: callFlags, silent: silent)
+                    _ = await api.joinCall(token: token, flags: callFlags, silent: silent)
                     CallDebugLog.log("CallSession", "joinCall flags updated to \(callFlags) (video off)")
                 }
             }
@@ -519,22 +546,24 @@ final class CallSession: NSObject, HpbSignalingListener {
         if mcuActive, let peer = peers[ownSessionId] {
             peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
                 guard let self, let sdp else { return }
-                // P68b: auch Re-Offer H264-erzwingen (MCU-Wahl sonst VP8).
-                let munged = Self.forcingH264(sdp.sdp)
-                let finalSdp = RTCSessionDescription(type: sdp.type, sdp: munged)
+                // P68f: auch Re-Offer mit H264-Präferenz (talk-iOS-Muster).
+                let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+                let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
                 peer.setLocalDescription(finalSdp) { _ in }
-                self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: munged)
-                let kinds = Self.mediaLines(of: munged)
+                self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: preferred)
+                let kinds = Self.mediaLines(of: preferred)
                 CallDebugLog.log("CallSession", "publisher re-offer sent after video change m-lines=[\(kinds.joined(separator: ","))]")
-                CallDebugLog.log("CallSession", "publisher re-offer video codecs: \(Self.videoCodecLines(of: munged))")
+                CallDebugLog.log("CallSession", "publisher re-offer video codecs: \(Self.videoCodecLines(of: preferred))")
             }
         } else {
             for (key, peer) in peers where key != ownSessionId && !key.isEmpty {
                 let session = key.split(separator: "|").map(String.init).first ?? ""
                 peer.offer(for: receiveConstraints()) { [weak self] sdp, _ in
                     guard let self, let sdp else { return }
-                    peer.setLocalDescription(sdp) { _ in }
-                    self.signaling?.sendOffer(toSession: session, sdp: sdp.sdp)
+                    let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+                    let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
+                    peer.setLocalDescription(finalSdp) { _ in }
+                    self.signaling?.sendOffer(toSession: session, sdp: preferred)
                 }
             }
         }
@@ -612,8 +641,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         statusChannels[key] = channel
         channel.delegate = self
         CallDebugLog.log("CallSession", "status channel opened key=\(key.prefix(12))")
+        timingLog("status channel open")
         if channel.readyState == .open {
             sendInitialStatus()
+            flushPendingStatus()
         }
     }
 
@@ -628,6 +659,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         // am MCU stumm.
         sendStatusMessage(localAudio?.isEnabled == false ? "audioOff" : "audioOn")
         sendStatusMessage((localVideo != nil && localVideo?.isEnabled == true) ? "videoOn" : "videoOff")
+        timingLog("audioOn sent")
     }
 
     private func sendStatusMessage(_ type: String) {
@@ -641,6 +673,25 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
         if sent {
             CallDebugLog.log("CallSession", "status message sent: \(type)")
+            return
+        }
+        // P68g: Status-Queue - solange der Status-Kanal noch nicht offen
+        // ist, gehen Mute-/Video-Presses sonst still verloren (wirkt
+        // "träge"/wirkungslos). Beim Kanal-Open wird nachgereicht.
+        if pendingStatus.last != type {
+            pendingStatus.append(type)
+            CallDebugLog.log("CallSession", "status message queued (channel not open): \(type)")
+        }
+    }
+
+    private var pendingStatus: [String] = []
+
+    private func flushPendingStatus() {
+        guard !pendingStatus.isEmpty else { return }
+        let queued = pendingStatus
+        pendingStatus.removeAll()
+        for type in queued {
+            sendStatusMessage(type)
         }
     }
 

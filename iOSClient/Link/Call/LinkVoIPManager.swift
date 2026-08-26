@@ -77,6 +77,68 @@ final class LinkVoIPManager: NSObject {
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
     }
 
+    /// P68e: true, solange der App-eigene Call-Vollscreen präsentiert ist.
+    /// Das LinkView-Banner ("Zum Anruf wechseln") bleibt dann aus.
+    private(set) var isCallUIPresented = false
+
+    func noteCallUIPresented() {
+        guard !isCallUIPresented else { return }
+        isCallUIPresented = true
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    func noteCallUIDismissed() {
+        guard isCallUIPresented else { return }
+        isCallUIPresented = false
+        NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
+    }
+
+    /// P68e: ZENTRALER Übergang in den App-Call-Vollscreen. Präsentiert den
+    /// CallVC IMMER an der laufenden Session (Reattach - kein Neustart,
+    /// kein Flappen). Retries, wenn das Fenster noch nicht bereit ist
+    /// (App-Start aus gesperrtem Zustand). Idempotent.
+    func presentCallUIIfNeeded(retriesLeft: Int = 2) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let session = self.activeSession, !session.hasEnded,
+                  let info = self.activeCallInfo,
+                  let account = LinkAccount.active() else {
+                CallDebugLog.log("LinkVoIPManager", "presentCallUI: skipped (no active session/info/account)")
+                return
+            }
+            if self.isCallUIPresented {
+                CallDebugLog.log("LinkVoIPManager", "presentCallUI: skipped (already presented)")
+                return
+            }
+            guard let root = UIApplication.shared.mainAppWindow?.rootViewController else {
+                if retriesLeft > 0 {
+                    CallDebugLog.log("LinkVoIPManager", "presentCallUI: window not ready - retry in 0.5s (\(retriesLeft) left)")
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        self?.presentCallUIIfNeeded(retriesLeft: retriesLeft - 1)
+                    }
+                } else {
+                    CallDebugLog.log("LinkVoIPManager", "presentCallUI: window never ready - giving up")
+                }
+                return
+            }
+            if root.presentedViewController is LinkCallViewController {
+                CallDebugLog.log("LinkVoIPManager", "presentCallUI: skipped (CallVC already in hierarchy)")
+                return
+            }
+            let callVC = LinkCallViewController(
+                account: account,
+                token: info.token,
+                title: info.title,
+                withVideo: info.withVideo,
+                session: session
+            )
+            callVC.modalPresentationStyle = .fullScreen
+            self.isCallUIPresented = true
+            CallDebugLog.log("LinkVoIPManager", "presentCallUI: presenting attached token=\(info.token.prefix(8))")
+            root.present(callVC, animated: true)
+        }
+    }
+
     /// true, solange ein eingehender Anruf über CallKit klingelt - der
     /// In-App-Fullscreen muss dann NICHT zusätzlich erscheinen (Dedup).
     var hasRingingCall: Bool {
@@ -644,6 +706,10 @@ extension LinkVoIPManager: CXProviderDelegate {
         session.lockForConfiguration()
         try? session.setActive(false)
         session.unlockForConfiguration()
+        // P68e: "In Souvera öffnen"/Video im System-Fullscreen -> genau hier
+        // in den App-Call-Vollscreen übergehen (Guard im Presenter greift
+        // nur bei noch laufender Session - beim Auflegen passiert nichts).
+        presentCallUIIfNeeded()
     }
 }
 

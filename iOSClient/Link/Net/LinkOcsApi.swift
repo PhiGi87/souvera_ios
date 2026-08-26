@@ -356,7 +356,7 @@ actor LinkOcsApi {
         return env?.ocs.data?.sessionId
     }
 
-    func joinCall(token: String, flags: Int, silent: Bool = false) async {
+    func joinCall(token: String, flags: Int, silent: Bool = false) async -> Bool {
         // Talk expects form-encoded fields; recordingConsent is mandatory
         // when the server enforces recording consent (otherwise 400
         // {"error":"consent"} and no call is opened). A silent join does not
@@ -371,6 +371,8 @@ actor LinkOcsApi {
             bodySnippet = String(text.prefix(200))
         }
         CallDebugLog.log("OcsApi", "joinCall http=\(status) body=\(bodySnippet)")
+        // P68g: Erfolg melden (Retry-Logik im CallSession).
+        return (200..<300).contains(status)
     }
 
     func leaveCall(token: String) async {

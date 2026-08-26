@@ -226,6 +226,10 @@ final class MailViewModel: ObservableObject {
             )
             // P66b: Die Mail SOFORT in die Liste mergen, damit die Übersicht
             // augenblicklich stimmt (der Refresh läuft parallel weiter).
+            // P62c: Die Mail bleibt bis zum Server-Nachweis GESCHÜTZT -
+            // parallele Sync-Publishes können sie nicht mehr entfernen
+            // (das war die Ursache "Mail fehlt nach Zurück").
+            protectedListIds.insert(message.emailId)
             if case let .success(items) = messages,
                !items.contains(where: { $0.emailId == message.emailId }) {
                 var updated = items
@@ -860,6 +864,7 @@ final class MailViewModel: ObservableObject {
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
         listGeneration += 1
+        protectedListIds.removeAll()
         messages = .loading
         pageState = (nil, false)
         hasMoreMessages = false
@@ -930,7 +935,22 @@ final class MailViewModel: ObservableObject {
 
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
+        // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync dieser
+        // Mailbox, wird der neue Wunsch nur vorgemerkt und danach EINMAL
+        // nachgezogen (keine parallelen Publishes, die sich überschreiben).
         let generation = listGeneration
+        guard !mailboxSyncInFlight else {
+            mailboxSyncQueued = true
+            return
+        }
+        mailboxSyncInFlight = true
+        defer {
+            mailboxSyncInFlight = false
+            if mailboxSyncQueued, listGeneration == generation {
+                mailboxSyncQueued = false
+                Task { [weak self] in await self?.refreshMessages() }
+            }
+        }
         do {
             let session = try await jmapClient?.refreshSession()
             // Leere Accounts = tote Credential: erneuern und neu laden.
@@ -989,7 +1009,7 @@ final class MailViewModel: ObservableObject {
                     guard generation == listGeneration else { return }
                     queryStates[cacheKey] = newState
                     MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
-                    messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                    messages = .success(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
@@ -1022,7 +1042,7 @@ final class MailViewModel: ObservableObject {
                 isFetchingMail = true
             } else {
                 let cachedList = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
-                messages = .success(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                messages = .success(protectingLiveMessages(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
             }
             var lastId: String?
             var hasMore = false
@@ -1081,7 +1101,7 @@ final class MailViewModel: ObservableObject {
                 queryStates[cacheKey] = state
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
-                messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                messages = .success(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
                 if !pageHasMore {
                     break
                 }
@@ -1096,7 +1116,7 @@ final class MailViewModel: ObservableObject {
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collected, queryState: state)
-            messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+            messages = .success(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
             isFetchingMail = false
             prefetchBodies(mailbox: mailbox)
 
@@ -1124,7 +1144,7 @@ final class MailViewModel: ObservableObject {
                 let kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 if self.currentMailbox?.id == mailbox.id, self.listGeneration == generation {
-                    self.messages = .success(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                    self.messages = .success(protectingLiveMessages(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
                 }
             }
         } catch {
@@ -1222,6 +1242,40 @@ final class MailViewModel: ObservableObject {
     /// Zustand des NEUEN Ordners schreiben (Flap-Fix). Auch loadMore
     /// und Prefetch hängen an dieser Generation.
     private var listGeneration = 0
+
+    /// P62c: Mail-IDs, die Sync-Publishes überleben MÜSSEN (z. B. die per
+    /// Deep-Link geöffnete Mail, die noch nicht im Server-Snapshot stand).
+    /// Jeder Publish vereinigt die Liste mit diesen Live-Einträgen.
+    private var protectedListIds: Set<String> = []
+
+    /// P62c: Sync-In-Flight-Guard - kein zweiter voller Sync derselben
+    /// Mailbox parallel (die parallelen Syncs überschrieben sich sonst
+    /// gegenseitig und warfen die Deep-Link-Mail wieder raus).
+    private var mailboxSyncInFlight = false
+    private var mailboxSyncQueued = false
+    /// P62d: Debounce-Task für den Refresh nach Mutationen (Löschen/
+    /// Verschieben) - ein Refresh nach der LETZTEN Mutation statt pro Swipe.
+    private var mutationRefreshTask: Task<Void, Never>?
+
+    /// P62c: Vereinigt einen Publish mit den Live-Einträgen, deren IDs
+    /// geschützt sind (Deep-Link-Mail) - bis der Server sie selbst liefert.
+    private func protectingLiveMessages(_ published: [MailMessage]) -> [MailMessage] {
+        guard !protectedListIds.isEmpty else { return published }
+        let publishedIds = Set(published.map(\.emailId))
+        let protected = protectedListIds.filter { !publishedIds.contains($0) }
+        guard !protected.isEmpty else {
+            protectedListIds.subtract(publishedIds)
+            return published
+        }
+        var result = published
+        if case let .success(live) = messages {
+            for message in live where protected.contains(message.emailId) {
+                result.append(message)
+            }
+        }
+        result.sort { $0.dateSent > $1.dateSent }
+        return result
+    }
 
     /// IMAP-artiger Voll-Cache: lädt die Bodies der geladenen Mails im
     /// Hintergrund nach (gedrosselt, abbrechbar, überspringt Gecachtes).
@@ -1646,7 +1700,43 @@ final class MailViewModel: ObservableObject {
 
     // MARK: - Move / Delete
 
+    /// P62d: Entfernt Mails SYNCHRON aus Live-Liste, Cache und Badge
+    /// (optimistisch, vor dem Server-Call) - der Swipe "flappt" damit nicht
+    /// mehr, weil die Zeile sofort verschwindet.
+    private func optimisticRemove(_ ids: [String]) {
+        let removed = Set(ids)
+        guard !removed.isEmpty else { return }
+        if useJmap, let mailbox = currentMailbox {
+            let accountName = mailAccount?.account ?? ""
+            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+                let filtered = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
+                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+            }
+        }
+        if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
+           case let .success(list) = messages {
+            let unreadRemoved = list
+                .filter { removed.contains($0.emailId) && !$0.isRead }
+                .count
+            if unreadRemoved > 0 {
+                postUnreadBadge(personalInboxUnread - unreadRemoved)
+            }
+        }
+        if case var .success(list) = messages {
+            list.removeAll { removed.contains($0.emailId) }
+            messages = .success(list)
+        }
+        if case var .success(results) = searchResults {
+            results.removeAll { removed.contains($0.emailId) }
+            searchResults = .success(results)
+        }
+    }
+
     func delete(_ messagesToDelete: [MailMessage]) {
+        // P62d: OPTIMISTISCH - Zeile/Badge/Cache sofort entfernen, damit der
+        // Swipe nicht "flappt", während der Server-Call läuft. Der Task
+        // macht danach nur noch den Server-Call + gebündelten Refresh.
+        optimisticRemove(messagesToDelete.map(\.emailId))
         Task {
             guard let first = messagesToDelete.first else { return }
             if useJmap {
@@ -1680,6 +1770,8 @@ final class MailViewModel: ObservableObject {
     /// Moves messages to another mailbox of the same JMAP account
     /// (mirrors the Android move action).
     func move(_ messagesToMove: [MailMessage], to target: Mailbox) {
+        // P62d: auch Verschieben optimistisch (kein Flappen beim Move).
+        optimisticRemove(messagesToMove.map(\.emailId))
         Task {
             guard let first = messagesToMove.first else { return }
             if useJmap {
@@ -1750,10 +1842,15 @@ final class MailViewModel: ObservableObject {
             // wirkungslos).
             if case .folders = route { return }
             route = .messages(mailbox: mailbox)
-            // Voller Sync statt Inkrementalpfad: queryChanges meldet
-            // Verschieben/Löschen nicht zuverlässig, der Cache-Snapshot
-            // würde die Mail sonst wieder einblenden.
-            Task { await refreshMessages() }
+            // P62d: Voller Sync DEBOUNCED (ein Refresh 0,8 s nach der
+            // LETZTEN Mutation statt pro Swipe) - schnelle Swipe-Löschungen
+            // lösen keine Refresh-Stürme mehr aus (Flap-Ursache).
+            mutationRefreshTask?.cancel()
+            mutationRefreshTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 800_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refreshMessages()
+            }
         } else if !lastSearchQuery.isEmpty {
             Task { await search(lastSearchQuery) }
         }

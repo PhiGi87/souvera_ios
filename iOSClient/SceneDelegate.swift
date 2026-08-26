@@ -221,6 +221,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     func sceneDidBecomeActive(_ scene: UIScene) {
         hidePrivacyProtectionWindow()
+        // P68e: Scene-Aktivierung als zweiter Übergabe-Punkt in den
+        // App-Call-Vollscreen (deckt Timing-Races zwischen Scene- und
+        // App-Lifecycle ab; Guard im Presenter greift nur bei aktivem Call).
+        LinkVoIPManager.shared.presentCallUIIfNeeded()
 
         if !NextcloudKit.shared.isNetworkReachable(),
            let windowScenee = SceneManager.shared.getWindow(scene: scene)?.windowScene {

@@ -97,18 +97,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         LinkVoIPManager.shared.register()
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
-            // gesperrtem Gerät); hier wird NUR die Call-UI präsentiert -
-            // und zwar ausschließlich im aktiven Vordergrund. Sonst
-            // übernimmt nach dem Entsperren der "Zurück zum Anruf"-Flow.
-            guard UIApplication.shared.applicationState == .active,
-                  let token = notification.userInfo?["token"] as? String, !token.isEmpty,
-                  let account = LinkAccount.active(),
-                  let root = UIApplication.shared.mainAppWindow?.rootViewController,
-                  let session = LinkVoIPManager.shared.activeSession else { return }
-            let title = (notification.userInfo?["title"] as? String) ?? NSLocalizedString("_link_incoming_call_", comment: "")
-            let hasVideo = (notification.userInfo?["hasVideo"] as? Bool) ?? false
-            let callVC = LinkCallViewController(account: account, token: token, title: title, withVideo: hasVideo, session: session)
-            root.present(callVC, animated: true)
+            // gesperrtem Gerät); die Call-UI übernimmt der zentrale
+            // Presenter (P68e) - nur im aktiven Vordergrund. Sonst
+            // übernimmt der "In Souvera öffnen"-Flow nach dem Entsperren.
+            guard UIApplication.shared.applicationState == .active else { return }
+            LinkVoIPManager.shared.presentCallUIIfNeeded()
         }
 
 #if !targetEnvironment(simulator)
@@ -316,21 +309,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     /// Nach "In Souvera öffnen" (CallKit) bzw. beim Entsperren: läuft ein
     /// Call ohne eigene UI, wird die Call-UI automatisch präsentiert.
+    /// P68e: zentraler Presenter mit Retries statt fragiler Guards - der
+    /// Nutzer landet IMMER direkt im App-Call-Vollscreen (kein Banner-
+    /// Zwischenzustand mit "Zum Anruf wechseln").
     func applicationDidBecomeActive(_ application: UIApplication) {
-        guard let session = LinkVoIPManager.shared.activeSession,
-              let info = LinkVoIPManager.shared.activeCallInfo,
-              let account = LinkAccount.active(),
-              let root = UIApplication.shared.mainAppWindow?.rootViewController else { return }
-        if root.presentedViewController is LinkCallViewController { return }
-        let callVC = LinkCallViewController(
-            account: account,
-            token: info.token,
-            title: info.title,
-            withVideo: info.withVideo,
-            session: session
-        )
-        callVC.modalPresentationStyle = .fullScreen
-        root.present(callVC, animated: true)
+        LinkVoIPManager.shared.presentCallUIIfNeeded()
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {

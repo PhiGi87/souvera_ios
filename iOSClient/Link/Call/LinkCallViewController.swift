@@ -68,6 +68,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // P68e: Der App-Vollscreen ist (ab jetzt) präsentiert - das
+        // LinkView-Banner ("Zum Anruf wechseln") bleibt damit aus.
+        LinkVoIPManager.shared.noteCallUIPresented()
         view.backgroundColor = .black
         setupVideoViews()
         setupControls()
@@ -225,6 +228,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         layoutTiles()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        // P68e: Vollscreen verlassen (Call beendet/verlassen) - Banner
+        // wieder erlauben, Presenter kann erneut präsentieren.
+        LinkVoIPManager.shared.noteCallUIDismissed()
     }
 
     /// Fokus-Modus-Layout: 1:1 = ein Vollbild-Stream (wie bisher);

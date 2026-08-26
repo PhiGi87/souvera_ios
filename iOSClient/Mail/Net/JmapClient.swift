@@ -473,15 +473,8 @@ enum JmapLog {
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let url = documents.appendingPathComponent("souvera-mail.log")
         let line = "[\(timestampFormatter.string(from: Date()))] \(message)\n"
-        if !FileManager.default.fileExists(atPath: url.path) {
-            FileManager.default.createFile(atPath: url.path, contents: Data(line.utf8))
-        } else if let handle = try? FileHandle(forWritingTo: url) {
-            handle.seekToEndOfFile()
-            handle.write(Data(line.utf8))
-            try? handle.close()
-        }
-        // Gleiche Begrenzung wie SouveraLog: älteste Einträge zuerst löschen.
-        SouveraLog.trimToLimit(at: url)
+        // P68h: Thread-sicher über die zentrale Writer-Queue (Append+Trim).
+        SouveraLog.appendSafely(line, to: url)
     }
 }
 

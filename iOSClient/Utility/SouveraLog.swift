@@ -25,8 +25,21 @@ enum SouveraLog {
         guard let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
         let url = documents.appendingPathComponent("souvera-app.log")
         let line = "[\(timestampFormatter.string(from: Date()))] \(message)\n"
-        appendLine(line, to: url)
-        trimToLimit(at: url)
+        appendSafely(line, to: url)
+    }
+
+    /// P68h: Serielle Writer-Queue - Append + Trim liefen bisher
+    /// un-synchronisiert aus vielen Threads (Background-Sync, Signaling,
+    /// Main); parallele Trims konnten fehlschlagen und die Datei über das
+    /// Limit wachsen lassen. Alle Log-Dateien laufen jetzt über diese Queue.
+    static let writerQueue = DispatchQueue(label: "souvera.log.writer", qos: .utility)
+
+    /// Thread-sicherer Append + Trim für beliebige Log-Dateien.
+    static func appendSafely(_ line: String, to url: URL, maxBytes: Int = SouveraLog.maxFileBytes) {
+        writerQueue.async {
+            appendLine(line, to: url)
+            trimToLimit(at: url, maxBytes: maxBytes)
+        }
     }
 
     private static func appendLine(_ line: String, to url: URL) {

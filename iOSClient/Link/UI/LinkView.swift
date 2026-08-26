@@ -134,7 +134,11 @@ struct LinkView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
+            // P68e: Banner nur, wenn KEIN App-Call-Vollscreen offen ist -
+            // der Nutzer landet nach "In Souvera öffnen" direkt im
+            // Vollscreen statt im "Zum Anruf wechseln"-Zwischenzustand.
             showCallBanner = LinkVoIPManager.shared.activeCallInfo != nil
+                && !LinkVoIPManager.shared.isCallUIPresented
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallUIClose)) { _ in
             // Wichtig: die Cover-Items leeren, sonst bleibt nach dem Auflegen

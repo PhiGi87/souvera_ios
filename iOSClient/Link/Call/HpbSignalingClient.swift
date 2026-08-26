@@ -36,6 +36,9 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     private var session: URLSession!
     private var socket: URLSessionWebSocketTask?
     private var ownSessionId = ""
+    /// P68h: Zähler für kollabierte Candidate-Logs.
+    private var candidateSendCount = 0
+    private var recvCandidateCount = 0
 
     private let roomTypeVideo = "video"
 
@@ -123,7 +126,17 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
                 "data": data
             ]
         ]
-        CallDebugLog.log("HpbSignaling", "send to=\(toSession) type=\(data["type"] ?? "")")
+        // P68h: Candidate-Flut kollabieren (nur jede 15. Zeile loggen) -
+        // entlastet das Log massiv und den Aufbau-Pfad.
+        let msgType = data["type"] as? String ?? ""
+        if msgType == "candidate" {
+            candidateSendCount += 1
+            if candidateSendCount % 15 == 1 {
+                CallDebugLog.log("HpbSignaling", "send candidate #\(candidateSendCount) to=\(toSession)")
+            }
+        } else {
+            CallDebugLog.log("HpbSignaling", "send to=\(toSession) type=\(msgType)")
+        }
         send(envelope)
     }
 
@@ -241,7 +254,16 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
               let data = message["data"] as? [String: Any] else { return }
         let payload = data["payload"] as? [String: Any]
         let roomType = data["roomType"] as? String ?? "video"
-        CallDebugLog.log("HpbSignaling", "recv msg from=\(from.prefix(8)) type=\(data["type"] as? String ?? "?") roomType=\(roomType)")
+        // P68h: empfangene Candidate-Flut kollabieren (nur jede 15.).
+        let recvType = data["type"] as? String ?? "?"
+        if recvType == "candidate" {
+            recvCandidateCount += 1
+            if recvCandidateCount % 15 == 1 {
+                CallDebugLog.log("HpbSignaling", "recv candidate #\(recvCandidateCount) from=\(from.prefix(8))")
+            }
+        } else {
+            CallDebugLog.log("HpbSignaling", "recv msg from=\(from.prefix(8)) type=\(recvType) roomType=\(roomType)")
+        }
         switch data["type"] as? String {
         case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sdp: sdp, roomType: roomType) }
         case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, sdp: sdp) }
