@@ -9,6 +9,8 @@ import Foundation
 struct CalendarEventModel: Identifiable {
     let id: String
     let uid: String
+    /// iTIP-SEQUENCE des Events (für korrekte Update-Verhandlung).
+    let sequence: Int
     let title: String
     let start: Date
     let end: Date
@@ -28,6 +30,8 @@ struct CalendarEventModel: Identifiable {
 
 struct EventDraft {
     var uid: String = ""
+    /// iTIP-SEQUENCE (0 für neue Termine; beim Update bestehende +1).
+    var sequence: Int = 0
     var title: String = ""
     var start: Date = Date()
     var end: Date = Date().addingTimeInterval(3600)
@@ -87,6 +91,7 @@ enum ICSParser {
             var start: Date?
             var end: Date?
             var duration: TimeInterval?
+            var sequenceValue = 0
             var allDay = false
             var startDay: Date?
             var endDay: Date?
@@ -181,6 +186,8 @@ enum ICSParser {
                     }
                 } else if keyPart == "DURATION" {
                     duration = parseDuration(value)
+                } else if keyPart == "SEQUENCE" {
+                    sequenceValue = Int(value) ?? 0
                 }
             }
 
@@ -219,6 +226,7 @@ enum ICSParser {
             events.append(CalendarEventModel(
                 id: href.isEmpty ? uid : href,
                 uid: uid,
+                sequence: sequenceValue,
                 title: title.isEmpty ? NSLocalizedString("_calendar_untitled_", comment: "") : title,
                 start: resolvedStart,
                 end: resolvedEnd,
@@ -270,6 +278,11 @@ enum ICSParser {
             "BEGIN:VEVENT",
             "UID:\(uid)",
             "DTSTAMP:\(formatter.string(from: Date()))",
+            // Browser-Format (Nextcloud Calendar Web): STATUS + SEQUENCE -
+            // ohne STATUS:CONFIRMED kann der Server die iTIP-Einladungen
+            // nicht abschließen ("Einladung wird gesendet" bleibt hängen).
+            "STATUS:CONFIRMED",
+            "SEQUENCE:\(draft.sequence)",
             startLine,
             endLine,
             "SUMMARY:\(escape(draft.title))"
@@ -284,12 +297,16 @@ enum ICSParser {
         // KEINE Einladungs-E-Mails und zeigt Teilnehmer nicht korrekt an.
         if !organizerEmail.isEmpty {
             lines.append("ORGANIZER;CN=\(escape(organizerName)):mailto:\(organizerEmail)")
+            // Wie Nextcloud Calendar Web: den Organizer zusätzlich als
+            // CHAIR-Attendee führen (Server-Kontext für die Einladungen).
+            lines.append("ATTENDEE;CN=\(escape(organizerName));CUTYPE=INDIVIDUAL;PARTSTAT=ACCEPTED;ROLE=CHAIR:mailto:\(organizerEmail)")
         }
         for attendee in draft.attendees {
-            // Volle Parameter wie Nextcloud Calendar Web, damit der Server
-            // die iTIP-Einladung verschickt und der Teilnehmer mit Status
-            // angezeigt wird.
-            lines.append("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:\(attendee)")
+            // Volle Parameter wie Nextcloud Calendar Web (CN + CUTYPE),
+            // damit der Server die iTIP-Einladung verschickt und der
+            // Teilnehmer mit Status angezeigt wird. CN = E-Mail, wenn
+            // kein Name bekannt ist (Browser-Verhalten).
+            lines.append("ATTENDEE;CN=\(escape(attendee));CUTYPE=INDIVIDUAL;PARTSTAT=NEEDS-ACTION;ROLE=REQ-PARTICIPANT;RSVP=TRUE:mailto:\(attendee)")
         }
         if let token = draft.talkRoomToken, !token.isEmpty {
             lines.append("X-SOUVERA-TALK-ROOM:\(escape(token))")

@@ -58,7 +58,14 @@ class NotificationService: UNNotificationServiceExtension {
 
                         if var json = try JSONSerialization.jsonObject(with: data) as? [String: AnyObject],
                            let subject = json["subject"] as? String {
-                            bestAttemptContent.body = subject
+                            // Titel (fett) = subject (z. B. Absender bei
+                            // Mail-Pushes), Body = message (z. B. Betreff).
+                            bestAttemptContent.title = subject
+                            if let message = json["message"] as? String, !message.isEmpty {
+                                bestAttemptContent.body = message
+                            } else {
+                                bestAttemptContent.body = subject
+                            }
                             if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                 json["account"] = tableAccount.account as AnyObject
                                 pref.set(json, forKey: "NOTIFICATION_DATA")

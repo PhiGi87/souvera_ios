@@ -331,7 +331,9 @@ final class CalendarViewModel: ObservableObject {
         let account = NCManageDatabase.shared.getActiveTableAccount()
         let organizerEmail = account?.user ?? ""
         let organizerName = account?.displayName ?? ""
-        let ics = ICSParser.buildICS(draft, organizerEmail: organizerEmail, organizerName: organizerName)
+        var finalDraft = draft
+        if existing != nil { finalDraft.sequence = max(finalDraft.sequence, 1) }
+        let ics = ICSParser.buildICS(finalDraft, organizerEmail: organizerEmail, organizerName: organizerName)
         let interesting = ics.components(separatedBy: "\r\n")
             .filter {
                 $0.hasPrefix("LOCATION") || $0.hasPrefix("X-SOUVERA") || $0.hasPrefix("DESCRIPTION")
@@ -498,6 +500,7 @@ final class CalendarViewModel: ObservableObject {
         draft.location = event.location ?? ""
         draft.notes = event.description ?? ""
         draft.attendees = event.attendees
+        draft.sequence = event.sequence + 1
         draft.talkRoomToken = event.talkRoomToken
         draft.talkRoomName = event.talkRoomName
         draft.reminders = event.reminders

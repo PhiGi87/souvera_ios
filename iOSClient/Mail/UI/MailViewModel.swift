@@ -196,7 +196,11 @@ final class MailViewModel: ObservableObject {
                 mailboxId: mailboxId,
                 json: json
             )
-            route = .detail(message: message)
+            // Über openMessage statt direkt route = .detail: lädt den Body
+            // (Cache-first, Fallbacks) und markiert die Mail als gelesen -
+            // sonst bliebe der Body der VORHERIGEN Mail sichtbar und die
+            // Mail ungelesen.
+            openMessage(message)
         } catch {
             SouveraLog.write("Mail", "deep link mail failed: \(error.localizedDescription)")
             actionFeedback = MailSendFeedback(

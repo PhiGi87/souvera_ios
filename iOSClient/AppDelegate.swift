@@ -275,20 +275,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
                 for tblAccount in tblAccounts {
                     await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
-                    // Mail-Push (souvera_mail, direkter APNs-Push): Gerät
-                    // registrieren - NUR wenn noch keins gespeichert ist
-                    // oder der Token gewechselt hat (keine Leichen, kein
-                    // Müll bei jedem Start).
-                    let davPassword = NCPreferences().getPassword(account: tblAccount.account)
-                    guard !davPassword.isEmpty else { continue }
-                    if !SouveraMailDeviceRegistrar.isCurrent(account: tblAccount.account, apnsToken: deviceToken) {
-                        await SouveraMailDeviceRegistrar.register(
-                            baseUrl: tblAccount.urlBase,
-                            username: tblAccount.user,
-                            ncPassword: davPassword,
-                            apnsToken: deviceToken,
-                            account: tblAccount.account
-                        )
+                    // Mail-Push läuft im Zielzustand über die NC-Push-Kette
+                    // (keine eigene Registrierung). One-Time-Cleanup: eine
+                    // frühere Direkt-Registrierung (Legacy push_mode=direct)
+                    // einmalig abmelden - keine Leichen.
+                    if let legacyId = SouveraMailDeviceRegistrar.storedDeviceId(account: tblAccount.account) {
+                        let davPassword = NCPreferences().getPassword(account: tblAccount.account)
+                        if !davPassword.isEmpty {
+                            await SouveraMailDeviceRegistrar.unregister(
+                                baseUrl: tblAccount.urlBase,
+                                username: tblAccount.user,
+                                ncPassword: davPassword,
+                                deviceId: legacyId,
+                                account: tblAccount.account
+                            )
+                        }
                     }
                 }
             }
@@ -322,6 +323,35 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         NCPushNotification.shared.applicationdidReceiveRemoteNotification(userInfo: userInfo) { result in
             completionHandler(result)
         }
+        // souvera_mail-Push (NC-Kette): Im VORDERGRUND erscheint kein
+        // System-Banner - hier als lokale Notification präsentieren und
+        // das Mail-Badge sofort nachziehen.
+        if let message = userInfo["subject"] as? String {
+            for tblAccount in NCManageDatabase.shared.getAllTableAccount() {
+                guard let privateKey = NCPreferences().getPushNotificationPrivateKey(account: tblAccount.account),
+                      let decrypted = NCPushNotificationEncryption.shared().decryptPushNotification(message, withDevicePrivateKey: privateKey),
+                      let data = decrypted.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
+                let app = json["app"] as? String ?? ""
+                let objectType = json["objectType"] as? String ?? ""
+                guard app == "souvera_mail" || objectType == "souvera_mail" else { break }
+                let title = (json["subject"] as? String) ?? NSLocalizedString("_mail_", comment: "")
+                let body = (json["message"] as? String) ?? title
+                let mailId = json["objectId"] as? String ?? ""
+                if UIApplication.shared.applicationState == .active {
+                    let content = UNMutableNotificationContent()
+                    content.title = title
+                    content.body = body
+                    content.sound = .default
+                    content.userInfo = ["emailId": mailId, "mailboxPath": "INBOX", "account": tblAccount.account]
+                    let request = UNNotificationRequest(identifier: "nc_mail_\(mailId)", content: content, trigger: nil)
+                    UNUserNotificationCenter.current().add(request)
+                }
+                // Badge an den Push koppeln: INBOX-Zählung sofort.
+                Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
+                break
+            }
+        }
     }
 
     func nextcloudPushNotificationAction(data: [String: AnyObject]) {
@@ -329,12 +359,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let app = data["app"] as? String
 
         func openNotification(controller: NCMainTabBarController) {
-            if app == "souvera_mail" || app == "souvera_mail_notifications" {
-                // Mail-Benachrichtigung: direkt ins Mail-Modul springen;
-                // trägt der Payload die Mail-Id (Server-Spec P51), öffnet
-                // sich direkt die jeweilige Mail.
+            let objectType = data["objectType"] as? String ?? ""
+            if app == "souvera_mail" || app == "souvera_mail_notifications" || objectType == "souvera_mail" {
+                // Mail-Benachrichtigung (NC-Push): Mail-Tab + direkt die
+                // Mail öffnen - objectId = JMAP-E-Mail-Id, Kontext INBOX.
                 controller.selectedIndex = 0
-                if let mailId = data["id"] as? String, !mailId.isEmpty {
+                if let mailId = data["objectId"] as? String, !mailId.isEmpty {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                         SouveraPushDeepLink.deliver(.mail(account: account, emailId: mailId))
                     }

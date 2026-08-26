@@ -203,7 +203,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             guard let self, let sdp else { return }
             peer.setLocalDescription(sdp) { _ in }
             // Diagnose: m-Lines des Offers loggen (audio/video vorhanden?).
-            let kinds = Self.mediaTypes(of: sdp.sdp)
+            let kinds = Self.mediaLines(of: sdp.sdp)
             CallDebugLog.log("CallSession", "publisher offer m-lines=[\(kinds.joined(separator: ","))]")
             self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
         }
@@ -304,8 +304,10 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     func onAnswer(fromSession: String, sdp: String) {
         // Diagnose: Akzeptiert der MCU unser m=video im Re-Offer?
-        let kinds = Self.mediaTypes(of: sdp)
+        // (Port 0 = abgelehnt.)
+        let kinds = Self.mediaLines(of: sdp)
         CallDebugLog.log("CallSession", "answer from \(fromSession.prefix(8)) m-lines=[\(kinds.joined(separator: ","))]")
+        CallDebugLog.log("CallSession", "answer video codecs: \(Self.videoCodecLines(of: sdp))")
         let peer = peers[fromSession] ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
         peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { [weak self] _ in
             // Nach einer Re-Verhandlung den Medienzustand erneut melden -
@@ -427,8 +429,9 @@ final class CallSession: NSObject, HpbSignalingListener {
                 guard let self, let sdp else { return }
                 peer.setLocalDescription(sdp) { _ in }
                 self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
-                let kinds = Self.mediaTypes(of: sdp.sdp)
+                let kinds = Self.mediaLines(of: sdp.sdp)
                 CallDebugLog.log("CallSession", "publisher re-offer sent after video change m-lines=[\(kinds.joined(separator: ","))]")
+                CallDebugLog.log("CallSession", "publisher re-offer video codecs: \(Self.videoCodecLines(of: sdp.sdp))")
             }
         } else {
             for (key, peer) in peers where key != ownSessionId && !key.isEmpty {
@@ -554,15 +557,23 @@ final class CallSession: NSObject, HpbSignalingListener {
         RTCMediaConstraints(mandatoryConstraints: ["OfferToReceiveAudio": "true", "OfferToReceiveVideo": "true"], optionalConstraints: nil)
     }
 
-    /// Extrahiert die Medientypen der m=-Zeilen eines SDP-Angebots.
-    static func mediaTypes(of sdp: String) -> [String] {
+    /// Extrahiert die m=-Zeilen eines SDP (Typ + Port) - Port 0 bedeutet
+    /// ABGELEHNT (z. B. MCU lehnt m=video ab).
+    static func mediaLines(of sdp: String) -> [String] {
         sdp.components(separatedBy: "\r\n")
             .filter { $0.hasPrefix("m=") }
             .map { line in
                 let parts = line.split(separator: " ")
-                guard let first = parts.first else { return "?" }
-                return String(first.dropFirst(2))
+                guard parts.count >= 2, let first = parts.first else { return "?" }
+                return "\(String(first.dropFirst(2))):\(parts[1])"
             }
+    }
+
+    /// Video-Codec-Zeilen (m=video + a=rtpmap) für die Diagnose.
+    static func videoCodecLines(of sdp: String) -> String {
+        sdp.components(separatedBy: "\r\n")
+            .filter { $0.hasPrefix("m=video") || $0.hasPrefix("a=rtpmap") }
+            .joined(separator: " | ")
     }
 
     private func end() {

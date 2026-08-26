@@ -160,6 +160,12 @@ final class LinkVoIPManager: NSObject {
         guard activeSession === session else { return }
         activeSession = nil
         activeCallInfo = nil
+        // Den CallKit-System-Call mitbeenden: Sonst bleibt der
+        // iOS-Fullscreen-Call nach dem App-Auflegen sichtbar.
+        if let uuid = activeCallUUID {
+            activeCallUUID = nil
+            provider.reportCall(with: uuid, endedAt: Date(), reason: .remoteEnded)
+        }
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
     }
 
@@ -175,6 +181,10 @@ final class LinkVoIPManager: NSObject {
             provider.reportCall(with: uuid, endedAt: Date(), reason: .remoteEnded)
         }
         activeCalls.removeAll()
+        if let uuid = activeCallUUID {
+            activeCallUUID = nil
+            provider.reportCall(with: uuid, endedAt: Date(), reason: .remoteEnded)
+        }
     }
 
 #if DEBUG
@@ -454,6 +464,9 @@ final class LinkVoIPManager: NSObject {
     /// Talk-Muster (maxRingingTime): unbeantwortete Push-Calls nach
     /// 45 s automatisch beenden - sonst klingelt das Gerät ewig.
     private var ringingTimeoutTimer: Timer?
+    /// CallKit-UUID des aktuell laufenden (angenommenen) Calls - beim
+    /// App-seitigen Auflegen wird der System-Call damit beendet.
+    private var activeCallUUID: UUID?
 
     private func reportIncomingCall(roomToken: String, displayName: String, hasVideo: Bool, completion: @escaping () -> Void) {
         let uuid = UUID()
@@ -474,6 +487,7 @@ final class LinkVoIPManager: NSObject {
     }
 
     private func startRingingTimeout(for uuid: UUID) {
+        activeCallUUID = uuid
         DispatchQueue.main.async {
             self.ringingTimeoutTimer?.invalidate()
             self.ringingTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: false) { [weak self] _ in
@@ -559,6 +573,9 @@ extension LinkVoIPManager: CXProviderDelegate {
         cancelRingingTimeout()
         let roomToken = activeCalls[action.callUUID] ?? ""
         activeCalls[action.callUUID] = nil
+        // CallKit-UUID behalten: Der System-Call läuft weiter und wird
+        // beim App-seitigen Auflegen via reportCall beendet.
+        activeCallUUID = action.callUUID
         action.fulfill()
         if !roomToken.isEmpty {
             let pending = pendingIncomingCall
@@ -586,10 +603,18 @@ extension LinkVoIPManager: CXProviderDelegate {
         }
     }
 
+    func provider(_ provider: CXProvider, perform action: CXSetMutedCallAction) {
+        // System-Mute mit der Session synchronisieren - sonst flappt der
+        // Mute-Button der System-UI und Mute wirkt aus der System-UI nicht.
+        activeSession?.setMuted(action.isMuted)
+        action.fulfill()
+    }
+
     func provider(_ provider: CXProvider, perform action: CXEndCallAction) {
         cancelRingingTimeout()
         activeCalls[action.callUUID] = nil
         pendingIncomingCall = nil
+        activeCallUUID = nil
         action.fulfill()
         // Auflegen beendet die aktive Session IMMER - auch wenn die
         // Call-UI nie präsentiert werden konnte (gesperrtes Gerät).

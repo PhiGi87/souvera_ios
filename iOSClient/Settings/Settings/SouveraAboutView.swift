@@ -16,7 +16,7 @@ struct SouveraAboutView: View {
 
     private let gplLink = URL(string: "https://github.com/nextcloud/ios/blob/master/LICENSE.txt")!
     private let appStoreExceptionLink = URL(string: "https://github.com/nextcloud/ios/blob/master/COPYING.iOS")!
-    private let sourceCodeLink = URL(string: "https://github.com/Host-On/souvera_ios")!
+    private let sourceCodeLink = URL(string: "https://github.com/PhiGi87/souvera_ios")!
 
     var body: some View {
         ScrollView {

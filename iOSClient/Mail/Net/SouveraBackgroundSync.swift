@@ -23,6 +23,27 @@ final class SouveraBackgroundSync {
         await syncLink()
     }
 
+    /// Zählt die ungelesenen Mails der INBOX und aktualisiert das Mail-Badge
+    /// (direkte Kopplung an eingehende Mail-Pushes).
+    func refreshMailBadge() async {
+        guard var credential = await SouveraMailCredentialManager().ensureCombinedCredential() else { return }
+        let client = JmapClient(
+            baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            username: credential.saslUser,
+            password: credential.mailPassword
+        )
+        let api = JmapApi(client: client)
+        guard let session = try? await client.refreshSession(),
+              !session.primaryAccountId.isEmpty else { return }
+        let accId = session.primaryAccountId
+        guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
+              let inboxId = inbox.optString("id") else { return }
+        guard let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
+              let total = resp["total"] as? Int else { return }
+        NotificationCenter.default.post(name: .mailUnreadChanged, object: total)
+        SouveraLog.write("BackgroundSync", "mail badge refresh -> \(total) unread")
+    }
+
     // MARK: - Mail
 
     private func syncMail() async {
