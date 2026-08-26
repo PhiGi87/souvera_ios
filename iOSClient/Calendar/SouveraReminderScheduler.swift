@@ -12,11 +12,14 @@ enum SouveraReminderScheduler {
 
     private static let prefix = "eventreminder_"
 
-    /// Replaces all pending event reminders with notifications for the given
-    /// events. iOS allows a maximum of 64 pending local notifications, so the
-    /// soonest reminders win; every calendar load / background sync refills
-    /// the queue (notifications fire even when the app is not running).
-    static func schedule(for events: [CalendarEventModel]) {
+    /// Replaces pending event reminders for ONE account with notifications
+    /// for the given events. iOS allows a maximum of 64 pending local
+    /// notifications, so the soonest reminders win; every calendar load /
+    /// background sync refills the queue (notifications fire even when the
+    /// app is not running). PRO ACCOUNT: nur die eigenen Erinnerungen werden
+    /// ersetzt (Multi-Account: A löscht nicht die Erinnerungen von B).
+    static func schedule(for events: [CalendarEventModel], account: String = "") {
+        let prefix = account.isEmpty ? Self.prefix : Self.prefix + account + "_"
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         center.getPendingNotificationRequests { existing in
@@ -45,7 +48,10 @@ enum SouveraReminderScheduler {
                     // des Termins.
                     content.userInfo = [
                         "uid": event.uid,
-                        "start": event.start.timeIntervalSince1970
+                        "start": event.start.timeIntervalSince1970,
+                        // Account für den Deep-Link (Multi-Account: Termin
+                        // im richtigen Account öffnen).
+                        "account": account
                     ]
                     let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
                     let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)

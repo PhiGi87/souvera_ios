@@ -189,6 +189,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     func onSelfInCall() {
         guard mcuActive, !publisherCreated else { return }
         publisherCreated = true
+        audioOnResendGeneration += 1
         CallDebugLog.log("CallSession", "createPublisher to own=\(ownSessionId)")
         createPublisher()
     }
@@ -201,13 +202,94 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "publisher senders=\(senders.count) kinds=[\(senders.compactMap { $0.track?.kind }.joined(separator: ","))]")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
-            peer.setLocalDescription(sdp) { _ in }
-            // Diagnose: m-Lines des Offers loggen (audio/video vorhanden?).
-            let kinds = Self.mediaLines(of: sdp.sdp)
+            // P68b: H264 im Angebot ERZWINGEN - die MCU wählt sonst VP8,
+            // für das der HW-Encoder (nur H264) keine Frames liefert und
+            // das Remote-Bild schwarz bleibt. Gemungtes SDP wird lokal
+            // gesetzt UND gesendet.
+            let munged = Self.forcingH264(sdp.sdp)
+            let finalSdp = RTCSessionDescription(type: sdp.type, sdp: munged)
+            peer.setLocalDescription(finalSdp) { _ in }
+            let kinds = Self.mediaLines(of: munged)
             CallDebugLog.log("CallSession", "publisher offer m-lines=[\(kinds.joined(separator: ","))]")
-            self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
+            CallDebugLog.log("CallSession", "publisher offer video codecs: \(Self.videoCodecLines(of: munged))")
+            self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: munged)
         }
         startSpeakerPolling()
+        // P68a: Der initiale audioOn beim Verbinden wirkt am MCU teils
+        // nicht (Ton kommt erst nach User-Toggle). Fix: nach dem
+        // Publisher-Connect erneut senden und den Capture einmal kurz
+        // re-affirmieren.
+        scheduleAudioOnResend()
+    }
+
+    /// P68a: audioOn-Resend nach Publisher-Aufbau (+1,5 s und +4 s) plus
+    /// Capture-Re-Affirmation (isEnabled false->true). Greift nur, wenn
+    /// nicht inzwischen gemutet wurde und die Session noch lebt.
+    private func scheduleAudioOnResend() {
+        let generation = audioOnResendGeneration
+        for delay in [1.5, 4.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+                guard let self,
+                      self.audioOnResendGeneration == generation,
+                      !self.isMutedLocally,
+                      self.mcuActive else { return }
+                CallDebugLog.log("CallSession", "audioOn resend (+\(delay)s)")
+                self.sendStatusMessage("audioOn")
+                if let track = self.localAudio {
+                    track.isEnabled = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        track.isEnabled = true
+                        CallDebugLog.log("CallSession", "audio capture re-affirmed")
+                    }
+                }
+            }
+        }
+    }
+
+    /// P68a: zählt Call-Starts; veraltete Resend-Timer werden ignoriert.
+    private var audioOnResendGeneration = 0
+
+    /// P68b: Entfernt Nicht-H264-Codecs aus den Video-m-Lines (inklusive
+    /// zugehöriger rtpmap/fmtp/rtcp-fb-Zeilen) und behält die H264-
+    /// Payload-Typen. Ohne H264-Zeilen bleibt das SDP unverändert.
+    static func forcingH264(_ sdpText: String) -> String {
+        let lines = sdpText.components(separatedBy: "\r\n")
+        var inVideo = false
+        var h264Payloads: [String] = []
+        for line in lines {
+            if line.hasPrefix("m=video") { inVideo = true }
+            if inVideo, line.hasPrefix("a=rtpmap:"), line.lowercased().contains("h264") {
+                let payload = line.dropFirst("a=rtpmap:".count).split(separator: " ").first ?? ""
+                if !payload.isEmpty { h264Payloads.append(String(payload)) }
+            }
+            if inVideo, !line.hasPrefix("a="), !line.hasPrefix("m="), !line.isEmpty { inVideo = false }
+        }
+        guard !h264Payloads.isEmpty else { return sdpText }
+        inVideo = false
+        var out: [String] = []
+        for line in lines {
+            if line.hasPrefix("m=video") {
+                inVideo = true
+                let tokens = line.split(separator: " ")
+                guard tokens.count >= 4 else { out.append(line); continue }
+                let payloads = tokens.dropFirst(3)
+                let kept = payloads.filter { h264Payloads.contains(String($0)) }
+                out.append((tokens.prefix(3) + (kept.isEmpty ? Array(payloads) : kept)).joined(separator: " "))
+                continue
+            }
+            if inVideo {
+                if line.hasPrefix("a=rtpmap:") || line.hasPrefix("a=fmtp:") || line.hasPrefix("a=rtcp-fb:") {
+                    let payload = line.split(separator: ":", maxSplits: 1).last?.split(separator: " ").first ?? ""
+                    if h264Payloads.contains(String(payload)) {
+                        out.append(line)
+                    }
+                    continue
+                }
+                if !line.hasPrefix("a=") { inVideo = false }
+            }
+            out.append(line)
+        }
+        return out.joined(separator: "\r\n")
     }
 
     // MARK: - Aktiver Sprecher (Fokus-Modus)
@@ -427,11 +509,14 @@ final class CallSession: NSObject, HpbSignalingListener {
         if mcuActive, let peer = peers[ownSessionId] {
             peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
                 guard let self, let sdp else { return }
-                peer.setLocalDescription(sdp) { _ in }
-                self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: sdp.sdp)
-                let kinds = Self.mediaLines(of: sdp.sdp)
+                // P68b: auch Re-Offer H264-erzwingen (MCU-Wahl sonst VP8).
+                let munged = Self.forcingH264(sdp.sdp)
+                let finalSdp = RTCSessionDescription(type: sdp.type, sdp: munged)
+                peer.setLocalDescription(finalSdp) { _ in }
+                self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: munged)
+                let kinds = Self.mediaLines(of: munged)
                 CallDebugLog.log("CallSession", "publisher re-offer sent after video change m-lines=[\(kinds.joined(separator: ","))]")
-                CallDebugLog.log("CallSession", "publisher re-offer video codecs: \(Self.videoCodecLines(of: sdp.sdp))")
+                CallDebugLog.log("CallSession", "publisher re-offer video codecs: \(Self.videoCodecLines(of: munged))")
             }
         } else {
             for (key, peer) in peers where key != ownSessionId && !key.isEmpty {

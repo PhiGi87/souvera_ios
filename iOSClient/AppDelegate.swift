@@ -222,9 +222,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             souveraOpenDeepLink(target: .mail(account: account, emailId: emailId), tabIndex: 0)
         } else if identifier.hasPrefix("eventreminder_"), let uid = info["uid"] as? String, !uid.isEmpty {
             let start = (info["start"] as? NSNumber)?.doubleValue ?? Date().timeIntervalSince1970
-            souveraOpenDeepLink(target: .event(uid: uid, start: start), tabIndex: 1)
+            souveraOpenDeepLink(target: .event(uid: uid, start: start), tabIndex: 1,
+                                account: info["account"] as? String ?? "")
         } else if identifier.hasPrefix("talk_"), let token = info["token"] as? String, !token.isEmpty {
-            souveraOpenDeepLink(target: .room(token: token, title: info["title"] as? String ?? ""), tabIndex: 2)
+            souveraOpenDeepLink(target: .room(token: token, title: info["title"] as? String ?? ""), tabIndex: 2,
+                                account: info["account"] as? String ?? "")
         } else if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
                   let data = pref.object(forKey: "NOTIFICATION_DATA") as? [String: AnyObject] {
             nextcloudPushNotificationAction(data: data)
@@ -235,8 +237,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     /// Wechselt auf den Ziel-Tab und liefert den Deep-Link an das Modul
-    /// (mit kurzem Verzug, damit die SwiftUI-Roots bereit sind).
-    private func souveraOpenDeepLink(target: SouveraPushDeepLink.Target, tabIndex: Int) {
+    /// (mit kurzem Verzug, damit die SwiftUI-Roots bereit sind). Ist ein
+    /// Account angegeben und nicht aktiv, wird zuerst gewechselt
+    /// (Multi-Account: Mail/Termin/Raum im richtigen Account öffnen).
+    private func souveraOpenDeepLink(target: SouveraPushDeepLink.Target, tabIndex: Int, account: String = "") {
         func apply(controller: NCMainTabBarController) {
             controller.selectedIndex = tabIndex
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -244,6 +248,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             }
         }
         let activeAccount = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+        if !account.isEmpty, account != activeAccount {
+            // Account-Wechsel, dann Ziel öffnen (Muster aus
+            // nextcloudPushNotificationAction).
+            if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }),
+               let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
+                Task { @MainActor in
+                    await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                        SouveraPushDeepLink.deliver(target)
+                    }
+                }
+                return
+            }
+        }
         if let controller = SceneManager.shared.getControllers().first(where: { $0.account == activeAccount }) {
             apply(controller: controller)
         } else if let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
@@ -326,7 +344,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // souvera_mail-Push (NC-Kette): Im VORDERGRUND erscheint kein
         // System-Banner - hier als lokale Notification präsentieren und
         // das Mail-Badge sofort nachziehen.
-        if let message = userInfo["subject"] as? String {
+        if let message = userInfo["subject"] as? String,
+           SouveraPushToggles.mailCalendarEnabled {
             for tblAccount in NCManageDatabase.shared.getAllTableAccount() {
                 guard let privateKey = NCPreferences().getPushNotificationPrivateKey(account: tblAccount.account),
                       let decrypted = NCPushNotificationEncryption.shared().decryptPushNotification(message, withDevicePrivateKey: privateKey),
@@ -334,6 +353,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { continue }
                 let app = json["app"] as? String ?? ""
                 let objectType = json["objectType"] as? String ?? ""
+                // P66: Payload-Logging - Verifikation der Push-Felder gegen
+                // die Spec (subject=Absender, message=Betreff).
+                SouveraLog.write("PushPayload", "app=\(app) objectType=\(objectType) objectId=\(json["objectId"] as? String ?? "-") subject=\(json["subject"] as? String ?? "-") message=\(json["message"] as? String ?? "-")")
                 guard app == "souvera_mail" || objectType == "souvera_mail" else { break }
                 let title = (json["subject"] as? String) ?? NSLocalizedString("_mail_", comment: "")
                 let body = (json["message"] as? String) ?? title
@@ -370,6 +392,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     }
                 }
             } else if app == "spreed" || app == "talk" {
+                // Push-Gruppe Link/Talk aus: nicht navigieren
+                // (Sicherheitsnetz parallel zur Server-Abmeldung).
+                guard SouveraPushToggles.linkTalkEnabled else { return }
                 // Talk-Benachrichtigung (Chat/Call): Link-Tab + Raum öffnen.
                 controller.selectedIndex = 2
                 if let token = data["id"] as? String, !token.isEmpty {

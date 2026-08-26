@@ -1330,6 +1330,20 @@ private struct MailDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(message.displayFrom).fontWeight(.medium)
+                        .contextMenu {
+                            Button {
+                                // P65: Absender(-Adresse) kopieren.
+                                UIPasteboard.general.string = message.fromAddress
+                                SouveraToastCenter.shared.show(
+                                    SouveraToast(
+                                        message: NSLocalizedString("_mail_sender_copied_", comment: ""),
+                                        style: .neutral
+                                    )
+                                )
+                            } label: {
+                                Label(NSLocalizedString("_mail_sender_copied_", comment: ""), systemImage: "doc.on.doc")
+                            }
+                        }
                     Text(MailDateFormatter.detailLabel(for: message.dateSent)).font(.caption).foregroundStyle(.secondary)
                     if !message.toAddresses.isEmpty {
                         Text("\(NSLocalizedString("_mail_to_", comment: "")): \(message.toAddresses)")

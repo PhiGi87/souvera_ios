@@ -350,7 +350,8 @@ final class LinkViewModel: ObservableObject {
     func loadConversations() {
         guard let api else { return }
         // Cache-first bei erstem Laden: sofortiger Inhalt statt Spinner.
-        if case .loading = conversations, let cached = LinkCache.loadConversations() {
+        let cacheAccount = LinkAccount.active()?.account ?? ""
+        if case .loading = conversations, let cached = LinkCache.loadConversations(account: cacheAccount) {
             let sorted = cached.sorted { $0.lastActivity > $1.lastActivity }
             self.conversationsSignature = conversationSignature(sorted)
             self.conversations = .success(sorted)
@@ -379,7 +380,7 @@ final class LinkViewModel: ObservableObject {
                 }
                 Self.postUnreadTotal(list)
                 self.offlineNotice = nil
-            } else if let cached = LinkCache.loadConversations() {
+            } else if let cached = LinkCache.loadConversations(account: cacheAccount) {
                 // Server nicht erreichbar (Wartung/offline): letzter Stand.
                 let sorted = cached.sorted { $0.lastActivity > $1.lastActivity }
                 let signature = conversationSignature(sorted)

@@ -99,6 +99,9 @@ class NCAccount: NSObject {
             NCNetworking.shared.activeAccountCertificate(account: account)
             // Subscribing Push Notification
             await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
+            // Talk/VoIP-Kanal ebenfalls für ALLE Accounts neu registrieren
+            // (neuer Account bekommt seinen eigenen Talk-Push).
+            LinkVoIPManager.shared.refreshVoipRegistration()
             // Start the service
             Task(priority: .utility) {
                 await NCService().startRequestServicesServer(account: account, controller: controller)

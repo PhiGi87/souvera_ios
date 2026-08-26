@@ -26,6 +26,11 @@ enum SouveraLinkOpener {
             return
         }
         #if !EXTENSION
+        // Termin-Einladungs-Links: Antwort-Overlay statt Browser (P63).
+        if SouveraInviteResponse.isResponseLink(url) {
+            NotificationCenter.default.post(name: .openInviteResponse, object: url)
+            return
+        }
         UIApplication.shared.open(url)
         #endif
     }

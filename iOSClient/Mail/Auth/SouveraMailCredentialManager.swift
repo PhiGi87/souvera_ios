@@ -58,12 +58,12 @@ struct SouveraMailCredentialManager {
 
     private var keychain: Keychain { Keychain(service: Self.service) }
 
-    func ensureCombinedCredential() async -> MailAccount? {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
-        let account = tbl.account
-        let baseUrl = tbl.urlBase
-        let username = tbl.user
-        let davPassword = NCPreferences().getPassword(account: account)
+    func ensureCombinedCredential(account explicitAccount: String? = nil) async -> MailAccount? {
+        guard let info = Self.accountInfo(explicitAccount) else { return nil }
+        let account = info.account
+        let baseUrl = info.baseUrl
+        let username = info.username
+        let davPassword = info.davPassword
         guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
 
         if let stored = storedAccount(account: account, baseUrl: baseUrl, username: username) {
@@ -85,12 +85,12 @@ struct SouveraMailCredentialManager {
     /// der auslösende 401 von einem veralteten Client und es wird NICHT
     /// neu gemintzt (jeder Mint entwertet serverseitig das vorherige
     /// Passwort derselben Beschreibung).
-    func renewCredential() async -> MailAccount? {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
-        let account = tbl.account
-        let baseUrl = tbl.urlBase
-        let username = tbl.user
-        let davPassword = NCPreferences().getPassword(account: account)
+    func renewCredential(account explicitAccount: String? = nil) async -> MailAccount? {
+        guard let info = Self.accountInfo(explicitAccount) else { return nil }
+        let account = info.account
+        let baseUrl = info.baseUrl
+        let username = info.username
+        let davPassword = info.davPassword
         guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
 
         let stored = storedAccount(account: account, baseUrl: baseUrl, username: username)
@@ -125,6 +125,18 @@ struct SouveraMailCredentialManager {
         let stalwartId = (try? keychain.get(Self.keyStalwartId + account)) ?? ""
         let loginName = (try? keychain.get(Self.keyLoginName + account)) ?? ""
         return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: loginName, mailPassword: stored, stalwartId: stalwartId)
+    }
+
+    /// Account-Infos (expliziter Account oder der aktive).
+    private static func accountInfo(_ explicit: String?) -> (account: String, baseUrl: String, username: String, davPassword: String)? {
+        if let explicit {
+            guard let tbl = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == explicit }) else { return nil }
+            let davPassword = NCPreferences().getPassword(account: explicit)
+            return (explicit, tbl.urlBase, tbl.user, davPassword)
+        }
+        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return nil }
+        let davPassword = NCPreferences().getPassword(account: tbl.account)
+        return (tbl.account, tbl.urlBase, tbl.user, davPassword)
     }
 
     private func lastMintDate(account: String) -> Date? {

@@ -58,18 +58,44 @@ class NotificationService: UNNotificationServiceExtension {
 
                         if var json = try JSONSerialization.jsonObject(with: data) as? [String: AnyObject],
                            let subject = json["subject"] as? String {
-                            // Titel (fett) = subject (z. B. Absender bei
-                            // Mail-Pushes), Body = message (z. B. Betreff).
-                            bestAttemptContent.title = subject
-                            if let message = json["message"] as? String, !message.isEmpty {
-                                bestAttemptContent.body = message
-                            } else {
-                                bestAttemptContent.body = subject
+                            // P70-Filter (Sicherheitsnetz): Gruppe abgeschaltet
+                            // -> Push ohne Inhalt unterdrücken, bis die
+                            // Server-Zeile entfernt ist.
+                            let pushDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)
+                            let appName = json["app"] as? String ?? ""
+                            let objectType = json["objectType"] as? String ?? ""
+                            var suppressed = false
+                            if appName == "souvera_mail" || objectType == "souvera_mail" {
+                                if pushDefaults?.object(forKey: "souvera_push_mail_calendar_enabled") as? Bool == false {
+                                    suppressed = true
+                                    nkLog(tag: NCGlobal.shared.logTagPN, emoji: .info, message: "Mail push suppressed by user toggle")
+                                }
                             }
-                            if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
-                                json["account"] = tableAccount.account as AnyObject
-                                pref.set(json, forKey: "NOTIFICATION_DATA")
-                                pref.synchronize()
+                            if appName == "spreed" || appName == "talk" {
+                                if pushDefaults?.object(forKey: "souvera_push_link_talk_enabled") as? Bool == false {
+                                    suppressed = true
+                                    nkLog(tag: NCGlobal.shared.logTagPN, emoji: .info, message: "Talk push suppressed by user toggle")
+                                }
+                            }
+                            if suppressed {
+                                // Übergang bis die Server-Zeile entfernt ist:
+                                // ohne Inhalt anzeigen.
+                                bestAttemptContent.title = ""
+                                bestAttemptContent.body = ""
+                            } else {
+                                // Titel (fett) = subject (z. B. Absender bei
+                                // Mail-Pushes), Body = message (z. B. Betreff).
+                                bestAttemptContent.title = subject
+                                if let message = json["message"] as? String, !message.isEmpty {
+                                    bestAttemptContent.body = message
+                                } else {
+                                    bestAttemptContent.body = subject
+                                }
+                                if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
+                                    json["account"] = tableAccount.account as AnyObject
+                                    pref.set(json, forKey: "NOTIFICATION_DATA")
+                                    pref.synchronize()
+                                }
                             }
                         } else {
                             bestAttemptContent.body = "Error JSON Serialization for  \(tableAccount.account)"

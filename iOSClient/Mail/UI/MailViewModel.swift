@@ -46,11 +46,23 @@ final class MailViewModel: ObservableObject {
     @Published private(set) var isInitialLoad = true
 
     /// Zuletzt geöffnete Mailbox (UserDefaults) - beim App-Start wird
-    /// direkt dieser Ordner statt der Ordnerliste angezeigt.
-    private static let lastMailboxKey = "souvera_mail_last_mailbox_id"
-    static var lastMailboxId: String? {
-        get { UserDefaults.standard.string(forKey: lastMailboxKey) }
-        set { UserDefaults.standard.set(newValue, forKey: lastMailboxKey) }
+    /// direkt dieser Ordner statt der Ordnerliste angezeigt. PRO ACCOUNT
+    /// (kein Vermischen zwischen Accounts).
+    private static let lastMailboxKey = "souvera_mail_last_mailbox_id_"
+    static func lastMailboxId(account: String) -> String? {
+        let key = lastMailboxKey + account
+        if UserDefaults.standard.string(forKey: key) == nil {
+            // Migration: alten globalen Wert übernehmen.
+            if let legacy = UserDefaults.standard.string(forKey: "souvera_mail_last_mailbox_id") {
+                UserDefaults.standard.set(legacy, forKey: key)
+                UserDefaults.standard.removeObject(forKey: "souvera_mail_last_mailbox_id")
+                return legacy
+            }
+        }
+        return UserDefaults.standard.string(forKey: key)
+    }
+    static func setLastMailboxId(_ id: String, account: String) {
+        UserDefaults.standard.set(id, forKey: lastMailboxKey + account)
     }
     @Published var mailboxes: MailUiState<[Mailbox]> = .loading
     @Published var messages: MailUiState<[MailMessage]> = .loading
@@ -427,7 +439,13 @@ final class MailViewModel: ObservableObject {
     private func postUnreadBadge(_ count: Int) {
         personalInboxUnread = max(0, count)
         JmapLog.write("Mail unread badge -> \(personalInboxUnread)")
-        NotificationCenter.default.post(name: .mailUnreadChanged, object: personalInboxUnread)
+        // Per-Account-Badge (der Tab-Badge folgt dem AKTIVEN Account; das
+        // System-Badge korrigiert der Background-Sync als Summe).
+        NotificationCenter.default.post(
+            name: .mailUnreadChanged,
+            object: nil,
+            userInfo: ["account": mailAccount?.account ?? "", "count": personalInboxUnread]
+        )
     }
 
     /// Ungelesen gesamt → Badge am Mail-Tab (NotificationCenter).
@@ -808,7 +826,7 @@ final class MailViewModel: ObservableObject {
     // MARK: - Messages
 
     func openMailbox(_ mailbox: Mailbox) {
-        Self.lastMailboxId = mailbox.id
+        Self.setLastMailboxId(mailbox.id, account: mailAccount?.account ?? "")
         // Talk-Muster (markNotificationsAsRead): Beim Öffnen des Post-
         // eingangs zugestellte Mail-Notifications aus der Mitteilungs-
         // zentrale entfernen.
@@ -817,6 +835,7 @@ final class MailViewModel: ObservableObject {
         }
         currentMailbox = mailbox
         route = .messages(mailbox: mailbox)
+        listGeneration += 1
         messages = .loading
         pageState = (nil, false)
         hasMoreMessages = false
@@ -839,7 +858,7 @@ final class MailViewModel: ObservableObject {
 
     /// Öffnet beim App-Start den ZULETZT benutzten Ordner (Fallback INBOX).
     private func openPreferredMailbox(_ boxes: [Mailbox]) {
-        if let lastId = Self.lastMailboxId,
+        if let lastId = Self.lastMailboxId(account: mailAccount?.account ?? ""),
            let last = boxes.first(where: { $0.id == lastId }) {
             openMailbox(last)
             return
@@ -851,12 +870,14 @@ final class MailViewModel: ObservableObject {
 
     func syncMessages() async {
         guard let mailbox = currentMailbox else { return }
+        let generation = listGeneration
         // Cache-First: letzten Nachrichten-Snapshot SOFORT anzeigen, der
         // Live-Sync ersetzt ihn im Hintergrund. Spinner nur ohne Cache
         // (erster Aufruf nach Login).
         let accountName = mailAccount?.account ?? ""
         if case .loading = messages,
            let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+            guard generation == listGeneration else { return }
             messages = .success(snapshot.emails.map {
                 JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
             })
@@ -870,17 +891,22 @@ final class MailViewModel: ObservableObject {
 
     private func syncMessagesImap(_ mailbox: Mailbox) async {
         guard let client = imapClient else { return }
+        let generation = listGeneration
         switch await client.syncMessages(mailboxPath: mailbox.path) {
         case let .success(list):
+            guard generation == listGeneration else { return }
             hasMoreMessages = false
             pageState = (nil, false)
             messages = .success(list)
-        case let .failure(message): messages = .error(errorText(message))
+        case let .failure(message):
+            guard generation == listGeneration else { return }
+            messages = .error(errorText(message))
         }
     }
 
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
+        let generation = listGeneration
         do {
             let session = try await jmapClient?.refreshSession()
             // Leere Accounts = tote Credential: erneuern und neu laden.
@@ -936,6 +962,7 @@ final class MailViewModel: ObservableObject {
                         dirtyFlagIds[cacheKey] = nil
                     }
                     let newState = changes.optString("newQueryState") ?? state
+                    guard generation == listGeneration else { return }
                     queryStates[cacheKey] = newState
                     MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
                     messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
@@ -1026,6 +1053,7 @@ final class MailViewModel: ObservableObject {
                 // publizieren - die Übersicht wächst sichtbar, statt die
                 // ganze Zeit nur zu kreiseln.
                 let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+                guard generation == listGeneration else { return }
                 queryStates[cacheKey] = state
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
@@ -1038,6 +1066,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
             let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+            guard generation == listGeneration else { return }
             queryStates[cacheKey] = state
             pageState = (lastId: lastId, hasMore: hasMore)
             hasMoreMessages = hasMore
@@ -1046,6 +1075,34 @@ final class MailViewModel: ObservableObject {
             messages = .success(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
             isFetchingMail = false
             prefetchBodies(mailbox: mailbox)
+
+            // P64 Stale-Verifikation: Cached-Einträge, die serverseitig nicht
+            // mehr existieren (z. B. auf anderem Gerät gelöscht), per Batch
+            // Email/get (max. 500 IDs) aus Cache + Liste entfernen. Läuft
+            // im Hintergrund nach dem Full-Refresh.
+            let finalSnapshot = collected
+            let finalState = state
+            Task { [weak self] in
+                guard let self else { return }
+                let cachedIds = finalSnapshot.compactMap { $0.optString("id") }
+                guard !cachedIds.isEmpty else { return }
+                var missing: [String] = []
+                for chunk in stride(from: 0, to: cachedIds.count, by: 500) {
+                    guard self.listGeneration == generation else { return }
+                    let batch = Array(cachedIds[chunk..<min(chunk + 500, cachedIds.count)])
+                    if let fetched = try? await api.getEmails(accountId: accId, ids: batch) {
+                        let present = Set(fetched.compactMap { $0.optString("id") })
+                        missing += batch.filter { !present.contains($0) }
+                    }
+                }
+                guard !missing.isEmpty, self.listGeneration == generation else { return }
+                JmapLog.write("P64 stale verification removed \(missing.count) of \(cachedIds.count) cached mails")
+                let kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
+                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
+                if self.currentMailbox?.id == mailbox.id, self.listGeneration == generation {
+                    self.messages = .success(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })
+                }
+            }
         } catch {
             isFetchingMail = false
             // 401: Credential erneuern und den aktuellen Ordner neu laden.
@@ -1063,6 +1120,7 @@ final class MailViewModel: ObservableObject {
             }
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
+            guard generation == listGeneration else { return }
             if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {
                 let accId = mailbox.accountId
                 messages = .success(cached.emails.map {
@@ -1085,6 +1143,7 @@ final class MailViewModel: ObservableObject {
               let mailbox = currentMailbox, let api = jmapApi,
               let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty,
               let lastId = pageState.lastId, !lastId.isEmpty else { return }
+        let generation = listGeneration
         isLoadingMore = true
         // Nachgeladene Mails sind nicht im Cache: Overlay zeigen.
         isFetchingMail = true
@@ -1114,6 +1173,7 @@ final class MailViewModel: ObservableObject {
                 }
                 emails.sort { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
                 let hasMore = ids.count >= 100
+                guard generation == listGeneration else { return }
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
                 MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: emails, queryState: snapshot?.queryState ?? "")
@@ -1132,6 +1192,12 @@ final class MailViewModel: ObservableObject {
     /// Generation des aktuellen Postfachs - ein Wechsel bricht laufende
     /// Prefetch-Queues ab.
     private var prefetchGeneration = 0
+
+    /// List-Generation (P62): Zählt Ordner-Wechsel. Läuft noch ein
+    /// Sync des ALTEN Ordners, darf dessen Ergebnis NICHT mehr in den
+    /// Zustand des NEUEN Ordners schreiben (Flap-Fix). Auch loadMore
+    /// und Prefetch hängen an dieser Generation.
+    private var listGeneration = 0
 
     /// IMAP-artiger Voll-Cache: lädt die Bodies der geladenen Mails im
     /// Hintergrund nach (gedrosselt, abbrechbar, überspringt Gecachtes).
@@ -1968,4 +2034,6 @@ extension String {
 extension Notification.Name {
     /// Ungelesen-Anzahl geändert (Mail-Tab-Badge); object = Int.
     static let mailUnreadChanged = Notification.Name("mailUnreadChanged")
+    /// Summe über ALLE Accounts (System-Badge am App-Icon).
+    static let mailTotalUnreadChanged = Notification.Name("mailTotalUnreadChanged")
 }

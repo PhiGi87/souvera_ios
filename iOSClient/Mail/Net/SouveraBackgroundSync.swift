@@ -17,16 +17,48 @@ final class SouveraBackgroundSync {
     private let notificationCenter = UNUserNotificationCenter.current()
 
     func syncNotifications() async {
-        guard NCManageDatabase.shared.getActiveTableAccount() != nil else { return }
-        await syncMail()
-        await syncCalendar()
-        await syncLink()
+        let accounts = NCManageDatabase.shared.getAllTableAccount()
+        guard !accounts.isEmpty else { return }
+        // ALLE Accounts synchronisieren (auch nicht-aktive): Jeder Account
+        // erhält seine lokalen Notifications + Reminder (per-Account-
+        // Ersetzung im Scheduler - A löscht nicht die Erinnerungen von B).
+        for tbl in accounts {
+            await syncMail(account: tbl.account)
+            await syncCalendar(account: tbl.account)
+            await syncLink(account: tbl.account)
+        }
     }
 
-    /// Zählt die ungelesenen Mails der INBOX und aktualisiert das Mail-Badge
-    /// (direkte Kopplung an eingehende Mail-Pushes).
+    /// Zählt die ungelesenen Mails ALLER Accounts und aktualisiert das
+    /// System-Badge (Summe) + die per-Account-Badges.
     func refreshMailBadge() async {
-        guard var credential = await SouveraMailCredentialManager().ensureCombinedCredential() else { return }
+        var grandTotal = 0
+        var anySucceeded = false
+        for tbl in NCManageDatabase.shared.getAllTableAccount() {
+            guard let total = await unreadCount(account: tbl.account) else {
+                // Tolerant (P66): Ein Account, der gerade nicht antwortet
+                // (Netz/Server), wirft den Zähler der anderen nicht weg.
+                SouveraLog.write("BackgroundSync", "mail badge refresh: account \(tbl.account) skipped")
+                continue
+            }
+            anySucceeded = true
+            grandTotal += total
+            NotificationCenter.default.post(
+                name: .mailUnreadChanged,
+                object: nil,
+                userInfo: ["account": tbl.account, "count": total]
+            )
+        }
+        // Nur bei mindestens einem erfolgreichen Zähler das System-Badge
+        // setzen - sonst würde ein Netzfehler das Badge auf 0 löschen.
+        if anySucceeded || NCManageDatabase.shared.getAllTableAccount().isEmpty {
+            NotificationCenter.default.post(name: .mailTotalUnreadChanged, object: grandTotal)
+            SouveraLog.write("BackgroundSync", "mail badge refresh -> total \(grandTotal) unread")
+        }
+    }
+
+    private func unreadCount(account: String) -> Int? {
+        guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else { return nil }
         let client = JmapClient(
             baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             username: credential.saslUser,
@@ -34,20 +66,23 @@ final class SouveraBackgroundSync {
         )
         let api = JmapApi(client: client)
         guard let session = try? await client.refreshSession(),
-              !session.primaryAccountId.isEmpty else { return }
+              !session.primaryAccountId.isEmpty else { return nil }
         let accId = session.primaryAccountId
         guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
-              let inboxId = inbox.optString("id") else { return }
+              let inboxId = inbox.optString("id") else { return nil }
         guard let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
-              let total = resp["total"] as? Int else { return }
-        NotificationCenter.default.post(name: .mailUnreadChanged, object: total)
-        SouveraLog.write("BackgroundSync", "mail badge refresh -> \(total) unread")
+              let total = resp["total"] as? Int else { return nil }
+        return total
     }
 
     // MARK: - Mail
 
-    private func syncMail() async {
-        guard var credential = await SouveraMailCredentialManager().ensureCombinedCredential() else { return }
+    private func syncMail(account: String) async {
+        guard var credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else { return }
+        // Push-Gruppe Mail & Kalender aus: KEINE lokalen Mail-Benachrichtigungen
+        // (Sicherheitsnetz parallel zur Server-Abmeldung). Der Badge-Zähler
+        // (refreshMailBadge) bleibt unabhängig.
+        let mailNotificationsEnabled = SouveraPushToggles.mailCalendarEnabled
         var client = JmapClient(
             baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             username: credential.saslUser,
@@ -146,12 +181,14 @@ final class SouveraBackgroundSync {
                 "emailId": email.optString("id") ?? "",
                 "baseUrl": credential.baseUrl
             ]
-            let request = UNNotificationRequest(
-                identifier: "mail_\(email.optString("id") ?? UUID().uuidString)",
-                content: content,
-                trigger: nil
-            )
-            try? await notificationCenter.add(request)
+            if mailNotificationsEnabled {
+                let request = UNNotificationRequest(
+                    identifier: "mail_\(email.optString("id") ?? UUID().uuidString)",
+                    content: content,
+                    trigger: nil
+                )
+                try? await notificationCenter.add(request)
+            }
         }
 
         // Merge the new mails into the cached snapshot so they are not
@@ -166,8 +203,8 @@ final class SouveraBackgroundSync {
 
     // MARK: - Calendar
 
-    private func syncCalendar() async {
-        let client = CalDavClient()
+    private func syncCalendar(account: String) async {
+        let client = CalDavClient(account: account)
         let calendars = await client.fetchCalendars()
         guard !calendars.isEmpty else { return }
 
@@ -181,9 +218,8 @@ final class SouveraBackgroundSync {
             }
         }
 
-        // Erinnerungen anhand der VALARM-Daten der Termine planen (bis zu 64
-        // kommende Notifications); Termine ohne Erinnerung bleiben still.
-        SouveraReminderScheduler.schedule(for: upcoming)
+        // Erinnerungen für DIESEN Account planen (per-Account-Ersetzung).
+        SouveraReminderScheduler.schedule(for: upcoming, account: account)
     }
 
     // MARK: - Link
@@ -192,12 +228,16 @@ final class SouveraBackgroundSync {
     /// als lokale Benachrichtigungen und aktualisiert die Badge-Basis
     /// (Unread-Summe). Der LinkCache wird dabei mit dem frischen Stand
     /// gesichert (offline-fähig).
-    private func syncLink() async {
-        guard let account = LinkAccount.active() else { return }
-        let api = LinkOcsApi(account: account)
+    private func syncLink(account: String) async {
+        guard let tbl = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }),
+              let linkAccount = LinkAccount.from(account: tbl.account, urlBase: tbl.urlBase, user: tbl.user) else { return }
+        // Push-Gruppe Link/Talk aus: keine lokalen Chat-Benachrichtigungen
+        // (Sicherheitsnetz parallel zur Server-Abmeldung).
+        guard SouveraPushToggles.linkTalkEnabled else { return }
+        let api = LinkOcsApi(account: linkAccount)
         guard let list = await api.listConversations() else { return }
 
-        let previous = LinkCache.loadConversations() ?? []
+        let previous = LinkCache.loadConversations(account: account) ?? []
         let previousUnread = Dictionary(uniqueKeysWithValues: previous.map { ($0.token, $0.unreadMessages) })
 
         for room in list {
@@ -218,7 +258,10 @@ final class SouveraBackgroundSync {
             // Deep-Link-Payload: Tap öffnet direkt den Raum-Chat.
             content.userInfo = [
                 "token": room.token,
-                "title": room.displayName
+                "title": room.displayName,
+                // Account für den Deep-Link (Multi-Account: Raum im
+                // richtigen Account öffnen).
+                "account": account
             ]
             let request = UNNotificationRequest(
                 identifier: "talk_\(room.token)_\(last.id)",
@@ -228,7 +271,11 @@ final class SouveraBackgroundSync {
             try? await notificationCenter.add(request)
         }
 
-        // Badge-Basis: Summe aller ungelesenen Nachrichten melden.
-        LinkViewModel.postUnreadTotal(list)
+        // Badge-Basis: nur der AKTIVE Account steuert den Link-Tab-Badge
+        // (der Badge-Monitor pollt ohnehin nur den aktiven Account - ein
+        // Sync des Hintergrund-Accounts darf den Badge nicht überschreiben).
+        if account == NCManageDatabase.shared.getActiveTableAccount()?.account {
+            LinkViewModel.postUnreadTotal(list)
+        }
     }
 }

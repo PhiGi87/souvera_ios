@@ -20,13 +20,13 @@ struct LinkCache {
 
     // MARK: - Conversations
 
-    static func saveConversations(raw: Data) {
-        guard let url = fileURL("conversations.json") else { return }
+    static func saveConversations(raw: Data, account: String) {
+        guard let url = fileURL("conversations_" + account + ".json") else { return }
         try? raw.write(to: url, options: .atomic)
     }
 
-    static func loadConversations() -> [LinkConversation]? {
-        guard let url = fileURL("conversations.json"),
+    static func loadConversations(account: String) -> [LinkConversation]? {
+        guard let url = fileURL("conversations_" + account + ".json"),
               let data = try? Data(contentsOf: url),
               let env = try? JSONDecoder().decode(OcsEnvelope<[LinkConversation]>.self, from: data) else { return nil }
         return env.ocs.data

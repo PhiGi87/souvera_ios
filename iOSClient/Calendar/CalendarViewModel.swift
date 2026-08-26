@@ -274,7 +274,7 @@ final class CalendarViewModel: ObservableObject {
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")
         }
-        SouveraReminderScheduler.schedule(for: all)
+        SouveraReminderScheduler.schedule(for: all, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "")
     }
 
     // MARK: - Mutations
@@ -427,23 +427,12 @@ final class CalendarViewModel: ObservableObject {
         let objectId = eventUid.isEmpty ? UUID().uuidString.lowercased() : eventUid
         guard let room = await api.createEventRoom(name: name, objectId: objectId, description: notes) else { return nil }
 
-        // Split attendees into internal Souvera users (resolved via the
-        // instance directory) and external guests (invited by email).
-        let directory = NextcloudDirectorySource()
-        var internalUsers: [String] = []
-        var externalEmails: [String] = []
-        for attendee in attendees {
-            let trimmed = attendee.trimmingCharacters(in: .whitespaces).lowercased()
-            guard trimmed.contains("@") else { continue }
-            let found = await directory.searchUsers(trimmed, limit: 5)
-            let isInternal = found.contains { $0.id.lowercased() == trimmed || $0.email.lowercased() == trimmed }
-            if isInternal {
-                internalUsers.append(trimmed)
-            } else {
-                externalEmails.append(trimmed)
-            }
-        }
-        await api.addParticipants(token: room.token, userIds: internalUsers, emails: externalEmails)
+        // P67: KEINE addParticipants-Aufrufe mehr - die Teilnehmer werden
+        // bereits über den Termin (iCal-ATTENDEE) eingeladen; eine zweite
+        // Einladung über Talk würde doppelte Mails auslösen. Der Server
+        // kann Teilnehmer über die Termin-Einladung mappen. Lobby bleibt
+        // aktiv, damit Unbekannte erst freigegeben werden müssen.
+        JmapLog.write("Calendar talk room \(room.token): created without addParticipants (\(attendees.count) attendees via calendar invite)")
 
         // Lobby immer aktivieren: Eingeladene warten auf die Freigabe,
         // Owner/Moderatoren sind davon ausgenommen.
@@ -510,10 +499,10 @@ final class CalendarViewModel: ObservableObject {
 
     // MARK: - Cache
 
-    private static func cacheKey(for month: Date) -> String {
+    private static func cacheKey(for month: Date, account: String) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM"
-        return "calendar_events_" + formatter.string(from: month)
+        return "calendar_events_" + account + "_" + formatter.string(from: month)
     }
 
     private static func saveCachedEntries(_ entries: [CalDavEventEntry], month: Date) {
@@ -522,11 +511,11 @@ final class CalendarViewModel: ObservableObject {
             dict["etag"] = entry.etag ?? ""
             return dict
         }
-        MailCache.saveJSON(array, key: cacheKey(for: month))
+        MailCache.saveJSON(array, key: cacheKey(for: month, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"))
     }
 
     private static func loadCachedEntries(month: Date) -> [CalDavEventEntry]? {
-        guard let array = MailCache.loadJSON(key: cacheKey(for: month)) as? [[String: Any]] else { return nil }
+        guard let array = MailCache.loadJSON(key: cacheKey(for: month, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default")) as? [[String: Any]] else { return nil }
         return array.compactMap { dict in
             guard let href = dict["href"] as? String,
                   let calendarHref = dict["calendarHref"] as? String,
@@ -543,7 +532,7 @@ final class CalendarViewModel: ObservableObject {
         return all
     }
 
-    private static var calendarListCacheKey: String { "calendar_list_cache" }
+    private static var calendarListCacheKey: String { "calendar_list_" + (NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default") }
 
     private static func saveCachedCalendars(_ calendars: [CalDavCalendar]) {
         let array: [[String: Any]] = calendars.map { ["href": $0.href, "displayName": $0.displayName, "color": $0.color ?? "", "canWrite": $0.canWrite] }

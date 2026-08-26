@@ -143,6 +143,11 @@ struct NCMoreView: View {
             } label: {
                 Label(NSLocalizedString("_account_settings_", comment: ""), systemImage: "gear")
             }
+            Button {
+                model.performAddAccount()
+            } label: {
+                Label(NSLocalizedString("_account_add_", comment: ""), systemImage: "person.crop.circle.badge.plus")
+            }
         } label: {
             HStack(spacing: SouveraTokens.Spacing.sm) {
                 avatar

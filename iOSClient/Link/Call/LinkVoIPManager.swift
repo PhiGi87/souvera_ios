@@ -61,6 +61,12 @@ final class LinkVoIPManager: NSObject {
 
     // MARK: - Outgoing calls (shared session)
 
+    /// Registriert die VoIP/Talk-Geräte neu (z. B. nach Account-Wechsel
+    /// oder -Hinzufügen - läuft für ALLE Accounts).
+    func refreshVoipRegistration() {
+        subscribeVoipToken()
+    }
+
     /// Registriert eine bereits laufende Session (z. B. die vom Call-VC
     /// privat erzeugte) im Shared State: Damit greifen endActiveCall,
     /// das "kein Fullscreen im eigenen Call"-Guard und die Geister-
@@ -205,6 +211,11 @@ final class LinkVoIPManager: NSObject {
 
     private func subscribeVoipToken() {
         let tokenPreview = voipToken.isEmpty ? "empty" : "len \(voipToken.count)"
+        // Push-Gruppe Link/Talk aus: keine VoIP-Registrierung.
+        guard SouveraPushToggles.linkTalkEnabled else {
+            nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: toggle disabled")
+            return
+        }
         guard !voipToken.isEmpty else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: no PushKit token (\(tokenPreview))")
             return

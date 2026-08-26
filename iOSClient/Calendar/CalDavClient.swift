@@ -33,6 +33,21 @@ struct CalDavEventEntry {
 
 final class CalDavClient {
 
+    /// Account für die Authentifizierung; nil = aktiver Account
+    /// (Vordergrund). Hintergrund-Sync übergibt den Account explizit.
+    private let accountName: String?
+
+    init(account: String? = nil) {
+        accountName = account
+    }
+
+    private var tableAccount: tableAccount? {
+        if let accountName {
+            return NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == accountName })
+        }
+        return NCManageDatabase.shared.getActiveTableAccount()
+    }
+
     private let urlSession: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
@@ -45,7 +60,7 @@ final class CalDavClient {
     /// DAV principal candidates: the full login (email) is the principal on
     /// Souvera; some setups use the short userId instead. Both are tried.
     private func principalCandidates() -> [String] {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        guard let tbl = tableAccount else { return [] }
         var candidates = [tbl.user]
         if !tbl.userId.isEmpty, tbl.userId != tbl.user {
             candidates.append(tbl.userId)
@@ -54,7 +69,7 @@ final class CalDavClient {
     }
 
     private func calendarHomeURLs() -> [URL] {
-        guard let tbl = NCManageDatabase.shared.getActiveTableAccount() else { return [] }
+        guard let tbl = tableAccount else { return [] }
         let root = tbl.urlBase.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         return principalCandidates().compactMap {
             URL(string: "\(root)/remote.php/dav/calendars/\($0)/")
@@ -67,7 +82,7 @@ final class CalDavClient {
         if let contentType {
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
-        if let tbl = NCManageDatabase.shared.getActiveTableAccount() {
+        if let tbl = tableAccount {
             let davPassword = NCPreferences().getPassword(account: tbl.account)
             let raw = "\(tbl.user):\(davPassword)"
             req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")

@@ -48,7 +48,9 @@ actor LinkOcsApi {
     /// roh im LinkCache gesichert.
     func listConversations() async -> [LinkConversation]? {
         guard let body = await get("\(base)/api/v4/room") else { return nil }
-        LinkCache.saveConversations(raw: Data(body.utf8))
+        // Cache PRO ACCOUNT: Die Konversationsliste darf zwischen
+        // Accounts nicht vermischt werden.
+        LinkCache.saveConversations(raw: Data(body.utf8), account: account.account)
         return decodeList(body)
     }
 

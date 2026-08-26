@@ -102,6 +102,27 @@ class NCMainTabBarController: UITabBarController {
                 self.openFilesFolder(folderPath)
             }
         }
+
+        // Termin-Einladungs-Links: Antwort-Overlay präsentieren (P63).
+        NotificationCenter.default.addObserver(forName: .openInviteResponse, object: nil, queue: .main) { [weak self] notification in
+            guard let self, let url = notification.object as? URL else { return }
+            let host = UIHostingController(rootView: SouveraInviteResponseView(url: url))
+            if let sheet = host.sheetPresentationController {
+                sheet.detents = [.medium()]
+            }
+            self.topViewController()?.present(host, animated: true)
+        }
+    }
+
+    private func topViewController() -> UIViewController? {
+        var top: UIViewController? = self
+        while let presented = top?.presentedViewController {
+            top = presented
+        }
+        if let nav = top as? UINavigationController {
+            top = nav.visibleViewController ?? nav
+        }
+        return top
     }
 
     /// Wechselt in den Dateien-Tab und navigiert in den Ordner mit dem
@@ -203,8 +224,23 @@ class NCMainTabBarController: UITabBarController {
             object: nil,
             queue: .main
         ) { [weak self] notification in
-            let count = notification.object as? Int ?? 0
-            self?.updateMailBadge(count)
+            // Nur der AKTIVE Account steuert den Mail-Tab-Badge.
+            guard let userInfo = notification.userInfo,
+                  let account = userInfo["account"] as? String,
+                  let count = userInfo["count"] as? Int else { return }
+            let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            if account == active {
+                self?.updateMailBadge(count)
+            }
+        }
+        NotificationCenter.default.addObserver(
+            forName: .mailTotalUnreadChanged,
+            object: nil,
+            queue: .main
+        ) { notification in
+            // System-Badge am App-Icon = Summe aller Accounts.
+            let total = notification.object as? Int ?? 0
+            UIApplication.shared.applicationIconBadgeNumber = total
         }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),
