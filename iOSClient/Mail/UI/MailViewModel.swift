@@ -27,6 +27,15 @@ enum MailRoute: Equatable {
     case compose
     case search
 
+    /// Detail-Message der aktuellen Route (nil = keine Detailansicht).
+    var detailMessage: MailMessage? {
+        if case let .detail(message) = self { return message }
+        return nil
+    }
+
+    /// true = Detailansicht aktiv (Liste bleibt darunter gemountet, P62b).
+    var isDetail: Bool { detailMessage != nil }
+
     static func == (lhs: MailRoute, rhs: MailRoute) -> Bool {
         switch (lhs, rhs) {
         case (.folders, .folders), (.compose, .compose), (.search, .search): return true

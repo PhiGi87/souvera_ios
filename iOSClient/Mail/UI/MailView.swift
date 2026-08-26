@@ -280,19 +280,10 @@ struct MailView: View {
             // SwiftUI-Identität der Liste erhalten und die Scrollposition
             // überlebt den Detail-Roundtrip (getrennte Branches erzeugten
             // jeweils NEUE Instanzen -> Scroll ging verloren).
-            let isDetail: Bool
-            let detailMessage: MailMessage?
-            if case let .detail(message) = viewModel.route {
-                isDetail = true
-                detailMessage = message
-            } else {
-                isDetail = false
-                detailMessage = nil
-            }
             ZStack {
-                MailMessageListView(viewModel: viewModel, toolbarActive: !isDetail)
-                if let detailMessage {
-                    MailDetailView(viewModel: viewModel, message: detailMessage)
+                MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
+                if let message = viewModel.route.detailMessage {
+                    MailDetailView(viewModel: viewModel, message: message)
                 }
             }
         case .compose:
