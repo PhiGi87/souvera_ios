@@ -173,9 +173,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.mcuActive = mcuActive
         CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
         timingLog("signaling connected")
-        // P68g: joinCall SOFORT beim Signaling-Connect senden (talk-iOS-
-        // Muster) - nicht erst nach dem Room-Join. Spart einen Roundtrip.
-        sendJoinCall()
+        // P68g-Fix: joinCall NICHT hier senden - vor dem Room-Join
+        // beantwortet der Server mit 404 ("not joined") und der Flow ist
+        // vergiftet (Nutzer kam nie in den Call). joinCall läuft erst
+        // nach dem Room-Join (Android-Parität + Vor-Build-Verhalten).
     }
 
     /// The signaling room join is confirmed - now open the call via OCS.
@@ -185,9 +186,11 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     /// P68g: Idempotenter joinCall mit Retry (talk-iOS-Muster: bis zu 3
-    /// Versuche, sonst bricht unser Call aktuell bei einem einmaligen
-    /// OCS-Fehler komplett ab).
+    /// Versuche). Ein 404 nach dem Room-Join bedeutet "Session nicht mehr
+    /// korrekt gejoint" - dann EINMAL den Raum- und Call-Flow neu aufbauen
+    /// (talk-iOS forceReconnect), statt nur blind zu retrien.
     private var joinCallSent = false
+    private var forceRejoinedOnce = false
     private func sendJoinCall(retry: Int = 3) {
         guard !joinCallSent, !endedOnce else { return }
         joinCallSent = true
@@ -195,17 +198,37 @@ final class CallSession: NSObject, HpbSignalingListener {
         Task { [weak self] in
             guard let self else { return }
             let flags = self.callFlags
-            let ok = await self.api.joinCall(token: self.token, flags: flags, silent: self.silent)
+            let status = await self.api.joinCall(token: self.token, flags: flags, silent: self.silent)
+            let ok = (200..<300).contains(status)
             if ok {
                 CallDebugLog.log("CallSession", "joinCall sent flags=\(flags)")
                 self.timingLog("joinCall ok")
             } else if retry > 0, !self.endedOnce {
-                CallDebugLog.log("CallSession", "joinCall failed - retry (\(retry) left)")
+                CallDebugLog.log("CallSession", "joinCall failed http=\(status) - retry (\(retry) left)")
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 self.joinCallSent = false
                 self.sendJoinCall(retry: retry - 1)
+            } else if status == 404, !self.forceRejoinedOnce, !self.endedOnce {
+                // talk-iOS forceReconnect: 404 = Session nicht mehr korrekt
+                // gejoint - Signaling neu verbinden + Raum erneut joinen,
+                // dann joinCall EINMAL wiederholen.
+                CallDebugLog.log("CallSession", "joinCall 404 - force rejoin once")
+                self.forceRejoinedOnce = true
+                self.joinCallSent = false
+                self.signaling?.close()
+                self.signaling = nil
+                self.publisherCreated = false
+                self.peers.removeAll()
+                self.statusChannels.removeAll()
+                Task { [weak self] in
+                    guard let self else { return }
+                    await self.startMedia()
+                }
             } else {
-                CallDebugLog.log("CallSession", "joinCall FAILED after retries")
+                // Kein Weg mehr: Call sauber beenden statt ihn hängen zu
+                // lassen (sonst "Call im Nirvana").
+                CallDebugLog.log("CallSession", "joinCall FAILED http=\(status) - ending call")
+                self.hangup()
             }
         }
     }

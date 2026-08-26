@@ -218,12 +218,25 @@ final class MailViewModel: ObservableObject {
                 return
             }
             let mailboxId = currentMailbox?.id ?? ""
-            let message = JmapMapper.mapMessage(
+            var message = JmapMapper.mapMessage(
                 account: mailAccount?.account ?? "",
                 accountId: accId,
                 mailboxId: mailboxId,
                 json: json
             )
+            // P62e: Der Push-ObjectId ist serverseitig eine KURZFORM
+            // ("93w" statt "dp1yaaa93w"). Email/get beantwortet sie mit der
+            // Kurzform, Email/set (gelesen/löschen) wirkt mit ihr aber
+            // NICHT (Server-No-Op). Deshalb: die KANONISCHE Zeile (volle
+            // ID) aus der Live-Liste per blobId ermitteln und stattdessen
+            // verwenden - sonst entstehen Duplikate, das Gelesen-Markieren
+            // zieht nicht und Swipe-Löschungen kommen wieder.
+            if let fetchedBlobId = message.blobId,
+               case let .success(items) = messages,
+               let canonical = items.first(where: { $0.blobId == fetchedBlobId }) {
+                message = canonical
+                SouveraLog.write("Mail", "deep link: canonical id found for \(emailId) -> \(canonical.emailId)")
+            }
             // P66b: Die Mail SOFORT in die Liste mergen, damit die Übersicht
             // augenblicklich stimmt (der Refresh läuft parallel weiter).
             // P62c: Die Mail bleibt bis zum Server-Nachweis GESCHÜTZT -
@@ -231,7 +244,7 @@ final class MailViewModel: ObservableObject {
             // (das war die Ursache "Mail fehlt nach Zurück").
             protectedListIds.insert(message.emailId)
             if case let .success(items) = messages,
-               !items.contains(where: { $0.emailId == message.emailId }) {
+               !items.contains(where: { $0.emailId == message.emailId || ($0.blobId != nil && $0.blobId == message.blobId) }) {
                 var updated = items
                 updated.insert(message, at: 0)
                 messages = .success(updated)
@@ -1262,7 +1275,20 @@ final class MailViewModel: ObservableObject {
     private func protectingLiveMessages(_ published: [MailMessage]) -> [MailMessage] {
         guard !protectedListIds.isEmpty else { return published }
         let publishedIds = Set(published.map(\.emailId))
-        let protected = protectedListIds.filter { !publishedIds.contains($0) }
+        // P62e: Auch per blobId deduplizieren - die serverseitige Kurz-ID
+        // ("93w") und die kanonische ID ("dp1yaaa93w") sind dieselbe Mail;
+        // ohne blobId-Vergleich würde die geschützte Kurz-ID-Zeile neben
+        // der kanonischen Zeile doppelt erscheinen.
+        let publishedBlobs = Set(published.compactMap(\.blobId))
+        let protected = protectedListIds.filter { id in
+            guard !publishedIds.contains(id) else { return false }
+            if case let .success(live) = messages,
+               let liveMessage = live.first(where: { $0.emailId == id }),
+               let blob = liveMessage.blobId {
+                return !publishedBlobs.contains(blob)
+            }
+            return true
+        }
         guard !protected.isEmpty else {
             protectedListIds.subtract(publishedIds)
             return published
@@ -1458,6 +1484,13 @@ final class MailViewModel: ObservableObject {
         cameFromSearch = fromSearch
         route = .detail(message: message)
         body = .loading
+        // P62e: Gelesen-Markierung SOFORT anstoßen (vor dem Body-Load) -
+        // bisher lief sie am Ende von openMessageJmap und der Status zog
+        // erst nach Sekunden (Body + Blob-Downloads). Die Übersicht
+        // aktualisiert die Zeile über updateLocalMessage sofort.
+        if !message.isRead {
+            Task { await setRead([message], true) }
+        }
         Task {
             if useJmap {
                 await openMessageJmap(message)
@@ -1472,7 +1505,7 @@ final class MailViewModel: ObservableObject {
         switch await client.fetchBody(mailboxPath: mailbox.path, uid: uid) {
         case let .success(b):
             body = .success(b)
-            if !message.isRead { await setRead([message], true) }
+            // P62e: Read-Marking läuft bereits zentral in openMessage.
         case let .failure(m):
             body = .error(errorText(m))
         }
@@ -1536,7 +1569,6 @@ final class MailViewModel: ObservableObject {
         }
         MailCache.saveBody(account: accountName, emailId: message.emailId, body: mapped)
         body = .success(mapped)
-        if !message.isRead { await setRead([message], true) }
     }
 
     /// Fetches the full Email/get JSON for a message (Android-parity body

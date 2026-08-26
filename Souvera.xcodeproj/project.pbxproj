@@ -6823,12 +6823,12 @@
 /* End XCConfigurationList section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		FED07C76ED36E00D707A3332 /* XCRemoteSwiftPackageReference "WebRTC" */ = {
+		FED07C76ED36E00D707A3332 /* XCRemoteSwiftPackageReference "talk-clients-webrtc" */ = {
 			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/stasel/WebRTC";
+			repositoryURL = "https://github.com/nextcloud-releases/talk-clients-webrtc";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 150.0.0;
+				kind = revision;
+				revision = 904c6624658e65786ac098597e05ef77072cc0d9;
 			};
 		};
 		F3374AEE2D78B01B002A38F9 /* XCRemoteSwiftPackageReference "swift-collections" */ = {
