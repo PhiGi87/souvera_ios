@@ -135,7 +135,7 @@ struct NCSettingsView: View {
             // Push-Gruppen (P70): pro Gruppe ab-/anschaltbar; aus = die
             // zugehörige Push-Zeile wird abgemeldet (Server-Zeile gelöscht),
             // an = neu registriert. Standard: beides an.
-            Section(header: Text(NSLocalizedString("_push_section_title_", comment: "")).font(.headline), content: {
+            Section(content: {
                 Toggle(NSLocalizedString("_push_toggle_mail_calendar_", comment: ""), isOn: $model.pushMailCalendar)
                     .font(.body)
                     .onChange(of: model.pushMailCalendar) {
@@ -146,6 +146,8 @@ struct NCSettingsView: View {
                     .onChange(of: model.pushLinkTalk) {
                         model.updatePushLinkTalk()
                     }
+            }, header: {
+                Text(NSLocalizedString("_push_section_title_", comment: "")).font(.headline)
             }, footer: {
                 Text(NSLocalizedString("_push_section_footer_", comment: ""))
                     .font(.footnote)

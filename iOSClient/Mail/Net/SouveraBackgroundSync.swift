@@ -57,7 +57,7 @@ final class SouveraBackgroundSync {
         }
     }
 
-    private func unreadCount(account: String) -> Int? {
+    private func unreadCount(account: String) async -> Int? {
         guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else { return nil }
         let client = JmapClient(
             baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
