@@ -126,10 +126,11 @@ final class LinkVoIPManager: NSObject {
         activeCallInfo = (token, title, withVideo)
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
         Task {
-            let audioOk = await CallPermissions.ensureAudio()
+            let allowPrompt = UIApplication.shared.applicationState == .active
+            let audioOk = await CallPermissions.ensureAudio(allowPrompt: allowPrompt)
             CallDebugLog.log("LinkVoIPManager", "incoming call: microphone granted=\(audioOk)")
             if audioOk, withVideo {
-                let cameraOk = await CallPermissions.ensureCamera()
+                let cameraOk = await CallPermissions.ensureCamera(allowPrompt: allowPrompt)
                 CallDebugLog.log("LinkVoIPManager", "incoming call: camera granted=\(cameraOk)")
                 if cameraOk {
                     session.start()
@@ -216,6 +217,18 @@ final class LinkVoIPManager: NSObject {
 
         Task {
             let preferences = NCPreferences()
+            // Token-Hygiene: hat der VoIP-Token gewechselt (Reinstall),
+            // wird die alte Registrierung VOR der neuen abgemeldet -
+            // keine Geräte-Leichen.
+            let previousVoipToken = UserDefaults.standard.string(forKey: Self.voipTokenKey)
+            if let previousVoipToken, previousVoipToken != voipToken,
+               UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey) != nil {
+                let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+                for tblAccount in tblAccounts {
+                    await Self.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user)
+                }
+            }
+            UserDefaults.standard.set(voipToken, forKey: Self.voipTokenKey)
             for tblAccount in await NCManageDatabase.shared.getAllTableAccountAsync() {
                 let account = tblAccount.account
                 let urlBase = tblAccount.urlBase
@@ -279,6 +292,7 @@ final class LinkVoIPManager: NSObject {
         }
     }
 
+    private static let voipTokenKey = "souvera_voip_token"
     private static let voipDeviceIdentifierKey = "souvera_voip_device_identifier"
     private static let voipDeviceSignatureKey = "souvera_voip_device_signature"
     private static let voipDevicePublicKeyKey = "souvera_voip_device_public_key"

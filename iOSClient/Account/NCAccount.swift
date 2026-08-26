@@ -133,6 +133,19 @@ class NCAccount: NSObject {
             // Talk-Zeile läuft über die Mail-Credential Y und wird von der
             // normalen Abmeldung nicht erfasst.
             await LinkVoIPManager.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user)
+            // Mail-Push-Gerät (souvera_mail) ebenfalls abmelden.
+            if let mailDeviceId = SouveraMailDeviceRegistrar.storedDeviceId(account: tblAccount.account) {
+                let davPassword = NCPreferences().getPassword(account: tblAccount.account)
+                if !davPassword.isEmpty {
+                    await SouveraMailDeviceRegistrar.unregister(
+                        baseUrl: tblAccount.urlBase,
+                        username: tblAccount.user,
+                        ncPassword: davPassword,
+                        deviceId: mailDeviceId,
+                        account: tblAccount.account
+                    )
+                }
+            }
             try? await FileProviderDomain().ensureDomainRemoved(userId: tblAccount.userId, urlBase: tblAccount.urlBase)
         }
 

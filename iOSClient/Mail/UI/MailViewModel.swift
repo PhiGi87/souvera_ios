@@ -146,7 +146,7 @@ final class MailViewModel: ObservableObject {
         switch target.kind {
         case .mail:
             if case .success = mailboxes {
-                Task { await openMailByJmapId(account: target.account, emailId: target.emailId) }
+                Task { await openMailByJmapId(account: target.account, emailId: target.emailId, mailboxPath: target.mailboxPath) }
             } else {
                 pendingDeepLink = target
             }
@@ -156,13 +156,23 @@ final class MailViewModel: ObservableObject {
     }
 
     /// Öffnet eine Mail direkt aus einer Push-Notification (Deep-Link):
-    /// INBOX als Kontext sicherstellen, die Mail per JMAP laden und die
-    /// Detail-Ansicht öffnen. "Zurück" führt in die INBOX.
-    func openMailByJmapId(account: String, emailId: String) async {
-        if case let .success(boxes) = mailboxes,
-           let inbox = boxes.first(where: { $0.kind == .inbox }),
-           currentMailbox?.id != inbox.id {
-            openMailbox(inbox)
+    /// Ordner-Kontext sicherstellen (mailboxPath, Fallback INBOX), die Mail
+    /// per JMAP laden und die Detail-Ansicht öffnen. "Zurück" führt in den
+    /// jeweiligen Ordner.
+    func openMailByJmapId(account: String, emailId: String, mailboxPath: String = "") async {
+        if case let .success(boxes) = mailboxes {
+            var contextBox: Mailbox?
+            let trimmedPath = mailboxPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedPath.isEmpty {
+                contextBox = boxes.first(where: { $0.name == trimmedPath || $0.path == trimmedPath })
+                    ?? boxes.first(where: { $0.name.lowercased() == trimmedPath.lowercased() || $0.path.lowercased() == trimmedPath.lowercased() })
+            }
+            if contextBox == nil {
+                contextBox = boxes.first(where: { $0.kind == .inbox })
+            }
+            if let box = contextBox, currentMailbox?.id != box.id {
+                openMailbox(box)
+            }
         }
         guard let api = jmapApi, let client = jmapClient else {
             SouveraLog.write("Mail", "deep link: no jmap client")

@@ -303,8 +303,16 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onAnswer(fromSession: String, sdp: String) {
+        // Diagnose: Akzeptiert der MCU unser m=video im Re-Offer?
+        let kinds = Self.mediaTypes(of: sdp)
+        CallDebugLog.log("CallSession", "answer from \(fromSession.prefix(8)) m-lines=[\(kinds.joined(separator: ","))]")
         let peer = peers[fromSession] ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
-        peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { _ in }
+        peer?.setRemoteDescription(RTCSessionDescription(type: .answer, sdp: sdp)) { [weak self] _ in
+            // Nach einer Re-Verhandlung den Medienzustand erneut melden -
+            // der MCU kann den letzten Stand sonst verschlucken (verzögerte
+            // Mute-/Video-Reaktion).
+            self?.sendInitialStatus()
+        }
     }
 
     static func streamKey(session: String, roomType: String) -> String {
@@ -373,6 +381,12 @@ final class CallSession: NSObject, HpbSignalingListener {
                 self.renegotiateAfterVideoChange()
                 self.sendStatusMessage("videoOn")
                 self.isVideoEnabled = true
+                // Diagnose: Sender + Kamera-Quelle nach dem Einschalten.
+                if let pub = self.peers[self.ownSessionId] {
+                    let kinds = pub.senders.compactMap { $0.track?.kind }
+                    let sourceState = video.source.state.rawValue
+                    CallDebugLog.log("CallSession", "video enabled; publisher senders=\(pub.senders.count) kinds=[\(kinds.joined(separator: ","))] sourceState=\(sourceState)")
+                }
             }
         } else {
             localVideo?.isEnabled = false
@@ -608,21 +622,17 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     private func dumpOutboundStats(peer: RTCPeerConnection, tag: String) {
-        // Der Stats-Report kann beim ersten Abruf leer sein - bis zu 3x
-        // mit kurzem Abstand nachfragen (Retry-Loop).
-        fetchStats(peer: peer, attempt: 0, tag: tag)
+        // Async-API verwenden: Der Callback-Overload lieferte auf diesem
+        // WebRTC-Build IMMER einen leeren Report. Bis zu 3 Versuche.
+        Task { [weak self] in
+            await self?.fetchStats(peer: peer, attempt: 0, tag: tag)
+        }
     }
 
-    private func fetchStats(peer: RTCPeerConnection, attempt: Int, tag: String) {
-        peer.statistics { [weak self] report in
-            guard let self else { return }
+    private func fetchStats(peer: RTCPeerConnection, attempt: Int, tag: String) async {
+        do {
+            let report = try await peer.statistics()
             let values = report.statistics.values
-            if values.isEmpty, attempt < 2 {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    self.fetchStats(peer: peer, attempt: attempt + 1, tag: tag)
-                }
-                return
-            }
             let outbound = values
                 .filter { ($0.values["type"] as? String) == "outbound-rtp" }
                 .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
@@ -637,6 +647,13 @@ final class CallSession: NSObject, HpbSignalingListener {
                 let bytes = stat.values["bytesSent"] as? NSNumber ?? 0
                 let packets = stat.values["packetsSent"] as? NSNumber ?? 0
                 CallDebugLog.log("CallSession", "publisher outbound-rtp [\(media)] bytesSent=\(bytes) packetsSent=\(packets) [\(tag)]")
+            }
+        } catch {
+            if attempt < 2 {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                await fetchStats(peer: peer, attempt: attempt + 1, tag: tag)
+            } else {
+                CallDebugLog.log("CallSession", "publisher stats failed [\(tag)]: \(error.localizedDescription)")
             }
         }
     }

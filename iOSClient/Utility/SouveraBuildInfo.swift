@@ -200,31 +200,35 @@ enum SouveraPushDeepLink {
         let kind: Kind
         let account: String
         let emailId: String
+        /// JMAP-Mailbox-Name (z. B. "INBOX", "Archiv/2026") als Kontext für
+        /// den Mail-Push - leer = INBOX-Fallback.
+        let mailboxPath: String
         let uid: String
         let start: TimeInterval
         let token: String
         let title: String
 
-        private init(kind: Kind, account: String, emailId: String, uid: String, start: TimeInterval, token: String, title: String) {
+        private init(kind: Kind, account: String, emailId: String, mailboxPath: String, uid: String, start: TimeInterval, token: String, title: String) {
             self.kind = kind
             self.account = account
             self.emailId = emailId
+            self.mailboxPath = mailboxPath
             self.uid = uid
             self.start = start
             self.token = token
             self.title = title
         }
 
-        static func mail(account: String, emailId: String) -> Target {
-            Target(kind: .mail, account: account, emailId: emailId, uid: "", start: 0, token: "", title: "")
+        static func mail(account: String, emailId: String, mailboxPath: String = "") -> Target {
+            Target(kind: .mail, account: account, emailId: emailId, mailboxPath: mailboxPath, uid: "", start: 0, token: "", title: "")
         }
 
         static func event(uid: String, start: TimeInterval) -> Target {
-            Target(kind: .event, account: "", emailId: "", uid: uid, start: start, token: "", title: "")
+            Target(kind: .event, account: "", emailId: "", mailboxPath: "", uid: uid, start: start, token: "", title: "")
         }
 
         static func room(token: String, title: String) -> Target {
-            Target(kind: .room, account: "", emailId: "", uid: "", start: 0, token: token, title: title)
+            Target(kind: .room, account: "", emailId: "", mailboxPath: "", uid: "", start: 0, token: token, title: title)
         }
     }
 

@@ -14,7 +14,28 @@ vorbereitet (Deep-Links, Hintergrund-Resync, Termin-Detail).
   Non-Talk-Apps -> alle Non-Talk-Geräte; Talk-Apps (`spreed`, `talk`,
   `admin_notification_talk`) -> Talk-Geräte (VoIP-Kanal).
 
-## 1. Mail-Push (App-Id `souvera_mail`)
+## 1. Mail-Push (direkter Standard-APNs-Push über souvera_mail)
+
+**Aktueller Vertrag (so umgesetzt, ersetzt den früheren NC-Notification-Ansatz):**
+- Registrierung nach Login: `POST /apps/souvera_mail/devices` mit
+  `{"apnsToken": "<APNs-Token>", "platform": "ios"}` (HTTP-Basic mit dem
+  NC-App-Passwort) - Antwort enthält `id`, die App speichert sie.
+- Abmeldung bei Logout: `DELETE /apps/souvera_mail/devices/{id}`.
+- Payload: System-Notification aus `aps.alert.title/body`; Zusatzfelder
+  `emailId` und `mailboxPath` (JMAP-Mailbox-Name) - die App öffnet damit
+  direkt die Mail-Detailansicht (Ordner als Kontext, Fallback INBOX).
+- Die App registriert NUR bei fehlendem Gerät oder Token-Wechsel; beim
+  Token-Wechsel meldet sie die alte Registrierung zuerst ab. Der NC-Proxy
+  (Talk/NC-Notifications) bleibt unverändert.
+
+**Erforderliche Server-Credentials (direkter APNs-Versand):**
+- APNs-Auth-Key (`.p8`), Key-ID, Team-ID (`S76D7JCS9V`), Bundle-ID
+  (`eu.souvera.app`). Der Key wird im Apple Developer Portal angelegt
+  (Certificates, Identifiers & Profiles -> Keys -> "+" -> APNs).
+- Leichen-Cleanup: APNs-Feedback auswerten (`Unregistered`/
+  `BadDeviceToken`) und das Gerät automatisch löschen.
+
+## 1b. Mail-Push (Altansatz, nur falls der direkte Weg nicht verfügbar)
 
 **Ziel:** Bei einer neuen Mail im Posteingang erhält der Benutzer sofort
 eine Push-Notification - unabhängig davon, ob die App offen ist.

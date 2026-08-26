@@ -95,7 +95,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // nur beim allerersten Mal (Talk-Standard). Ohne Mikrofon kein
             // Call; ohne Kamera läuft der Video-Call audio-only weiter.
             Task {
-                let audioOk = await CallPermissions.ensureAudio()
+                let audioOk = await CallPermissions.ensureAudio(allowPrompt: UIApplication.shared.applicationState == .active)
                 if !audioOk {
                     CallDebugLog.log("CallVC", "microphone denied - aborting call")
                     await MainActor.run { self.showPermissionDeniedHint() }

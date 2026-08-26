@@ -209,7 +209,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let request = response.notification.request
         let info = request.content.userInfo
         let identifier = request.identifier
-        if identifier.hasPrefix("mail_"), let emailId = info["emailId"] as? String, !emailId.isEmpty {
+        // souvera_mail-Standard-Push (direkte APNs, unverschlüsselt):
+        // emailId + mailboxPath direkt in die Mail-Detailansicht führen.
+        if let emailId = info["emailId"] as? String, !emailId.isEmpty {
+            let account = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            souveraOpenDeepLink(
+                target: .mail(account: account, emailId: emailId, mailboxPath: info["mailboxPath"] as? String ?? ""),
+                tabIndex: 0
+            )
+        } else if identifier.hasPrefix("mail_"), let emailId = info["emailId"] as? String, !emailId.isEmpty {
             let account = info["account"] as? String ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
             souveraOpenDeepLink(target: .mail(account: account, emailId: emailId), tabIndex: 0)
         } else if identifier.hasPrefix("eventreminder_"), let uid = info["uid"] as? String, !uid.isEmpty {
@@ -267,9 +275,43 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
                 for tblAccount in tblAccounts {
                     await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
+                    // Mail-Push (souvera_mail, direkter APNs-Push): Gerät
+                    // registrieren - NUR wenn noch keins gespeichert ist
+                    // oder der Token gewechselt hat (keine Leichen, kein
+                    // Müll bei jedem Start).
+                    let davPassword = NCPreferences().getPassword(account: tblAccount.account)
+                    guard !davPassword.isEmpty else { continue }
+                    if !SouveraMailDeviceRegistrar.isCurrent(account: tblAccount.account, apnsToken: deviceToken) {
+                        await SouveraMailDeviceRegistrar.register(
+                            baseUrl: tblAccount.urlBase,
+                            username: tblAccount.user,
+                            ncPassword: davPassword,
+                            apnsToken: deviceToken,
+                            account: tblAccount.account
+                        )
+                    }
                 }
             }
         }
+    }
+
+    /// Nach "In Souvera öffnen" (CallKit) bzw. beim Entsperren: läuft ein
+    /// Call ohne eigene UI, wird die Call-UI automatisch präsentiert.
+    func applicationDidBecomeActive(_ application: UIApplication) {
+        guard let session = LinkVoIPManager.shared.activeSession,
+              let info = LinkVoIPManager.shared.activeCallInfo,
+              let account = LinkAccount.active(),
+              let root = UIApplication.shared.mainAppWindow?.rootViewController else { return }
+        if root.presentedViewController is LinkCallViewController { return }
+        let callVC = LinkCallViewController(
+            account: account,
+            token: info.token,
+            title: info.title,
+            withVideo: info.withVideo,
+            session: session
+        )
+        callVC.modalPresentationStyle = .fullScreen
+        root.present(callVC, animated: true)
     }
 
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
