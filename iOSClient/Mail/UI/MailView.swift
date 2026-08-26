@@ -274,18 +274,26 @@ struct MailView: View {
             } else {
                 MailFolderListView(viewModel: viewModel)
             }
-        case .messages:
-            MailMessageListView(viewModel: viewModel)
-        case let .detail(message):
-            // Die Nachrichtenliste bleibt UNTER der Detailansicht gemountet
-            // (unsichtbar + nicht interaktiv), damit ihre Scrollposition
-            // beim Zurückkehren exakt erhalten bleibt - kein Anchor-Restore
-            // nötig.
+        case .messages, .detail:
+            // P62b: EINE Listen-Instanz für beide Zustände - die Detailansicht
+            // liegt als deckendes Overlay darüber. Nur so bleibt die
+            // SwiftUI-Identität der Liste erhalten und die Scrollposition
+            // überlebt den Detail-Roundtrip (getrennte Branches erzeugten
+            // jeweils NEUE Instanzen -> Scroll ging verloren).
+            let isDetail: Bool
+            let detailMessage: MailMessage?
+            if case let .detail(message) = viewModel.route {
+                isDetail = true
+                detailMessage = message
+            } else {
+                isDetail = false
+                detailMessage = nil
+            }
             ZStack {
-                MailMessageListView(viewModel: viewModel, toolbarActive: false)
-                    .opacity(0)
-                    .allowsHitTesting(false)
-                MailDetailView(viewModel: viewModel, message: message)
+                MailMessageListView(viewModel: viewModel, toolbarActive: !isDetail)
+                if let detailMessage {
+                    MailDetailView(viewModel: viewModel, message: detailMessage)
+                }
             }
         case .compose:
             MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
@@ -1305,6 +1313,9 @@ private struct MailDetailView: View {
             .padding(.top, 12)
             .padding(.bottom, 24)
         }
+        // P62b: opaker Hintergrund - die darunter gemountete Nachrichtenliste
+        // darf nicht durchscheinen und keine Taps durchlassen.
+        .background(Color(.systemBackground))
         .quickLookPreview($previewURL)
         .sheet(item: Binding(
             get: { moveTarget.map { MoveSheetState(messages: $0.0, mailboxes: $0.1) } },

@@ -182,8 +182,15 @@ final class MailViewModel: ObservableObject {
             if contextBox == nil {
                 contextBox = boxes.first(where: { $0.kind == .inbox })
             }
-            if let box = contextBox, currentMailbox?.id != box.id {
-                openMailbox(box)
+            if let box = contextBox {
+                if currentMailbox?.id != box.id {
+                    openMailbox(box)
+                } else {
+                    // P66b: Der Zielordner ist bereits offen - die Liste
+                    // trotzdem SOFORT aktualisieren, sonst bleibt sie nach
+                    // dem Push-Tap stehen (nur die Detailansicht öffnete).
+                    Task { await refreshMessages() }
+                }
             }
         }
         guard let api = jmapApi, let client = jmapClient else {
@@ -208,6 +215,14 @@ final class MailViewModel: ObservableObject {
                 mailboxId: mailboxId,
                 json: json
             )
+            // P66b: Die Mail SOFORT in die Liste mergen, damit die Übersicht
+            // augenblicklich stimmt (der Refresh läuft parallel weiter).
+            if case let .success(items) = messages,
+               !items.contains(where: { $0.emailId == message.emailId }) {
+                var updated = items
+                updated.insert(message, at: 0)
+                messages = .success(updated)
+            }
             // Über openMessage statt direkt route = .detail: lädt den Body
             // (Cache-first, Fallbacks) und markiert die Mail als gelesen -
             // sonst bliebe der Body der VORHERIGEN Mail sichtbar und die

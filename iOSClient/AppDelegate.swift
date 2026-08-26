@@ -354,8 +354,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 let app = json["app"] as? String ?? ""
                 let objectType = json["objectType"] as? String ?? ""
                 // P66: Payload-Logging - Verifikation der Push-Felder gegen
-                // die Spec (subject=Absender, message=Betreff).
-                SouveraLog.write("PushPayload", "app=\(app) objectType=\(objectType) objectId=\(json["objectId"] as? String ?? "-") subject=\(json["subject"] as? String ?? "-") message=\(json["message"] as? String ?? "-")")
+                // die Spec (subject=Absender, message=Betreff). P66c: das
+                // KOMPLETTE entschlüsselte JSON loggen (keine Secrets),
+                // damit die echte Feldstruktur des Servers sichtbar wird.
+                SouveraLog.write("PushPayload", "account=\(tblAccount.account) app=\(app) objectType=\(objectType) objectId=\(json["objectId"] as? String ?? "-") subject=\(json["subject"] as? String ?? "-") message=\(json["message"] as? String ?? "-")")
+                SouveraLog.write("PushPayloadJSON", decrypted)
                 guard app == "souvera_mail" || objectType == "souvera_mail" else { break }
                 let title = (json["subject"] as? String) ?? NSLocalizedString("_mail_", comment: "")
                 let body = (json["message"] as? String) ?? title

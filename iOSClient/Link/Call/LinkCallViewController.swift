@@ -77,12 +77,26 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             self.session = attached
             attached.reattach(callbacks: self)
             applyInitialControlStates()
+        } else if let active = LinkVoIPManager.shared.activeSession,
+                  active.token == token,
+                  !active.hasEnded {
+            // P68c: Läuft bereits eine Session zu DIESEM Raum (z. B. über
+            // CallKit angenommen und nun "In Souvera öffnen"/Video bzw.
+            // "Teilnehmen" getippt), wird sie ÜBERNOMMEN statt beendet.
+            // Der alte Fallback killte den laufenden Call (endActiveCall)
+            // und startete eine frische Session - Audio fiel aus, Video-
+            // Zustand ging verloren, der Anruf kam nur "verspätet" an.
+            self.session = active
+            active.reattach(callbacks: self)
+            applyInitialControlStates()
+            CallDebugLog.log("CallVC", "took over active session token=\(token.prefix(8)) (no restart)")
         } else {
             // Nur EINE Call-Session gleichzeitig: eine noch laufende Session
             // sauber beenden, bevor eine neue startet (sonst entstehen
             // parallele eigene Sessions im Raum -> MCU-Chaos, kein Medien-
             // Fluss, "Gelöschter Benutzer"-Geister).
             LinkVoIPManager.shared.endActiveCall()
+            CallDebugLog.log("CallVC", "no active session - starting fresh call token=\(token.prefix(8))")
             let session = CallSession(account: account, token: token, callbacks: self, withVideo: isVideoOn, silent: silent)
             self.session = session
             // Shared State registrieren: endActiveCall/leaveCall/Fullscreen-

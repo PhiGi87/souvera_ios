@@ -28,7 +28,8 @@ protocol CallSessionCallbacks: AnyObject {
 
 final class CallSession: NSObject, HpbSignalingListener {
     private let account: LinkAccount
-    private let token: String
+    /// Raum-Token (lesbar für die Call-Übernahme P68c).
+    let token: String
     var callbacks: CallSessionCallbacks?
 
     private let api: LinkOcsApi
@@ -252,29 +253,39 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// P68b: Entfernt Nicht-H264-Codecs aus den Video-m-Lines (inklusive
     /// zugehöriger rtpmap/fmtp/rtcp-fb-Zeilen) und behält die H264-
     /// Payload-Typen. Ohne H264-Zeilen bleibt das SDP unverändert.
+    /// P68d-Fix: NUR m=-Zeilen schalten die Sektion - die c=-Zeile direkt
+    /// nach m=video hatte vorher inVideo wieder ausgeschaltet, sodass die
+    /// rtpmap-Zeilen nie gesehen wurden und das SDP ungemungt blieb.
     static func forcingH264(_ sdpText: String) -> String {
         let lines = sdpText.components(separatedBy: "\r\n")
         var inVideo = false
         var h264Payloads: [String] = []
         for line in lines {
-            if line.hasPrefix("m=video") { inVideo = true }
+            if line.hasPrefix("m=") {
+                inVideo = line.hasPrefix("m=video")
+                continue
+            }
             if inVideo, line.hasPrefix("a=rtpmap:"), line.lowercased().contains("h264") {
                 let payload = line.dropFirst("a=rtpmap:".count).split(separator: " ").first ?? ""
                 if !payload.isEmpty { h264Payloads.append(String(payload)) }
             }
-            if inVideo, !line.hasPrefix("a="), !line.hasPrefix("m="), !line.isEmpty { inVideo = false }
         }
         guard !h264Payloads.isEmpty else { return sdpText }
         inVideo = false
         var out: [String] = []
         for line in lines {
-            if line.hasPrefix("m=video") {
-                inVideo = true
-                let tokens = line.split(separator: " ")
-                guard tokens.count >= 4 else { out.append(line); continue }
-                let payloads = tokens.dropFirst(3)
-                let kept = payloads.filter { h264Payloads.contains(String($0)) }
-                out.append((tokens.prefix(3) + (kept.isEmpty ? Array(payloads) : kept)).joined(separator: " "))
+            if line.hasPrefix("m=") {
+                inVideo = line.hasPrefix("m=video")
+                if inVideo {
+                    let tokens = line.split(separator: " ")
+                    if tokens.count >= 4 {
+                        let payloads = tokens.dropFirst(3)
+                        let kept = payloads.filter { h264Payloads.contains(String($0)) }
+                        out.append((tokens.prefix(3) + (kept.isEmpty ? Array(payloads) : kept)).joined(separator: " "))
+                        continue
+                    }
+                }
+                out.append(line)
                 continue
             }
             if inVideo {
@@ -285,7 +296,6 @@ final class CallSession: NSObject, HpbSignalingListener {
                     }
                     continue
                 }
-                if !line.hasPrefix("a=") { inVideo = false }
             }
             out.append(line)
         }
