@@ -13,6 +13,8 @@ struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var callContext: CallContext?
+    /// P68k: Nachricht, deren Bild gerade im Vollbild-Viewer geöffnet ist.
+    @State private var fullscreenImageMessage: LinkChatMessage?
     @State private var showCallBanner = false
     @State private var returnToCall = false
     @State private var showCreateChannel = false
@@ -209,6 +211,12 @@ struct LinkView: View {
                 )
                 .ignoresSafeArea()
             }
+        }
+        .fullScreenCover(item: $fullscreenImageMessage) { target in
+            LinkImageViewer(
+                title: target.fileInfo()?.name ?? "",
+                imageData: viewModel.chatImageCache[target.id]
+            )
         }
         .fullScreenCover(isPresented: $returnToCall) {
             if let info = LinkVoIPManager.shared.activeCallInfo,
@@ -937,6 +945,56 @@ struct LinkChatView: View {
         mentionSuggestions = []
     }
 
+    /// Nachrichten ohne gelöschte Systemmeldungen (Grundlage für Tages-
+    /// trenner und Unread-Linie).
+    private var visibleItems: [LinkChatMessage] {
+        guard case let .success(items) = viewModel.messages else { return [] }
+        return items.filter { $0.systemMessage != "message_deleted" }
+    }
+
+    private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
+        guard index > 0 else { return true }
+        let previous = visibleItems[index - 1]
+        let calendar = Calendar.current
+        let prevDay = calendar.startOfDay(for: Date(timeIntervalSince1970: previous.timestamp))
+        let thisDay = calendar.startOfDay(for: Date(timeIntervalSince1970: message.timestamp))
+        return prevDay != thisDay
+    }
+
+    /// Dezente Tages-Trennlinie im Verlauf (P68j).
+    private func daySeparatorRow(for timestamp: TimeInterval) -> some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
+            Text(dayLabel(for: timestamp))
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .listRowSeparator(.hidden)
+        .listRowInsets(EdgeInsets())
+        .listRowBackground(Color.clear)
+    }
+
+    private func dayLabel(for timestamp: TimeInterval) -> String {
+        let date = Date(timeIntervalSince1970: timestamp)
+        let calendar = Calendar.current
+        if calendar.isDateInToday(date) {
+            return NSLocalizedString("_link_today_", comment: "")
+        }
+        if calendar.isDateInYesterday(date) {
+            return NSLocalizedString("_link_yesterday_", comment: "")
+        }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "EEEE, d. MMMM"
+        return formatter.string(from: date)
+    }
+
     @ViewBuilder
     private var messageList: some View {
         switch viewModel.messages {
@@ -958,7 +1016,12 @@ struct LinkChatView: View {
                         .listRowSeparator(.hidden)
                         .onAppear { viewModel.loadEarlierHistory() }
                     }
-                    ForEach(Array(items.filter { $0.systemMessage != "message_deleted" }.enumerated()), id: \.element.id) { index, message in
+                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
+                        // Tageswechsel-Trennlinie (P68j): vor der ersten
+                        // Nachricht eines neuen Kalendertags.
+                        if showsDaySeparator(index: index, message: message) {
+                            daySeparatorRow(for: message.timestamp)
+                        }
                         // "Neue Nachrichten"-Trennlinie vor der ersten
                         // ungelesenen Nachricht (Talk-Standard).
                         if !viewModel.hideUnreadSeparator,
@@ -983,6 +1046,9 @@ struct LinkChatView: View {
                                     // Datei im Dateien-Modul anzeigen (Ordner
                                     // des Talk-Uploads statt lokaler Vorschau).
                                     viewModel.openFileInFiles(info)
+                                },
+                                onImageTap: { target in
+                                    fullscreenImageMessage = target
                                 },
                                 onStartReply: { replyingTo = message },
                                 onStartForward: { forwardTarget = message },
@@ -1356,6 +1422,8 @@ private struct LinkMessageRow: View {
     var showsAvatar: Bool = true
     let onStartEdit: () -> Void
     let onFileTap: (LinkFileInfo) -> Void
+    /// P68k: Tap auf ein Inline-Bild -> Vollbild-Viewer.
+    var onImageTap: (LinkChatMessage) -> Void = { _ in }
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
@@ -1441,6 +1509,31 @@ private struct LinkMessageRow: View {
         }
     }
 
+    /// Inline-Bild-Thumbnail (P68k): geladen -> Bild, sonst Platzhalter.
+    @ViewBuilder
+    private var chatImageThumbnail: some View {
+        if let data = viewModel.chatImageCache[message.id], !data.isEmpty,
+           let ui = UIImage(data: data) {
+            Image(uiImage: ui)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 220, maxHeight: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+        } else {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: 160, height: 100)
+                .overlay(
+                    HStack(spacing: 6) {
+                        Image(systemName: "photo").font(.caption)
+                        Text(NSLocalizedString("_link_image_loading_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                )
+        }
+    }
+
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             if !isOwn {
@@ -1456,23 +1549,41 @@ private struct LinkMessageRow: View {
                 }
                 replyQuote
                 if let file = message.fileInfo() {
-                    Button {
-                        onFileTap(file)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "paperclip").font(.caption)
-                            Text(file.name).font(.caption).lineLimit(1)
-                            if file.size > 0 {
-                                Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                    if viewModel.isImageMessage(message) {
+                        // P68k: Bild INLINE anzeigen (Thumbnail), Tap ->
+                        // Vollbild. Kleiner Dateiname als Caption.
+                        Button {
+                            onImageTap(message)
+                        } label: {
+                            VStack(alignment: isOwn ? .trailing : .leading, spacing: 4) {
+                                chatImageThumbnail
+                                Text(file.name)
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
                         }
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Color(.secondarySystemBackground), in: Capsule())
+                        .buttonStyle(.plain)
+                        .task { await viewModel.loadChatImage(for: message) }
+                    } else {
+                        Button {
+                            onFileTap(file)
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "paperclip").font(.caption)
+                                Text(file.name).font(.caption).lineLimit(1)
+                                if file.size > 0 {
+                                    Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Color(.secondarySystemBackground), in: Capsule())
+                        }
+                        .buttonStyle(.plain)
                     }
-                    .buttonStyle(.plain)
                 }
                 HStack(spacing: 0) {
                     if isOwn { Spacer(minLength: 40) }

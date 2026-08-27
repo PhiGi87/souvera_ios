@@ -329,7 +329,7 @@ final class MailViewModel: ObservableObject {
                     self.nextAutoRefreshAt = Date().addingTimeInterval(interval)
                     guard self.composeContext == nil else { continue }
                     if self.currentMailbox != nil {
-                        await self.refreshMessages()
+                        await self.refreshMessagesIncremental()
                     } else {
                         // Ordnerübersicht: Postfächer (Ungelesen-Zähler) aktualisieren
                         await self.loadMailboxes(autoOpenInbox: false)
@@ -1022,7 +1022,7 @@ final class MailViewModel: ObservableObject {
                     guard generation == listGeneration else { return }
                     queryStates[cacheKey] = newState
                     MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
-                    messages = .success(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
+                    messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
@@ -1055,7 +1055,7 @@ final class MailViewModel: ObservableObject {
                 isFetchingMail = true
             } else {
                 let cachedList = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
-                messages = .success(protectingLiveMessages(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
+                messages = .success(filterPendingRemoved(protectingLiveMessages(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             }
             var lastId: String?
             var hasMore = false
@@ -1114,7 +1114,7 @@ final class MailViewModel: ObservableObject {
                 queryStates[cacheKey] = state
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
-                messages = .success(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
+                messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                 if !pageHasMore {
                     break
                 }
@@ -1128,8 +1128,9 @@ final class MailViewModel: ObservableObject {
             pageState = (lastId: lastId, hasMore: hasMore)
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
-            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collected, queryState: state)
-            messages = .success(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
+            let savedCollected = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: savedCollected, queryState: state)
+            messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             isFetchingMail = false
             prefetchBodies(mailbox: mailbox)
 
@@ -1154,10 +1155,11 @@ final class MailViewModel: ObservableObject {
                 }
                 guard !missing.isEmpty, self.listGeneration == generation else { return }
                 JmapLog.write("P64 stale verification removed \(missing.count) of \(cachedIds.count) cached mails")
-                let kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
+                var kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
+                kept = kept.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 if self.currentMailbox?.id == mailbox.id, self.listGeneration == generation {
-                    self.messages = .success(protectingLiveMessages(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) }))
+                    self.messages = .success(filterPendingRemoved(protectingLiveMessages(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                 }
             }
         } catch {
@@ -1233,8 +1235,9 @@ final class MailViewModel: ObservableObject {
                 guard generation == listGeneration else { return }
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
-                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: emails, queryState: snapshot?.queryState ?? "")
-                messages = .success(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })
+                let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
+                messages = .success(filterPendingRemoved(protectingLiveMessages(keptEmails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })))
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
                 isFetchingMail = false
@@ -1269,6 +1272,14 @@ final class MailViewModel: ObservableObject {
     /// P62d: Debounce-Task für den Refresh nach Mutationen (Löschen/
     /// Verschieben) - ein Refresh nach der LETZTEN Mutation statt pro Swipe.
     private var mutationRefreshTask: Task<Void, Never>?
+    /// P62f: Optimistisch entfernte Mail-IDs - Sync-Publishes und Cache-Saves
+    /// filtern sie, bis der Debounce-Refresh (Server-Wahrheit) bestätigt.
+    /// Verhindert das Wiederauftauchen gelöschter Mails durch parallel
+    /// laufende Syncs (log-belegter Reappear).
+    private var pendingRemovedIds: Set<String> = []
+    /// P62f: FIFO für Lösch-/Move-Tasks (keine parallelen Session-Races
+    /// zwischen Folge-Löschungen).
+    private var deleteWorkTask: Task<Void, Never>?
 
     /// P62c: Vereinigt einen Publish mit den Live-Einträgen, deren IDs
     /// geschützt sind (Deep-Link-Mail) - bis der Server sie selbst liefert.
@@ -1301,6 +1312,12 @@ final class MailViewModel: ObservableObject {
         }
         result.sort { $0.dateSent > $1.dateSent }
         return result
+    }
+
+    /// P62f: Filtert optimistisch entfernte IDs aus einer Publish-Liste.
+    private func filterPendingRemoved(_ published: [MailMessage]) -> [MailMessage] {
+        guard !pendingRemovedIds.isEmpty else { return published }
+        return published.filter { !pendingRemovedIds.contains($0.emailId) }
     }
 
     /// IMAP-artiger Voll-Cache: lädt die Bodies der geladenen Mails im
@@ -1407,6 +1424,18 @@ final class MailViewModel: ObservableObject {
         }
         // Badge autoritativ nachziehen - extern ankommende Mails würden
         // sonst erst mit dem nächsten Postfach-Load zählen.
+        await refreshUnreadBadge()
+    }
+
+    /// P62f: Inkrementeller Refresh (queryChanges statt Voll-Refresh) -
+    /// für den Auto-Refresh-Timer (sonst lädt jeder Zyklus 300 Mails neu).
+    func refreshMessagesIncremental() async {
+        guard let mailbox = currentMailbox else { return }
+        if useJmap {
+            await syncMessagesJmap(mailbox, forceFullRefresh: false)
+        } else {
+            await syncMessagesImap(mailbox)
+        }
         await refreshUnreadBadge()
     }
 
@@ -1738,6 +1767,8 @@ final class MailViewModel: ObservableObject {
     private func optimisticRemove(_ ids: [String]) {
         let removed = Set(ids)
         guard !removed.isEmpty else { return }
+        // P62f: bis zum bestätigenden Refresh filtern Syncs die IDs aus.
+        pendingRemovedIds.formUnion(removed)
         if useJmap, let mailbox = currentMailbox {
             let accountName = mailAccount?.account ?? ""
             if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
@@ -1766,24 +1797,43 @@ final class MailViewModel: ObservableObject {
 
     func delete(_ messagesToDelete: [MailMessage]) {
         // P62d: OPTIMISTISCH - Zeile/Badge/Cache sofort entfernen, damit der
-        // Swipe nicht "flappt", während der Server-Call läuft. Der Task
-        // macht danach nur noch den Server-Call + gebündelten Refresh.
+        // Swipe nicht "flappt", während der Server-Call läuft.
         optimisticRemove(messagesToDelete.map(\.emailId))
-        Task {
-            guard let first = messagesToDelete.first else { return }
+        // P62f: FIFO - Folge-Löschungen laufen nicht parallel (Session-Races).
+        let ids = messagesToDelete.map(\.emailId)
+        let work = { [weak self] in
+            await self?.performDelete(messagesToDelete, ids: ids)
+        }
+        let previous = deleteWorkTask
+        deleteWorkTask = Task {
+            await previous?.value
+            await work()
+        }
+    }
+
+    /// Server-Call des Löschens + Ergebnisprüfung (P62f): No-Op
+    /// (oldState==newState) = bereits verschoben; echter Fehler = Zeile
+    /// wiederherstellen + Feedback statt still schlucken.
+    private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async {
+        guard let first = messagesToDelete.first else { return }
+        do {
             if useJmap {
                 guard let api = jmapApi,
                       let client = jmapClient,
-                      let session = try? await client.refreshSession() else { return }
+                      let session = try await client.refreshSession() else { return }
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 // Trash must live in the same JMAP account as the message.
                 if let trash = allMailboxes.first(where: { $0.kind == .trash && $0.accountId == accId }),
                    let trashJmapId = trash.jmapId,
                    trashJmapId != currentMailbox?.jmapId {
-                    _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId), targetMailboxId: trashJmapId)
+                    let resp = try await api.moveEmails(accountId: accId, emailIds: ids, targetMailboxId: trashJmapId)
+                    let noOp = (resp["oldState"] as? String) == (resp["newState"] as? String)
+                    if noOp {
+                        JmapLog.write("delete: already moved (no-op) for \(ids.joined(separator: ","))")
+                    }
                     invalidateCache(for: trash)
                 } else {
-                    _ = try? await api.deleteEmails(accountId: accId, emailIds: messagesToDelete.map(\.emailId))
+                    _ = try await api.deleteEmails(accountId: accId, emailIds: ids)
                 }
             } else {
                 guard let mailbox = currentMailbox,
@@ -1795,8 +1845,19 @@ final class MailViewModel: ObservableObject {
                     }
                 }
             }
-            afterListMutation(messagesToDelete.map(\.emailId))
+        } catch {
+            // P62f: Server-Fehler - Filter aufheben, Zeilen wiederherstellen
+            // (Refresh holt den Server-Stand) und Feedback zeigen.
+            JmapLog.write("delete FAILED for \(ids.joined(separator: ",")): \(error.localizedDescription)")
+            pendingRemovedIds.subtract(ids)
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_delete_failed_", comment: "")
+            )
+            Task { await refreshMessages() }
+            return
         }
+        afterListMutation(ids)
     }
 
     /// Moves messages to another mailbox of the same JMAP account
@@ -1882,6 +1943,9 @@ final class MailViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 guard !Task.isCancelled else { return }
                 await self?.refreshMessages()
+                // P62f: Der Refresh hat den Server-Stand publiziert (mit
+                // Filter) - jetzt sind die IDs freigegeben.
+                self?.pendingRemovedIds.removeAll()
             }
         } else if !lastSearchQuery.isEmpty {
             Task { await search(lastSearchQuery) }

@@ -44,6 +44,9 @@ final class LinkViewModel: ObservableObject {
     @Published var userResults: [LinkSuggestion] = []
     /// In-Memory-Avatar-Cache (URL -> Bilddaten) für Raum- und Nutzer-Avatare.
     @Published var avatarCache: [String: Data] = [:]
+    /// P68k: Inline-Bilder des Chats (Key = Message-ID; leeres Data =
+    /// Laden fehlgeschlagen -> Chip-Fallback).
+    @Published var chatImageCache: [Int64: Data] = [:]
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
     /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
@@ -113,6 +116,43 @@ final class LinkViewModel: ObservableObject {
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
         // erstellte Channels sofort sichtbar sind.
         loadConversations()
+    }
+
+    /// P68k: Ist die Nachricht eine anzeigbare Bild-Datei?
+    func isImageMessage(_ message: LinkChatMessage) -> Bool {
+        guard let info = message.fileInfo() else { return false }
+        let ext = (info.name as NSString).pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "gif", "webp", "heic", "heif", "bmp"].contains(ext)
+    }
+
+    /// P68k: Lädt ein Chat-Bild (WebDAV) und skaliert es fürs Thumbnail
+    /// herunter (Speicherschutz bei großen Fotos).
+    func loadChatImage(for message: LinkChatMessage) async {
+        guard chatImageCache[message.id] == nil,
+              let info = message.fileInfo(),
+              let path = info.path,
+              let api else { return }
+        guard let url = await api.downloadChatAttachment(path: path),
+              let data = try? Data(contentsOf: url) else {
+            await MainActor.run { chatImageCache[message.id] = Data() }
+            return
+        }
+        let scaled = await Self.downscaledImageData(data, maxDimension: 1280) ?? data
+        await MainActor.run { chatImageCache[message.id] = scaled }
+    }
+
+    /// Skaliert Bilddaten auf maxDimension (längste Kante) herunter.
+    nonisolated static func downscaledImageData(_ data: Data, maxDimension: CGFloat) async -> Data? {
+        guard let image = UIImage(data: data) else { return nil }
+        let largest = max(image.size.width, image.size.height)
+        guard largest > maxDimension else { return data }
+        let scale = maxDimension / largest
+        let size = CGSize(width: image.size.width * scale, height: image.size.height * scale)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        let resized = renderer.image { _ in
+            image.draw(in: CGRect(origin: .zero, size: size))
+        }
+        return resized.jpegData(compressionQuality: 0.85)
     }
 
     func searchUsers(query: String) {
@@ -468,7 +508,15 @@ final class LinkViewModel: ObservableObject {
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
-            self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+            // P68j: Room-Objekt nachziehen, falls beim Eintritt (z. B. über
+            // Deep-Link) noch kein currentRoom vorhanden war - sonst fehlt
+            // die "Neue Nachrichten"-Trennlinie (lastReadMessage = 0).
+            if self.currentRoom == nil, case let .success(rooms) = self.conversations {
+                self.currentRoom = rooms.first(where: { $0.token == token })
+            }
+            let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
+            let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
+            self.updateUnreadBoundary(roomLastRead: effectiveLastRead, roomUnread: effectiveUnread)
             // Verlauf beim Eintritt NUR bei ungelesenen Nachrichten komplett
             // nachladen (sonst läuft das Netz unsichtbar im Hintergrund und
             // ältere Seiten kommen per Scroll nach).
@@ -482,7 +530,7 @@ final class LinkViewModel: ObservableObject {
 
     /// Berechnet die erste ungelesene Nachricht aus dem geladenen Fenster.
     private func updateUnreadBoundary(roomLastRead: Int64, roomUnread: Int) {
-        guard roomUnread > 0, roomLastRead > 0 else {
+        guard roomUnread > 0 else {
             unreadBoundary = nil
             return
         }
@@ -491,7 +539,14 @@ final class LinkViewModel: ObservableObject {
             return
         }
         let sorted = items.sorted { $0.id < $1.id }
-        unreadBoundary = sorted.first(where: { $0.id > roomLastRead })?.id
+        if roomLastRead > 0 {
+            unreadBoundary = sorted.first(where: { $0.id > roomLastRead })?.id
+        } else {
+            // lastReadMessage == 0 (frischer Raum/Account bzw. Room-Objekt
+            // noch nicht geladen): ALLES im Fenster ist ungelesen - die
+            // Trennlinie markiert dann den Anfang der neuen Nachrichten.
+            unreadBoundary = sorted.first?.id
+        }
     }
 
     private var markReadWorkItem: DispatchWorkItem?

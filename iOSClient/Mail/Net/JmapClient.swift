@@ -26,8 +26,11 @@ actor JmapClient {
 
     private nonisolated let urlSession: URLSession = {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 60
+        config.timeoutIntervalForRequest = 60
+        // P68i: 180 s Ressource-Timeout - der Log-Versand (Blob-Upload,
+        // bis zu einigen MB) lief sonst in den 60-s-Timeout (Log-Beweis:
+        // "Zeitüberschreitung bei der Anforderung").
+        config.timeoutIntervalForResource = 180
         return URLSession(configuration: config)
     }()
 

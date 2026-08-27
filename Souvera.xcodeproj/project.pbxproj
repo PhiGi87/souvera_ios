@@ -17,6 +17,7 @@
 		C9A1F5E2B3D8472109E6F8A7 /* LinkBadgeMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B2C3E6F1A8492307B5C8D9 /* LinkBadgeMonitor.swift */; };
 		B7E3D1A5C8F2496E02B4A7C1 /* SouveraMaintenanceMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */; };
 		F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */; };
+		A945F64BF0DF50D2E4CB9A16 /* LinkImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */; };
 		E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */; };
@@ -1270,6 +1271,7 @@
 		D4B2C3E6F1A8492307B5C8D9 /* LinkBadgeMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkBadgeMonitor.swift"; sourceTree = SOURCE_ROOT; };
 		E5A2F7C3B9D14806E3C6F9A2 /* SouveraMaintenanceMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraMaintenanceMonitor.swift"; sourceTree = SOURCE_ROOT; };
 		A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkCache.swift"; sourceTree = SOURCE_ROOT; };
+		76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/LinkImageViewer.swift"; sourceTree = SOURCE_ROOT; };
 		B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraAppearance.swift"; sourceTree = SOURCE_ROOT; };
 		C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
 		C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBanner.swift"; sourceTree = SOURCE_ROOT; };
@@ -3282,6 +3284,7 @@
 				4B0CFE3E156D0EE7C3FDD6A7 /* SouveraToast.swift */,
 				D4B2C3E6F1A8492307B5C8D9 /* LinkBadgeMonitor.swift */,
 				A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */,
+				76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */,
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
 				D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */,
 				30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */,
@@ -5025,7 +5028,8 @@
 				11C2DD393E394409F11CC51A /* SouveraBadge.swift in Sources */,
 				B7CA2D7D98A0C4D3ADBBC323 /* SouveraToast.swift in Sources */,
 				C9A1F5E2B3D8472109E6F8A7 /* LinkBadgeMonitor.swift in Sources */,
-				F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */,
+				F2C8B4A6D1E3497F03C5B8D2 A945F64BF0DF50D2E4CB9A16 /* LinkImageViewer.swift in Sources */,
+				/* LinkCache.swift in Sources */,
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
 				A3D201096C4962E5A83184F6 /* SouveraPushToggles.swift in Sources */,
 				8AD227B5D3FD8FFBB3ED4284 /* SouveraInviteResponse.swift in Sources */,

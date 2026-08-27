@@ -32,11 +32,12 @@ enum SouveraLogSender {
         parts.append("Letzter Push-Test: \(UserDefaults.standard.string(forKey: "SouveraLastTestPushResult") ?? "-")")
         parts.append("")
         parts.append("=== souvera-app.log ===")
-        parts.append(SouveraLog.fileContent())
+        parts.append(Self.recentTail(of: SouveraLog.fileContent(), maxBytes: 2_500_000))
         parts.append("=== souvera-mail.log ===")
         if let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let mailLog = documents.appendingPathComponent("souvera-mail.log")
-            parts.append((try? String(contentsOf: mailLog, encoding: .utf8)) ?? "(keine Mail-Logs)")
+            let content = (try? String(contentsOf: mailLog, encoding: .utf8)) ?? "(keine Mail-Logs)"
+            parts.append(Self.recentTail(of: content, maxBytes: 2_500_000))
         }
         return parts.joined(separator: "\n")
     }
@@ -52,6 +53,20 @@ enum SouveraLogSender {
             SouveraLog.write("LogSender", "share file write failed: \(error.localizedDescription)")
             return nil
         }
+    }
+
+    /// P68i: Kürzt Log-Inhalte auf die LETZTEN maxBytes (die neuesten
+    /// Einträge sind für die Diagnose entscheidend - der Versand bleibt
+    /// klein und schnell).
+    private static func recentTail(of content: String, maxBytes: Int) -> String {
+        let utf8 = content.utf8
+        guard utf8.count > maxBytes else { return content }
+        let start = utf8.index(utf8.endIndex, offsetBy: -maxBytes)
+        var tail = String(utf8[start...]) ?? content
+        if let firstLineBreak = tail.firstIndex(of: "\n") {
+            tail = String(tail[firstLineBreak...]).trimmingCharacters(in: .newlines)
+        }
+        return "(gekürzt) …\n" + tail
     }
 
     /// Letzter Push-Registrierungsstatus (aus UserDefaults, geschrieben von
@@ -80,7 +95,9 @@ enum SouveraLogSender {
                 return .failure(MailSendError.noClient)
             }
 
-            let logs = combinedLog()
+            // P68i: Log-Aufbereitung VOM MAIN THREAD (bis ~18 MB Lesen
+            // fror die UI beim Tippen ein) + auf die letzten 5 MB kürzen.
+            let logs = await Task.detached { combinedLog() }.value
             let data = Data(logs.utf8)
             let uploaded = try await client.uploadBlob(accountId: accId, data: data, contentType: "text/plain")
             let blobId = uploaded.blobId

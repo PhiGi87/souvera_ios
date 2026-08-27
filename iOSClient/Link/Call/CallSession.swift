@@ -130,17 +130,31 @@ final class CallSession: NSObject, HpbSignalingListener {
             callFlags &= ~4
         }
         timingLog("startMedia")
-        // P68g: joinRoom und getSignalingSettings PARALLEL laden (waren
-        // sequenziell - ~0,4 s Ersparnis beim Kaltstart).
-        async let roomResult = api.joinRoom(token: token)
-        async let settingsResult = api.getSignalingSettings(token: token)
-        guard let ncSession = await roomResult else {
-            CallDebugLog.log("CallSession", "joinRoom failed"); return end()
+        // P68g: Pre-Warm verwenden, falls der VoIP-Push die OCS-Phase schon
+        // vor der Annahme geladen hat (kalter Start: ~2,4 s gespart).
+        var ncSession: String?
+        var settings: SignalingSettings?
+        if let pre = LinkVoIPManager.shared.consumePrewarmedSignaling(for: token) {
+            ncSession = pre.sessionId
+            settings = pre.settings
+            timingLog("prewarm consumed")
+        } else {
+            // joinRoom und getSignalingSettings PARALLEL laden.
+            async let roomResult = api.joinRoom(token: token)
+            async let settingsResult = api.getSignalingSettings(token: token)
+            guard let room = await roomResult else {
+                CallDebugLog.log("CallSession", "joinRoom failed"); return end()
+            }
+            guard let fetchedSettings = await settingsResult else {
+                CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
+            }
+            ncSession = room
+            settings = fetchedSettings
+            timingLog("ocs calls done")
         }
-        guard let settings = await settingsResult else {
-            CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
+        guard let ncSession, let settings else {
+            CallDebugLog.log("CallSession", "signaling setup failed"); return end()
         }
-        timingLog("ocs calls done")
         // joinCall runs after the signaling room join (onRoomJoined) -
         // mirroring the Android client. Opening the call earlier makes
         // the MCU ignore our publisher.
@@ -185,11 +199,14 @@ final class CallSession: NSObject, HpbSignalingListener {
         sendJoinCall()
     }
 
-    /// P68g: Idempotenter joinCall mit Retry (talk-iOS-Muster: bis zu 3
-    /// Versuche). Ein 404 nach dem Room-Join bedeutet "Session nicht mehr
-    /// korrekt gejoint" - dann EINMAL den Raum- und Call-Flow neu aufbauen
-    /// (talk-iOS forceReconnect), statt nur blind zu retrien.
+    /// P68g: joinCall mit klarer Fehlerpolitik:
+    /// - 404 (deterministisch: "not joined"): KEINE Retries - sofort der
+    ///   BILLIGE Rejoin (nur joinRoom erneut + joinCall erneut, die
+    ///   bestehende Signaling-Verbindung bleibt stehen). Greift der auch
+    ///   nicht, folgt einmalig der volle Neuaufbau (talk-iOS forceReconnect).
+    /// - Netzfehler (0/5xx): bis zu 3 Retries.
     private var joinCallSent = false
+    private var cheapRejoinDone = false
     private var forceRejoinedOnce = false
     private func sendJoinCall(retry: Int = 3) {
         guard !joinCallSent, !endedOnce else { return }
@@ -203,33 +220,53 @@ final class CallSession: NSObject, HpbSignalingListener {
             if ok {
                 CallDebugLog.log("CallSession", "joinCall sent flags=\(flags)")
                 self.timingLog("joinCall ok")
-            } else if retry > 0, !self.endedOnce {
-                CallDebugLog.log("CallSession", "joinCall failed http=\(status) - retry (\(retry) left)")
-                try? await Task.sleep(nanoseconds: 500_000_000)
+            } else if status == 404, !self.cheapRejoinDone, !self.endedOnce {
+                // Billiger Rejoin: nur joinRoom + joinCall erneut (Signaling
+                // bleibt). ~0,5 s statt ~2,5 s Komplett-Neuaufbau.
+                CallDebugLog.log("CallSession", "joinCall 404 - cheap rejoin (joinRoom only)")
+                self.cheapRejoinDone = true
                 self.joinCallSent = false
-                self.sendJoinCall(retry: retry - 1)
+                guard let _ = await self.api.joinRoom(token: self.token) else {
+                    CallDebugLog.log("CallSession", "cheap rejoin: joinRoom failed - full force rejoin")
+                    self.forceFullRejoin()
+                    return
+                }
+                self.sendJoinCall(retry: 0)
             } else if status == 404, !self.forceRejoinedOnce, !self.endedOnce {
-                // talk-iOS forceReconnect: 404 = Session nicht mehr korrekt
-                // gejoint - Signaling neu verbinden + Raum erneut joinen,
-                // dann joinCall EINMAL wiederholen.
-                CallDebugLog.log("CallSession", "joinCall 404 - force rejoin once")
-                self.forceRejoinedOnce = true
-                self.joinCallSent = false
-                self.signaling?.close()
-                self.signaling = nil
-                self.publisherCreated = false
-                self.peers.removeAll()
-                self.statusChannels.removeAll()
-                Task { [weak self] in
-                    guard let self else { return }
-                    await self.startMedia()
+                CallDebugLog.log("CallSession", "joinCall 404 again - full force rejoin once")
+                self.forceFullRejoin()
+            } else if status == 0 || status >= 500 {
+                if retry > 0, !self.endedOnce {
+                    CallDebugLog.log("CallSession", "joinCall network error http=\(status) - retry (\(retry) left)")
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    self.joinCallSent = false
+                    self.sendJoinCall(retry: retry - 1)
+                } else {
+                    CallDebugLog.log("CallSession", "joinCall FAILED http=\(status) - ending call")
+                    self.hangup()
                 }
             } else {
-                // Kein Weg mehr: Call sauber beenden statt ihn hängen zu
-                // lassen (sonst "Call im Nirvana").
+                // Andere Fehler (400 consent, 403 Lobby ...): Call beenden.
                 CallDebugLog.log("CallSession", "joinCall FAILED http=\(status) - ending call")
                 self.hangup()
             }
+        }
+    }
+
+    /// talk-iOS forceReconnect: Signaling neu verbinden + Raum erneut
+    /// joinen, dann joinCall noch einmal.
+    private func forceFullRejoin() {
+        guard !forceRejoinedOnce, !endedOnce else { return }
+        forceRejoinedOnce = true
+        joinCallSent = false
+        signaling?.close()
+        signaling = nil
+        publisherCreated = false
+        peers.removeAll()
+        statusChannels.removeAll()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.startMedia()
         }
     }
 
@@ -810,31 +847,35 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     private func fetchStats(peer: RTCPeerConnection, attempt: Int, tag: String) async {
-        do {
-            let report = try await peer.statistics()
-            let values = report.statistics.values
-            let outbound = values
-                .filter { ($0.values["type"] as? String) == "outbound-rtp" }
-                .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
-            if outbound.isEmpty {
-                let types = values.compactMap { $0.values["type"] as? String }
-                let kindMap = Dictionary(grouping: types, by: { $0 }).mapValues { $0.count }
-                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none; stat types=[\(kindMap.sorted { $0.key < $1.key }.map { "\($0.key)x\($0.value)" }.joined(separator: ","))]")
+        // P68f: Callback-API statt der Async-Variante - letztere lieferte
+        // auf diesem WebRTC-Build IMMER einen leeren Report (stat
+        // types=[]), sodass nie sichtbar war, ob Video-Frames fließen.
+        let report = await withCheckedContinuation { cont in
+            peer.statistics { report in
+                cont.resume(returning: report)
             }
-            for stat in outbound {
-                let media = stat.values["mediaType"] as? String
-                    ?? stat.values["kind"] as? String ?? "?"
-                let bytes = stat.values["bytesSent"] as? NSNumber ?? 0
-                let packets = stat.values["packetsSent"] as? NSNumber ?? 0
-                CallDebugLog.log("CallSession", "publisher outbound-rtp [\(media)] bytesSent=\(bytes) packetsSent=\(packets) [\(tag)]")
-            }
-        } catch {
-            if attempt < 2 {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                await fetchStats(peer: peer, attempt: attempt + 1, tag: tag)
-            } else {
-                CallDebugLog.log("CallSession", "publisher stats failed [\(tag)]: \(error.localizedDescription)")
-            }
+        }
+        let values = report.statistics.values
+        // Leerer Report = API quirk: einmal kurz warten und erneut probieren.
+        if values.isEmpty, attempt < 2 {
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            await fetchStats(peer: peer, attempt: attempt + 1, tag: tag)
+            return
+        }
+        let outbound = values
+            .filter { ($0.values["type"] as? String) == "outbound-rtp" }
+            .sorted { (($0.values["kind"] as? String) ?? "") < (($1.values["kind"] as? String) ?? "") }
+        if outbound.isEmpty {
+            let types = values.compactMap { $0.values["type"] as? String }
+            let kindMap = Dictionary(grouping: types, by: { $0 }).mapValues { $0.count }
+            CallDebugLog.log("CallSession", "publisher outbound-rtp [\(tag)]: none; stat types=[\(kindMap.sorted { $0.key < $1.key }.map { "\($0.key)x\($0.value)" }.joined(separator: ","))]")
+        }
+        for stat in outbound {
+            let media = stat.values["mediaType"] as? String
+                ?? stat.values["kind"] as? String ?? "?"
+            let bytes = stat.values["bytesSent"] as? NSNumber ?? 0
+            let packets = stat.values["packetsSent"] as? NSNumber ?? 0
+            CallDebugLog.log("CallSession", "publisher outbound-rtp [\(media)] bytesSent=\(bytes) packetsSent=\(packets) [\(tag)]")
         }
     }
 }

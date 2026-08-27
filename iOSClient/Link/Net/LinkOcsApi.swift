@@ -350,8 +350,13 @@ actor LinkOcsApi {
     /// Joins the room as an active participant; returns the Nextcloud session id (for HPB room join).
     func joinRoom(token: String) async -> String? {
         let req = signed(url: "\(base)/api/v4/room/\(token)/participants/active", method: "POST")
-        guard let (data, response) = try? await session.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode ?? 500 < 300 else { return nil }
+        guard let (data, response) = try? await session.data(for: req) else {
+            CallDebugLog.log("OcsApi", "joinRoom failed (no response)")
+            return nil
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "joinRoom http=\(status)")
+        guard status < 300 else { return nil }
         let env = try? decoder.decode(OcsEnvelope<JoinRoomData>.self, from: data)
         return env?.ocs.data?.sessionId
     }
