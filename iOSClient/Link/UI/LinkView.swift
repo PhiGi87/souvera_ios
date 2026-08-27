@@ -1688,16 +1688,21 @@ private struct LinkMessageBubble: View {
             }
             if isPdfMessage {
                 pdfContent
-                // Optionaler Text des Absenders unter dem Bild.
+                // Optionaler Text des Absenders unter dem Bild - auf die
+                // Thumbnail-Breite begrenzt, damit die Bubble nicht
+                // unnötig breit wird.
                 if let caption = message.fileCaption() {
                     Text(caption)
+                        .frame(maxWidth: 180, alignment: .leading)
                         .souveraOpenURLAction()
                 }
             } else if isImageMessage {
                 imageContent
-                // Optionaler Text des Absenders unter dem Bild.
+                // Optionaler Text des Absenders unter dem Bild - auf die
+                // Thumbnail-Breite begrenzt (Bubble passt sich dem Bild an).
                 if let caption = message.fileCaption() {
                     Text(caption)
+                        .frame(maxWidth: 220, alignment: .leading)
                         .souveraOpenURLAction()
                 }
             } else if message.fileName() != nil {
