@@ -1819,8 +1819,8 @@ final class MailViewModel: ObservableObject {
         do {
             if useJmap {
                 guard let api = jmapApi,
-                      let client = jmapClient,
-                      let session = try await client.refreshSession() else { return }
+                      let client = jmapClient else { return }
+                let session = try await client.refreshSession()
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 // Trash must live in the same JMAP account as the message.
                 if let trash = allMailboxes.first(where: { $0.kind == .trash && $0.accountId == accId }),

@@ -13,8 +13,6 @@ struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @State private var callContext: CallContext?
-    /// P68k: Nachricht, deren Bild gerade im Vollbild-Viewer geöffnet ist.
-    @State private var fullscreenImageMessage: LinkChatMessage?
     @State private var showCallBanner = false
     @State private var returnToCall = false
     @State private var showCreateChannel = false
@@ -211,12 +209,6 @@ struct LinkView: View {
                 )
                 .ignoresSafeArea()
             }
-        }
-        .fullScreenCover(item: $fullscreenImageMessage) { target in
-            LinkImageViewer(
-                title: target.fileInfo()?.name ?? "",
-                imageData: viewModel.chatImageCache[target.id]
-            )
         }
         .fullScreenCover(isPresented: $returnToCall) {
             if let info = LinkVoIPManager.shared.activeCallInfo,
@@ -810,6 +802,8 @@ struct LinkChatView: View {
     @ObservedObject var viewModel: LinkViewModel
     let token: String
     let title: String
+    /// P68k: Nachricht, deren Bild gerade im Vollbild-Viewer geöffnet ist.
+    @State private var fullscreenImageMessage: LinkChatMessage?
     @State private var draft = ""
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
@@ -834,6 +828,12 @@ struct LinkChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
+                .fullScreenCover(item: $fullscreenImageMessage) { target in
+                    LinkImageViewer(
+                        title: target.fileInfo()?.name ?? "",
+                        imageData: viewModel.chatImageCache[target.id]
+                    )
+                }
             Divider()
             composer
         }
