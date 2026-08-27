@@ -53,7 +53,12 @@ struct MailView: View {
                     Text(blacklistMessage)
                 }
         }
-        .onAppear { viewModel.start() }
+        .onAppear {
+            viewModel.start()
+            // P62g: JEDER Modul-Eintritt zieht die offene Mailbox nach -
+            // neue Mails erscheinen sofort statt erst mit dem Auto-Refresh.
+            viewModel.refreshOnEntry()
+        }
         .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if viewModel.isSending {

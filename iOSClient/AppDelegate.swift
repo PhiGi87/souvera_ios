@@ -357,6 +357,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 }
                 // Badge an den Push koppeln: INBOX-Zählung sofort.
                 Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
+                // P62g: Auch die OFFENE Mailbox sofort nachziehen lassen.
+                NotificationCenter.default.post(
+                    name: .mailPushReceived,
+                    object: nil,
+                    userInfo: ["account": tblAccount.account]
+                )
                 break
             }
         }

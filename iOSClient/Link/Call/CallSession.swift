@@ -162,6 +162,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             }
         }
         pendingIceServers = settings.iceServers()
+        lastSignalingSettings = settings
         if settings.hasExternalServer {
             let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: ncSession, listener: self)
             signaling = client
@@ -187,14 +188,20 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     /// The signaling room join is confirmed. P68g: Der erste joinCall wurde
-    /// serverseitig immer mit 404 beantwortet (belegt über alle Logs); ein
-    /// FRISCHES joinRoom direkt davor lieferte dagegen 200. Deshalb: nochmal
-    /// joinRoom (frische Session), die Signaling-Raum-Mitgliedschaft auf die
-    /// neue Session umschlüsseln und joinCall sofort senden - ohne den
-    /// Rejoin nähme der MCU die neue Session nicht in den Raum auf
-    /// (Session-Mismatch -> keine Medien).
+    /// serverseitig immer mit 404 beantwortet; ein FRISCHES joinRoom direkt
+    /// davor lieferte 200. Deshalb: nochmal joinRoom (frische Session) und
+    /// die Signaling-VERBINDUNG mit dieser Session NEU aufbauen - der
+    /// Same-Socket-Rejoin ("room"-Message mit neuer Session) wurde vom HPB
+    /// ignoriert (belegt: kein participants/update, keine Medien). Der
+    /// frische Connect mit der frischen Session ist das bewährte Muster.
     func onRoomJoined() {
         timingLog("room joined")
+        if signalingReconnectedOnce {
+            // Zweiter Room-Join (nach dem Reconnect): jetzt den Call öffnen.
+            sendJoinCall()
+            return
+        }
+        signalingReconnectedOnce = true
         Task { [weak self] in
             guard let self, !self.endedOnce else { return }
             guard let freshSession = await self.api.joinRoom(token: self.token) else {
@@ -203,16 +210,41 @@ final class CallSession: NSObject, HpbSignalingListener {
                 return
             }
             self.timingLog("fresh joinRoom done")
-            self.signaling?.rejoinRoom(sessionId: freshSession)
-            self.sendJoinCall()
+            self.reconnectSignaling(sessionId: freshSession)
         }
     }
 
+    /// P68g: Signaling-Verbindung mit einer frischen Session neu aufbauen
+    /// (Settings + Audio-Track werden wiederverwendet - nur der Websocket
+    /// wird neu geöffnet). Der zweite Room-Join triggert onRoomJoined erneut
+    /// und öffnet dann den Call.
+    private var signalingReconnectedOnce = false
+    private func reconnectSignaling(sessionId: String) {
+        guard let settings = lastSignalingSettings else {
+            CallDebugLog.log("CallSession", "reconnect failed: no settings")
+            return
+        }
+        signaling?.close()
+        signaling = nil
+        peers.removeAll()
+        statusChannels.removeAll()
+        publisherCreated = false
+        joinCallSent = false
+        let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: sessionId, listener: self)
+        signaling = client
+        client.connect()
+        timingLog("signaling reconnect")
+    }
+
+    /// P68g: Letzte Signaling-Settings (für den Reconnect mit frischer
+    /// Session - ohne erneuten Settings-Fetch).
+    private var lastSignalingSettings: SignalingSettings?
+
     /// P68g: joinCall mit klarer Fehlerpolitik:
     /// - 404 (deterministisch: "not joined"): KEINE Retries - sofort der
-    ///   BILLIGE Rejoin (nur joinRoom erneut + joinCall erneut, die
-    ///   bestehende Signaling-Verbindung bleibt stehen). Greift der auch
-    ///   nicht, folgt einmalig der volle Neuaufbau (talk-iOS forceReconnect).
+    ///   Reconnect mit frischer joinRoom-Session (gleicher Settings/Audio,
+    ///   nur der Websocket wird neu aufgebaut). Greift der auch nicht,
+    ///   folgt einmalig der volle Neuaufbau (talk-iOS forceReconnect).
     /// - Netzfehler (0/5xx): bis zu 3 Retries.
     private var joinCallSent = false
     private var cheapRejoinDone = false
@@ -240,10 +272,10 @@ final class CallSession: NSObject, HpbSignalingListener {
                     self.forceFullRejoin()
                     return
                 }
-                // Die neue Session muss auch der Signaling-Raum kennen,
-                // sonst nimmt der MCU sie nicht auf (Session-Mismatch).
-                self.signaling?.rejoinRoom(sessionId: freshSession)
-                self.sendJoinCall(retry: 0)
+                // Frische Session braucht einen FRISCHEN Signaling-Connect
+                // (Same-Socket-Rejoin ignoriert der HPB - belegt).
+                self.signalingReconnectedOnce = true
+                self.reconnectSignaling(sessionId: freshSession)
             } else if status == 404, !self.forceRejoinedOnce, !self.endedOnce {
                 CallDebugLog.log("CallSession", "joinCall 404 again - full force rejoin once")
                 self.forceFullRejoin()

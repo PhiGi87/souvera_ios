@@ -83,6 +83,12 @@ class NotificationService: UNNotificationServiceExtension {
                                 bestAttemptContent.title = ""
                                 bestAttemptContent.body = ""
                             } else {
+                                // P62g: Mail-Push -> Flag für den nächsten
+                                // Modul-Eintritt setzen (Refresh auch ohne
+                                // Tap auf die Notification).
+                                if appName == "souvera_mail" || objectType == "souvera_mail" {
+                                    UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)?.set(true, forKey: "souvera_mail_refresh_needed")
+                                }
                                 // Titel (fett) = subject (z. B. Absender bei
                                 // Mail-Pushes), Body = message (z. B. Betreff).
                                 bestAttemptContent.title = subject

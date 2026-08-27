@@ -1511,31 +1511,6 @@ private struct LinkMessageRow: View {
         }
     }
 
-    /// Inline-Bild-Thumbnail (P68k): geladen -> Bild, sonst Platzhalter.
-    @ViewBuilder
-    private var chatImageThumbnail: some View {
-        if let data = viewModel.chatImageCache[message.id], !data.isEmpty,
-           let ui = UIImage(data: data) {
-            Image(uiImage: ui)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: 220, maxHeight: 220)
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-        } else {
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color(.secondarySystemBackground))
-                .frame(width: 160, height: 100)
-                .overlay(
-                    HStack(spacing: 6) {
-                        Image(systemName: "photo").font(.caption)
-                        Text(NSLocalizedString("_link_image_loading_", comment: ""))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                )
-        }
-    }
-
     var body: some View {
         HStack(alignment: .top, spacing: 6) {
             if !isOwn {
@@ -1550,42 +1525,42 @@ private struct LinkMessageRow: View {
                         .padding(.trailing, isOwn ? 6 : 0)
                 }
                 replyQuote
-                if let file = message.fileInfo() {
-                    if viewModel.isImageMessage(message) {
-                        // P68k: Bild INLINE anzeigen (Thumbnail), Tap ->
-                        // Vollbild. Kleiner Dateiname als Caption.
-                        // P68k: Bild allein reicht (tapbar zum Vergrößern),
-                        // ohne Dateinamen-Caption (1a).
-                        Button {
-                            onImageTap(message)
-                        } label: {
-                            chatImageThumbnail
-                        }
-                        .buttonStyle(.plain)
-                        .task { await viewModel.loadChatImage(for: message) }
-                    } else {
-                        Button {
-                            onFileTap(file)
-                        } label: {
-                            HStack(spacing: 6) {
-                                Image(systemName: "paperclip").font(.caption)
-                                Text(file.name).font(.caption).lineLimit(1)
-                                if file.size > 0 {
-                                    Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
+                // P68k: Bildnachrichten rendern Bild + Caption IN der Bubble
+                // (einheitliche Optik); Nicht-Bild-Dateien behalten den Chip.
+                if let file = message.fileInfo(), !viewModel.isImageMessage(message) {
+                    Button {
+                        onFileTap(file)
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "paperclip").font(.caption)
+                            Text(file.name).font(.caption).lineLimit(1)
+                            if file.size > 0 {
+                                Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                                    .font(.caption2)
+                                    .foregroundStyle(.secondary)
                             }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color(.secondarySystemBackground), in: Capsule())
                         }
-                        .buttonStyle(.plain)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Color(.secondarySystemBackground), in: Capsule())
                     }
+                    .buttonStyle(.plain)
                 }
+
                 HStack(spacing: 0) {
                     if isOwn { Spacer(minLength: 40) }
-                    LinkMessageBubble(message: message, isOwn: isOwn)
+                    LinkMessageBubble(
+                        message: message,
+                        isOwn: isOwn,
+                        isImageMessage: viewModel.isImageMessage(message),
+                        imageData: viewModel.chatImageCache[message.id],
+                        onImageTap: { onImageTap(message) }
+                    )
+                    .task {
+                        if viewModel.isImageMessage(message) {
+                            await viewModel.loadChatImage(for: message)
+                        }
+                    }
                         .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
                             // Reaktionen leicht überlappend am unteren Bubble-Rand,
                             // etwas eingerückt (nicht ganz bündig mit der Kante),
@@ -1652,13 +1627,24 @@ private struct LinkMessageRow: View {
 private struct LinkMessageBubble: View {
     let message: LinkChatMessage
     let isOwn: Bool
+    /// P68k: Bildnachricht (Bild + Caption IN der Bubble, einheitliche Optik).
+    var isImageMessage: Bool = false
+    var imageData: Data?
+    var onImageTap: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if !isOwn {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
-            if message.fileName() != nil {
+            if isImageMessage {
+                imageContent
+                // Optionaler Text des Absenders unter dem Bild.
+                if let caption = message.fileCaption() {
+                    Text(caption)
+                        .souveraOpenURLAction()
+                }
+            } else if message.fileName() != nil {
                 Text(displayText)
             } else {
                 Text(message.attributedDisplayText())
@@ -1671,6 +1657,31 @@ private struct LinkMessageBubble: View {
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
         .foregroundStyle(isOwn ? .white : .primary)
+    }
+
+    /// Bild im Bubble (Tap -> Vollbild), mit Lade-Platzhalter.
+    @ViewBuilder
+    private var imageContent: some View {
+        if let imageData, !imageData.isEmpty, let ui = UIImage(data: imageData) {
+            Image(uiImage: ui)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 220, maxHeight: 220)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .onTapGesture { onImageTap() }
+        } else {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: 160, height: 100)
+                .overlay(
+                    HStack(spacing: 6) {
+                        Image(systemName: "photo").font(.caption)
+                        Text(NSLocalizedString("_link_image_loading_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                )
+        }
     }
 
     private var messageTime: String {

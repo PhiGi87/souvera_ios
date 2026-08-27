@@ -142,6 +142,8 @@ final class MailViewModel: ObservableObject {
     /// Deep-Link-Beobachter + Pending für den Kaltstart (Link kommt an,
     /// bevor der erste Mailbox-Load fertig ist).
     private var deepLinkObserver: NSObjectProtocol?
+    /// P62g: Push-Refresh-Beobachter.
+    private var pushRefreshObserver: NSObjectProtocol?
     private var pendingDeepLink: SouveraPushDeepLink.Target?
 
     init() {
@@ -155,11 +157,24 @@ final class MailViewModel: ObservableObject {
                 self?.handleDeepLink(target)
             }
         }
+        // P62g: Mail-Push (Vordergrund) -> offene Mailbox sofort nachziehen.
+        pushRefreshObserver = NotificationCenter.default.addObserver(
+            forName: .mailPushReceived,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.refreshOnEntry(force: true)
+            }
+        }
     }
 
     deinit {
         if let deepLinkObserver {
             NotificationCenter.default.removeObserver(deepLinkObserver)
+        }
+        if let pushRefreshObserver {
+            NotificationCenter.default.removeObserver(pushRefreshObserver)
         }
     }
 
@@ -920,7 +935,10 @@ final class MailViewModel: ObservableObject {
         if case .loading = messages,
            let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
             guard generation == listGeneration else { return }
-            messages = .success(snapshot.emails.map {
+            // P62f: Cache-first-Publish filtern (optimistisch entfernte Mails
+            // dürfen nicht wieder auftauchen).
+            let filteredSnapshot = snapshot.emails.filter { !pendingRemovedIds.contains($0.optString("id") ?? "") }
+            messages = .success(filteredSnapshot.map {
                 JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
             })
         }
@@ -1021,7 +1039,11 @@ final class MailViewModel: ObservableObject {
                     let newState = changes.optString("newQueryState") ?? state
                     guard generation == listGeneration else { return }
                     queryStates[cacheKey] = newState
-                    MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: emails, queryState: newState)
+                    // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
+                    // inkrementelle Sync (Snapshot von VOR der Löschung) die
+                    // gelöschten Mails in den Cache (Reappear-Muster).
+                    let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                    MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                     messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
@@ -1425,6 +1447,28 @@ final class MailViewModel: ObservableObject {
         // Badge autoritativ nachziehen - extern ankommende Mails würden
         // sonst erst mit dem nächsten Postfach-Load zählen.
         await refreshUnreadBadge()
+    }
+
+    /// P62g: Modul-Eintritt / Push: die offene Mailbox SOFORT (inkrementell)
+    /// nachziehen, damit neue Mails nicht erst mit dem Auto-Refresh-Timer
+    /// auftauchen. Gedrosselt (~8 s), außer `force` (Push) oder das
+    /// NSE-Flag "souvera_mail_refresh_needed" ist gesetzt (Mail-Push kam,
+    /// während die App zu war).
+    private static let refreshNeededFlagKey = "souvera_mail_refresh_needed"
+    private var lastEntryRefresh: Date = .distantPast
+
+    func refreshOnEntry(force: Bool = false) {
+        guard let mailbox = currentMailbox else { return }
+        let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)
+        let flagSet = (groupDefaults?.bool(forKey: Self.refreshNeededFlagKey)) ?? false
+        if flagSet {
+            groupDefaults?.set(false, forKey: Self.refreshNeededFlagKey)
+        }
+        let elapsed = Date().timeIntervalSince(lastEntryRefresh)
+        guard force || flagSet || elapsed >= 8 else { return }
+        lastEntryRefresh = Date()
+        JmapLog.write("refreshOnEntry (force=\(force) flag=\(flagSet))")
+        Task { await refreshMessagesIncremental() }
     }
 
     /// P62f: Inkrementeller Refresh (queryChanges statt Voll-Refresh) -
@@ -2251,6 +2295,9 @@ extension String {
 extension Notification.Name {
     /// Ungelesen-Anzahl geändert (Mail-Tab-Badge); object = Int.
     static let mailUnreadChanged = Notification.Name("mailUnreadChanged")
+    /// P62g: Mail-Push eingetroffen (Vordergrund) - die offene Mailbox soll
+    /// sofort nachziehen (userInfo: account).
+    static let mailPushReceived = Notification.Name("mailPushReceived")
     /// Summe über ALLE Accounts (System-Badge am App-Icon).
     static let mailTotalUnreadChanged = Notification.Name("mailTotalUnreadChanged")
 }

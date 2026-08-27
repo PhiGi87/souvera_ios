@@ -252,6 +252,20 @@ struct LinkChatMessage: Decodable, Identifiable {
         Self.resolvePlaceholders(in: message, parameters: messageParameters)
     }
 
+    /// P68k: Text-Nachricht des Absenders bei Datei/Bild-Nachrichten - der
+    /// {file}-Platzhalter wird entfernt, die übrigen Platzhalter aufgelöst.
+    /// Leer = keine Caption.
+    func fileCaption() -> String? {
+        guard fileName() != nil else { return nil }
+        var working = message
+        if let fileKey = messageParameters?.first(where: { $0.value.type == "file" })?.key {
+            working = working.replacingOccurrences(of: "{\(fileKey)}", with: "")
+        }
+        let resolved = Self.resolvePlaceholders(in: working, parameters: messageParameters)
+        let trimmed = resolved.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
     /// P68l (1b): Gemeinsame Platzhalter-Auflösung (Bubble UND Zitat):
     /// {user1}/{mention-user1}/... werden durch die Namen aus den
     /// messageParameters ersetzt; Mentions erhalten das @-Präfix.
