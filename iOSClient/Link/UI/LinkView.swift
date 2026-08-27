@@ -1060,6 +1060,11 @@ struct LinkChatView: View {
                                 onImageTap: { target in
                                     fullscreenImageMessage = target
                                 },
+                                onPdfTap: { target in
+                                    if let url = viewModel.chatPdfCache[target.id] {
+                                        pdfPreviewURL = url
+                                    }
+                                },
                                 onStartReply: { replyingTo = message },
                                 onStartForward: { forwardTarget = message },
                                 onLongPress: { target in reactionTarget = target },
@@ -1458,6 +1463,8 @@ private struct LinkMessageRow: View {
     let onFileTap: (LinkFileInfo) -> Void
     /// P68k: Tap auf ein Inline-Bild -> Vollbild-Viewer.
     var onImageTap: (LinkChatMessage) -> Void = { _ in }
+    /// P68o: Tap auf ein PDF-Thumbnail -> QuickLook-Viewer.
+    var onPdfTap: (LinkChatMessage) -> Void = { _ in }
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
@@ -1593,11 +1600,7 @@ private struct LinkMessageRow: View {
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
                         onImageTap: { onImageTap(message) },
-                        onPdfTap: {
-                            if let url = viewModel.chatPdfCache[message.id] {
-                                pdfPreviewURL = url
-                            }
-                        }
+                        onPdfTap: { onPdfTap(message) }
                     )
                     .task {
                         if viewModel.isImageMessage(message) {
