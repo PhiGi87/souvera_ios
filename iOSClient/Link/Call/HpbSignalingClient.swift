@@ -30,7 +30,6 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     private let settings: SignalingSettings
     private let backendUrl: String
     private let roomToken: String
-    private let ncSessionId: String
     private weak var listener: HpbSignalingListener?
 
     private var session: URLSession!
