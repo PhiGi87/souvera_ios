@@ -47,6 +47,9 @@ final class LinkViewModel: ObservableObject {
     /// P68k: Inline-Bilder des Chats (Key = Message-ID; leeres Data =
     /// Laden fehlgeschlagen -> Chip-Fallback).
     @Published var chatImageCache: [Int64: Data] = [:]
+    /// P68o: PDF-Anhänge: Thumbnail (1. Seite) + Temp-URL für QuickLook.
+    @Published var chatPdfThumbCache: [Int64: Data] = [:]
+    @Published var chatPdfCache: [Int64: URL] = [:]
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
     /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
@@ -116,6 +119,35 @@ final class LinkViewModel: ObservableObject {
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
         // erstellte Channels sofort sichtbar sind.
         loadConversations()
+    }
+
+    /// P68o: Ist die Nachricht eine PDF-Datei?
+    func isPdfMessage(_ message: LinkChatMessage) -> Bool {
+        guard let info = message.fileInfo() else { return false }
+        return (info.name as NSString).pathExtension.lowercased() == "pdf"
+    }
+
+    /// P68o: Lädt ein Chat-PDF (WebDAV - funktioniert für hochgeladene
+    /// Anhänge UND Souvera-Dateien-Freigaben) und erzeugt das Thumbnail
+    /// der ersten Seite.
+    func loadChatPdf(for message: LinkChatMessage) async {
+        guard chatPdfThumbCache[message.id] == nil,
+              let info = message.fileInfo(),
+              let path = info.path,
+              let api else { return }
+        guard let url = await api.downloadChatAttachment(path: path) else {
+            await MainActor.run { chatPdfThumbCache[message.id] = Data() }
+            return
+        }
+        guard let thumb = NCUtility().pdfThumbnail(url: url, width: 220),
+              let thumbData = thumb.jpegData(compressionQuality: 0.85) else {
+            await MainActor.run { chatPdfThumbCache[message.id] = Data() }
+            return
+        }
+        await MainActor.run {
+            chatPdfThumbCache[message.id] = thumbData
+            chatPdfCache[message.id] = url
+        }
     }
 
     /// P68k: Ist die Nachricht eine anzeigbare Bild-Datei?

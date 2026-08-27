@@ -1153,6 +1153,12 @@ final class MailViewModel: ObservableObject {
             let savedCollected = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+            // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
+            // Stands (Voll-Refresh) sind die optimistisch entfernten IDs
+            // freigegeben - nur hier, nicht nach gequeueten Refreshes.
+            if forceFullRefresh {
+                pendingRemovedIds.removeAll()
+            }
             isFetchingMail = false
             prefetchBodies(mailbox: mailbox)
 
@@ -1179,10 +1185,10 @@ final class MailViewModel: ObservableObject {
                 JmapLog.write("P64 stale verification removed \(missing.count) of \(cachedIds.count) cached mails")
                 var kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
                 kept = kept.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                // P62f-Fix: NUR den Cache bereinigen - kein erneutes
+                // Republish der Live-Liste (das war der zweite Race-Kanal
+                // für wiederauftauchende Mails).
                 MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
-                if self.currentMailbox?.id == mailbox.id, self.listGeneration == generation {
-                    self.messages = .success(filterPendingRemoved(protectingLiveMessages(kept.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
-                }
             }
         } catch {
             isFetchingMail = false
@@ -1468,7 +1474,10 @@ final class MailViewModel: ObservableObject {
         guard force || flagSet || elapsed >= 8 else { return }
         lastEntryRefresh = Date()
         JmapLog.write("refreshOnEntry (force=\(force) flag=\(flagSet))")
-        Task { await refreshMessagesIncremental() }
+        // P62g: VOLLER Refresh beim Eintritt - Stalwarts queryChanges meldet
+        // neue Mails unzuverlässig; der Voll-Refresh garantiert den
+        // Server-Stand (neue Mails sofort). Throttle oben verhindert Exzesse.
+        Task { await refreshMessages() }
     }
 
     /// P62f: Inkrementeller Refresh (queryChanges statt Voll-Refresh) -
@@ -1986,10 +1995,11 @@ final class MailViewModel: ObservableObject {
             mutationRefreshTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 guard !Task.isCancelled else { return }
+                // P62f-Fix: pendingRemovedIds werden NUR im Sync selbst
+                // freigegeben, wenn der Full-Refresh TATSÄCHLICH lief
+                // (sonst leert ein gequeueter Refresh den Filter zu früh
+                // und die Mail taucht wieder auf - Log-Beweis).
                 await self?.refreshMessages()
-                // P62f: Der Refresh hat den Server-Stand publiziert (mit
-                // Filter) - jetzt sind die IDs freigegeben.
-                self?.pendingRemovedIds.removeAll()
             }
         } else if !lastSearchQuery.isEmpty {
             Task { await search(lastSearchQuery) }

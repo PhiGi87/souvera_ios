@@ -80,6 +80,9 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.api = LinkOcsApi(account: account)
         super.init()
         timingLog("session init")
+        // P68v: Encoder-Fähigkeit hart loggen (beweist, ob VP8-Encoding im
+        // Build enthalten ist - entscheidend für die Video-Diagnose).
+        CallDebugLog.log("CallSession", "video encoder codecs: \(RTCDefaultVideoEncoderFactory.supportedCodecs().map { $0.name }.joined(separator: ","))")
     }
 
     /// P68g: Meilenstein-Logs für die Call-Aufbau-Latenz (Start -> audioOn).
@@ -88,6 +91,11 @@ final class CallSession: NSObject, HpbSignalingListener {
         let elapsed = String(format: "%.2f", Date().timeIntervalSince(sessionStartDate))
         CallDebugLog.log("CallTiming", "\(milestone) +\(elapsed)s")
     }
+
+    /// P68v: Serielle WebRTC-Queue NUR für die Stats-Diagnose (talk-iOS-
+    /// WebRTCCommon-Muster). Der funktionierende Medien-/Call-Pfad bleibt
+    /// unangetastet.
+    nonisolated static let webRtcQueue = DispatchQueue(label: "souvera.webrtc.stats", qos: .userInitiated)
 
     /// Safety-Net: Wird die Session ohne explizites hangup() freigegeben
     /// (UI weg, App beendet, Crash-Pfade), bleibt sonst eine Geister-

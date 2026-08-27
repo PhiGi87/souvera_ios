@@ -804,6 +804,15 @@ struct LinkChatView: View {
     let title: String
     /// P68k: Nachricht, deren Bild gerade im Vollbild-Viewer geöffnet ist.
     @State private var fullscreenImageMessage: LinkChatMessage?
+    /// P68o: PDF-Datei für den QuickLook-Vollbild-Viewer.
+    @State private var pdfPreviewURL: URL?
+    /// P68n: Nachpositionier-Fenster beim Raumeintritt (3 s) - die
+    /// Server-Liste/Boundary kann verspätet eintreffen; solange wird
+    /// unsichtbar nachpositioniert (kein sichtbares Scrollen).
+    @State private var entryPositioningUntil = Date.distantPast
+    /// P68n: Nach dem Senden ans Listenende springen.
+    @State private var scrollToNewestPending = false
+    @State private var lastVisibleMessageId: Int64?
     @State private var draft = ""
     @State private var showFilePicker = false
     @State private var showNextcloudPicker = false
@@ -834,6 +843,7 @@ struct LinkChatView: View {
                         imageData: viewModel.chatImageCache[target.id]
                     )
                 }
+                .quickLookPreview($pdfPreviewURL)
             Divider()
             composer
         }
@@ -1096,6 +1106,8 @@ struct LinkChatView: View {
                 .onChange(of: token) { _, _ in
                     chatPositioned = false
                     showScrollBottom = false
+                    entryPositioningUntil = Date().addingTimeInterval(3)
+                    lastVisibleMessageId = items.last?.id
                 }
                 // Position-vor-Sichtbarkeit: EINMALIG unsichtbar an die
                 // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
@@ -1106,14 +1118,34 @@ struct LinkChatView: View {
                 // neutralisiert.
                 .opacity(chatPositioned ? 1 : 0)
                 .onAppear {
-                    guard !chatPositioned else { return }
+                    entryPositioningUntil = Date().addingTimeInterval(3)
+                    lastVisibleMessageId = items.last?.id
                     positionChat(proxy: proxy, items: items)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                         chatPositioned = true
                     }
                 }
+                // P68n: Nachpositionieren solange das Fenster läuft (die
+                // Server-Liste/Boundary kommt oft erst 1-3 s nach dem
+                // Eintritt) - ohne Animation, vor/nach dem Einblenden.
                 .onChange(of: viewModel.unreadBoundary) { _, _ in
-                    guard !chatPositioned else { return }
+                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
+                    positionChat(proxy: proxy, items: items)
+                }
+                .onChange(of: items.last?.id) { _, newLastId in
+                    // P68n: Nach dem Senden ans Ende springen (eigene
+                    // Nachricht immer sichtbar).
+                    if scrollToNewestPending,
+                       let newLastId,
+                       newLastId != lastVisibleMessageId {
+                        scrollToNewestPending = false
+                        withAnimation { proxy.scrollTo(newLastId, anchor: .bottom) }
+                        viewModel.noteScrolledToNewest()
+                    }
+                    lastVisibleMessageId = newLastId
+                    // Verspätete Listen-Updates im Eintrittsfenster
+                    // nachpositionieren.
+                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat(proxy: proxy, items: items)
                 }
             }
@@ -1377,6 +1409,8 @@ struct LinkChatView: View {
                 let replyTarget = replyingTo?.id
                 draft = ""
                 replyingTo = nil
+                // P68n: Nach dem Senden automatisch ans Ende scrollen.
+                scrollToNewestPending = true
                 viewModel.send(text: text, replyTo: replyTarget)
             } label: {
                 Image(systemName: "paperplane.fill")
@@ -1527,7 +1561,9 @@ private struct LinkMessageRow: View {
                 replyQuote
                 // P68k: Bildnachrichten rendern Bild + Caption IN der Bubble
                 // (einheitliche Optik); Nicht-Bild-Dateien behalten den Chip.
-                if let file = message.fileInfo(), !viewModel.isImageMessage(message) {
+                if let file = message.fileInfo(),
+                   !viewModel.isImageMessage(message),
+                   !viewModel.isPdfMessage(message) {
                     Button {
                         onFileTap(file)
                     } label: {
@@ -1554,11 +1590,20 @@ private struct LinkMessageRow: View {
                         isOwn: isOwn,
                         isImageMessage: viewModel.isImageMessage(message),
                         imageData: viewModel.chatImageCache[message.id],
-                        onImageTap: { onImageTap(message) }
+                        isPdfMessage: viewModel.isPdfMessage(message),
+                        pdfThumbData: viewModel.chatPdfThumbCache[message.id],
+                        onImageTap: { onImageTap(message) },
+                        onPdfTap: {
+                            if let url = viewModel.chatPdfCache[message.id] {
+                                pdfPreviewURL = url
+                            }
+                        }
                     )
                     .task {
                         if viewModel.isImageMessage(message) {
                             await viewModel.loadChatImage(for: message)
+                        } else if viewModel.isPdfMessage(message) {
+                            await viewModel.loadChatPdf(for: message)
                         }
                     }
                         .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
@@ -1630,14 +1675,25 @@ private struct LinkMessageBubble: View {
     /// P68k: Bildnachricht (Bild + Caption IN der Bubble, einheitliche Optik).
     var isImageMessage: Bool = false
     var imageData: Data?
+    /// P68o: PDF-Nachricht (Thumbnail der 1. Seite + QuickLook-Tap).
+    var isPdfMessage: Bool = false
+    var pdfThumbData: Data?
     var onImageTap: () -> Void = {}
+    var onPdfTap: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             if !isOwn {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
-            if isImageMessage {
+            if isPdfMessage {
+                pdfContent
+                // Optionaler Text des Absenders unter dem Bild.
+                if let caption = message.fileCaption() {
+                    Text(caption)
+                        .souveraOpenURLAction()
+                }
+            } else if isImageMessage {
                 imageContent
                 // Optionaler Text des Absenders unter dem Bild.
                 if let caption = message.fileCaption() {
@@ -1657,6 +1713,38 @@ private struct LinkMessageBubble: View {
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
         .foregroundStyle(isOwn ? .white : .primary)
+    }
+
+    /// PDF-Thumbnail (1. Seite) im Bubble (Tap -> QuickLook), mit
+    /// Lade-Platzhalter (P68o).
+    @ViewBuilder
+    private var pdfContent: some View {
+        if let pdfThumbData, !pdfThumbData.isEmpty, let ui = UIImage(data: pdfThumbData) {
+            Image(uiImage: ui)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: 180, maxHeight: 240)
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+                .overlay(alignment: .bottomTrailing) {
+                    Image(systemName: "doc.richtext")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(4)
+                }
+                .onTapGesture { onPdfTap() }
+        } else {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: 140, height: 180)
+                .overlay(
+                    VStack(spacing: 6) {
+                        Image(systemName: "doc.richtext").font(.title3)
+                        Text(NSLocalizedString("_link_image_loading_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                )
+        }
     }
 
     /// Bild im Bubble (Tap -> Vollbild), mit Lade-Platzhalter.

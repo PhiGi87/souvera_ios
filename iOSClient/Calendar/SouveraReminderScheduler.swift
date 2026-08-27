@@ -43,8 +43,7 @@ enum SouveraReminderScheduler {
                     content.body = SouveraNotificationText.body(
                         DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .short)
                     )
-                    content.sound = .default
-                    // Deep-Link-Payload: Tap öffnet direkt die Detail-Ansicht
+                    content.sound = SouveraCalendarReminderSound.stored.sound // Deep-Link-Payload: Tap öffnet direkt die Detail-Ansicht
                     // des Termins.
                     content.userInfo = [
                         "uid": event.uid,

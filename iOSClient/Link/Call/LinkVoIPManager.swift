@@ -43,7 +43,11 @@ final class LinkVoIPManager: NSObject {
 
     private override init() {
         let configuration = CXProviderConfiguration()
-        configuration.supportsVideo = true
+        // Befund 4: KEIN Kamera-/Video-Button im iOS-Fullscreen - der
+        // System-Tap wäre ohnehin nicht von "In Souvera öffnen"
+        // unterscheidbar (CallKit kennt keine Video-Action). Video läuft
+        // im App-eigenen Vollscreen.
+        configuration.supportsVideo = false
         configuration.maximumCallsPerCallGroup = 1
         configuration.supportedHandleTypes = [.generic]
         provider = CXProvider(configuration: configuration)

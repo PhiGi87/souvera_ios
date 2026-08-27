@@ -167,6 +167,17 @@ struct NCSettingsView: View {
                 }
                 .pickerStyle(.segmented)
             })
+            // Ton für Kalender-Erinnerungen (System-Töne)
+            Section(header: Text(NSLocalizedString("_settings_calendar_reminder_sound_", comment: "")).font(.headline), content: {
+                Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: Binding(
+                    get: { SouveraCalendarReminderSound.stored },
+                    set: { SouveraCalendarReminderSound.stored = $0 }
+                )) {
+                    ForEach(SouveraCalendarReminderSound.allCases) { sound in
+                        Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound)
+                    }
+                }
+            })
             // Auto-Refresh (Mail & Kalender)
             Section(header: Text(NSLocalizedString("_settings_auto_refresh_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_auto_refresh_interval_", comment: ""), selection: Binding(
