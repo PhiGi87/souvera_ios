@@ -1499,7 +1499,9 @@ private struct LinkMessageRow: View {
                 Rectangle().fill(Color.gray.opacity(0.45)).frame(width: 2.5)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(parent.actorDisplayName).font(.caption2).fontWeight(.medium)
-                    Text(parent.message).font(.caption2).lineLimit(2)
+                    // P68l (1b): Platzhalter im Zitat auflösen (sonst steht
+                    // {mention-user1} roh im Text).
+                    Text(parent.resolvedDisplayText).font(.caption2).lineLimit(2)
                 }
                 .foregroundStyle(.secondary)
             }
@@ -1552,16 +1554,12 @@ private struct LinkMessageRow: View {
                     if viewModel.isImageMessage(message) {
                         // P68k: Bild INLINE anzeigen (Thumbnail), Tap ->
                         // Vollbild. Kleiner Dateiname als Caption.
+                        // P68k: Bild allein reicht (tapbar zum Vergrößern),
+                        // ohne Dateinamen-Caption (1a).
                         Button {
                             onImageTap(message)
                         } label: {
-                            VStack(alignment: isOwn ? .trailing : .leading, spacing: 4) {
-                                chatImageThumbnail
-                                Text(file.name)
-                                    .font(.caption2)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
+                            chatImageThumbnail
                         }
                         .buttonStyle(.plain)
                         .task { await viewModel.loadChatImage(for: message) }

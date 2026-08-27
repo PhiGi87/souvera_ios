@@ -130,31 +130,24 @@ final class CallSession: NSObject, HpbSignalingListener {
             callFlags &= ~4
         }
         timingLog("startMedia")
-        // P68g: Pre-Warm verwenden, falls der VoIP-Push die OCS-Phase schon
-        // vor der Annahme geladen hat (kalter Start: ~2,4 s gespart).
-        var ncSession: String?
-        var settings: SignalingSettings?
-        if let pre = LinkVoIPManager.shared.consumePrewarmedSignaling(for: token) {
-            ncSession = pre.sessionId
-            settings = pre.settings
-            timingLog("prewarm consumed")
+        // P68g: Settings ggf. aus dem Pre-Warm (VoIP-Push hat sie schon vor
+        // der Annahme geladen). joinRoom läuft IMMER frisch hier - eine
+        // veraltete Session aus dem Pre-Warm verursachte die 404-Kette
+        // und den Session-Mismatch am MCU (keine Medien).
+        let settings: SignalingSettings?
+        if let pre = LinkVoIPManager.shared.consumePrewarmedSettings(for: token) {
+            settings = pre
+            timingLog("prewarm settings consumed")
         } else {
-            // joinRoom und getSignalingSettings PARALLEL laden.
-            async let roomResult = api.joinRoom(token: token)
-            async let settingsResult = api.getSignalingSettings(token: token)
-            guard let room = await roomResult else {
-                CallDebugLog.log("CallSession", "joinRoom failed"); return end()
-            }
-            guard let fetchedSettings = await settingsResult else {
-                CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
-            }
-            ncSession = room
-            settings = fetchedSettings
-            timingLog("ocs calls done")
+            settings = await api.getSignalingSettings(token: token)
         }
-        guard let ncSession, let settings else {
-            CallDebugLog.log("CallSession", "signaling setup failed"); return end()
+        guard let ncSession = await api.joinRoom(token: token) else {
+            CallDebugLog.log("CallSession", "joinRoom failed"); return end()
         }
+        guard let settings else {
+            CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
+        }
+        timingLog("ocs calls done")
         // joinCall runs after the signaling room join (onRoomJoined) -
         // mirroring the Android client. Opening the call earlier makes
         // the MCU ignore our publisher.
@@ -193,10 +186,26 @@ final class CallSession: NSObject, HpbSignalingListener {
         // nach dem Room-Join (Android-Parität + Vor-Build-Verhalten).
     }
 
-    /// The signaling room join is confirmed - now open the call via OCS.
+    /// The signaling room join is confirmed. P68g: Der erste joinCall wurde
+    /// serverseitig immer mit 404 beantwortet (belegt über alle Logs); ein
+    /// FRISCHES joinRoom direkt davor lieferte dagegen 200. Deshalb: nochmal
+    /// joinRoom (frische Session), die Signaling-Raum-Mitgliedschaft auf die
+    /// neue Session umschlüsseln und joinCall sofort senden - ohne den
+    /// Rejoin nähme der MCU die neue Session nicht in den Raum auf
+    /// (Session-Mismatch -> keine Medien).
     func onRoomJoined() {
         timingLog("room joined")
-        sendJoinCall()
+        Task { [weak self] in
+            guard let self, !self.endedOnce else { return }
+            guard let freshSession = await self.api.joinRoom(token: self.token) else {
+                CallDebugLog.log("CallSession", "refresh joinRoom failed - plain joinCall")
+                self.sendJoinCall()
+                return
+            }
+            self.timingLog("fresh joinRoom done")
+            self.signaling?.rejoinRoom(sessionId: freshSession)
+            self.sendJoinCall()
+        }
     }
 
     /// P68g: joinCall mit klarer Fehlerpolitik:
@@ -223,14 +232,17 @@ final class CallSession: NSObject, HpbSignalingListener {
             } else if status == 404, !self.cheapRejoinDone, !self.endedOnce {
                 // Billiger Rejoin: nur joinRoom + joinCall erneut (Signaling
                 // bleibt). ~0,5 s statt ~2,5 s Komplett-Neuaufbau.
-                CallDebugLog.log("CallSession", "joinCall 404 - cheap rejoin (joinRoom only)")
+                CallDebugLog.log("CallSession", "joinCall 404 - cheap rejoin")
                 self.cheapRejoinDone = true
                 self.joinCallSent = false
-                guard let _ = await self.api.joinRoom(token: self.token) else {
+                guard let freshSession = await self.api.joinRoom(token: self.token) else {
                     CallDebugLog.log("CallSession", "cheap rejoin: joinRoom failed - full force rejoin")
                     self.forceFullRejoin()
                     return
                 }
+                // Die neue Session muss auch der Signaling-Raum kennen,
+                // sonst nimmt der MCU sie nicht auf (Session-Mismatch).
+                self.signaling?.rejoinRoom(sessionId: freshSession)
                 self.sendJoinCall(retry: 0)
             } else if status == 404, !self.forceRejoinedOnce, !self.endedOnce {
                 CallDebugLog.log("CallSession", "joinCall 404 again - full force rejoin once")

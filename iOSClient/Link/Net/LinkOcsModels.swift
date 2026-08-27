@@ -249,16 +249,23 @@ struct LinkChatMessage: Decodable, Identifiable {
     /// aus den messageParameters ersetzt (Systemnachrichten UND normale
     /// Nachrichten - sonst zeigt z. B. die Kanal-Vorschau rohe Platzhalter).
     func displayText() -> String {
-        var text = message
-        if let params = messageParameters, !params.isEmpty {
-            for (key, object) in params {
-                let name = object.name ?? object.id ?? ""
-                if !name.isEmpty {
-                    text = text.replacingOccurrences(of: "{\(key)}", with: name)
-                }
+        Self.resolvePlaceholders(in: message, parameters: messageParameters)
+    }
+
+    /// P68l (1b): Gemeinsame Platzhalter-Auflösung (Bubble UND Zitat):
+    /// {user1}/{mention-user1}/... werden durch die Namen aus den
+    /// messageParameters ersetzt; Mentions erhalten das @-Präfix.
+    static func resolvePlaceholders(in text: String, parameters: [String: LinkRichObject]?) -> String {
+        guard let params = parameters, !params.isEmpty else { return text }
+        var resolved = text
+        for (key, object) in params {
+            let name = object.name ?? object.id ?? ""
+            if !name.isEmpty {
+                let value = key.hasPrefix("mention-") ? "@\(name)" : name
+                resolved = resolved.replacingOccurrences(of: "{\(key)}", with: value)
             }
         }
-        return text
+        return resolved
     }
 
     /// The deleted message id when this is a `message_deleted` system
@@ -307,11 +314,14 @@ struct LinkParent: Decodable {
     let timestamp: TimeInterval
     let message: String
     let systemMessage: String
+    /// P68l (1b): Parameter des Elternteils - ohne sie blieben
+    /// {mention-user1}-Platzhalter im Antwort-Zitat roh stehen.
+    let messageParameters: [String: LinkRichObject]?
 
     var isSystemMessage: Bool { !systemMessage.isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case id, actorId, actorDisplayName, timestamp, message, systemMessage
+        case id, actorId, actorDisplayName, timestamp, message, systemMessage, messageParameters
     }
 
     init(from decoder: Decoder) throws {
@@ -322,6 +332,12 @@ struct LinkParent: Decodable {
         timestamp = (try? c.decode(TimeInterval.self, forKey: .timestamp)) ?? 0
         message = (try? c.decode(String.self, forKey: .message)) ?? ""
         systemMessage = (try? c.decode(String.self, forKey: .systemMessage)) ?? ""
+        messageParameters = (try? c.decode([String: LinkRichObject].self, forKey: .messageParameters))
+    }
+
+    /// Zitat-Text mit aufgelösten Platzhaltern (Mentions -> @Name).
+    var resolvedDisplayText: String {
+        LinkChatMessage.resolvePlaceholders(in: message, parameters: messageParameters)
     }
 }
 

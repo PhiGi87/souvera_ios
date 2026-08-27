@@ -984,6 +984,34 @@ private struct MailMessageListView: View {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
             .buttonStyle(.plain)
+            // P68m: Langer Druck = Detail-"..."-Menü (ohne Antworten):
+            // Weiterleiten, Gelesen/Ungelesen, Markieren, Absender-Blacklist.
+            // Blacklist nutzt den vorhandenen Bestätigungsdialog.
+            .contextMenu {
+                Button {
+                    viewModel.startCompose(mode: .forward, message: message)
+                } label: {
+                    Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+                }
+                Button {
+                    Task { await viewModel.setRead([message], !message.isRead) }
+                } label: {
+                    Label(message.isRead
+                          ? NSLocalizedString("_mail_mark_unread_", comment: "")
+                          : NSLocalizedString("_mail_mark_read_", comment: ""),
+                          systemImage: message.isRead ? "envelope" : "envelope.open")
+                }
+                Button {
+                    viewModel.toggleFlagged(message)
+                } label: {
+                    Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
+                }
+                Button {
+                    blacklistTarget = [message]
+                } label: {
+                    Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
+                }
+            }
             .swipeActions(edge: .trailing) {
                 Button(role: .destructive) { viewModel.delete([message]) } label: {
                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")

@@ -139,31 +139,29 @@ final class LinkVoIPManager: NSObject {
         }
     }
 
-    /// P68g Pre-Warm: joinRoom + Signaling-Settings werden bereits beim
-    /// VoIP-Push-Empfang geladen (vor der Annahme) - beim Annehmen entfällt
-    /// die kalte OCS-Phase (~2,4 s). Nur verwenden, wenn frisch (<25 s),
-    /// sonst ist das Backend-Ticket ggf. abgelaufen.
-    private var prewarmedSignaling: (token: String, sessionId: String, settings: SignalingSettings, at: Date)?
+    /// P68g Pre-Warm: NUR die Signaling-Settings werden bereits beim
+    /// VoIP-Push-Empfang geladen (vor der Annahme). joinRoom bleibt der
+    /// Annahme vorbehalten - ein veralteter Session-Id aus dem Pre-Warm
+    /// führte zu 404s beim joinCall und zum Session-Mismatch am MCU
+    /// (keine Medien). Nur verwenden, wenn frisch (<25 s).
+    private var prewarmedSettings: (token: String, settings: SignalingSettings, at: Date)?
 
-    func consumePrewarmedSignaling(for token: String) -> (sessionId: String, settings: SignalingSettings)? {
-        guard let pre = prewarmedSignaling, pre.token == token else { return nil }
-        prewarmedSignaling = nil
+    func consumePrewarmedSettings(for token: String) -> SignalingSettings? {
+        guard let pre = prewarmedSettings, pre.token == token else { return nil }
+        prewarmedSettings = nil
         guard Date().timeIntervalSince(pre.at) < 25 else { return nil }
-        CallDebugLog.log("LinkVoIPManager", "pre-warmed signaling consumed (\(String(format: "%.1f", Date().timeIntervalSince(pre.at)))s old)")
-        return (pre.sessionId, pre.settings)
+        CallDebugLog.log("LinkVoIPManager", "pre-warmed settings consumed (\(String(format: "%.1f", Date().timeIntervalSince(pre.at)))s old)")
+        return pre.settings
     }
 
-    private func prewarmSignaling(for token: String) {
-        prewarmedSignaling = nil
+    private func prewarmSettings(for token: String) {
+        prewarmedSettings = nil
         Task { [weak self] in
             guard let self, let account = LinkAccount.active() else { return }
             let api = LinkOcsApi(account: account)
-            async let roomResult = api.joinRoom(token: token)
-            async let settingsResult = api.getSignalingSettings(token: token)
-            guard let sessionId = await roomResult,
-                  let settings = await settingsResult else { return }
-            self.prewarmedSignaling = (token, sessionId, settings, Date())
-            CallDebugLog.log("LinkVoIPManager", "pre-warmed signaling ready for \(token.prefix(8))")
+            guard let settings = await api.getSignalingSettings(token: token) else { return }
+            self.prewarmedSettings = (token, settings, Date())
+            CallDebugLog.log("LinkVoIPManager", "pre-warmed settings ready for \(token.prefix(8))")
         }
     }
 
@@ -656,9 +654,9 @@ extension LinkVoIPManager: PKPushRegistryDelegate {
         guard type == .voIP else { completion(); return }
         // iOS REQUIRES reporting a call for every VoIP push, else the app is killed. Always report.
         if let call = decryptCallPayload(payload.dictionaryPayload) {
-            // P68g: OCS-Phase VOR der Annahme vorwärmen (joinRoom + Settings
-            // parallel) - kalte Anrufe kommen damit sofort in den Call.
-            prewarmSignaling(for: call.roomToken)
+            // P68g: Settings VOR der Annahme vorwärmen (joinRoom bleibt
+            // der Annahme vorbehalten - Session-Frische ist kritisch).
+            prewarmSettings(for: call.roomToken)
             reportIncomingCall(roomToken: call.roomToken, displayName: call.displayName, hasVideo: call.hasVideo, completion: completion)
         } else {
             reportIncomingCall(roomToken: "", displayName: NSLocalizedString("_link_incoming_call_", comment: ""), hasVideo: true, completion: completion)

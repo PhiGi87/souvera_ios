@@ -36,6 +36,7 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     private var session: URLSession!
     private var socket: URLSessionWebSocketTask?
     private var ownSessionId = ""
+    private var ncSessionId: String
     /// P68h: Zähler für kollabierte Candidate-Logs.
     private var candidateSendCount = 0
     private var recvCandidateCount = 0
@@ -49,6 +50,17 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         self.ncSessionId = ncSessionId
         self.listener = listener
         super.init()
+    }
+
+    /// P68g: Raum mit einer NEUEN NC-Session-Id erneut joinen (über die
+    /// bestehende Verbindung) - nach dem Doppel-joinRoom. Ohne diesen
+    /// Rejoin kennt der MCU die neue Session nicht und nimmt den Teilnehmer
+    /// nicht in den Call auf (Session-Mismatch -> keine Medien).
+    func rejoinRoom(sessionId: String) {
+        guard socket != nil else { return }
+        ncSessionId = sessionId
+        CallDebugLog.log("HpbSignaling", "rejoin room with fresh session id")
+        sendRoomJoin()
     }
 
     func connect() {
