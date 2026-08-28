@@ -640,11 +640,11 @@ final class CallSession: NSObject, HpbSignalingListener {
                     if let existing = peer.transceivers.first(where: { $0.mediaType == .video }) {
                         existing.sender.track = video
                         if existing.direction == .inactive {
-                            existing.direction = .sendOnly
+                            existing.setDirection(.sendOnly, error: nil)
                         }
                     } else {
                         let transceiver = peer.addTransceiver(of: .video)
-                        transceiver.direction = .sendOnly
+                        transceiver.setDirection(.sendOnly, error: nil)
                         transceiver.sender.track = video
                     }
                 }

@@ -569,12 +569,25 @@ final class CalendarViewModel: ObservableObject {
 
     private static func loadCachedCalendars() -> [CalDavCalendar]? {
         if let array = MailCache.loadJSON(key: calendarListCacheKey) as? [[String: Any]] {
-            return array.compactMap { CalDavCalendar(dict: $0) }
+            return decodeCalendars(array)
         }
         // Fallback: Alt-Cache unter dem "default"-Key (vor P68t).
         if let array = MailCache.loadJSON(key: "calendar_list_default") as? [[String: Any]] {
-            return array.compactMap { CalDavCalendar(dict: $0) }
+            return decodeCalendars(array)
         }
         return nil
+    }
+
+    private static func decodeCalendars(_ array: [[String: Any]]) -> [CalDavCalendar] {
+        array.compactMap { dict in
+            guard let href = dict["href"] as? String,
+                  let displayName = dict["displayName"] as? String else { return nil }
+            return CalDavCalendar(
+                href: href,
+                displayName: displayName,
+                color: dict["color"] as? String,
+                canWrite: (dict["canWrite"] as? Bool) ?? true
+            )
+        }
     }
 }
