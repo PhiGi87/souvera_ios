@@ -70,8 +70,6 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         CallDebugLog.log("EncoderProbe", "release codec=\(codecName) totalEncodes=\(encodeCount)")
         return inner.release()
     }
-        inner.release()
-    }
 
     var resolutionAlignment: Int { inner.resolutionAlignment }
     var applyAlignmentToAllSimulcastLayers: Bool { inner.applyAlignmentToAllSimulcastLayers }
