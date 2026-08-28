@@ -44,7 +44,7 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         inner.implementationName()
     }
 
-    func setBitrate(_ bitrate: UInt32, framerate: UInt32) -> Int {
+    func setBitrate(_ bitrate: UInt32, framerate: UInt32) -> Int32 {
         inner.setBitrate(bitrate, framerate: framerate)
     }
 
@@ -76,24 +76,8 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         inner.release()
     }
 
-    func resolutionAlignment() -> Int {
-        inner.resolutionAlignment()
-    }
-
-    func applyAlignment(toWidth width: Int32, height: Int32) -> Int {
-        inner.applyAlignment(toWidth: width, height: height)
-    }
-
-    func setResolutionOnEncoder(_ size: CMVideoDimensions) -> Int {
-        inner.setResolutionOnEncoder(size)
-    }
-
-    func qpMax() -> Int? {
-        inner.qpMax()
-    }
-
-    func scalingSettings() -> RTCVideoEncoderQpThresholds? {
-        inner.scalingSettings()
-    }
+    var resolutionAlignment: Int { inner.resolutionAlignment }
+    var applyAlignmentToAllSimulcastLayers: Bool { inner.applyAlignmentToAllSimulcastLayers }
+    var supportsNativeHandle: Bool { inner.supportsNativeHandle }
 
 }
