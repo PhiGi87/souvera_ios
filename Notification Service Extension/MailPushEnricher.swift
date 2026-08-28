@@ -175,7 +175,7 @@ final class MailPushEnricher {
                     if let data { total.append(data) }
                     if isComplete || error != nil {
                         connection.cancel()
-                        let result = parseHttpResponse(total)
+                        let result = self.parseHttpResponse(total)
                         cont.resume(returning: result)
                     } else {
                         receiveAll(accumulated: total)
