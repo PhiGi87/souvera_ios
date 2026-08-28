@@ -42,7 +42,7 @@ class NotificationService: UNNotificationServiceExtension {
             let userInfo = bestAttemptContent?.userInfo ?? [:]
             let alert = userInfo["aps"] as? [String: Any]
             let alertDict = alert?["alert"] as? [String: Any]
-            var raw = "keys=[\(userInfo.keys.sorted().joined(separator: ","))]"
+            var raw = "keys=[\(userInfo.keys.map { String(describing: $0) }.sorted().joined(separator: ","))]"
             raw += " alertTitle=\((alertDict?["title"] as? String) ?? "")"
             raw += " alertBody=\((alertDict?["body"] as? String) ?? "")"
             for key in ["emailId", "mailId", "objectId", "id", "nid", "type", "app"] {
