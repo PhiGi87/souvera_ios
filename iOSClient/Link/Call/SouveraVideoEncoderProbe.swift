@@ -36,7 +36,7 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         CallDebugLog.log("EncoderProbe", "encoder created: \(codecName)")
     }
 
-    func setCallback(_ callback: @escaping RTCVideoEncoderCallback) {
+    func setCallback(_ callback: RTCVideoEncoderCallback?) {
         inner.setCallback(callback)
     }
 
@@ -48,8 +48,8 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         inner.setBitrate(bitrate, framerate: framerate)
     }
 
-    func startEncode(_ settings: RTCVideoEncoderSettings, numberOfCores: Int32) -> Int {
-        let result = inner.startEncode(settings, numberOfCores: numberOfCores)
+    func startEncode(with settings: RTCVideoEncoderSettings, numberOfCores: Int32) -> Int {
+        let result = inner.startEncode(with: settings, numberOfCores: numberOfCores)
         CallDebugLog.log("EncoderProbe", "startEncode codec=\(codecName) w=\(settings.width) h=\(settings.height) result=\(result)")
         return result
     }
@@ -72,8 +72,8 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         return result
     }
 
-    func releaseEncoder() -> Int {
-        inner.releaseEncoder()
+    func release() -> Int {
+        inner.release()
     }
 
     func resolutionAlignment() -> Int {
@@ -96,7 +96,4 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         inner.scalingSettings()
     }
 
-    func setError(_ error: RTCVideoEncoderError) {
-        CallDebugLog.log("EncoderProbe", "encoder error codec=\(codecName): \(error)")
-    }
 }
