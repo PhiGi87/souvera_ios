@@ -87,7 +87,7 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
             firstFrameLogged = true
             // P68w: Dimensions-/Rotations-/Timestamp-Mismatch erkennen
             // (z. B. Capturer liefert andere Größe als startEncode 720x1280).
-            CallDebugLog.log("EncoderProbe", "first frame codec=\(codecName) w=\(frame.width) h=\(frame.height) rot=\(frame.rotation.rawValue) ts=\(frame.timeStampNs) ntpt=\(frame.ntpTimeMs)")
+            CallDebugLog.log("EncoderProbe", "first frame codec=\(codecName) w=\(frame.width) h=\(frame.height) rot=\(frame.rotation.rawValue) ts=\(frame.timeStampNs)")
         }
         let result = inner.encode(frame, codecSpecificInfo: codecSpecificInfo, frameTypes: frameTypes)
         encodeCount += 1
