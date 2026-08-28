@@ -44,6 +44,11 @@ final class WebRtcClient {
     func createLocalVideoTrack() -> RTCVideoTrack? {
         let source = factory.videoSource()
         videoSource = source
+        // P68v: Ausgabeformat der Source adaptieren (AppRTC-Standard) -
+        // ohne diese Anpassung kann der Encoder in manchen WebRTC-Versionen
+        // keine Frames übernehmen (schwarzes Remote-Bild trotz laufender
+        // Kamera). Reiner Diagnose-Fix, betrifft nur den Video-Pfad.
+        source.adaptOutputFormat(toWidth: 1280, height: 720, fps: 30)
         let capturer = RTCCameraVideoCapturer(delegate: source)
         videoCapturer = capturer
 

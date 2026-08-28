@@ -95,6 +95,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
         // Link (Talk) VoIP: register the PushKit token and present incoming calls via CallKit.
         LinkVoIPManager.shared.register()
+        // Kalender-Erinnerungs-Töne einmalig generieren (Library/Sounds).
+        SouveraToneSynthesizer.ensureAllGenerated()
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
             // gesperrtem Gerät); die Call-UI übernimmt der zentrale

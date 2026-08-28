@@ -171,7 +171,11 @@ struct NCSettingsView: View {
             Section(header: Text(NSLocalizedString("_settings_calendar_reminder_sound_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: Binding(
                     get: { SouveraCalendarReminderSound.stored },
-                    set: { SouveraCalendarReminderSound.stored = $0 }
+                    set: { newValue in
+                        SouveraCalendarReminderSound.stored = newValue
+                        // Probehören beim Auswählen.
+                        newValue.previewPlay()
+                    }
                 )) {
                     ForEach(SouveraCalendarReminderSound.allCases) { sound in
                         Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound)

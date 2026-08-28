@@ -1566,11 +1566,15 @@ final class MailViewModel: ObservableObject {
         cameFromSearch = fromSearch
         route = .detail(message: message)
         body = .loading
-        // P62e: Gelesen-Markierung SOFORT anstoßen (vor dem Body-Load) -
-        // bisher lief sie am Ende von openMessageJmap und der Status zog
-        // erst nach Sekunden (Body + Blob-Downloads). Die Übersicht
-        // aktualisiert die Zeile über updateLocalMessage sofort.
+        // P62e: Gelesen-Status SOFORT lokal flippen (vor dem Server-Call) -
+        // beim Zurückwechseln in die Übersicht ist die Zeile damit ohne
+        // Verzögerung korrekt. Der Server-Call persistiert anschließend
+        // (setRead erhält bewusst das ORIGINAL-Message, damit das
+        // Badge-Delta korrekt berechnet bleibt).
         if !message.isRead {
+            var flipped = message
+            flipped.isRead = true
+            updateLocalMessage(flipped)
             Task { await setRead([message], true) }
         }
         Task {

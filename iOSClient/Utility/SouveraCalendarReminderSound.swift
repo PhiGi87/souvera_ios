@@ -3,11 +3,14 @@
 
 import Foundation
 import UserNotifications
+import AVFAudio
 
 /// Ton für Kalender-Erinnerungen (lokale Notifications).
-/// Neben dem System-Standardton und "kein Ton" stehen ausgewählte
-/// iOS-System-UI-Sounds zur Auswahl (Referenz per Dateiname - bei
-/// unbekanntem Namen fällt iOS automatisch auf den Standardton zurück).
+/// Neben dem System-Standardton und "kein Ton" stehen vier selbst
+/// SYNTHETISIERTE Chimes zur Auswahl - die System-UI-Sounds per Dateiname
+/// griffen auf iOS 26 nicht zuverlässig. Die generierten WAVs liegen im
+/// App-Container unter Library/Sounds (offiziell unterstützter Ort für
+/// eigene Notification-Sounds).
 enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
     case systemDefault
     case bell
@@ -30,15 +33,27 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
     }
 
     /// UNNotificationSound für die Erinnerungen (nil = kein Ton).
+    /// Eigene Töne werden bei Bedarf generiert (Library/Sounds).
     var sound: UNNotificationSound? {
         switch self {
         case .systemDefault: return .default
         case .none: return nil
-        case .bell: return Self.named("calendar-alert.caf")
-        case .chime: return Self.named("new-mail.caf")
-        case .bowl: return Self.named("sms-received1.caf")
-        case .wind: return Self.named("mail-sent.caf")
+        case .bell, .chime, .bowl, .wind:
+            SouveraToneSynthesizer.ensureAllGenerated()
+            guard let fileName = SouveraToneSynthesizer.fileName(for: self) else { return .default }
+            return UNNotificationSound(named: UNNotificationSoundName(fileName))
         }
+    }
+
+    /// Probehören (Picker): spielt den Ton direkt ab.
+    func previewPlay() {
+        guard let url = SouveraToneSynthesizer.url(for: self),
+              FileManager.default.fileExists(atPath: url.path) else { return }
+        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [])
+        try? AVAudioSession.sharedInstance().setActive(true)
+        let player = try? AVAudioPlayer(contentsOf: url)
+        player?.prepareToPlay()
+        player?.play()
     }
 
     var titleKey: String {
@@ -52,7 +67,4 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
         }
     }
 
-    private static func named(_ name: String) -> UNNotificationSound? {
-        UNNotificationSound(named: UNNotificationSoundName(name))
-    }
 }

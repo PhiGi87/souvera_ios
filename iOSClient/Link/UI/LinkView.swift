@@ -1037,6 +1037,12 @@ struct LinkChatView: View {
                         if !viewModel.hideUnreadSeparator,
                            viewModel.unreadBoundary == message.id {
                             unreadSeparatorRow
+                                // Eigene Scroll-ID (negativ, kollidiert
+                                // nicht mit Nachrichten-IDs): positionChat
+                                // springt zur LINIE, damit sie oben sitzt
+                                // und die erste ungelesene Nachricht
+                                // darunter sichtbar ist.
+                                .id(-(message.id))
                         }
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
@@ -1211,7 +1217,9 @@ struct LinkChatView: View {
     /// (oben), sonst an die neueste Nachricht (unten).
     private func positionChat(proxy: ScrollViewProxy, items: [LinkChatMessage]) {
         if let boundary = viewModel.unreadBoundary {
-            proxy.scrollTo(boundary, anchor: .top)
+            // Zur TRENNLINIE springen (anchor .top): die Linie sitzt oben,
+            // die erste ungelesene Nachricht direkt darunter.
+            proxy.scrollTo(-boundary, anchor: .top)
         } else if let lastId = items.last?.id {
             proxy.scrollTo(lastId, anchor: .bottom)
         }
