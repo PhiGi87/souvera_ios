@@ -152,7 +152,10 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         guard let delegate,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1_000_000_000
-        let frame = RTCVideoFrame(buffer: pixelBuffer, rotation: videoRotation, timeStampNs: Int64(timeStampNs))
+        // talk-iOS-Muster: der Frame erwartet einen RTCVideoFrameBuffer -
+        // das CVPixelBuffer wird in ein RTCCVPixelBuffer gewrappt.
+        let rtcBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
+        let frame = RTCVideoFrame(buffer: rtcBuffer, rotation: videoRotation, timeStampNs: Int64(timeStampNs))
         delegate.capturer(capturer, didCapture: frame)
     }
 }
