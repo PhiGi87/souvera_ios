@@ -144,7 +144,13 @@ final class MailPushEnricher {
                 return
             }
             let port = NWEndpoint.Port(rawValue: UInt16(url.port ?? (scheme == "http" ? 80 : 443))) ?? NWEndpoint.Port(443)
-            let params = NWParameters(tls: scheme == "https" ? NWParameters.tls : nil)
+            let tlsOptions = scheme == "https" ? NWProtocolTLS.Options() : nil
+            let params: NWParameters
+            if let tlsOptions {
+                params = NWParameters(tls: tlsOptions)
+            } else {
+                params = NWParameters()
+            }
             params.allowLocalEndpointReuse = true
             let connection = NWConnection(host: NWEndpoint.Host(host), port: port, using: params)
 
