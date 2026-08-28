@@ -45,6 +45,11 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
         }
     }
 
+    /// P68r: Player muss WÄHREND der Wiedergabe gehalten werden - als
+    /// lokale Variable deallokiert er sofort und es erklingt nur ein
+    /// kurzer Zuck-Laut.
+    private static var previewPlayer: AVAudioPlayer?
+
     /// Probehören (Picker): spielt den Ton direkt ab.
     func previewPlay() {
         guard let url = SouveraToneSynthesizer.url(for: self),
@@ -53,9 +58,10 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
         // PlayAndRecord/Hörmuschel hängen und der Ton bleibt unhörbar.
         try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
-        let player = try? AVAudioPlayer(contentsOf: url)
-        player?.prepareToPlay()
-        player?.play()
+        Self.previewPlayer?.stop()
+        Self.previewPlayer = try? AVAudioPlayer(contentsOf: url)
+        Self.previewPlayer?.prepareToPlay()
+        Self.previewPlayer?.play()
     }
 
     var titleKey: String {

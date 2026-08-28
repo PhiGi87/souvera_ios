@@ -36,8 +36,21 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         CallDebugLog.log("EncoderProbe", "encoder created: \(codecName)")
     }
 
+    private var callbackDelivered = 0
+    private var lastDeliveryLog = Date.distantPast
+
     func setCallback(_ callback: RTCVideoEncoderCallback?) {
-        inner.setCallback(callback)
+        let wrapped: RTCVideoEncoderCallback = { [weak self] frame, info in
+            guard let self else { return callback?(frame, info) ?? true }
+            self.callbackDelivered += 1
+            let now = Date()
+            if now.timeIntervalSince(self.lastDeliveryLog) >= 2 {
+                self.lastDeliveryLog = now
+                CallDebugLog.log("EncoderProbe", "callback delivered #\(self.callbackDelivered) codec=\(self.codecName)")
+            }
+            return callback?(frame, info) ?? true
+        }
+        inner.setCallback(wrapped)
     }
 
     func implementationName() -> String {

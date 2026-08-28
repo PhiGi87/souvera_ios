@@ -218,8 +218,8 @@ final class CalendarViewModel: ObservableObject {
         let start = calendar.date(byAdding: .day, value: -1, to: monthInterval.start) ?? monthInterval.start
         let end = calendar.date(byAdding: .day, value: 1, to: (calendar.date(byAdding: .month, value: 1, to: monthInterval.start) ?? monthInterval.start.addingTimeInterval(31 * 86400))) ?? Date.distantFuture
 
-        // Sofortige Anzeige aus dem Monats-Cache, statt eines leeren
-        // Lade-Screens während der Server-Abfrage.
+        // P68s: Sofortige Anzeige aus dem Monats-Cache (kein leerer
+        // Lade-Screen) + gecachte Kalenderliste VOR dem Server-Abruf.
         if case .loading = events {
             if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
                 let cachedSorted = Self.parseEntries(cached).sorted { $0.start < $1.start }
@@ -227,7 +227,14 @@ final class CalendarViewModel: ObservableObject {
                     eventsSignature = "cached-\(cached.count)"
                     events = .success(cachedSorted)
                 }
+                JmapLog.write("Calendar cache hit: \(cached.count) entries")
+            } else {
+                JmapLog.write("Calendar cache miss for visible month")
             }
+        }
+        if calendars.isEmpty, let cachedCalendars = Self.loadCachedCalendars(), !cachedCalendars.isEmpty {
+            calendars = cachedCalendars
+            restoreSelection(cachedCalendars)
         }
 
         let discovered = await client.fetchCalendars()
@@ -506,6 +513,12 @@ final class CalendarViewModel: ObservableObject {
     }
 
     private static func saveCachedEntries(_ entries: [CalDavEventEntry], month: Date) {
+        // P68s: Einen guten Cache NIE mit einem leeren Ergebnis überschreiben
+        // (ein fehlgeschlagener Fetch löschte sonst den Sofort-Start).
+        guard !entries.isEmpty else {
+            JmapLog.write("Calendar cache: skip empty save")
+            return
+        }
         let array: [[String: Any]] = entries.map { entry in
             var dict: [String: Any] = ["calendarHref": entry.calendarHref, "href": entry.href, "ics": entry.ics]
             dict["etag"] = entry.etag ?? ""

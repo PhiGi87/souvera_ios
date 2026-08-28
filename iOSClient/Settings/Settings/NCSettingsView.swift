@@ -361,18 +361,23 @@ struct NCSettingsView: View {
                 .tint(Color(NCBrandColor.shared.textColor))
             })
         }
-        .confirmationDialog(
-            NSLocalizedString("_settings_logs_confirm_title_", comment: ""),
+        .souveraCenteredDialog(
             isPresented: $showLogsConfirm,
-            titleVisibility: .visible
-        ) {
-            Button(NSLocalizedString("_settings_logs_confirm_send_", comment: "")) {
-                sendLogs()
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
-        } message: {
-            Text(NSLocalizedString("_settings_logs_confirm_message_", comment: ""))
-        }
+            title: NSLocalizedString("_settings_logs_confirm_title_", comment: ""),
+            message: NSLocalizedString("_settings_logs_confirm_message_", comment: ""),
+            actions: [
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_settings_logs_confirm_send_", comment: ""),
+                    role: .primary
+                ) {
+                    sendLogs()
+                },
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_cancel_", comment: ""),
+                    role: .cancel
+                ) {}
+            ]
+        )
         .overlay(alignment: .bottom) {
             if isSendingLogs {
                 HStack(spacing: 8) {

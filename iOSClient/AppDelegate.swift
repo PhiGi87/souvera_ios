@@ -337,6 +337,28 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         LinkVoIPManager.shared.presentCallUIIfNeeded()
     }
 
+    /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).
+    private static func enrichMailPush(account: tableAccount, objectId: String) async -> (String, String)? {
+        guard !objectId.isEmpty,
+              let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account.account) else { return nil }
+        let client = JmapClient(
+            baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+            username: credential.saslUser,
+            password: credential.mailPassword
+        )
+        let api = JmapApi(client: client)
+        guard let session = try? await client.refreshSession(),
+              let list = try? await api.getEmails(accountId: session.primaryAccountId, ids: [objectId]),
+              let mail = list.first else { return nil }
+        let from = (mail["from"] as? [[String: Any]])?.first
+        let senderName = from?["name"] as? String ?? ""
+        let senderMail = from?["email"] as? String ?? ""
+        let sender = senderName.isEmpty ? senderMail : senderName
+        let subject = mail["subject"] as? String ?? ""
+        guard !sender.isEmpty, !subject.isEmpty else { return nil }
+        return (sender, subject)
+    }
+
     func application(_ application: UIApplication, didFailToRegisterForRemoteNotificationsWithError error: Error) {
         nkLog(tag: global.logTagPN, emoji: .error, message: "APNs registration FAILED: \(error.localizedDescription)")
     }
@@ -345,6 +367,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         NCPushNotification.shared.applicationdidReceiveRemoteNotification(userInfo: userInfo) { result in
             completionHandler(result)
         }
+        // P66d: Vordergrund-Pushes (besonders Mail-Legacy-Pfad) roh loggen.
+        let alert = (userInfo["aps"] as? [String: Any])?["alert"] as? [String: Any]
+        var rawLog = "keys=[\(userInfo.keys.map { String(describing: $0) }.sorted().joined(separator: ","))]"
+        rawLog += " alertTitle=\((alert?["title"] as? String) ?? "")"
+        rawLog += " alertBody=\((alert?["body"] as? String) ?? "")"
+        for key in ["emailId", "mailId", "objectId", "id", "nid", "type", "app"] {
+            if let value = userInfo[key] {
+                rawLog += " \(key)=\(String(describing: value).prefix(40))"
+            }
+        }
+        SouveraLog.write("PushRawFg", rawLog)
         // souvera_mail-Push (NC-Kette): Im VORDERGRUND erscheint kein
         // System-Banner - hier als lokale Notification präsentieren und
         // das Mail-Badge sofort nachziehen.
@@ -366,15 +399,33 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 guard app == "souvera_mail" || objectType == "souvera_mail" else { break }
                 let title = (json["subject"] as? String) ?? NSLocalizedString("_mail_", comment: "")
                 let body = (json["message"] as? String) ?? title
-                let mailId = json["objectId"] as? String ?? ""
+                let mailId = (json["objectId"] as? String)
+                    ?? (json["emailId"] as? String)
+                    ?? (json["mailId"] as? String)
+                    ?? (json["id"] as? String)
+                    ?? ""
                 if UIApplication.shared.applicationState == .active {
-                    let content = UNMutableNotificationContent()
-                    content.title = title
-                    content.body = body
-                    content.sound = .default
-                    content.userInfo = ["emailId": mailId, "mailboxPath": "INBOX", "account": tblAccount.account]
-                    let request = UNNotificationRequest(identifier: "nc_mail_\(mailId)", content: content, trigger: nil)
-                    UNUserNotificationCenter.current().add(request)
+                    // P66d: Bei generischen Server-Texten Absender/Betreff
+                    // selbst laden (Vordergrund-Banner).
+                    let finalMailId = mailId
+                    let tblCopy = tblAccount
+                    Task {
+                        var finalTitle = title
+                        var finalBody = body
+                        if title.isEmpty || title == "Neue E-Mail" || body.isEmpty || body == "Du hast eine neue Nachricht erhalten" {
+                            if let enriched = await Self.enrichMailPush(account: tblCopy, objectId: finalMailId) {
+                                finalTitle = enriched.0
+                                finalBody = enriched.1
+                            }
+                        }
+                        let content = UNMutableNotificationContent()
+                        content.title = finalTitle
+                        content.body = finalBody
+                        content.sound = .default
+                        content.userInfo = ["emailId": finalMailId, "mailboxPath": "INBOX", "account": tblCopy.account]
+                        let request = UNNotificationRequest(identifier: "nc_mail_\(finalMailId)", content: content, trigger: nil)
+                        UNUserNotificationCenter.current().add(request)
+                    }
                 }
                 // Badge an den Push koppeln: INBOX-Zählung sofort.
                 Task { await SouveraBackgroundSync.shared.refreshMailBadge() }

@@ -149,13 +149,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         } else {
             settings = await api.getSignalingSettings(token: token)
         }
-        guard let ncSession = await api.joinRoom(token: token) else {
-            CallDebugLog.log("CallSession", "joinRoom failed"); return end()
-        }
         guard let settings else {
             CallDebugLog.log("CallSession", "getSignalingSettings failed"); return end()
         }
-        timingLog("ocs calls done")
+        timingLog("settings done")
         // joinCall runs after the signaling room join (onRoomJoined) -
         // mirroring the Android client. Opening the call earlier makes
         // the MCU ignore our publisher.
@@ -172,12 +169,39 @@ final class CallSession: NSObject, HpbSignalingListener {
         pendingIceServers = settings.iceServers()
         lastSignalingSettings = settings
         if settings.hasExternalServer {
-            let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: ncSession, listener: self)
+            // P68q: Signaling OHNE Session verbinden - die FRISCHE Session
+            // (joinRoom) wird erst kurz vor dem Room-Join geholt. Ein
+            // einziger Room-Join = keine "Gelöschter Benutzer"-Geister
+            // für den Call-Partner.
+            let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: nil, listener: self)
             signaling = client
             client.connect()
+            // Frische Session parallel holen; sobald Signaling + Session
+            // bereit sind, wird der Raum gejoint.
+            Task { [weak self] in
+                guard let self else { return }
+                guard let freshSession = await self.api.joinRoom(token: self.token) else {
+                    CallDebugLog.log("CallSession", "joinRoom failed"); self.end()
+                    return
+                }
+                self.signalingSessionId = freshSession
+                self.timingLog("fresh joinRoom done")
+                self.maybeJoinRoom()
+            }
         } else {
             CallDebugLog.log("CallSession", "No external signaling server; 1:1 internal not implemented")
         }
+    }
+
+    /// P68q: Raum-Join, sobald Signaling-Verbindung UND frische Session
+    /// bereit sind (genau EINE Session pro Call).
+    private var signalingConnected = false
+    private var signalingSessionId: String?
+
+    private func maybeJoinRoom() {
+        guard signalingConnected, let sessionId = signalingSessionId, !endedOnce else { return }
+        signalingSessionId = nil
+        signaling?.joinRoom(sessionId: sessionId)
     }
 
     // MARK: - HpbSignalingListener
@@ -189,10 +213,11 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.mcuActive = mcuActive
         CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
         timingLog("signaling connected")
+        signalingConnected = true
+        maybeJoinRoom()
         // P68g-Fix: joinCall NICHT hier senden - vor dem Room-Join
-        // beantwortet der Server mit 404 ("not joined") und der Flow ist
-        // vergiftet (Nutzer kam nie in den Call). joinCall läuft erst
-        // nach dem Room-Join (Android-Parität + Vor-Build-Verhalten).
+        // beantwortet der Server mit 404 ("not joined"). joinCall läuft
+        // erst nach dem Room-Join.
     }
 
     /// The signaling room join is confirmed. P68g: Der erste joinCall wurde
@@ -204,29 +229,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// frische Connect mit der frischen Session ist das bewährte Muster.
     func onRoomJoined() {
         timingLog("room joined")
-        if signalingReconnectedOnce {
-            // Zweiter Room-Join (nach dem Reconnect): jetzt den Call öffnen.
-            sendJoinCall()
-            return
-        }
-        signalingReconnectedOnce = true
-        Task { [weak self] in
-            guard let self, !self.endedOnce else { return }
-            guard let freshSession = await self.api.joinRoom(token: self.token) else {
-                CallDebugLog.log("CallSession", "refresh joinRoom failed - plain joinCall")
-                self.sendJoinCall()
-                return
-            }
-            self.timingLog("fresh joinRoom done")
-            self.reconnectSignaling(sessionId: freshSession)
-        }
+        sendJoinCall()
     }
 
     /// P68g: Signaling-Verbindung mit einer frischen Session neu aufbauen
     /// (Settings + Audio-Track werden wiederverwendet - nur der Websocket
     /// wird neu geöffnet). Der zweite Room-Join triggert onRoomJoined erneut
     /// und öffnet dann den Call.
-    private var signalingReconnectedOnce = false
     private func reconnectSignaling(sessionId: String) {
         guard let settings = lastSignalingSettings else {
             CallDebugLog.log("CallSession", "reconnect failed: no settings")
@@ -238,6 +247,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         statusChannels.removeAll()
         publisherCreated = false
         joinCallSent = false
+        signalingConnected = false
+        signalingSessionId = nil
         let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: sessionId, listener: self)
         signaling = client
         client.connect()
@@ -282,7 +293,6 @@ final class CallSession: NSObject, HpbSignalingListener {
                 }
                 // Frische Session braucht einen FRISCHEN Signaling-Connect
                 // (Same-Socket-Rejoin ignoriert der HPB - belegt).
-                self.signalingReconnectedOnce = true
                 self.reconnectSignaling(sessionId: freshSession)
             } else if status == 404, !self.forceRejoinedOnce, !self.endedOnce {
                 CallDebugLog.log("CallSession", "joinCall 404 again - full force rejoin once")
@@ -316,6 +326,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         publisherCreated = false
         peers.removeAll()
         statusChannels.removeAll()
+        signalingConnected = false
+        signalingSessionId = nil
         Task { [weak self] in
             guard let self else { return }
             await self.startMedia()
@@ -619,6 +631,13 @@ final class CallSession: NSObject, HpbSignalingListener {
                     let kinds = pub.senders.compactMap { $0.track?.kind }
                     let sourceState = video.source.state.rawValue
                     CallDebugLog.log("CallSession", "video enabled; publisher senders=\(pub.senders.count) kinds=[\(kinds.joined(separator: ","))] sourceState=\(sourceState)")
+                    // P68v: Sender-Parameter loggen (ausgehandelter Codec + Encodings).
+                    for sender in pub.senders where sender.track?.kind == "video" {
+                        let params = sender.parameters
+                        let codecNames = params.codecs.map { $0.name }.joined(separator: ",")
+                        let encodings = params.encodings.map { "ssrc=\($0.ssrc ?? 0) active=\($0.isActive)" }.joined(separator: " ")
+                        CallDebugLog.log("CallSession", "video sender params codecs=[\(codecNames)] encodings=[\(encodings)]")
+                    }
                 }
             }
         } else {

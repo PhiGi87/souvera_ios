@@ -35,14 +35,18 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     private var session: URLSession!
     private var socket: URLSessionWebSocketTask?
     private var ownSessionId = ""
-    private var ncSessionId: String
+    /// P68q: nil = Room-Join erfolgt später per joinRoom(sessionId:)
+    /// (frische Session, kein Ghost). Bei gesetzter Session (Reconnect-
+    /// Fallback) wird der Room-Join automatisch nach dem Hello gesendet.
+    private var ncSessionId: String?
+    private var roomJoinSent = false
     /// P68h: Zähler für kollabierte Candidate-Logs.
     private var candidateSendCount = 0
     private var recvCandidateCount = 0
 
     private let roomTypeVideo = "video"
 
-    init(settings: SignalingSettings, backendUrl: String, roomToken: String, ncSessionId: String, listener: HpbSignalingListener) {
+    init(settings: SignalingSettings, backendUrl: String, roomToken: String, ncSessionId: String?, listener: HpbSignalingListener) {
         self.settings = settings
         self.backendUrl = backendUrl
         self.roomToken = roomToken
@@ -51,14 +55,14 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         super.init()
     }
 
-    /// P68g: Raum mit einer NEUEN NC-Session-Id erneut joinen (über die
-    /// bestehende Verbindung) - nach dem Doppel-joinRoom. Ohne diesen
-    /// Rejoin kennt der MCU die neue Session nicht und nimmt den Teilnehmer
-    /// nicht in den Call auf (Session-Mismatch -> keine Medien).
-    func rejoinRoom(sessionId: String) {
+    /// P68q: Raum mit der FRISCHEN Session joinen (über die bestehende
+    /// Verbindung). Der Aufrufer sorgt dafür, dass die Session frisch ist -
+    /// eine einzige Session bedeutet keine "Gelöschter Benutzer"-Geister
+    /// für den Call-Partner.
+    func joinRoom(sessionId: String) {
         guard socket != nil else { return }
         ncSessionId = sessionId
-        CallDebugLog.log("HpbSignaling", "rejoin room with fresh session id")
+        CallDebugLog.log("HpbSignaling", "join room with fresh session id")
         sendRoomJoin()
     }
 
@@ -164,6 +168,8 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     private func sendRoomJoin() {
+        guard !roomJoinSent, let ncSessionId else { return }
+        roomJoinSent = true
         send(["type": "room", "room": ["roomid": roomToken, "sessionid": ncSessionId]])
     }
 
@@ -222,7 +228,12 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         let mcuActive = features.contains("mcu")
         CallDebugLog.log("HpbSignaling", "hello mcu=\(mcuActive)")
         listener?.onConnected(ownSessionId: ownSessionId, mcuActive: mcuActive)
-        sendRoomJoin()
+        // P68q: Automatischer Room-Join nur, wenn die Session bereits beim
+        // Init übergeben wurde (Reconnect-Fallback). Der Normalfall joint
+        // später per joinRoom(sessionId:) mit der frischen Session.
+        if ncSessionId != nil {
+            sendRoomJoin()
+        }
     }
 
     /// Only "participants/update" carries the in-call participant list (with

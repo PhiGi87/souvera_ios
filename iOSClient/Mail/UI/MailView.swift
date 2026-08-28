@@ -23,35 +23,43 @@ struct MailView: View {
                 .toolbar {
                     toolbar
                 }
-                .confirmationDialog(
-                    NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+                .souveraCenteredDialog(
                     isPresented: Binding(
                         get: { blacklistTarget != nil },
                         set: { if !$0 { blacklistTarget = nil } }
                     ),
-                    titleVisibility: .visible
-                ) {
-                    Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
-                        let target = blacklistTarget ?? []
-                        blacklistTarget = nil
-                        Task { await viewModel.blacklistSenders(target) }
-                    }
-                    Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
-                        let target = blacklistTarget ?? []
-                        blacklistTarget = nil
-                        Task {
-                            // Erst löschen - die Liste aktualisiert sofort;
-                            // der Blacklist-API-Lauf dauert länger.
-                            viewModel.delete(target)
-                            await viewModel.blacklistSenders(target)
+                    title: NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+                    message: blacklistMessage,
+                    actions: [
+                        SouveraCenteredDialog.DialogAction(
+                            label: NSLocalizedString("_mail_blacklist_short_", comment: ""),
+                            role: .destructive
+                        ) {
+                            let target = blacklistTarget ?? []
+                            blacklistTarget = nil
+                            Task { await viewModel.blacklistSenders(target) }
+                        },
+                        SouveraCenteredDialog.DialogAction(
+                            label: NSLocalizedString("_mail_blacklist_and_delete_", comment: ""),
+                            role: .destructive
+                        ) {
+                            let target = blacklistTarget ?? []
+                            blacklistTarget = nil
+                            Task {
+                                // Erst löschen - die Liste aktualisiert sofort;
+                                // der Blacklist-API-Lauf dauert länger.
+                                viewModel.delete(target)
+                                await viewModel.blacklistSenders(target)
+                            }
+                        },
+                        SouveraCenteredDialog.DialogAction(
+                            label: NSLocalizedString("_cancel_", comment: ""),
+                            role: .cancel
+                        ) {
+                            blacklistTarget = nil
                         }
-                    }
-                    Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                        blacklistTarget = nil
-                    }
-                } message: {
-                    Text(blacklistMessage)
-                }
+                    ]
+                )
         }
         .onAppear {
             viewModel.start()
@@ -829,35 +837,43 @@ private struct MailMessageListView: View {
         } message: {
             Text(NSLocalizedString("_mail_trash_empty_confirm_", comment: ""))
         }
-        .confirmationDialog(
-            NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+        .souveraCenteredDialog(
             isPresented: Binding(
                 get: { blacklistTarget != nil },
                 set: { if !$0 { blacklistTarget = nil } }
             ),
-            titleVisibility: .visible
-        ) {
-            Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
-                let target = blacklistTarget ?? []
-                blacklistTarget = nil
-                Task { await viewModel.blacklistSenders(target) }
-            }
-            Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
-                let target = blacklistTarget ?? []
-                blacklistTarget = nil
-                Task {
-                    await viewModel.blacklistSenders(target)
-                    viewModel.delete(target)
+            title: NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+            message: blacklistConfirmMessage,
+            actions: [
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_mail_blacklist_short_", comment: ""),
+                    role: .destructive
+                ) {
+                    let target = blacklistTarget ?? []
+                    blacklistTarget = nil
+                    Task { await viewModel.blacklistSenders(target) }
+                },
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_mail_blacklist_and_delete_", comment: ""),
+                    role: .destructive
+                ) {
+                    let target = blacklistTarget ?? []
+                    blacklistTarget = nil
+                    Task {
+                        await viewModel.blacklistSenders(target)
+                        viewModel.delete(target)
+                    }
+                    selected.removeAll()
+                    editing = false
+                },
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_cancel_", comment: ""),
+                    role: .cancel
+                ) {
+                    blacklistTarget = nil
                 }
-                selected.removeAll()
-                editing = false
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                blacklistTarget = nil
-            }
-        } message: {
-            Text(blacklistConfirmMessage)
-        }
+            ]
+        )
     }
 
     /// Die Nachrichtenliste als eigene Funktion (hält den Body klein).

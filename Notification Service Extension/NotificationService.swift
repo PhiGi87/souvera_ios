@@ -35,6 +35,30 @@ class NotificationService: UNNotificationServiceExtension {
 
         NextcloudKit.configureLogger(logLevel: .verbose)
 
+        // P66d: Roh-Payload JEDES Pushs loggen (Keys + Werte, gekürzt) -
+        // die Mail-Push-Feldstruktur ist serverseitig unbekannt; dieser
+        // Log deckt sie auf.
+        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
+            let userInfo = bestAttemptContent?.userInfo ?? [:]
+            let alert = userInfo["aps"] as? [String: Any]
+            let alertDict = alert?["alert"] as? [String: Any]
+            var raw = "keys=[\(userInfo.keys.sorted().joined(separator: ","))]"
+            raw += " alertTitle=\((alertDict?["title"] as? String) ?? "")"
+            raw += " alertBody=\((alertDict?["body"] as? String) ?? "")"
+            for key in ["emailId", "mailId", "objectId", "id", "nid", "type", "app"] {
+                if let value = userInfo[key] {
+                    let text = String(describing: value).prefix(40)
+                    raw += " \(key)=\(text)"
+                }
+            }
+            let key = "souvera_mail_push_raw_log"
+            var logText = (groupDefaults.string(forKey: key)) ?? ""
+            logText += raw + "|"
+            if logText.count > 20000 {
+                logText = String(logText.suffix(20000))
+            }
+            groupDefaults.set(logText, forKey: key)
+        }
         if let bestAttemptContent = bestAttemptContent {
             bestAttemptContent.title = ""
             bestAttemptContent.body = "Souvera notification"
@@ -95,7 +119,11 @@ class NotificationService: UNNotificationServiceExtension {
                                     }
                                     groupDefaults?.set(logText, forKey: key)
                                 }
-                                let objectId = json["objectId"] as? String ?? ""
+                                let objectId = (json["objectId"] as? String)
+                                    ?? (json["emailId"] as? String)
+                                    ?? (json["mailId"] as? String)
+                                    ?? (json["id"] as? String)
+                                    ?? ""
                                 if appName == "souvera_mail" || objectType == "souvera_mail",
                                    !objectId.isEmpty {
                                     // Absender + Betreff selbst laden (der Server
@@ -161,9 +189,13 @@ class NotificationService: UNNotificationServiceExtension {
 
             // P66d: Legacy-Direktpfad (unverschlüsselt, emailId im Payload) -
             // ebenfalls anreichern (Absender/Betreff) statt generischer Texte.
+            let legacyEmailId = (bestAttemptContent.userInfo["emailId"] as? String)
+                ?? (bestAttemptContent.userInfo["mailId"] as? String)
+                ?? (bestAttemptContent.userInfo["objectId"] as? String)
+                ?? (bestAttemptContent.userInfo["id"] as? String)
+                ?? ""
             if bestAttemptContent.userInfo["subject"] as? String == nil,
-               let emailId = bestAttemptContent.userInfo["emailId"] as? String,
-               !emailId.isEmpty,
+               !legacyEmailId.isEmpty,
                let tableAccount = NCManageDatabase.shared.getActiveTableAccount() {
                 let semaphore = DispatchSemaphore(value: 0)
                 var enrichResult = "skipped"
@@ -172,7 +204,7 @@ class NotificationService: UNNotificationServiceExtension {
                         root: tableAccount.urlBase,
                         ncUser: tableAccount.user,
                         ncPassword: NCPreferences().getPassword(account: tableAccount.account),
-                        objectId: emailId
+                        objectId: legacyEmailId
                     )
                     if let enriched {
                         bestAttemptContent.title = enriched.title
@@ -187,7 +219,7 @@ class NotificationService: UNNotificationServiceExtension {
                 if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                     let key = "souvera_mail_push_enrich_log"
                     var logText = (groupDefaults.string(forKey: key)) ?? ""
-                    logText += "legacy emailId=\(emailId.prefix(12)) result=\(enrichResult)|"
+                    logText += "legacy emailId=\(legacyEmailId.prefix(12)) result=\(enrichResult)|"
                     if logText.count > 10000 {
                         logText = String(logText.suffix(10000))
                     }
