@@ -107,6 +107,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             }
             groupDefaults.removeObject(forKey: "souvera_mail_push_payload_log")
         }
+        // P66d: Anreicherungs-Ergebnisse der Extension loggen.
+        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
+           let enrichLog = groupDefaults.string(forKey: "souvera_mail_push_enrich_log"),
+           !enrichLog.isEmpty {
+            for entry in enrichLog.split(separator: "|") where !entry.isEmpty {
+                SouveraLog.write("PushEnrich", String(entry))
+            }
+            groupDefaults.removeObject(forKey: "souvera_mail_push_enrich_log")
+        }
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
             // gesperrtem Gerät); die Call-UI übernimmt der zentrale

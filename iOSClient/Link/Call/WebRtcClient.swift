@@ -19,7 +19,8 @@ final class WebRtcClient {
 
     init() {
         RTCInitializeSSL()
-        let encoder = RTCDefaultVideoEncoderFactory()
+        // P68v-Diagnose: Probe-Wrapper loggt encode()-Aufrufe und Fehler.
+        let encoder = SouveraProbeVideoEncoderFactory()
         let decoder = RTCDefaultVideoDecoderFactory()
         factory = RTCPeerConnectionFactory(encoderFactory: encoder, decoderFactory: decoder)
     }

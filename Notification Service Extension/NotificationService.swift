@@ -101,6 +101,7 @@ class NotificationService: UNNotificationServiceExtension {
                                     // Absender + Betreff selbst laden (der Server
                                     // liefert oft nur generische Texte).
                                     let semaphore = DispatchSemaphore(value: 0)
+                                    var enrichResult = "skipped"
                                     Task {
                                         let enriched = await MailPushEnricher.shared.enrich(
                                             root: tableAccount.urlBase,
@@ -111,10 +112,22 @@ class NotificationService: UNNotificationServiceExtension {
                                         if let enriched {
                                             bestAttemptContent.title = enriched.title
                                             bestAttemptContent.body = enriched.body
+                                            enrichResult = "ok"
+                                        } else {
+                                            enrichResult = "fallback"
                                         }
                                         semaphore.signal()
                                     }
                                     _ = semaphore.wait(timeout: .now() + 8)
+                                    if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
+                                        let key = "souvera_mail_push_enrich_log"
+                                        var logText = (groupDefaults.string(forKey: key)) ?? ""
+                                        logText += "objectId=\(objectId.prefix(12)) result=\(enrichResult)|"
+                                        if logText.count > 10000 {
+                                            logText = String(logText.suffix(10000))
+                                        }
+                                        groupDefaults.set(logText, forKey: key)
+                                    }
                                 }
                                 // P62g: Mail-Push -> Flag für den nächsten
                                 // Modul-Eintritt setzen (Refresh auch ohne
@@ -144,6 +157,42 @@ class NotificationService: UNNotificationServiceExtension {
                 }
             } catch let error as NSError {
                 nkLog(error: "Failed : \(error.localizedDescription)")
+            }
+
+            // P66d: Legacy-Direktpfad (unverschlüsselt, emailId im Payload) -
+            // ebenfalls anreichern (Absender/Betreff) statt generischer Texte.
+            if bestAttemptContent.userInfo["subject"] as? String == nil,
+               let emailId = bestAttemptContent.userInfo["emailId"] as? String,
+               !emailId.isEmpty,
+               let tableAccount = NCManageDatabase.shared.getActiveTableAccount() {
+                let semaphore = DispatchSemaphore(value: 0)
+                var enrichResult = "skipped"
+                Task {
+                    let enriched = await MailPushEnricher.shared.enrich(
+                        root: tableAccount.urlBase,
+                        ncUser: tableAccount.user,
+                        ncPassword: NCPreferences().getPassword(account: tableAccount.account),
+                        objectId: emailId
+                    )
+                    if let enriched {
+                        bestAttemptContent.title = enriched.title
+                        bestAttemptContent.body = enriched.body
+                        enrichResult = "ok"
+                    } else {
+                        enrichResult = "fallback"
+                    }
+                    semaphore.signal()
+                }
+                _ = semaphore.wait(timeout: .now() + 8)
+                if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
+                    let key = "souvera_mail_push_enrich_log"
+                    var logText = (groupDefaults.string(forKey: key)) ?? ""
+                    logText += "legacy emailId=\(emailId.prefix(12)) result=\(enrichResult)|"
+                    if logText.count > 10000 {
+                        logText = String(logText.suffix(10000))
+                    }
+                    groupDefaults.set(logText, forKey: key)
+                }
             }
 
             contentHandler(bestAttemptContent)

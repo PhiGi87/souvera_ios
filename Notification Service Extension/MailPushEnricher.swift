@@ -74,7 +74,8 @@ final class MailPushEnricher {
               let loginName = json["loginName"] as? String,
               let appPassword = json["appPassword"] as? String,
               !loginName.isEmpty, !appPassword.isEmpty else {
-            groupDefaults.set(Date(), forKey: mintedKey)
+            // Mint-Limit NUR bei Erfolg setzen - ein transienter Netzfehler
+            // darf die Anreicherung nicht für einen ganzen Tag sperren.
             return nil
         }
         groupDefaults.set(loginName, forKey: loginKey)

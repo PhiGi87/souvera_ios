@@ -22,6 +22,7 @@ struct NCSettingsView: View {
     // Logs teilen: Bestätigung, Sendestatus und Ergebnis-Overlay
     @State private var showLogsConfirm = false
     @State private var isSendingLogs = false
+    @AppStorage("souvera_calendar_reminder_sound") private var reminderSoundRaw = SouveraCalendarReminderSound.systemDefault.rawValue
     @State private var logsResult: (success: Bool, message: String)?
     // Push-Diagnose-Sheet
     @State private var showPushDiagnostics = false
@@ -166,18 +167,19 @@ struct NCSettingsView: View {
             })
             // Ton für Kalender-Erinnerungen (System-Töne)
             Section(header: Text(NSLocalizedString("_settings_calendar_reminder_sound_", comment: "")).font(.headline), content: {
-                Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: Binding(
-                    get: { SouveraCalendarReminderSound.stored },
-                    set: { newValue in
-                        SouveraCalendarReminderSound.stored = newValue
-                        SouveraLog.write("Settings", "tone selected: \(newValue.rawValue)")
-                        // Probehören beim Auswählen.
-                        newValue.previewPlay()
-                    }
-                )) {
+                Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: $reminderSoundRaw) {
                     ForEach(SouveraCalendarReminderSound.allCases) { sound in
-                        Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound)
+                        Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound.rawValue)
                     }
+                }
+                .onChange(of: reminderSoundRaw) { _, newRaw in
+                    guard let sound = SouveraCalendarReminderSound(rawValue: newRaw) else { return }
+                    SouveraLog.write("Settings", "tone selected: \(newRaw)")
+                    // Probehören: EINMAL bei tatsächlichem Wechsel der Auswahl.
+                    sound.previewPlay()
+                }
+                .onAppear {
+                    SouveraLog.write("Settings", "tone stored: \(reminderSoundRaw)")
                 }
             })
             // Auto-Refresh (Mail & Kalender)

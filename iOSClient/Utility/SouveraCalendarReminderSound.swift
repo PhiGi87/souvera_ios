@@ -49,7 +49,9 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
     func previewPlay() {
         guard let url = SouveraToneSynthesizer.url(for: self),
               FileManager.default.fileExists(atPath: url.path) else { return }
-        try? AVAudioSession.sharedInstance().setCategory(.ambient, options: [])
+        // .playback: nach einem Call kann die Session sonst auf
+        // PlayAndRecord/Hörmuschel hängen und der Ton bleibt unhörbar.
+        try? AVAudioSession.sharedInstance().setCategory(.playback, mode: .default, options: [])
         try? AVAudioSession.sharedInstance().setActive(true)
         let player = try? AVAudioPlayer(contentsOf: url)
         player?.prepareToPlay()
