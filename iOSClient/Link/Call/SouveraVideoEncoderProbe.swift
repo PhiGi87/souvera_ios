@@ -66,13 +66,10 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         return result
     }
 
-    func stopEncode() -> Int {
-        let result = inner.stopEncode()
-        CallDebugLog.log("EncoderProbe", "stopEncode codec=\(codecName) totalEncodes=\(encodeCount)")
-        return result
-    }
-
     func release() -> Int {
+        CallDebugLog.log("EncoderProbe", "release codec=\(codecName) totalEncodes=\(encodeCount)")
+        return inner.release()
+    }
         inner.release()
     }
 
