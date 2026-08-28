@@ -179,7 +179,7 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: souvera-deriveddata-v3-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-deriveddata-v4-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       # Downloads the pre-created App Store provisioning profiles (which carry
       # the App Groups capabilities) and writes ExportOptions.plist for manual
@@ -232,11 +232,14 @@ jobs:
           [ -f archive.log ] && cp archive.log build/logs/ || true
 
       - name: Save DerivedData cache
-        if: always()
+        # Nie eine kaputte DerivedData speichern: nach einem fehlgeschlagenen
+        # Archive hing der Save über Stunden am Lock und blockierte alle
+        # nachfolgenden Restores desselben Keys.
+        if: steps.archive.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.DERIVED_DATA }}
-          key: souvera-deriveddata-v3-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-deriveddata-v4-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       - name: Export IPA
         if: steps.archive.outcome == 'success'
@@ -343,9 +346,10 @@ jobs:
         uses: actions/cache/restore@v4
         with:
           path: ${{ env.SIM_DERIVED_DATA }}
-          key: souvera-sim-v1-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-sim-v2-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       - name: Build for simulator
+        id: sim-build
         timeout-minutes: 50
         run: |
           set -o pipefail
@@ -368,11 +372,13 @@ jobs:
           [ "$SIM_EXIT" = "0" ]
 
       - name: Save DerivedData cache
-        if: always()
+        # Siehe archive-Job: nur nach erfolgreichem Build speichern, damit
+        # ein kaputter/hängender Save nie die Restores des Keys blockiert.
+        if: steps.sim-build.outcome == 'success'
         uses: actions/cache/save@v4
         with:
           path: ${{ env.SIM_DERIVED_DATA }}
-          key: souvera-sim-v1-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+          key: souvera-sim-v2-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
       - name: Package simulator app
         if: success()
