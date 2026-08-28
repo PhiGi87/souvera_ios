@@ -8,15 +8,13 @@
 // active call; call dispose() when the call ends.
 
 import Foundation
+import AVFoundation
 import WebRTC
 
 final class WebRtcClient {
     private let factory: RTCPeerConnectionFactory
-    private var videoCapturer: RTCCameraVideoCapturer?
+    private var videoCapturer: ManualVideoCapturer?
     private var videoSource: RTCVideoSource?
-    private var captureDevice: AVCaptureDevice?
-    private var captureFormat: AVCaptureDevice.Format?
-    private var captureFps: Int = 30
     private var disposed = false
 
     init() {
@@ -40,43 +38,24 @@ final class WebRtcClient {
         return factory.audioTrack(with: source, trackId: "link_audio0")
     }
 
-    /// Creates the local video track and starts front-camera capture. Returns nil if no camera.
+    /// Creates the local video track and starts front-camera capture.
+    /// P68v: talk-iOS-Muster (NCCameraController): manuelle AVCaptureSession,
+    /// Frames werden via videoSource.capturer(didCapture:) eingespeist -
+    /// der eingebaute RTCCameraVideoCapturer lieferte auf diesem WebRTC-Build
+    /// offenbar keine Frames an den Encoder (Remote schwarz trotz Live-Source).
     func createLocalVideoTrack() -> RTCVideoTrack? {
         let source = factory.videoSource()
         videoSource = source
-        // P68v: Ausgabeformat der Source adaptieren (AppRTC-Standard) -
-        // ohne diese Anpassung kann der Encoder in manchen WebRTC-Versionen
-        // keine Frames übernehmen (schwarzes Remote-Bild trotz laufender
-        // Kamera). Reiner Diagnose-Fix, betrifft nur den Video-Pfad.
         source.adaptOutputFormat(toWidth: 1280, height: 720, fps: 30)
-        let capturer = RTCCameraVideoCapturer(delegate: source)
+        let capturer = ManualVideoCapturer(delegate: source)
         videoCapturer = capturer
-
-        guard let device = RTCCameraVideoCapturer.captureDevices().first(where: { $0.position == .front })
-            ?? RTCCameraVideoCapturer.captureDevices().first else { return nil }
-        let formats = RTCCameraVideoCapturer.supportedFormats(for: device)
-        // Pick a format close to 1280x720.
-        let format = formats.min(by: { lhs, rhs in
-            let ld = CMVideoFormatDescriptionGetDimensions(lhs.formatDescription)
-            let rd = CMVideoFormatDescriptionGetDimensions(rhs.formatDescription)
-            return abs(Int(ld.width) - 1280) < abs(Int(rd.width) - 1280)
-        }) ?? formats.first
-        captureDevice = device
-        captureFormat = format
-        if let format {
-            let fps = (format.videoSupportedFrameRateRanges.map { $0.maxFrameRate }.max() ?? 30)
-            captureFps = Int(min(fps, 30))
-            capturer.startCapture(with: device, format: format, fps: captureFps)
-        }
+        capturer.startCapture()
         return factory.videoTrack(with: source, trackId: "link_video0")
     }
 
     /// Restarts the camera capture (video was re-enabled after a stop).
     func startVideoCapture() {
-        guard let capturer = videoCapturer,
-              let device = captureDevice,
-              let format = captureFormat else { return }
-        capturer.startCapture(with: device, format: format, fps: captureFps)
+        videoCapturer?.startCapture()
     }
 
     /// Stops the camera capture (video off - the camera LED must go out).
@@ -90,8 +69,90 @@ final class WebRtcClient {
         videoCapturer?.stopCapture()
         videoCapturer = nil
         videoSource = nil
-        captureDevice = nil
-        captureFormat = nil
         RTCCleanupSSL()
+    }
+}
+
+/// Manuelle Kamera-Einspeisung (talk-iOS-NCCameraController-Muster, minimal):
+/// AVCaptureSession mit Front-Kamera, Porträt-Ausrichtung der Frames und
+/// Rotation nach Geräteorientierung.
+private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
+    private weak var delegate: RTCVideoSource?
+    private let capturer: RTCVideoCapturer
+    private let session = AVCaptureSession()
+    private let output = AVCaptureVideoDataOutput()
+    private let captureQueue = DispatchQueue(label: "souvera.camera.capture")
+    private let usingFrontCamera = true
+    private var videoRotation: RTCVideoRotation = ._0
+    private var deviceOrientation: UIDeviceOrientation = .portrait
+
+    init(delegate: RTCVideoSource) {
+        self.delegate = delegate
+        self.capturer = RTCVideoCapturer(delegate: delegate)
+        super.init()
+        configureSession()
+        NotificationCenter.default.addObserver(self, selector: #selector(orientationChanged),
+                                               name: UIDevice.orientationDidChangeNotification, object: nil)
+    }
+
+    private func configureSession() {
+        session.beginConfiguration()
+        session.sessionPreset = .high
+        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified)
+        if let device,
+           let input = try? AVCaptureDeviceInput(device: device),
+           session.canAddInput(input) {
+            session.addInput(input)
+        }
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+        output.alwaysDiscardsLateVideoFrames = true
+        output.setSampleBufferDelegate(self, queue: captureQueue)
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+        }
+        output.connections.first?.videoOrientation = .portrait
+        session.commitConfiguration()
+    }
+
+    @objc private func orientationChanged() {
+        deviceOrientation = UIDevice.current.orientation
+        updateRotation()
+    }
+
+    private func updateRotation() {
+        // talk-iOS-Mapping (Front-Kamera, Frames in Porträt-Ausrichtung).
+        if deviceOrientation == .portrait {
+            videoRotation = ._0
+        } else if deviceOrientation == .portraitUpsideDown {
+            videoRotation = ._180
+        } else if deviceOrientation == .landscapeRight {
+            videoRotation = usingFrontCamera ? ._270 : ._90
+        } else if deviceOrientation == .landscapeLeft {
+            videoRotation = usingFrontCamera ? ._90 : ._270
+        }
+    }
+
+    func startCapture() {
+        updateRotation()
+        guard !session.isRunning else { return }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            self?.session.startRunning()
+        }
+    }
+
+    func stopCapture() {
+        guard session.isRunning else { return }
+        session.stopRunning()
+    }
+
+    func captureOutput(_ output: AVCaptureOutput,
+                       didOutput sampleBuffer: CMSampleBuffer,
+                       from connection: AVCaptureConnection) {
+        guard let delegate,
+              let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1_000_000_000
+        let frame = RTCVideoFrame(buffer: pixelBuffer, rotation: videoRotation, timeStampNs: Int64(timeStampNs))
+        delegate.capturer(capturer, didCapture: frame)
     }
 }

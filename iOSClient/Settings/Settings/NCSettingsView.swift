@@ -12,16 +12,13 @@ import FirebaseCrashlytics
 @MainActor
 struct NCSettingsView: View {
     // State to control the visibility of the acknowledgements view
-    @State private var showAcknowledgements = false
     @State private var showLanguageRestart = false
     // State to control the visibility of the passcode view
     @State private var showPasscode = false
     // State to contorl the visibility of the change passcode view
     @State private var showChangePasscode = false
     // State to control the visibility of the Policy view
-    @State private var showBrowser = false
     // State to control the visibility of the Source Code  view
-    @State private var showSourceCode = false
     // Logs teilen: Bestätigung, Sendestatus und Ergebnis-Overlay
     @State private var showLogsConfirm = false
     @State private var isSendingLogs = false
@@ -173,6 +170,7 @@ struct NCSettingsView: View {
                     get: { SouveraCalendarReminderSound.stored },
                     set: { newValue in
                         SouveraCalendarReminderSound.stored = newValue
+                        SouveraLog.write("Settings", "tone selected: \(newValue.rawValue)")
                         // Probehören beim Auswählen.
                         newValue.previewPlay()
                     }
@@ -294,62 +292,18 @@ struct NCSettingsView: View {
                     }
                 }
             }
-            // `Information` Section
+            // `Information` Section - nur "Über die App"
             Section(header: Text(NSLocalizedString("_information_", comment: "")).font(.headline), content: {
-                // Acknowledgements
-                Button(action: {
-                    showAcknowledgements.toggle()
-                }, label: {
+                NavigationLink(destination: LazyView {
+                    SouveraAboutView()
+                }) {
                     HStack {
-                        Image(systemName: "figure.2.circle")
+                        Image(systemName: "info.circle")
                             .font(.icon())
                             .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
                             .frame(width: 39)
-
-                        Text(NSLocalizedString("_acknowledgements_", comment: ""))
+                        Text(NSLocalizedString("_settings_about_app_", comment: ""))
                             .font(.body)
-                    }
-                })
-                .tint(Color(NCBrandColor.shared.textColor))
-                .sheet(isPresented: $showAcknowledgements) {
-                    NCAcknowledgementsView(browserTitle: NSLocalizedString("_acknowledgements_", comment: ""))
-                }
-                // Terms & Privacy Conditions
-                Button(action: {
-                    showBrowser.toggle()
-                }, label: {
-                    HStack {
-                        Image(systemName: "shield.checkerboard")
-                            .font(.icon())
-                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
-                            .frame(width: 39)
-
-                        Text(NSLocalizedString("_privacy_legal_", comment: ""))
-                            .font(.body)
-                    }
-                })
-                .tint(Color(NCBrandColor.shared.textColor))
-                .sheet(isPresented: $showBrowser) {
-                    NCBrowserWebView(urlBase: URL(string: NCBrandOptions.shared.privacy)!, browserTitle: NSLocalizedString("_privacy_legal_", comment: ""))
-                }
-                // Source Code Nextcloud App
-                if !NCBrandOptions.shared.disable_source_code_in_settings {
-                    Button(action: {
-                        showSourceCode.toggle()
-                    }, label: {
-                        HStack {
-                            Image(systemName: "network")
-                                .font(.icon())
-                                .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
-                                .frame(width: 39)
-
-                            Text(NSLocalizedString("_source_code_", comment: ""))
-                                .font(.body)
-                        }
-                    })
-                    .tint(Color(NCBrandColor.shared.textColor))
-                    .sheet(isPresented: $showSourceCode) {
-                        NCBrowserWebView(urlBase: URL(string: NCBrandOptions.shared.sourceCode)!, browserTitle: NSLocalizedString("_source_code_", comment: ""))
                     }
                 }
             })
@@ -372,22 +326,6 @@ struct NCSettingsView: View {
                 .tint(Color(NCBrandColor.shared.textColor))
             })
 #endif
-
-            // `Über die App` Section
-            Section(content: {
-                NavigationLink(destination: LazyView {
-                    SouveraAboutView()
-                }) {
-                    HStack {
-                        Image(systemName: "info.circle")
-                            .font(.icon())
-                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
-                            .frame(width: 39)
-                        Text(NSLocalizedString("_settings_about_app_", comment: ""))
-                            .font(.body)
-                    }
-                }
-            })
 
             // `Diagnose` Section - ganz unten in den Einstellungen
             Section(header: Text(NSLocalizedString("_settings_diagnostics_", comment: "")).font(.headline), content: {

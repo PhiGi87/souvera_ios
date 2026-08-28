@@ -1724,6 +1724,10 @@ private struct LinkMessageBubble: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        // P68k-Width: Bild-/PDF-Bubbles huggen den Inhalt (kein breiter
+        // Hintergrund); die Caption-Caps (220/180) bleiben erhalten und
+        // wickeln weiter. Textnachrichten sind unverändert.
+        .fixedSize(horizontal: isImageMessage || isPdfMessage, vertical: false)
         .background(
             RoundedRectangle(cornerRadius: 16)
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))

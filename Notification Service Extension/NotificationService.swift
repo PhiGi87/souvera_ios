@@ -83,6 +83,39 @@ class NotificationService: UNNotificationServiceExtension {
                                 bestAttemptContent.title = ""
                                 bestAttemptContent.body = ""
                             } else {
+                                // P66d: Payload-Diagnose + Anreicherung.
+                                let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)
+                                if let jsonData = try? JSONSerialization.data(withJSONObject: json),
+                                   let jsonText = String(data: jsonData, encoding: .utf8) {
+                                    let key = "souvera_mail_push_payload_log"
+                                    var logText = (groupDefaults?.string(forKey: key)) ?? ""
+                                    logText += jsonText + "|"
+                                    if logText.count > 20000 {
+                                        logText = String(logText.suffix(20000))
+                                    }
+                                    groupDefaults?.set(logText, forKey: key)
+                                }
+                                let objectId = json["objectId"] as? String ?? ""
+                                if appName == "souvera_mail" || objectType == "souvera_mail",
+                                   !objectId.isEmpty {
+                                    // Absender + Betreff selbst laden (der Server
+                                    // liefert oft nur generische Texte).
+                                    let semaphore = DispatchSemaphore(value: 0)
+                                    Task {
+                                        let enriched = await MailPushEnricher.shared.enrich(
+                                            root: tableAccount.urlBase,
+                                            ncUser: tableAccount.user,
+                                            ncPassword: NCPreferences().getPassword(account: tableAccount.account),
+                                            objectId: objectId
+                                        )
+                                        if let enriched {
+                                            bestAttemptContent.title = enriched.title
+                                            bestAttemptContent.body = enriched.body
+                                        }
+                                        semaphore.signal()
+                                    }
+                                    _ = semaphore.wait(timeout: .now() + 8)
+                                }
                                 // P62g: Mail-Push -> Flag für den nächsten
                                 // Modul-Eintritt setzen (Refresh auch ohne
                                 // Tap auf die Notification).

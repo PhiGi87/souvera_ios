@@ -39,24 +39,28 @@ enum SouveraToneSynthesizer {
             guard let url = url(for: sound),
                   !FileManager.default.fileExists(atPath: url.path) else { continue }
             if let data = synthesize(sound) {
-                try? data.write(to: url, options: .atomic)
+                do {
+                    try data.write(to: url, options: .atomic)
+                    SouveraLog.write("ToneSynthesizer", "tone generated ok: \(url.lastPathComponent)")
+                } catch {
+                    SouveraLog.write("ToneSynthesizer", "tone write failed: \(error.localizedDescription)")
+                }
+            } else {
+                SouveraLog.write("ToneSynthesizer", "tone synthesis failed for \(sound.rawValue)")
             }
         }
     }
 
     // MARK: - Synthese (16-bit PCM, mono, 44.1 kHz, ~1,2 s)
 
-    private static func synthesize(_ sound: SouveraCalendarReminderSound) -> Data? {
-        let sampleRate = 44100.0
+    /// Manuelle WAV-Erzeugung (RIFF-Header + PCM16) - bewusst OHNE
+    /// AVAudioFile, dessen format.settings-Schreibweg die Dateien zuvor
+    /// nicht zuverlässig erzeugte ("tote" Töne).
+    static func synthesize(_ sound: SouveraCalendarReminderSound) -> Data? {
+        let sampleRate = 44100
         let duration = 1.2
-        let frameCount = Int(sampleRate * duration)
-        guard let format = AVAudioFormat(commonFormat: .pcmFormatInt16,
-                                         sampleRate: sampleRate,
-                                         channels: 1,
-                                         interleaved: true),
-              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frameCount)),
-              let channel = buffer.floatChannelData?[0] else { return nil }
-        buffer.frameLength = AVAudioFrameCount(frameCount)
+        let frameCount = Int(Double(sampleRate) * duration)
+        var pcm = [Int16](repeating: 0, count: frameCount)
 
         var rngState: UInt64 = 0x9E3779B97F4A7C15
         func nextRandom() -> Double {
@@ -65,41 +69,55 @@ enum SouveraToneSynthesizer {
         }
 
         for i in 0..<frameCount {
-            let t = Double(i) / sampleRate
+            let t = Double(i) / Double(sampleRate)
             var value: Double
             switch sound {
             case .bell:
-                // Zwei hell schwingende Sinus mit schnellem Abklingen.
                 value = 0.55 * sin(2 * .pi * 880 * t) * exp(-4.0 * t)
                     + 0.35 * sin(2 * .pi * 1318.5 * t) * exp(-6.0 * t)
             case .chime:
                 value = 0.5 * sin(2 * .pi * 1318.5 * t) * exp(-5.0 * t)
                     + 0.2 * sin(2 * .pi * 2637 * t) * exp(-7.0 * t)
             case .bowl:
-                // Tiefer Gong, lang ausklingend.
                 value = 0.6 * sin(2 * .pi * 196 * t) * exp(-1.6 * t)
                     + 0.3 * sin(2 * .pi * 294 * t) * exp(-2.4 * t)
             case .wind:
-                // Weiches Rauschen mit sanfter Hüllkurve.
                 let noise = (nextRandom() * 2.0 - 1.0)
                 let envelope = sin(.pi * min(t / duration, 1.0))
                 value = noise * 0.25 * envelope
             default:
                 value = 0
             }
-            channel[i] = Float(max(-1.0, min(1.0, value)))
+            let clamped = max(-1.0, min(1.0, value))
+            pcm[i] = Int16(clamped * 32767.0)
         }
 
-        do {
-            let tempURL = FileManager.default.temporaryDirectory
-                .appendingPathComponent("souvera-tone-\(UUID().uuidString).wav")
-            let file = try AVAudioFile(forWriting: tempURL, settings: format.settings)
-            try file.write(from: buffer)
-            let data = try Data(contentsOf: tempURL)
-            try? FileManager.default.removeItem(at: tempURL)
-            return data
-        } catch {
-            return nil
+        let dataSize = frameCount * 2
+        var data = Data()
+        data.append(contentsOf: Array("RIFF".utf8))
+        data.append(uint32LE(UInt32(36 + dataSize)))
+        data.append(contentsOf: Array("WAVE".utf8))
+        data.append(contentsOf: Array("fmt ".utf8))
+        data.append(uint32LE(16))
+        data.append(uint16LE(1))          // PCM
+        data.append(uint16LE(1))          // mono
+        data.append(uint32LE(UInt32(sampleRate)))
+        data.append(uint32LE(UInt32(sampleRate * 2))) // byte rate
+        data.append(uint16LE(2))          // block align
+        data.append(uint16LE(16))         // bits
+        data.append(contentsOf: Array("data".utf8))
+        data.append(uint32LE(UInt32(dataSize)))
+        for sample in pcm {
+            withUnsafeBytes(of: sample.littleEndian) { data.append(contentsOf: $0) }
         }
+        return data
+    }
+
+    private static func uint32LE(_ v: UInt32) -> Data {
+        withUnsafeBytes(of: v.littleEndian) { Data($0) }
+    }
+
+    private static func uint16LE(_ v: UInt16) -> Data {
+        withUnsafeBytes(of: v.littleEndian) { Data($0) }
     }
 }

@@ -97,6 +97,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         LinkVoIPManager.shared.register()
         // Kalender-Erinnerungs-Töne einmalig generieren (Library/Sounds).
         SouveraToneSynthesizer.ensureAllGenerated()
+        // P66d: In der Extension gesammelte Mail-Push-Payloads aus der
+        // App-Gruppe loggen (Diagnose der Server-Feldstruktur).
+        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
+           let payloadLog = groupDefaults.string(forKey: "souvera_mail_push_payload_log"),
+           !payloadLog.isEmpty {
+            for entry in payloadLog.split(separator: "|") where !entry.isEmpty {
+                SouveraLog.write("PushPayloadNSE", String(entry))
+            }
+            groupDefaults.removeObject(forKey: "souvera_mail_push_payload_log")
+        }
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
             // gesperrtem Gerät); die Call-UI übernimmt der zentrale
