@@ -8,10 +8,12 @@ import UIKit
 /// (Root mit Logo und alle gepushten Unterseiten ohne Logo).
 enum SouveraAppearance {
 
-    /// Vertikaler Souvera-Gradient (#4BBFEA → #496BBF) als SwiftUI-Farben.
+    /// Vertikaler Souvera-Gradient als SwiftUI-Farben.
+    /// P68w: deutlich dunkleres Blau als der frühere Verlauf
+    /// (#4BBFEA → #496BBF war oben fast identisch zur alten Flachfarbe).
     static let gradientColors: [Color] = [
-        Color(red: 0x4B / 255.0, green: 0xBF / 255.0, blue: 0xEA / 255.0),
-        Color(red: 0x49 / 255.0, green: 0x6B / 255.0, blue: 0xBF / 255.0)
+        Color(red: 0x2E / 255.0, green: 0x9B / 255.0, blue: 0xD8 / 255.0),
+        Color(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0)
     ]
 
     /// Gradient als Kachelbild (UIKit, Pattern-Hintergrund).
@@ -20,8 +22,8 @@ enum SouveraAppearance {
         let layer = CAGradientLayer()
         layer.frame = CGRect(origin: .zero, size: size)
         layer.colors = [
-            UIColor(red: 0x4B / 255.0, green: 0xBF / 255.0, blue: 0xEA / 255.0, alpha: 1).cgColor,
-            UIColor(red: 0x49 / 255.0, green: 0x6B / 255.0, blue: 0xBF / 255.0, alpha: 1).cgColor
+            UIColor(red: 0x2E / 255.0, green: 0x9B / 255.0, blue: 0xD8 / 255.0, alpha: 1).cgColor,
+            UIColor(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0, alpha: 1).cgColor
         ]
         layer.startPoint = CGPoint(x: 0, y: 0)
         layer.endPoint = CGPoint(x: 0, y: 1)

@@ -33,11 +33,12 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
         self.inner = inner
         self.codecName = codecName
         super.init()
-        CallDebugLog.log("EncoderProbe", "encoder created: \(codecName)")
+        CallDebugLog.log("EncoderProbe", "encoder created: \(codecName) impl=\(inner.implementationName())")
     }
 
     private var callbackDelivered = 0
     private var lastDeliveryLog = Date.distantPast
+    private var firstFrameLogged = false
 
     func setCallback(_ callback: RTCVideoEncoderCallback?) {
         // P68v: Zeigt, ob die Engine den Encoder überhaupt verdrahtet
@@ -62,8 +63,18 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
     }
 
     func setBitrate(_ bitrate: UInt32, framerate: UInt32) -> Int32 {
-        inner.setBitrate(bitrate, framerate: framerate)
+        // P68w: Bitrate 0 oder ausbleibende Raten = Encoder produziert
+        // nichts - genau der Kandidat für den fehlenden Callback.
+        if bitrate != lastLoggedBitrate || framerate != lastLoggedFramerate {
+            lastLoggedBitrate = bitrate
+            lastLoggedFramerate = framerate
+            CallDebugLog.log("EncoderProbe", "setBitrate codec=\(codecName) bitrate=\(bitrate) fps=\(framerate)")
+        }
+        return inner.setBitrate(bitrate, framerate: framerate)
     }
+
+    private var lastLoggedBitrate: UInt32 = 0xFFFF_FFFF
+    private var lastLoggedFramerate: UInt32 = 0xFFFF_FFFF
 
     func startEncode(with settings: RTCVideoEncoderSettings, numberOfCores: Int32) -> Int {
         let result = inner.startEncode(with: settings, numberOfCores: numberOfCores)
@@ -72,6 +83,12 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
     }
 
     func encode(_ frame: RTCVideoFrame, codecSpecificInfo: RTCCodecSpecificInfo?, frameTypes: [NSNumber]) -> Int {
+        if !firstFrameLogged {
+            firstFrameLogged = true
+            // P68w: Dimensions-/Rotations-/Timestamp-Mismatch erkennen
+            // (z. B. Capturer liefert andere Größe als startEncode 720x1280).
+            CallDebugLog.log("EncoderProbe", "first frame codec=\(codecName) w=\(frame.width) h=\(frame.height) rot=\(frame.rotation.rawValue) ts=\(frame.timeStampNs) ntpt=\(frame.ntpTimeMs)")
+        }
         let result = inner.encode(frame, codecSpecificInfo: codecSpecificInfo, frameTypes: frameTypes)
         encodeCount += 1
         let now = Date()

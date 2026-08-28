@@ -92,10 +92,12 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallTiming", "\(milestone) +\(elapsed)s")
     }
 
-    /// P68v: Serielle WebRTC-Queue NUR für die Stats-Diagnose (talk-iOS-
-    /// WebRTCCommon-Muster). Der funktionierende Medien-/Call-Pfad bleibt
-    /// unangetastet.
-    nonisolated static let webRtcQueue = DispatchQueue(label: "souvera.webrtc.stats", qos: .userInitiated)
+    /// P68w: Serielle WebRTC-Queue für ALLE PeerConnection-Operationen
+    /// (talk-iOS WebRTCCommon-Muster: "Every call into the WebRTC library
+    /// must be dispatched to this queue"). Parallele Calls aus WebRTC-
+    /// Callbacks + Websocket-Receive + MainActor sind ein Kandidat für den
+    /// ausbleibenden Encoder-Callback gewesen.
+    nonisolated static let webRtcQueue = DispatchQueue(label: "souvera.webrtc", qos: .userInitiated)
 
     /// Safety-Net: Wird die Session ohne explizites hangup() freigegeben
     /// (UI weg, App beendet, Crash-Pfade), bleibt sonst eine Geister-
@@ -169,46 +171,33 @@ final class CallSession: NSObject, HpbSignalingListener {
         pendingIceServers = settings.iceServers()
         lastSignalingSettings = settings
         if settings.hasExternalServer {
-            // P68q: Signaling OHNE Session verbinden - die FRISCHE Session
-            // (joinRoom) wird erst kurz vor dem Room-Join geholt. Ein
-            // einziger Room-Join = keine "Gelöschter Benutzer"-Geister
-            // für den Call-Partner.
-            let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: nil, listener: self)
-            signaling = client
-            client.connect()
-            // Frische Session parallel holen; sobald Signaling + Session
-            // bereit sind, wird der Raum gejoint.
+            // P68w: Basis-/Android-Reihenfolge (talk-iOS NCCallController +
+            // souvera_android CallSession.kt): ERST die frische Session
+            // (joinRoom), DANN der Signaling-Connect MIT dieser Session -
+            // der HPB ordnet die Verbindung sofort dem User zu (kein
+            // "Gelöschter Benutzer") und joint den Raum direkt nach dem
+            // Hello. joinCall folgt NACH dem Room-Join (onRoomJoined),
+            // der Publisher NACH dem joinCall-Erfolg. Der frühe joinCall
+            // vor dem Room-Join (P68q) ist rückgebaut - er verzögerte den
+            // participants/update-Broadcast und machte den "Gelöschter
+            // Benutzer"-Transienten permanent.
             Task { [weak self] in
                 guard let self else { return }
                 guard let freshSession = await self.api.joinRoom(token: self.token) else {
                     CallDebugLog.log("CallSession", "joinRoom failed"); self.end()
                     return
                 }
-                self.signalingSessionId = freshSession
                 self.timingLog("fresh joinRoom done")
-                // P68q: joinCall SOFORT senden (frische Session -> das
-                // belegte 200-Muster), BEVOR der Signaling-Room-Join erfolgt.
-                // Die Session kommt damit MIT In-Call-Status am MCU an -
-                // der Call-Partner sieht keinen "Gelöschter Benutzer"-
-                // Transienten mehr.
-                self.sendJoinCall()
-                self.maybeJoinRoom()
+                let client = HpbSignalingClient(settings: settings, backendUrl: self.account.baseUrl, roomToken: self.token, ncSessionId: freshSession, listener: self)
+                self.signaling = client
+                client.connect()
             }
         } else {
             CallDebugLog.log("CallSession", "No external signaling server; 1:1 internal not implemented")
         }
     }
 
-    /// P68q: Raum-Join, sobald Signaling-Verbindung UND frische Session
-    /// bereit sind (genau EINE Session pro Call).
     private var signalingConnected = false
-    private var signalingSessionId: String?
-
-    private func maybeJoinRoom() {
-        guard signalingConnected, let sessionId = signalingSessionId, !endedOnce else { return }
-        signalingSessionId = nil
-        signaling?.joinRoom(sessionId: sessionId)
-    }
 
     // MARK: - HpbSignalingListener
 
@@ -220,10 +209,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
         timingLog("signaling connected")
         signalingConnected = true
-        maybeJoinRoom()
-        // P68g-Fix: joinCall NICHT hier senden - vor dem Room-Join
-        // beantwortet der Server mit 404 ("not joined"). joinCall läuft
-        // erst nach dem Room-Join.
+        // P68w: Der Client joint den Raum direkt nach dem Hello (Session
+        // wurde beim Connect übergeben). joinCall NICHT hier senden -
+        // vor dem Room-Join beantwortet der Server mit 404 ("not joined").
+        // joinCall läuft erst nach dem Room-Join (onRoomJoined).
     }
 
     /// The signaling room join is confirmed. P68g: Der erste joinCall wurde
@@ -254,7 +243,6 @@ final class CallSession: NSObject, HpbSignalingListener {
         publisherCreated = false
         joinCallSent = false
         signalingConnected = false
-        signalingSessionId = nil
         let client = HpbSignalingClient(settings: settings, backendUrl: account.baseUrl, roomToken: token, ncSessionId: sessionId, listener: self)
         signaling = client
         client.connect()
@@ -297,6 +285,12 @@ final class CallSession: NSObject, HpbSignalingListener {
             if ok {
                 CallDebugLog.log("CallSession", "joinCall sent flags=\(flags)")
                 self.timingLog("joinCall ok")
+                // P68w: Basis-Muster (talk-iOS): der Publisher wird direkt
+                // nach dem joinCall-Erfolg erstellt - NICHT erst nach dem
+                // participants/update (das verzögerte den Publisher um
+                // 10-20 s und machte den Teilnehmer stumm, bis Video
+                // gestartet wurde). onSelfInCall bleibt als Fallback.
+                self.createPublisherIfNeeded()
             } else if status == 404, !self.cheapRejoinDone, !self.endedOnce {
                 // Billiger Rejoin: nur joinRoom + joinCall erneut (Signaling
                 // bleibt). ~0,5 s statt ~2,5 s Komplett-Neuaufbau.
@@ -344,7 +338,6 @@ final class CallSession: NSObject, HpbSignalingListener {
         peers.removeAll()
         statusChannels.removeAll()
         signalingConnected = false
-        signalingSessionId = nil
         Task { [weak self] in
             guard let self else { return }
             await self.startMedia()
@@ -370,13 +363,21 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     /// The server confirmed our session is in-call; only now may we publish
     /// to the MCU (publishing earlier is rejected/ignored by Janus).
+    /// P68w: NUR noch Fallback - der Normalfall erstellt den Publisher
+    /// direkt nach dem joinCall-Erfolg (talk-iOS-Muster).
     func onSelfInCall() {
-        guard mcuActive, !publisherCreated else { return }
+        createPublisherIfNeeded()
+    }
+
+    private func createPublisherIfNeeded() {
+        guard mcuActive, !publisherCreated, !endedOnce else { return }
         publisherCreated = true
         audioOnResendGeneration += 1
         CallDebugLog.log("CallSession", "createPublisher to own=\(ownSessionId)")
         timingLog("createPublisher")
-        createPublisher()
+        Self.webRtcQueue.async { [weak self] in
+            self?.createPublisher()
+        }
     }
 
     private func createPublisher() {
@@ -543,6 +544,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onOffer(fromSession: String, sdp: String, roomType: String) {
+        Self.webRtcQueue.async { [weak self] in
+            self?.handleOffer(fromSession: fromSession, sdp: sdp, roomType: roomType)
+        }
+    }
+
+    /// P68w: On-Queue-Implementierung (serielle WebRTC-Queue, Basis-Muster).
+    private func handleOffer(fromSession: String, sdp: String, roomType: String) {
         // Peers pro Session UND Stream-Typ (Bildschirmfreigabe kommt als
         // zweites Angebot derselben Session).
         let key = Self.streamKey(session: fromSession, roomType: roomType)
@@ -560,6 +568,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onAnswer(fromSession: String, sdp: String) {
+        Self.webRtcQueue.async { [weak self] in
+            self?.handleAnswer(fromSession: fromSession, sdp: sdp)
+        }
+    }
+
+    /// P68w: On-Queue-Implementierung (serielle WebRTC-Queue, Basis-Muster).
+    private func handleAnswer(fromSession: String, sdp: String) {
         // Diagnose: Akzeptiert der MCU unser m=video im Re-Offer?
         // (Port 0 = abgelehnt.)
         let kinds = Self.mediaLines(of: sdp)
@@ -585,9 +600,12 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onCandidate(fromSession: String, candidate: [String: Any]) {
-        guard let peer = peers[fromSession], let sdp = candidate["candidate"] as? String else { return }
-        let ice = RTCIceCandidate(sdp: sdp, sdpMLineIndex: Int32(candidate["sdpMLineIndex"] as? Int ?? 0), sdpMid: candidate["sdpMid"] as? String)
-        peer.add(ice) { _ in }
+        Self.webRtcQueue.async { [weak self] in
+            guard let self, let peer = self.peers[fromSession],
+                  let sdp = candidate["candidate"] as? String else { return }
+            let ice = RTCIceCandidate(sdp: sdp, sdpMLineIndex: Int32(candidate["sdpMLineIndex"] as? Int ?? 0), sdpMid: candidate["sdpMid"] as? String)
+            peer.add(ice) { _ in }
+        }
     }
 
     func onClosed() {}
@@ -631,21 +649,23 @@ final class CallSession: NSObject, HpbSignalingListener {
                     video.isEnabled = true
                 }
                 self.webRtc.startVideoCapture()
-                // P68v: talk-iOS-Muster - der Track wird über die
-                // bestehende (oder neue) Video-TRANSCEIVER-Zuweisung
-                // angebunden statt per peer.add(video) (ein neuer
-                // Transceiver über Renegotiation gilt als unzuverlässig
-                // für Lazy-Video).
-                for (session, peer) in self.peers where !self.mcuActive || session == self.ownSessionId {
-                    if let existing = peer.transceivers.first(where: { $0.mediaType == .video }) {
-                        existing.sender.track = video
-                        if existing.direction == .inactive {
-                            existing.setDirection(.sendOnly, error: nil)
+                // P68w Basis-Muster: Der Publisher hat die Video-m-line
+                // bereits (Platzhalter). Upgrade = NUR sender.track ersetzen
+                // - keine neue m-line, keine Renegotiation-Ergänzung (der
+                // MCU relayt nachträglich hinzugefügte m-lines nicht).
+                // On-Queue (serielle WebRTC-Queue, Basis-Muster).
+                Self.webRtcQueue.async { [weak self] in
+                    guard let self else { return }
+                    for (session, peer) in self.peers where !self.mcuActive || session == self.ownSessionId {
+                        if let existing = peer.transceivers.first(where: { $0.mediaType == .video }) {
+                            existing.sender.track = video
+                            if existing.direction != .sendOnly {
+                                existing.setDirection(.sendOnly, error: nil)
+                            }
                         }
-                    } else if let transceiver = peer.addTransceiver(of: .video) {
-                        transceiver.setDirection(.sendOnly, error: nil)
-                        transceiver.sender.track = video
                     }
+                    // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
+                    self.renegotiateAfterVideoChange()
                 }
                 // Call-Flags aktualisieren, damit der Raum als Video-Call gilt.
                 if self.callFlags & 4 == 0 {
@@ -653,8 +673,6 @@ final class CallSession: NSObject, HpbSignalingListener {
                     _ = await self.api.joinCall(token: self.token, flags: self.callFlags, silent: self.silent)
                     CallDebugLog.log("CallSession", "joinCall flags updated to \(self.callFlags)")
                 }
-                // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
-                self.renegotiateAfterVideoChange()
                 self.sendStatusMessage("videoOn")
                 self.isVideoEnabled = true
                 // Diagnose: Sender + Kamera-Quelle nach dem Einschalten.
@@ -741,8 +759,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
         Task { await api.leaveCall(token: token) }
         signaling?.close()
-        peers.values.forEach { $0.close() }
-        peers.removeAll()
+        Self.webRtcQueue.async { [weak self] in
+            self?.peers.values.forEach { $0.close() }
+            self?.peers.removeAll()
+        }
         // dispose() ist teuer und darf den Main-Thread nicht blockieren
         // (sonst bleibt die UI weiss, wenn der Cover geschlossen wird).
         let webRtcDispose = webRtc
@@ -782,6 +802,18 @@ final class CallSession: NSObject, HpbSignalingListener {
         if addLocalTracks {
             if let audio = localAudio { peer.add(audio, streamIds: ["link"]) }
             if let video = localVideo { peer.add(video, streamIds: ["link"]) }
+            else if mcuActive, isPublisher {
+                // P68w Basis-Muster (talk-iOS createPublisherPeerConnection):
+                // In Audio-only-Calls wird von Anfang an eine Platzhalter-
+                // Video-m-line (sendOnly ohne Track) verhandelt. Eine
+                // NACHträglich per Renegotiation hinzugefügte m-line wird
+                // vom MCU nie relayed (dokumentiert in talk-iOS) - das
+                // Upgrade ersetzt nur den sender.track.
+                let initT = RTCRtpTransceiverInit()
+                initT.direction = .sendOnly
+                initT.streamIds = ["link"]
+                peer.addTransceiver(of: .video, init: initT)
+            }
         }
         // Janus erwartet den "status"-DataChannel auf jeder MCU-Verbindung;
         // der Publisher ERSTELLT ihn (landet im Offer), Subscriber erhalten
