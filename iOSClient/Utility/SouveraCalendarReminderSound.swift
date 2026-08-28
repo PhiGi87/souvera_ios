@@ -4,6 +4,7 @@
 import Foundation
 import UserNotifications
 import AVFAudio
+import AudioToolbox
 
 /// Ton für Kalender-Erinnerungen (lokale Notifications).
 /// Neben dem System-Standardton und "kein Ton" stehen vier selbst
@@ -52,6 +53,12 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
 
     /// Probehören (Picker): spielt den Ton direkt ab.
     func previewPlay() {
+        // P68s: "Standard" hat keine Datei - Vorschau über einen
+        // repräsentativen Systemton (Tri-Tone).
+        if self == .systemDefault {
+            AudioServicesPlaySystemSound(1007)
+            return
+        }
         guard let url = SouveraToneSynthesizer.url(for: self),
               FileManager.default.fileExists(atPath: url.path) else { return }
         // .playback: nach einem Call kann die Session sonst auf

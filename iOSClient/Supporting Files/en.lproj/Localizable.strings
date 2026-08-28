@@ -888,7 +888,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 
 "_settings_logs_"                 = "Share logs";
 "_settings_logs_confirm_title_"   = "Send logs to Host-On?";
-"_settings_logs_confirm_message_" = "The diagnostic logs will be sent by email to Host-On (a.raatz@host-on.de).";
+"_settings_logs_confirm_message_" = "The diagnostic logs will be sent by email to Host-On.";
 "_settings_logs_confirm_send_"    = "Send";
 "_settings_logs_sending_"         = "Sending logs…";
 "_settings_logs_sent_"            = "Logs sent to Host-On.";

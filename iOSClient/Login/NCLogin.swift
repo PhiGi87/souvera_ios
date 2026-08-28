@@ -114,7 +114,9 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         navBarAppearance.titleTextAttributes = [.foregroundColor: textColor]
         navBarAppearance.largeTitleTextAttributes = [.foregroundColor: textColor]
         self.navigationController?.navigationBar.standardAppearance = navBarAppearance
-        self.navigationController?.view.backgroundColor = NCBrandColor.shared.customer
+        // P68u: Souvera-Blau-Verlauf (identisch zum Mehr-Menü-Header)
+        // statt der soliden Brand-Farbe.
+        self.navigationController?.view.backgroundColor = UIColor(patternImage: SouveraAppearance.gradientPatternImage())
         self.navigationController?.navigationBar.tintColor = textColor
 
         if let dirGroupApps = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: NCBrandOptions.shared.capabilitiesGroupApps) {
@@ -141,7 +143,7 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         }
 
         self.navigationController?.navigationBar.setValue(true, forKey: "hidesShadow")
-        view.backgroundColor = NCBrandColor.shared.customer
+        view.backgroundColor = UIColor(patternImage: SouveraAppearance.gradientPatternImage())
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)

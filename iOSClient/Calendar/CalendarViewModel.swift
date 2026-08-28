@@ -64,8 +64,16 @@ final class CalendarViewModel: ObservableObject {
     /// nie wieder automatisch aktiviert.
     private var sessionDeselectedHrefs: Set<String> = []
 
+    /// P68t: Stabiler Cache-/Selection-Key. getAllTableAccount().first
+    /// ist ab App-Start gefüllt, während getActiveTableAccount() beim
+    /// allerersten Load (vor dem Session-Setup) noch nil ist - das
+    /// verursachte den Cache-Miss nach dem frischen App-Start.
+    private static func stableAccountKey() -> String {
+        NCManageDatabase.shared.getAllTableAccount().first?.account ?? "default"
+    }
+
     private var accountKey: String {
-        NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"
+        Self.stableAccountKey()
     }
 
     private var selectionDefaultsKey: String { "souveraCalendarSelection_\(accountKey)" }
@@ -524,12 +532,19 @@ final class CalendarViewModel: ObservableObject {
             dict["etag"] = entry.etag ?? ""
             return dict
         }
-        MailCache.saveJSON(array, key: cacheKey(for: month, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default"))
+        MailCache.saveJSON(array, key: cacheKey(for: month, account: stableAccountKey()))
     }
 
     private static func loadCachedEntries(month: Date) -> [CalDavEventEntry]? {
-        guard let array = MailCache.loadJSON(key: cacheKey(for: month, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default")) as? [[String: Any]] else { return nil }
-        return array.compactMap { dict in
+        let key = cacheKey(for: month, account: stableAccountKey())
+        if let array = MailCache.loadJSON(key: key) as? [[String: Any]] { return decodeEntries(array) }
+        // Fallback: Alt-Cache unter dem "default"-Key (vor P68t).
+        if let array = MailCache.loadJSON(key: cacheKey(for: month, account: "default")) as? [[String: Any]] { return decodeEntries(array) }
+        return nil
+    }
+
+    private static func decodeEntries(_ array: [[String: Any]]) -> [CalDavEventEntry] {
+        array.compactMap { dict in
             guard let href = dict["href"] as? String,
                   let calendarHref = dict["calendarHref"] as? String,
                   let ics = dict["ics"] as? String else { return nil }
@@ -545,7 +560,7 @@ final class CalendarViewModel: ObservableObject {
         return all
     }
 
-    private static var calendarListCacheKey: String { "calendar_list_" + (NCManageDatabase.shared.getActiveTableAccount()?.account ?? "default") }
+    private static var calendarListCacheKey: String { "calendar_list_" + stableAccountKey() }
 
     private static func saveCachedCalendars(_ calendars: [CalDavCalendar]) {
         let array: [[String: Any]] = calendars.map { ["href": $0.href, "displayName": $0.displayName, "color": $0.color ?? "", "canWrite": $0.canWrite] }
@@ -553,16 +568,13 @@ final class CalendarViewModel: ObservableObject {
     }
 
     private static func loadCachedCalendars() -> [CalDavCalendar]? {
-        guard let array = MailCache.loadJSON(key: calendarListCacheKey) as? [[String: Any]] else { return nil }
-        return array.compactMap { dict in
-            guard let href = dict["href"] as? String,
-                  let displayName = dict["displayName"] as? String else { return nil }
-            return CalDavCalendar(
-                href: href,
-                displayName: displayName,
-                color: dict["color"] as? String,
-                canWrite: (dict["canWrite"] as? Bool) ?? true
-            )
+        if let array = MailCache.loadJSON(key: calendarListCacheKey) as? [[String: Any]] {
+            return array.compactMap { CalDavCalendar(dict: $0) }
         }
+        // Fallback: Alt-Cache unter dem "default"-Key (vor P68t).
+        if let array = MailCache.loadJSON(key: "calendar_list_default") as? [[String: Any]] {
+            return array.compactMap { CalDavCalendar(dict: $0) }
+        }
+        return nil
     }
 }

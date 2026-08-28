@@ -186,6 +186,12 @@ final class CallSession: NSObject, HpbSignalingListener {
                 }
                 self.signalingSessionId = freshSession
                 self.timingLog("fresh joinRoom done")
+                // P68q: joinCall SOFORT senden (frische Session -> das
+                // belegte 200-Muster), BEVOR der Signaling-Room-Join erfolgt.
+                // Die Session kommt damit MIT In-Call-Status am MCU an -
+                // der Call-Partner sieht keinen "Gelöschter Benutzer"-
+                // Transienten mehr.
+                self.sendJoinCall()
                 self.maybeJoinRoom()
             }
         } else {
@@ -258,6 +264,17 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// P68g: Letzte Signaling-Settings (für den Reconnect mit frischer
     /// Session - ohne erneuten Settings-Fetch).
     private var lastSignalingSettings: SignalingSettings?
+
+    /// P68v: Video-Sender-Parameter loggen (nach der Answer gefüllt).
+    private func logVideoSenderParams() {
+        guard let pub = peers[ownSessionId] else { return }
+        for sender in pub.senders where sender.track?.kind == "video" {
+            let params = sender.parameters
+            let codecNames = params.codecs.map { $0.name }.joined(separator: ",")
+            let encodings = params.encodings.map { "ssrc=\($0.ssrc ?? 0) active=\($0.isActive)" }.joined(separator: " ")
+            CallDebugLog.log("CallSession", "video sender params after answer codecs=[\(codecNames)] encodings=[\(encodings)]")
+        }
+    }
 
     /// P68g: joinCall mit klarer Fehlerpolitik:
     /// - 404 (deterministisch: "not joined"): KEINE Retries - sofort der
@@ -557,6 +574,9 @@ final class CallSession: NSObject, HpbSignalingListener {
             // der MCU kann den letzten Stand sonst verschlucken (verzögerte
             // Mute-/Video-Reaktion).
             self?.sendInitialStatus()
+            // P68v: NACH der Answer sind die Sender-Parameter gefüllt
+            // (ausgehandelter Codec sichtbar).
+            self?.logVideoSenderParams()
         }
     }
 
@@ -611,10 +631,22 @@ final class CallSession: NSObject, HpbSignalingListener {
                     video.isEnabled = true
                 }
                 self.webRtc.startVideoCapture()
-                // Der neue Track muss in bestehende lokale Verbindungen
-                // aufgenommen werden (Publisher bzw. 1:1-Peers).
+                // P68v: talk-iOS-Muster - der Track wird über die
+                // bestehende (oder neue) Video-TRANSCEIVER-Zuweisung
+                // angebunden statt per peer.add(video) (ein neuer
+                // Transceiver über Renegotiation gilt als unzuverlässig
+                // für Lazy-Video).
                 for (session, peer) in self.peers where !self.mcuActive || session == self.ownSessionId {
-                    peer.add(video, streamIds: ["link"])
+                    if let existing = peer.transceivers.first(where: { $0.mediaType == .video }) {
+                        existing.sender.track = video
+                        if existing.direction == .inactive {
+                            existing.direction = .sendOnly
+                        }
+                    } else {
+                        let transceiver = peer.addTransceiver(of: .video)
+                        transceiver.direction = .sendOnly
+                        transceiver.sender.track = video
+                    }
                 }
                 // Call-Flags aktualisieren, damit der Raum als Video-Call gilt.
                 if self.callFlags & 4 == 0 {

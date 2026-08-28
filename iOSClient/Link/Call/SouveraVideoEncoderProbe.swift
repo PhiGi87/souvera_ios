@@ -40,6 +40,10 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
     private var lastDeliveryLog = Date.distantPast
 
     func setCallback(_ callback: RTCVideoEncoderCallback?) {
+        // P68v: Zeigt, ob die Engine den Encoder überhaupt verdrahtet
+        // (Callback-Installation) - die Übergabe der kodierten Frames
+        // hängt daran.
+        CallDebugLog.log("EncoderProbe", "callback installed codec=\(codecName)")
         let wrapped: RTCVideoEncoderCallback = { [weak self] frame, info in
             guard let self else { return callback?(frame, info) ?? true }
             self.callbackDelivered += 1
