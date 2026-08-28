@@ -642,8 +642,7 @@ final class CallSession: NSObject, HpbSignalingListener {
                         if existing.direction == .inactive {
                             existing.setDirection(.sendOnly, error: nil)
                         }
-                    } else {
-                        let transceiver = peer.addTransceiver(of: .video)
+                    } else if let transceiver = peer.addTransceiver(of: .video) {
                         transceiver.setDirection(.sendOnly, error: nil)
                         transceiver.sender.track = video
                     }
