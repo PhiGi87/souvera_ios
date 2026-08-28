@@ -424,7 +424,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                         content.sound = .default
                         content.userInfo = ["emailId": finalMailId, "mailboxPath": "INBOX", "account": tblCopy.account]
                         let request = UNNotificationRequest(identifier: "nc_mail_\(finalMailId)", content: content, trigger: nil)
-                        UNUserNotificationCenter.current().add(request)
+                        try? await UNUserNotificationCenter.current().add(request)
                     }
                 }
                 // Badge an den Push koppeln: INBOX-Zählung sofort.
