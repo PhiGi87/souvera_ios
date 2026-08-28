@@ -80,4 +80,8 @@ final class SouveraProbeVideoEncoder: NSObject, RTCVideoEncoder {
     var applyAlignmentToAllSimulcastLayers: Bool { inner.applyAlignmentToAllSimulcastLayers }
     var supportsNativeHandle: Bool { inner.supportsNativeHandle }
 
+    func scalingSettings() -> RTCVideoEncoderQpThresholds? {
+        inner.scalingSettings()
+    }
+
 }
