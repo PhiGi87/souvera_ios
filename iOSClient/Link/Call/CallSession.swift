@@ -388,10 +388,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "publisher senders=\(senders.count) kinds=[\(senders.compactMap { $0.track?.kind }.joined(separator: ","))]")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
-            // P68f: H264 per REORDER bevorzugen (talk-iOS ARDSDPUtils-
-            // Muster) - der MCU wählt dann H264 statt VP8, das wir nicht
-            // encodieren können.
-            let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+            // P68x: VP8/AV1 komplett aus dem Angebot entfernen - die MCU
+            // muss H264 antworten (VideoToolbox). Der VP8-Encoder liefert
+            // keine kodierten Frames über den Callback (Proben).
+            let preferred = Self.h264OnlySdp(sdp.sdp)
             let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
             peer.setLocalDescription(finalSdp) { _ in }
             let kinds = Self.mediaLines(of: preferred)
@@ -662,7 +662,6 @@ final class CallSession: NSObject, HpbSignalingListener {
                             if existing.direction != .sendOnly {
                                 existing.setDirection(.sendOnly, error: nil)
                             }
-                            Self.preferH264(on: peer)
                         }
                     }
                     // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
@@ -727,8 +726,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         if mcuActive, let peer = peers[ownSessionId] {
             peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
                 guard let self, let sdp else { return }
-                // P68f: auch Re-Offer mit H264-Präferenz (talk-iOS-Muster).
-                let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
+                // P68x: Re-Offer ebenfalls H264-only (VP8/AV1 entfernen).
+                let preferred = Self.h264OnlySdp(sdp.sdp)
                 let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
                 peer.setLocalDescription(finalSdp) { _ in }
                 self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: preferred)
@@ -791,16 +790,47 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "hangup done")
     }
 
-    /// P68x: Nur H264 anbieten. Der MCU (Janus-Default) wählt sonst VP8,
-    /// dessen libvpx-Encoder in diesem WebRTC-Build keine kodierten Frames
-    /// über den Callback ausliefert (Proben: kein "callback delivered" trotz
-    /// gültiger Frames/Bitrate). H264 läuft über VideoToolbox (Hardware) -
-    /// derselbe Pfad, den talk-iOS gegen Talk-Cloud-MCUs nutzt.
-    private static func preferH264(on peer: RTCPeerConnection) {
-        let h264 = RTCVideoCodecInfo(name: "H264")
-        for transceiver in peer.transceivers where transceiver.mediaType == .video {
-            transceiver.setCodecPreferences([h264], error: nil)
+    /// P68x: Entfernt VP8/AV1 (und deren rtx/red/ulpfec) aus dem Publisher-
+    /// Angebot, sodass nur H264 übrig bleibt - die MCU muss H264 antworten
+    /// (VideoToolbox). Der VP8-libvpx-Encoder dieses WebRTC-Builds liefert
+    /// trotz gültiger Frames/Bitrate keine kodierten Frames über den
+    /// Callback aus (kein "callback delivered" in den Proben).
+    static func h264OnlySdp(_ sdpText: String) -> String {
+        var lines = sdpText.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        guard let mLineIndex = lines.firstIndex(where: { $0.hasPrefix("m=video") }) else {
+            return sdpText
         }
+        // Payload -> Codec-Name (a=rtpmap:<pt> <codec>/<rate>).
+        var codecByPayload: [String: String] = [:]
+        for line in lines where line.hasPrefix("a=rtpmap:") {
+            let rest = line.dropFirst("a=rtpmap:".count)
+            let parts = rest.split(separator: " ", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            let pt = String(parts[0])
+            let codec = parts[1].split(separator: "/").first.map(String.init) ?? ""
+            codecByPayload[pt] = codec
+        }
+        let mParts = lines[mLineIndex].split(separator: " ")
+        guard mParts.count > 3 else { return sdpText }
+        let header = mParts.prefix(3).map(String.init)
+        let payloads = mParts.dropFirst(3).map(String.init)
+        let h264Payloads = payloads.filter { codecByPayload[$0]?.caseInsensitiveCompare("H264") == .orderedSame }
+        guard !h264Payloads.isEmpty, h264Payloads.count != payloads.count else {
+            // Kein H264 oder bereits nur H264 -> unverändert.
+            return sdpText
+        }
+        let kept = Set(h264Payloads)
+        lines[mLineIndex] = (header + h264Payloads).joined(separator: " ")
+        // a=rtpmap/fmtp/rtcp-fb-Zeilen für entfernte Payloads löschen.
+        let prefixes = ["a=rtpmap:", "a=fmtp:", "a=rtcp-fb:"]
+        lines = lines.filter { line in
+            for prefix in prefixes where line.hasPrefix(prefix) {
+                let pt = line.dropFirst(prefix.count).split(separator: " ").first.map(String.init) ?? ""
+                return kept.contains(pt)
+            }
+            return true
+        }
+        return lines.joined(separator: "\n")
     }
 
     // MARK: - Peer helpers
@@ -827,10 +857,6 @@ final class CallSession: NSObject, HpbSignalingListener {
                 initT.streamIds = ["link"]
                 peer.addTransceiver(of: .video, init: initT)
             }
-        }
-        // P68x: Publisher nur H264 anbieten (VideoToolbox statt kaputtem VP8).
-        if mcuActive, isPublisher {
-            Self.preferH264(on: peer)
         }
         // Janus erwartet den "status"-DataChannel auf jeder MCU-Verbindung;
         // der Publisher ERSTELLT ihn (landet im Offer), Subscriber erhalten
