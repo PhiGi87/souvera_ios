@@ -88,10 +88,23 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // Push Notification & display notification
         UNUserNotificationCenter.current().getNotificationSettings { settings in
             self.notificationSettings = settings
+            // P68z: Berechtigungs-Status diagnostizieren (0 notDetermined,
+            // 1 denied, 2 authorized, 3 provisional, 4 ephemeral).
+            SouveraLog.write("Push", "notification authorization status=\(settings.authorizationStatus.rawValue)")
         }
         application.registerForRemoteNotifications()
         UNUserNotificationCenter.current().delegate = self
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { _, _ in }
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
+            // P68z: NACH der Berechtigungs-Entscheidung erneut registrieren.
+            // Auf iOS 26 wird das APNs-Token teils erst dann ausgeliefert -
+            // nach einem Reinstall blieb der Token sonst dauerhaft leer
+            // (didRegisterForRemoteNotificationsWithDeviceToken feuerte nie)
+            // und Mail-/Talk-Push kam nie an.
+            SouveraLog.write("Push", "notification authorization \(granted ? "granted" : "denied")")
+            DispatchQueue.main.async {
+                application.registerForRemoteNotifications()
+            }
+        }
 
         // Link (Talk) VoIP: register the PushKit token and present incoming calls via CallKit.
         LinkVoIPManager.shared.register()

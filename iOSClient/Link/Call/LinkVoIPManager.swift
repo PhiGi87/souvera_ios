@@ -306,10 +306,12 @@ final class LinkVoIPManager: NSObject {
         // Push-Gruppe Link/Talk aus: keine VoIP-Registrierung.
         guard SouveraPushToggles.linkTalkEnabled else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: toggle disabled")
+            SouveraLog.write("PushVoip", "registration skipped: link/talk toggle disabled")
             return
         }
         guard !voipToken.isEmpty else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: no PushKit token (\(tokenPreview))")
+            SouveraLog.write("PushVoip", "registration skipped: no PushKit token")
             return
         }
         let proxyServerUrl = NCBrandOptions.shared.pushNotificationServerProxy
