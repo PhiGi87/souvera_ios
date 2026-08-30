@@ -1140,5 +1140,5 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_cal_sound_bowl_" = "Singing bowl";
 "_cal_sound_wind_" = "Wind";
 "_cal_sound_none_" = "None";
-""_account_logout_""            = "Log out";
-""_account_logout_confirm_""    = "Do you want to log out of this account?";
+"_account_logout_"            = "Log out";
+"_account_logout_confirm_"    = "Do you want to log out of this account?";
