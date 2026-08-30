@@ -97,6 +97,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         LinkVoIPManager.shared.register()
         // Kalender-Erinnerungs-Töne einmalig generieren (Library/Sounds).
         SouveraToneSynthesizer.ensureAllGenerated()
+        // P68y: FD-Diagnose periodisch loggen (0xdead10cc-FD-Leck sichtbar machen).
+        SouveraFdDiagnostics.startPeriodicLogging()
         // P66d: In der Extension gesammelte Mail-Push-Payloads aus der
         // App-Gruppe loggen (Diagnose der Server-Feldstruktur).
         if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),

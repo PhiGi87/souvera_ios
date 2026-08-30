@@ -176,6 +176,8 @@ final class MailPushEnricher {
                     if let data { total.append(data) }
                     if isComplete || error != nil {
                         connection.cancel()
+                        // P68y: Retain-Cycle brechen (stateUpdateHandler -> connection).
+                        connection.stateUpdateHandler = nil
                         let result = self.parseHttpResponse(total)
                         cont.resume(returning: result)
                     } else {
@@ -187,6 +189,7 @@ final class MailPushEnricher {
             connection.stateUpdateHandler = { state in
                 if case .failed = state {
                     connection.cancel()
+                    connection.stateUpdateHandler = nil
                     cont.resume(returning: nil)
                 }
             }

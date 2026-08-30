@@ -796,13 +796,22 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// trotz gültiger Frames/Bitrate keine kodierten Frames über den
     /// Callback aus (kein "callback delivered" in den Proben).
     static func h264OnlySdp(_ sdpText: String) -> String {
-        var lines = sdpText.components(separatedBy: "\n").map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        // CRLF erhalten (SDP-Standard). Die vorherige Version strippte das
+        // "\r" und joint mit "\n" - das malformte das Angebot (MCU lehnte
+        // Video ab) und zerlegte die Diagnose (mediaLines fand keine m=-Zeile).
+        var lines = sdpText.components(separatedBy: "\r\n")
         guard let mLineIndex = lines.firstIndex(where: { $0.hasPrefix("m=video") }) else {
             return sdpText
         }
-        // Payload -> Codec-Name (a=rtpmap:<pt> <codec>/<rate>).
+        // Video-Section: von m=video bis zur nächsten m=-Zeile. NUR DIESE
+        // Section wird gefiltert - die Audio-Codec-Zeilen (opus/red/...)
+        // bleiben unangetastet (die vorherige Version löschte sie mit und
+        // machte damit den Audio-Uplink stumm).
+        let nextMLine = lines[mLineIndex...].dropFirst().firstIndex(where: { $0.hasPrefix("m=") }) ?? lines.endIndex
+
+        // Payload -> Codec-Name NUR innerhalb der Video-Section.
         var codecByPayload: [String: String] = [:]
-        for line in lines where line.hasPrefix("a=rtpmap:") {
+        for line in lines[mLineIndex..<nextMLine] where line.hasPrefix("a=rtpmap:") {
             let rest = line.dropFirst("a=rtpmap:".count)
             let parts = rest.split(separator: " ", maxSplits: 1)
             guard parts.count == 2 else { continue }
@@ -810,6 +819,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             let codec = parts[1].split(separator: "/").first.map(String.init) ?? ""
             codecByPayload[pt] = codec
         }
+
         let mParts = lines[mLineIndex].split(separator: " ")
         guard mParts.count > 3 else { return sdpText }
         let header = mParts.prefix(3).map(String.init)
@@ -821,16 +831,23 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
         let kept = Set(h264Payloads)
         lines[mLineIndex] = (header + h264Payloads).joined(separator: " ")
-        // a=rtpmap/fmtp/rtcp-fb-Zeilen für entfernte Payloads löschen.
+
+        // a=rtpmap/fmtp/rtcp-fb-Zeilen NUR in der Video-Section filtern.
         let prefixes = ["a=rtpmap:", "a=fmtp:", "a=rtcp-fb:"]
-        lines = lines.filter { line in
-            for prefix in prefixes where line.hasPrefix(prefix) {
-                let pt = line.dropFirst(prefix.count).split(separator: " ").first.map(String.init) ?? ""
-                return kept.contains(pt)
+        var result: [String] = []
+        for (index, line) in lines.enumerated() {
+            if index >= mLineIndex && index < nextMLine {
+                var keep = true
+                for prefix in prefixes where line.hasPrefix(prefix) {
+                    let pt = line.dropFirst(prefix.count).split(separator: " ").first.map(String.init) ?? ""
+                    keep = kept.contains(pt)
+                    break
+                }
+                if !keep { continue }
             }
-            return true
+            result.append(line)
         }
-        return lines.joined(separator: "\n")
+        return result.joined(separator: "\r\n")
     }
 
     // MARK: - Peer helpers

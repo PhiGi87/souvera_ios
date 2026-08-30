@@ -124,10 +124,24 @@ class NotificationService: UNNotificationServiceExtension {
                                     ?? (json["mailId"] as? String)
                                     ?? (json["id"] as? String)
                                     ?? ""
-                                if appName == "souvera_mail" || objectType == "souvera_mail",
-                                   !objectId.isEmpty {
-                                    // Absender + Betreff selbst laden (der Server
-                                    // liefert oft nur generische Texte).
+                                let isMailPush = (appName == "souvera_mail" || objectType == "souvera_mail")
+                                // P62g: Mail-Push -> Flag für den nächsten
+                                // Modul-Eintritt setzen (Refresh auch ohne
+                                // Tap auf die Notification).
+                                if isMailPush {
+                                    UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)?.set(true, forKey: "souvera_mail_refresh_needed")
+                                }
+                                // Titel (fett) = subject (z. B. Absender bei
+                                // Mail-Pushes), Body = message (z. B. Betreff).
+                                var title = subject
+                                let message = json["message"] as? String
+                                var body = (message != nil && !message!.isEmpty) ? message! : subject
+                                // P68y: NUR bei generischen/leeren Server-Texten
+                                // Absender/Betreff selbst laden. Vorher wurde die
+                                // Anreicherung immer vom title=subject überschrieben
+                                // (toter Code) - der Fallback griff nie.
+                                if isMailPush, !objectId.isEmpty,
+                                   (title.isEmpty || title == "Neue E-Mail" || body.isEmpty || body == "Du hast eine neue Nachricht erhalten") {
                                     let semaphore = DispatchSemaphore(value: 0)
                                     var enrichResult = "skipped"
                                     Task {
@@ -138,8 +152,8 @@ class NotificationService: UNNotificationServiceExtension {
                                             objectId: objectId
                                         )
                                         if let enriched {
-                                            bestAttemptContent.title = enriched.title
-                                            bestAttemptContent.body = enriched.body
+                                            title = enriched.title
+                                            body = enriched.body
                                             enrichResult = "ok"
                                         } else {
                                             enrichResult = "fallback"
@@ -157,20 +171,8 @@ class NotificationService: UNNotificationServiceExtension {
                                         groupDefaults.set(logText, forKey: key)
                                     }
                                 }
-                                // P62g: Mail-Push -> Flag für den nächsten
-                                // Modul-Eintritt setzen (Refresh auch ohne
-                                // Tap auf die Notification).
-                                if appName == "souvera_mail" || objectType == "souvera_mail" {
-                                    UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)?.set(true, forKey: "souvera_mail_refresh_needed")
-                                }
-                                // Titel (fett) = subject (z. B. Absender bei
-                                // Mail-Pushes), Body = message (z. B. Betreff).
-                                bestAttemptContent.title = subject
-                                if let message = json["message"] as? String, !message.isEmpty {
-                                    bestAttemptContent.body = message
-                                } else {
-                                    bestAttemptContent.body = subject
-                                }
+                                bestAttemptContent.title = title
+                                bestAttemptContent.body = body
                                 if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                     json["account"] = tableAccount.account as AnyObject
                                     pref.set(json, forKey: "NOTIFICATION_DATA")

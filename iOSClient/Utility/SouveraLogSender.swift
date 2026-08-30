@@ -30,6 +30,7 @@ enum SouveraLogSender {
         parts.append("VoIP-Token: \(voipToken.isEmpty ? "fehlt" : "vorhanden (\(voipToken.count) Zeichen)")")
         parts.append("Push-Registrierung: \(pushRegistrationStatus())")
         parts.append("Letzter Push-Test: \(UserDefaults.standard.string(forKey: "SouveraLastTestPushResult") ?? "-")")
+        parts.append("Offene Datei-Deskriptoren: \(SouveraFdDiagnostics.openFileDescriptorCount())")
         parts.append("")
         parts.append("=== souvera-app.log ===")
         parts.append(Self.recentTail(of: SouveraLog.fileContent(), maxBytes: 2_500_000))

@@ -42,28 +42,21 @@ class NCPushNotification {
             return
         }
 
-        let responsePN = await NextcloudKit.shared.subscribingPushNotificationAsync(serverUrl: urlBase,
-                                                                                    pushTokenHash: pushTokenHash,
-                                                                                    devicePublicKey: devicePublicKey,
-                                                                                    proxyServerUrl: proxyServerUrl, account: account) { task in
-            Task {
-                let identifier = await NCNetworking.shared.networkingTasks.createIdentifier(account: account,
-                                                                                            path: urlBase,
-                                                                                            name: "subscribingPushNotification")
-                await NCNetworking.shared.networkingTasks.track(identifier: identifier, task: task)
-            }
-        }
+        let responsePN = await subscribePushNotification(serverUrl: urlBase,
+                                                         pushTokenHash: pushTokenHash,
+                                                         devicePublicKey: devicePublicKey,
+                                                         proxyServerUrl: proxyServerUrl,
+                                                         account: account)
 
-        guard responsePN.error == .success,
-              let deviceIdentifier = responsePN.deviceIdentifier,
-              let signature = responsePN.signature,
-              let subscribingPublicKey = responsePN.publicKey
-        else {
-            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Nextcloud instance push registration FAILED for \(urlBase), status \(responsePN.error.errorCode): \(responsePN.error.errorDescription)")
-            UserDefaults.standard.set("failed NC \(responsePN.error.errorCode) \(Date())", forKey: "SouveraPushRegStatusNormal")
-            SouveraLog.write("Push", "NC registration FAILED \(urlBase) status \(responsePN.error.errorCode)")
+        guard let responsePN else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Nextcloud instance push registration FAILED for \(urlBase)")
+            UserDefaults.standard.set("failed NC \(Date())", forKey: "SouveraPushRegStatusNormal")
+            SouveraLog.write("Push", "NC registration FAILED \(urlBase)")
             return
         }
+        let deviceIdentifier = responsePN.deviceIdentifier
+        let signature = responsePN.signature
+        let subscribingPublicKey = responsePN.publicKey
 
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Nextcloud instance push registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
         SouveraLog.write("Push", "NC registration OK \(urlBase)")
@@ -94,6 +87,50 @@ class NCPushNotification {
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
         preferences.setPushNotificationDeviceIdentifierSignature(account: account, deviceIdentifierSignature: signature)
         preferences.setPushNotificationSubscribingPublicKey(account: account, publicKey: subscribingPublicKey)
+    }
+
+    /// P68y: Abonniert Push am NC-Server und wiederholt bei -1000
+    /// (NSURLErrorBadURL = NextcloudKit .urlError). Der NCK-Call baut seine
+    /// Request-URL aus der INTERNEN Session (nksessions.session(forAccount:)),
+    /// nicht aus dem übergebenen serverUrl - rennt das Abo dem Session-Setup
+    /// (App-Start/Sync) voraus, ist die Session noch nil -> -1000 und die
+    /// Normal-Registrierung (Mail/Chat) fällt aus. Kurz warten + retry.
+    private func subscribePushNotification(serverUrl: String,
+                                           pushTokenHash: String,
+                                           devicePublicKey: String,
+                                           proxyServerUrl: String,
+                                           account: String) async -> (deviceIdentifier: String, signature: String, publicKey: String)? {
+        for attempt in 0..<3 {
+            let response = await NextcloudKit.shared.subscribingPushNotificationAsync(
+                serverUrl: serverUrl,
+                pushTokenHash: pushTokenHash,
+                devicePublicKey: devicePublicKey,
+                proxyServerUrl: proxyServerUrl,
+                account: account
+            ) { task in
+                Task {
+                    let identifier = await NCNetworking.shared.networkingTasks.createIdentifier(account: account,
+                                                                                                path: serverUrl,
+                                                                                                name: "subscribingPushNotification")
+                    await NCNetworking.shared.networkingTasks.track(identifier: identifier, task: task)
+                }
+            }
+
+            if response.error == .success,
+               let deviceIdentifier = response.deviceIdentifier,
+               let signature = response.signature,
+               let publicKey = response.publicKey {
+                return (deviceIdentifier, signature, publicKey)
+            }
+
+            SouveraLog.write("Push", "NC registration attempt \(attempt + 1) failed \(serverUrl) status \(response.error.errorCode): \(response.error.errorDescription)")
+            if response.error.errorCode == NSURLErrorBadURL, attempt < 2 {
+                try? await Task.sleep(for: .seconds(2))
+                continue
+            }
+            return nil
+        }
+        return nil
     }
 
     func unsubscribingNextcloudServerPushNotification(account: String, urlBase: String) async {

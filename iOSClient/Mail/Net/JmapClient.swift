@@ -504,10 +504,14 @@ private final class Http1Transport {
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_tls_server_name(tls.securityProtocolOptions, host)
         sec_protocol_options_add_tls_application_protocol(tls.securityProtocolOptions, "http/1.1")
+        // P68y: lokalen Endpoint wiederverwenden - sonst erschöpft sich bei
+        // vielen Kurz-Verbindungen der lokale Port-/FD-Bereich.
+        let params = NWParameters(tls: tls)
+        params.allowLocalEndpointReuse = true
         let connection = NWConnection(
             host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(rawValue: port)!,
-            using: NWParameters(tls: tls)
+            using: params
         )
 
         var request = "POST \(path) HTTP/1.1\r\n"
@@ -531,6 +535,10 @@ private final class Http1Transport {
                 guard !done else { return }
                 done = true
                 connection.cancel()
+                // P68y: Retain-Cycle brechen (stateUpdateHandler -> finish ->
+                // connection) - sonst bleibt die NWConnection samt Socket-FD
+                // am Leben (FD-Leck, Termination 0xdead10cc).
+                connection.stateUpdateHandler = nil
                 continuation.resume(with: result)
             }
 
