@@ -251,9 +251,16 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
 
         var selfInCall = false
         var remotes: [String] = []
+        // P68z: User-Zuordnung diagnostizieren ("Gelöschter Benutzer" beim
+        // Call-Partner entsteht, wenn die MCU unsere Session ohne userId
+        // broadcastet). Roh-Zeile je Teilnehmer: userId/session/inCall.
+        var userLine = "participants raw:"
         for user in users {
+            let userId = (user["userId"] as? String) ?? (user["userid"] as? String) ?? ""
             let inCall = (user["inCall"] as? Int ?? 0) != 0
             let session = (user["sessionId"] as? String) ?? (user["sessionid"] as? String) ?? ""
+            let actor = (user["actorType"] as? String) ?? (user["actortype"] as? String) ?? ""
+            userLine += " [userId=\(userId.isEmpty ? "-" : userId.prefix(16)) actor=\(actor) inCall=\(inCall) session=\(session.prefix(8))]"
             guard inCall, !session.isEmpty else { continue }
             if session == ownSessionId {
                 selfInCall = true
@@ -262,6 +269,7 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
             }
         }
         CallDebugLog.log("HpbSignaling", "participants/update self=\(selfInCall) remotes=\(remotes.count)")
+        CallDebugLog.log("HpbSignaling", userLine)
         if selfInCall {
             listener?.onSelfInCall()
         }

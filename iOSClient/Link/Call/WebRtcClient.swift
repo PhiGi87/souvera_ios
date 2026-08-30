@@ -19,8 +19,10 @@ final class WebRtcClient {
 
     init() {
         RTCInitializeSSL()
-        // P68v-Diagnose: Probe-Wrapper loggt encode()-Aufrufe und Fehler.
-        let encoder = SouveraProbeVideoEncoderFactory()
+        // P68z: talk-iOS-Parität - rohe Encoder-Factory (kein Probe-Wrapper).
+        // Der Wrapper (setCallback-Umschreibung) war eine Abweichung im
+        // Encoder-Pfad; talk-iOS nutzt die Default-Factory direkt.
+        let encoder = RTCDefaultVideoEncoderFactory()
         let decoder = RTCDefaultVideoDecoderFactory()
         factory = RTCPeerConnectionFactory(encoderFactory: encoder, decoderFactory: decoder)
     }
@@ -47,7 +49,10 @@ final class WebRtcClient {
     func createLocalVideoTrack() -> RTCVideoTrack? {
         let source = factory.videoSource()
         videoSource = source
-        source.adaptOutputFormat(toWidth: 1280, height: 720, fps: 30)
+        // P68z: talk-iOS-Parität - KEIN adaptOutputFormat. Die frühere
+        // adaptOutputFormat(toWidth:1280,height:720) war vertauscht
+        // (Landschaft statt Porträt) und ein Kandidat dafür, dass libvpx
+        // die Frames annahm, aber keinen Output lieferte.
         let capturer = ManualVideoCapturer(delegate: source)
         videoCapturer = capturer
         capturer.startCapture()
@@ -152,6 +157,19 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
                        from connection: AVCaptureConnection) {
         guard let delegate,
               let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        // P68z: Einmalig das Pixel-Format + Größe loggen (NV12 vs. BGRA -
+        // talk-iOS rendert via CoreImage auf BGRA; ein Format-Problem wäre
+        // der nächste Kandidat, falls der Encoder weiter keinen Output liefert).
+        if !firstFrameLogged {
+            firstFrameLogged = true
+            let format = CVPixelBufferGetPixelFormatType(pixelBuffer)
+            var chars = [Character]()
+            for shift in stride(from: 24, through: 0, by: -8) {
+                let byte = (Int(format) >> shift) & 0xFF
+                if byte > 0 { chars.append(Character(UnicodeScalar(byte)!)) }
+            }
+            CallDebugLog.log("CameraProbe", "first frame format=\(String(chars)) w=\(CVPixelBufferGetWidth(pixelBuffer)) h=\(CVPixelBufferGetHeight(pixelBuffer))")
+        }
         let timeStampNs = CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sampleBuffer)) * 1_000_000_000
         // talk-iOS-Muster: der Frame erwartet einen RTCVideoFrameBuffer -
         // das CVPixelBuffer wird in ein RTCCVPixelBuffer gewrappt.
@@ -159,4 +177,6 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         let frame = RTCVideoFrame(buffer: rtcBuffer, rotation: videoRotation, timeStampNs: Int64(timeStampNs))
         delegate.capturer(capturer, didCapture: frame)
     }
+
+    private var firstFrameLogged = false
 }

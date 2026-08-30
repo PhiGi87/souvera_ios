@@ -14,6 +14,14 @@ class NCPushNotification {
     func subscribingNextcloudServerPushNotification(account: String, urlBase: String) async {
         let preferences = NCPreferences()
         let proxyServerUrl = NCBrandOptions.shared.pushNotificationServerProxy
+        // P68z: NIE mit leerem APNs-Token registrieren - sonst entsteht am
+        // NC-Server/Proxy eine Gerätezeile mit SHA512("") und Mail/Chat-Push
+        // kommt nie an (nach Reinstall kommt der Token teils verspätet).
+        guard !preferences.deviceTokenPushNotification.isEmpty else {
+            nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push subscription skipped for \(urlBase): no APNs token available yet")
+            SouveraLog.write("Push", "NC registration skipped \(urlBase): no APNs token")
+            return
+        }
         guard !proxyServerUrl.isEmpty,
               let pushTokenHash = NCEndToEndEncryption.shared().createSHA512(preferences.deviceTokenPushNotification) else {
             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration skipped for \(urlBase): no push proxy URL configured or no APNs token available")

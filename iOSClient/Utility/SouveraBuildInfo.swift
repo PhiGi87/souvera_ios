@@ -190,6 +190,10 @@ enum SouveraPushRegistrar {
                                         deviceIdentifier: deviceIdentifier,
                                         signature: signature,
                                         publicKey: publicKey)
+                // P68z: Der Proxy verarbeitet DELETE offenbar asynchron -
+                // ein sofortiger Re-POST traf weiterhin auf den alten
+                // Geräteeintrag (409). Kurz warten, dann erneut anlegen.
+                try? await Task.sleep(for: .seconds(1))
                 var retryReq = URLRequest(url: url)
                 retryReq.httpMethod = "POST"
                 retryReq.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")

@@ -388,10 +388,10 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "publisher senders=\(senders.count) kinds=[\(senders.compactMap { $0.track?.kind }.joined(separator: ","))]")
         peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
             guard let self, let sdp else { return }
-            // P68x: VP8/AV1 komplett aus dem Angebot entfernen - die MCU
-            // muss H264 antworten (VideoToolbox). Der VP8-Encoder liefert
-            // keine kodierten Frames über den Callback (Proben).
-            let preferred = Self.h264OnlySdp(sdp.sdp)
+            // talk-iOS-Parität: H264 per REORDER bevorzugen, VP8 bleibt im
+            // Angebot - die Host-On-MCU akzeptiert nur VP8 (H264-only wurde
+            // mit video:0 abgelehnt und stoppte den Video-Transceiver).
+            let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
             let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
             peer.setLocalDescription(finalSdp) { _ in }
             let kinds = Self.mediaLines(of: preferred)
@@ -726,8 +726,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         if mcuActive, let peer = peers[ownSessionId] {
             peer.offer(for: publisherConstraints()) { [weak self] sdp, _ in
                 guard let self, let sdp else { return }
-                // P68x: Re-Offer ebenfalls H264-only (VP8/AV1 entfernen).
-                let preferred = Self.h264OnlySdp(sdp.sdp)
+                // talk-iOS-Parität: Re-Offer mit H264-Präferenz (VP8 bleibt).
+                let preferred = Self.preferringVideoCodec(sdp.sdp, codec: "H264")
                 let finalSdp = RTCSessionDescription(type: sdp.type, sdp: preferred)
                 peer.setLocalDescription(finalSdp) { _ in }
                 self.signaling?.sendOffer(toSession: self.ownSessionId, sdp: preferred)
@@ -788,66 +788,6 @@ final class CallSession: NSObject, HpbSignalingListener {
         LinkVoIPManager.shared.callSessionDidEnd(self)
         NotificationCenter.default.post(name: .linkCallUIClose, object: nil)
         CallDebugLog.log("CallSession", "hangup done")
-    }
-
-    /// P68x: Entfernt VP8/AV1 (und deren rtx/red/ulpfec) aus dem Publisher-
-    /// Angebot, sodass nur H264 übrig bleibt - die MCU muss H264 antworten
-    /// (VideoToolbox). Der VP8-libvpx-Encoder dieses WebRTC-Builds liefert
-    /// trotz gültiger Frames/Bitrate keine kodierten Frames über den
-    /// Callback aus (kein "callback delivered" in den Proben).
-    static func h264OnlySdp(_ sdpText: String) -> String {
-        // CRLF erhalten (SDP-Standard). Die vorherige Version strippte das
-        // "\r" und joint mit "\n" - das malformte das Angebot (MCU lehnte
-        // Video ab) und zerlegte die Diagnose (mediaLines fand keine m=-Zeile).
-        var lines = sdpText.components(separatedBy: "\r\n")
-        guard let mLineIndex = lines.firstIndex(where: { $0.hasPrefix("m=video") }) else {
-            return sdpText
-        }
-        // Video-Section: von m=video bis zur nächsten m=-Zeile. NUR DIESE
-        // Section wird gefiltert - die Audio-Codec-Zeilen (opus/red/...)
-        // bleiben unangetastet (die vorherige Version löschte sie mit und
-        // machte damit den Audio-Uplink stumm).
-        let nextMLine = lines[mLineIndex...].dropFirst().firstIndex(where: { $0.hasPrefix("m=") }) ?? lines.endIndex
-
-        // Payload -> Codec-Name NUR innerhalb der Video-Section.
-        var codecByPayload: [String: String] = [:]
-        for line in lines[mLineIndex..<nextMLine] where line.hasPrefix("a=rtpmap:") {
-            let rest = line.dropFirst("a=rtpmap:".count)
-            let parts = rest.split(separator: " ", maxSplits: 1)
-            guard parts.count == 2 else { continue }
-            let pt = String(parts[0])
-            let codec = parts[1].split(separator: "/").first.map(String.init) ?? ""
-            codecByPayload[pt] = codec
-        }
-
-        let mParts = lines[mLineIndex].split(separator: " ")
-        guard mParts.count > 3 else { return sdpText }
-        let header = mParts.prefix(3).map(String.init)
-        let payloads = mParts.dropFirst(3).map(String.init)
-        let h264Payloads = payloads.filter { codecByPayload[$0]?.caseInsensitiveCompare("H264") == .orderedSame }
-        guard !h264Payloads.isEmpty, h264Payloads.count != payloads.count else {
-            // Kein H264 oder bereits nur H264 -> unverändert.
-            return sdpText
-        }
-        let kept = Set(h264Payloads)
-        lines[mLineIndex] = (header + h264Payloads).joined(separator: " ")
-
-        // a=rtpmap/fmtp/rtcp-fb-Zeilen NUR in der Video-Section filtern.
-        let prefixes = ["a=rtpmap:", "a=fmtp:", "a=rtcp-fb:"]
-        var result: [String] = []
-        for (index, line) in lines.enumerated() {
-            if index >= mLineIndex && index < nextMLine {
-                var keep = true
-                for prefix in prefixes where line.hasPrefix(prefix) {
-                    let pt = line.dropFirst(prefix.count).split(separator: " ").first.map(String.init) ?? ""
-                    keep = kept.contains(pt)
-                    break
-                }
-                if !keep { continue }
-            }
-            result.append(line)
-        }
-        return result.joined(separator: "\r\n")
     }
 
     // MARK: - Peer helpers
