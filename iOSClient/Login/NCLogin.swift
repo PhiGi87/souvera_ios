@@ -49,22 +49,19 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
     // LucidBanner
     var banner: LucidBanner?
 
+    /// P68x: Volle-Höhe-Verlaufs-Layer (Rotation/Resize-Aktualisierung).
+    private var backgroundGradientLayers: [CAGradientLayer] = []
+
     // MARK: - View Life Cycle
 
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Text color
-        if NCBrandColor.shared.customer.isTooLight() {
-            textColor = .black
-            textColorOpponent = .white
-        } else if NCBrandColor.shared.customer.isTooDark() {
-            textColor = .white
-            textColorOpponent = .black
-        } else {
-            textColor = .white
-            textColorOpponent = .black
-        }
+        // P68x: dunkler Verlauf -> immer weiße Schrift. Der frühere
+        // isTooLight()-Zweig (#4BBFEA) setzte schwarzen Text, der auf dem
+        // dunklen Souvera-Verlauf unlesbar ist.
+        textColor = .white
+        textColorOpponent = .black
 
         // Image Brand
         imageBrand.image = UIImage(named: "logo")
@@ -114,9 +111,11 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         navBarAppearance.titleTextAttributes = [.foregroundColor: textColor]
         navBarAppearance.largeTitleTextAttributes = [.foregroundColor: textColor]
         self.navigationController?.navigationBar.standardAppearance = navBarAppearance
-        // P68u: Souvera-Blau-Verlauf (identisch zum Mehr-Menü-Header)
-        // statt der soliden Brand-Farbe.
-        self.navigationController?.view.backgroundColor = UIColor(patternImage: SouveraAppearance.gradientPatternImage())
+        // P68x: voller Verlauf über die ganze Höhe statt gekacheltem Muster.
+        if let navView = self.navigationController?.view {
+            let layer = SouveraAppearance.applyGradientBackground(to: navView)
+            backgroundGradientLayers.append(layer)
+        }
         self.navigationController?.navigationBar.tintColor = textColor
 
         if let dirGroupApps = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: NCBrandOptions.shared.capabilitiesGroupApps) {
@@ -143,7 +142,8 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         }
 
         self.navigationController?.navigationBar.setValue(true, forKey: "hidesShadow")
-        view.backgroundColor = UIColor(patternImage: SouveraAppearance.gradientPatternImage())
+        let layer = SouveraAppearance.applyGradientBackground(to: view)
+        backgroundGradientLayers.append(layer)
 
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
@@ -179,6 +179,14 @@ class NCLogin: UIViewController, UITextFieldDelegate, NCLoginQRCodeDelegate {
         }
 
         NCNetworking.shared.certificateDelegate = self
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // P68x: Verlauf an Rotation/Resize anpassen.
+        for layer in backgroundGradientLayers {
+            layer.frame = layer.superlayer?.bounds ?? .zero
+        }
     }
 
     override func viewWillAppear(_ animated: Bool) {

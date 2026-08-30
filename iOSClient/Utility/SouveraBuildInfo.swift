@@ -177,7 +177,30 @@ enum SouveraPushRegistrar {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             let body = String(data: data.prefix(400), encoding: .utf8) ?? ""
             SouveraLog.write("PushProxy", "register \(trimmed) -> http \(status) body=\(body)")
-            return (200..<300).contains(status)
+            if (200..<300).contains(status) {
+                return true
+            }
+            // P68x: 409 = Gerät existiert bereits am Proxy (z. B. nach einem
+            // Reinstall hängt dort noch die alte Registrierung mit anderem
+            // Token). Dann erst abmelden (DELETE) und genau einmal neu
+            // anlegen - sonst bleibt der Proxy auf dem veralteten Token
+            // stehen und Push kommt nie an.
+            if status == 409 {
+                await unregisterAtProxy(proxyServerUrl: proxyServerUrl,
+                                        deviceIdentifier: deviceIdentifier,
+                                        signature: signature,
+                                        publicKey: publicKey)
+                var retryReq = URLRequest(url: url)
+                retryReq.httpMethod = "POST"
+                retryReq.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+                retryReq.httpBody = form.data(using: .utf8)
+                let (retryData, retryResponse) = try await URLSession.shared.data(for: retryReq)
+                let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? -1
+                let retryBody = String(data: retryData.prefix(400), encoding: .utf8) ?? ""
+                SouveraLog.write("PushProxy", "register retry \(trimmed) -> http \(retryStatus) body=\(retryBody)")
+                return (200..<300).contains(retryStatus)
+            }
+            return false
         } catch {
             SouveraLog.write("PushProxy", "register \(trimmed) failed: \(error.localizedDescription)")
             return false

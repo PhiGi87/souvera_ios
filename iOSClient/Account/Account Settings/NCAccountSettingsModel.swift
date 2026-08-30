@@ -168,14 +168,21 @@ class NCAccountSettingsModel: ObservableObject, ViewOnAppearHandling {
         }
     }
 
-    /// Function to delete the current account
+    /// Function to log out (remove) the current account
     func deleteAccount() {
         Task { @MainActor in
             if let tblAccount {
                 await NCAccount().deleteAccount(tblAccount.account)
-                let account = database.getAllTableAccount().first?.account
-                setAccount(account: account)
-                dismissView = true
+                let remaining = database.getAllTableAccount()
+                if remaining.isEmpty {
+                    // P68x: letztes Konto abgemeldet -> zurück zum
+                    // Login-/Intro-Start-Screen (App-Einstellungen bleiben).
+                    dismissView = true
+                    NCAccount().showLoginAfterLastLogout()
+                } else {
+                    setAccount(account: remaining.first?.account)
+                    dismissView = true
+                }
             }
         }
     }

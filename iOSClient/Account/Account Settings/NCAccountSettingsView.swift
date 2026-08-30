@@ -221,24 +221,24 @@ struct NCAccountSettingsView: View {
                     }
                 })
                 //
-                // Delete account
+                // Logout / account removal
                 Section(content: {
                     Button(action: {
                         showDeleteAccountAlert.toggle()
                     }, label: {
                         HStack {
-                            Image(systemName: "trash")
+                            Image(systemName: "rectangle.portrait.and.arrow.right")
                                 .font(.icon())
                                 .foregroundStyle(.red)
                                 .frame(width: 26)
-                            Text(NSLocalizedString("_remove_local_account_", comment: ""))
+                            Text(NSLocalizedString("_account_logout_", comment: ""))
                                 .cappedFont(.body, maxDynamicType: .accessibility2)
                                 .foregroundStyle(.red)
                         }
                         .font(.callout)
                     })
-                    .alert(NSLocalizedString("_want_delete_account_", comment: ""), isPresented: $showDeleteAccountAlert) {
-                        Button(NSLocalizedString("_remove_local_account_", comment: ""), role: .destructive) {
+                    .alert(NSLocalizedString("_account_logout_confirm_", comment: ""), isPresented: $showDeleteAccountAlert) {
+                        Button(NSLocalizedString("_account_logout_", comment: ""), role: .destructive) {
                             model.deleteAccount()
                         }
                         Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { }

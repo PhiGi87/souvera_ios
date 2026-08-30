@@ -194,6 +194,23 @@ class NCAccount: NSObject {
         }
     }
 
+    /// P68x: Setzt das Hauptfenster auf den Login-/Intro-Start-Screen zurück,
+    /// nachdem das letzte Konto abgemeldet wurde. App-Einstellungen (z. B.
+    /// Kalender-Ton) bleiben erhalten - es wird NUR die Oberfläche gewechselt
+    /// (analog zum No-Account-Zweig im SceneDelegate).
+    func showLoginAfterLastLogout() {
+        if NCBrandOptions.shared.disable_intro {
+            if let viewController = UIStoryboard(name: "NCLogin", bundle: nil).instantiateViewController(withIdentifier: "NCLogin") as? NCLogin {
+                let navigationController = UINavigationController(rootViewController: viewController)
+                UIApplication.shared.mainAppWindow?.rootViewController = navigationController
+                UIApplication.shared.mainAppWindow?.makeKeyAndVisible()
+            }
+        } else if let navigationController = UIStoryboard(name: "NCIntro", bundle: nil).instantiateInitialViewController() as? UINavigationController {
+            UIApplication.shared.mainAppWindow?.rootViewController = navigationController
+            UIApplication.shared.mainAppWindow?.makeKeyAndVisible()
+        }
+    }
+
     func updateAppsShareAccounts() async -> Error? {
         guard let dirGroupApps = FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: NCBrandOptions.shared.capabilitiesGroupApps) else { return nil }
         var accounts = [NKShareAccounts.DataAccounts]()

@@ -286,10 +286,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
-        guard !isXcodeRunningForPreviews,
-              application.applicationState != .background else {
-            return
-        }
+        // P68x: Token IMMER speichern - auch im Background/inactive. Der
+        // frühere Background-Guard verwarf den Token nach einem Reinstall
+        // (Callback kam, während die App noch startete) und ohne Retry
+        // blieb der APNs-Token dauerhaft leer -> Push komplett tot.
+        guard !isXcodeRunningForPreviews else { return }
 
         if let deviceToken = NCPushNotificationEncryption.shared().string(withDeviceToken: deviceToken) {
             NCPreferences().deviceTokenPushNotification = deviceToken
@@ -335,6 +336,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     /// Zwischenzustand mit "Zum Anruf wechseln").
     func applicationDidBecomeActive(_ application: UIApplication) {
         LinkVoIPManager.shared.presentCallUIIfNeeded()
+        // P68x: APNs-Token-Retry - nach einem Reinstall kam der erste
+        // registerForRemoteNotifications()-Callback teils nicht an (kein
+        // "APNs registration OK" im Log). Ohne Token registriert sich das
+        // Gerät mit SHA512("") -> Push unzustellbar. Bei leerem Token also
+        // erneut anfordern.
+        if NCPreferences().deviceTokenPushNotification.isEmpty {
+            application.registerForRemoteNotifications()
+        }
     }
 
     /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).

@@ -23,6 +23,8 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
     private var textColor: UIColor = .white
     private var textColorOpponent: UIColor = .black
     private var activeLoginProvider: NCLoginProvider?
+    /// P68x: Volle-Höhe-Verlaufs-Layer (Rotation/Resize-Aktualisierung).
+    private var backgroundGradientLayers: [CAGradientLayer] = []
 
     // MARK: - View Life Cycle
 
@@ -30,26 +32,20 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         super.viewDidLoad()
         buttonSignUp.setTitle(NSLocalizedString("_intro_about_souvera_", comment: ""), for: .normal)
 
-        let isTooLight = NCBrandColor.shared.customer.isTooLight()
-        let isTooDark = NCBrandColor.shared.customer.isTooDark()
-
-        if isTooLight {
-            textColor = .black
-            textColorOpponent = .white
-        } else if isTooDark {
-            textColor = .white
-            textColorOpponent = .black
-        } else {
-            textColor = .white
-            textColorOpponent = .black
-        }
+        // P68x: dunkler Souvera-Verlauf -> immer weiße Schrift.
+        textColor = .white
+        textColorOpponent = .black
 
         let navBarAppearance = UINavigationBarAppearance()
         navBarAppearance.configureWithTransparentBackground()
         navBarAppearance.shadowColor = .clear
         navBarAppearance.shadowImage = UIImage()
         self.navigationController?.navigationBar.standardAppearance = navBarAppearance
-        self.navigationController?.view.backgroundColor = NCBrandColor.shared.customer
+        // P68x: voller Verlauf statt solider Brand-Farbe.
+        if let navView = self.navigationController?.view {
+            let layer = SouveraAppearance.applyGradientBackground(to: navView)
+            backgroundGradientLayers.append(layer)
+        }
         self.navigationController?.navigationBar.tintColor = textColor
 
         if !NCManageDatabase.shared.getAllTableAccount().isEmpty {
@@ -62,7 +58,9 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         pageControl.pageIndicatorTintColor = .lightGray
 
         buttonLogin.layer.cornerRadius = 8
-        buttonLogin.setTitleColor(NCBrandColor.shared.customer, for: .normal)
+        // P68x: dunkle Titel-Farbe auf dem weißen Button (customer #4BBFEA
+        // wäre auf Weiß kontrastarm).
+        buttonLogin.setTitleColor(UIColor(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0, alpha: 1), for: .normal)
         buttonLogin.backgroundColor = textColor
         buttonLogin.setTitle(NSLocalizedString("_log_in_", comment: ""), for: .normal)
 
@@ -85,12 +83,22 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
         introCollectionView.register(UINib(nibName: "NCIntroCollectionViewCell", bundle: nil), forCellWithReuseIdentifier: "introCell")
         introCollectionView.dataSource = self
         introCollectionView.delegate = self
-        introCollectionView.backgroundColor = NCBrandColor.shared.customer
+        // P68x: transparent, damit der Verlauf auf der View durchscheint.
+        introCollectionView.backgroundColor = .clear
         pageControl.numberOfPages = self.titles.count
 
-        view.backgroundColor = NCBrandColor.shared.customer
+        let layer = SouveraAppearance.applyGradientBackground(to: view)
+        backgroundGradientLayers.append(layer)
 
         self.timer = Timer.scheduledTimer(timeInterval: 4, target: self, selector: (#selector(self.autoScroll(_:))), userInfo: nil, repeats: true)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // P68x: Verlauf an Rotation/Resize anpassen.
+        for layer in backgroundGradientLayers {
+            layer.frame = layer.superlayer?.bounds ?? .zero
+        }
     }
 
     override var preferredStatusBarStyle: UIStatusBarStyle {
@@ -136,7 +144,7 @@ class NCIntroViewController: UIViewController, UICollectionViewDataSource, UICol
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = (collectionView.dequeueReusableCell(withReuseIdentifier: "introCell", for: indexPath) as? NCIntroCollectionViewCell)!
-        cell.backgroundColor = NCBrandColor.shared.customer
+        cell.backgroundColor = .clear
         cell.indexPath = indexPath
         cell.titleLabel.textColor = textColor
         cell.titleLabel.text = titles[indexPath.row]

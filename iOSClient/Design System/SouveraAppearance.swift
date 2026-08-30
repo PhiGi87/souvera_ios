@@ -33,6 +33,27 @@ enum SouveraAppearance {
         }
     }
 
+    /// P68x: Verlauf über die GESAMTE Höhe eines Views (kein Kacheln).
+    static func gradientLayer(frame: CGRect) -> CAGradientLayer {
+        let layer = CAGradientLayer()
+        layer.colors = [
+            UIColor(red: 0x2E / 255.0, green: 0x9B / 255.0, blue: 0xD8 / 255.0, alpha: 1).cgColor,
+            UIColor(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0, alpha: 1).cgColor
+        ]
+        layer.startPoint = CGPoint(x: 0, y: 0)
+        layer.endPoint = CGPoint(x: 0, y: 1)
+        layer.frame = frame
+        return layer
+    }
+
+    /// Installiert den Verlauf hinter allen Subviews und gibt den Layer
+    /// zurück (Frame bei Rotation/Resize über superlayer.bounds anpassen).
+    static func applyGradientBackground(to view: UIView) -> CAGradientLayer {
+        let layer = gradientLayer(frame: view.bounds)
+        view.layer.insertSublayer(layer, at: 0)
+        return layer
+    }
+
     /// UIKit: blaue, deckende NavigationBar-Appearance (kein Glass-Effekt).
     static func blueNavigationBarAppearance() -> UINavigationBarAppearance {
         let appearance = UINavigationBarAppearance()

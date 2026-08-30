@@ -662,6 +662,7 @@ final class CallSession: NSObject, HpbSignalingListener {
                             if existing.direction != .sendOnly {
                                 existing.setDirection(.sendOnly, error: nil)
                             }
+                            Self.preferH264(on: peer)
                         }
                     }
                     // Publisher neu verhandeln (MCU), 1:1-Peers ebenfalls.
@@ -790,6 +791,18 @@ final class CallSession: NSObject, HpbSignalingListener {
         CallDebugLog.log("CallSession", "hangup done")
     }
 
+    /// P68x: Nur H264 anbieten. Der MCU (Janus-Default) wählt sonst VP8,
+    /// dessen libvpx-Encoder in diesem WebRTC-Build keine kodierten Frames
+    /// über den Callback ausliefert (Proben: kein "callback delivered" trotz
+    /// gültiger Frames/Bitrate). H264 läuft über VideoToolbox (Hardware) -
+    /// derselbe Pfad, den talk-iOS gegen Talk-Cloud-MCUs nutzt.
+    private static func preferH264(on peer: RTCPeerConnection) {
+        let h264 = RTCVideoCodecInfo(name: "H264")
+        for transceiver in peer.transceivers where transceiver.mediaType == .video {
+            transceiver.setCodecPreferences([h264], error: nil)
+        }
+    }
+
     // MARK: - Peer helpers
 
     private func peerFor(key: String, session: String, addLocalTracks: Bool, isPublisher: Bool, roomType: String) -> RTCPeerConnection {
@@ -814,6 +827,10 @@ final class CallSession: NSObject, HpbSignalingListener {
                 initT.streamIds = ["link"]
                 peer.addTransceiver(of: .video, init: initT)
             }
+        }
+        // P68x: Publisher nur H264 anbieten (VideoToolbox statt kaputtem VP8).
+        if mcuActive, isPublisher {
+            Self.preferH264(on: peer)
         }
         // Janus erwartet den "status"-DataChannel auf jeder MCU-Verbindung;
         // der Publisher ERSTELLT ihn (landet im Offer), Subscriber erhalten
