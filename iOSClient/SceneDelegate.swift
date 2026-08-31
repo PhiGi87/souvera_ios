@@ -16,9 +16,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 
     private let appDelegate = UIApplication.shared.delegate as? AppDelegate
     private var privacyProtectionWindow: UIWindow?
-    /// P68z: Kaltstart-Splash-Overlay (einmal pro Prozess).
-    private var splashHosting: UIHostingController<SouveraSplashView>?
-    private var splashPresented = false
     private let global = NCGlobal.shared
     private let alreadyMigratedMultiDomains = UserDefaults.standard.bool(forKey: NCGlobal.shared.udMigrationMultiDomains)
 
@@ -132,9 +129,6 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                     window?.makeKeyAndVisible()
                 }
             }
-
-            // P68z: Kaltstart-Splash (Verlauf + Logo) für ~2 s über dem Fenster.
-            presentSplashIfNeeded()
         }
     }
 
@@ -196,36 +190,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             }
         }
 
-        // P68z: Kaltstart-Splash (Verlauf + Logo) für ~2 s über dem Fenster.
-        presentSplashIfNeeded()
-
         // Clean orphaned FP Domains
         Task {
             await FileProviderDomain().cleanOrphanedFileProviderDomains()
-        }
-    }
-
-    /// P68z: Legt den Kaltstart-Splash (Verlauf + Logo) für ~2 s über das
-    /// Hauptfenster und blendet ihn dann sanft aus. Einmal pro Prozess -
-    /// umgeht den gecachten statischen Launch-Screen und garantiert die
-    /// Sichtbarkeit des Logos.
-    private func presentSplashIfNeeded() {
-        guard !splashPresented, let window else { return }
-        splashPresented = true
-        let hosting = UIHostingController(rootView: SouveraSplashView())
-        hosting.view.frame = window.bounds
-        hosting.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        hosting.view.isUserInteractionEnabled = false
-        window.addSubview(hosting.view)
-        splashHosting = hosting
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-            guard let self else { return }
-            UIView.animate(withDuration: 0.35, animations: {
-                self.splashHosting?.view.alpha = 0
-            }, completion: { _ in
-                self.splashHosting?.view.removeFromSuperview()
-                self.splashHosting = nil
-            })
         }
     }
 

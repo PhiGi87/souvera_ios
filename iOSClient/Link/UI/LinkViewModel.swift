@@ -927,18 +927,8 @@ final class LinkViewModel: ObservableObject {
         connectSignaling(token: token)
     }
 
-    // MARK: - In-App-Incoming-Call (Vordergrund)
+    // MARK: - Raum-Polling (Vordergrund)
 
-    /// Raum mit laufendem Call, für den noch keine In-App-Anruf-UI gezeigt
-    /// wurde (Foreground: PushKit liefert keine VoIP-Pushes).
-    @Published var incomingCallRoom: LinkConversation?
-
-    /// Call-Zustand pro Raum aus dem letzten Poll: Die In-App-Anruf-UI
-    /// erscheint NUR beim Übergang kein Call -> Call (frisch gestarteter
-    /// Call, während die App läuft). Läuft der Call bereits beim ersten
-    /// Poll (App-Start oder Raum-Öffnen), gibt es KEINEN Fullscreen - man
-    /// steigt über den "Teilnehmen"-Button im Chat ein.
-    private var previousCallState: [String: Bool] = [:]
     private var roomPollTask: Task<Void, Never>?
 
     /// Periodischer Vordergrund-Poll der Raumliste (alle 10 s): erkennt
@@ -950,7 +940,6 @@ final class LinkViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 self.loadConversations()
-                self.detectIncomingCall()
             }
         }
     }
@@ -960,46 +949,6 @@ final class LinkViewModel: ObservableObject {
         roomPollTask = nil
     }
 
-    /// Zeigt die In-App-Anruf-UI nur, wenn ein Call FRISCH startet (Übergang
-    /// false->true im Poll) und wir selbst nicht im Call sind. Ein bereits
-    /// laufender Call beim Öffnen der App/des Raums löst keinen Fullscreen
-    /// aus. Der Zustand wird auch während eines eigenen Calls nachgezogen,
-    /// damit nach dem Verlassen wieder frische Calls erkannt werden.
-    private func detectIncomingCall() {
-        guard case let .success(rooms) = conversations else { return }
-        var freshCall: LinkConversation?
-        for room in rooms {
-            let hasCall = room.hasCall
-            let previous = previousCallState[room.token]
-            previousCallState[room.token] = hasCall
-            if hasCall, previous == false, freshCall == nil {
-                freshCall = room
-            }
-        }
-        guard let freshCall,
-              LinkVoIPManager.shared.activeSession == nil,
-              !LinkVoIPManager.shared.hasRingingCall,
-              incomingCallRoom == nil else { return }
-        CallDebugLog.log("LinkViewModel", "in-app incoming call detected (fresh) room=\(freshCall.token)")
-        incomingCallRoom = freshCall
-    }
-
-    /// Ablehnen der In-App-Anruf-UI (Raum wird für diesen Call nicht erneut
-    /// gemeldet).
-    func dismissIncomingCall() {
-        incomingCallRoom = nil
-    }
-
-    /// Fullscreen minimieren: Der klingelnde Anruf wandert in die schmale
-    /// Leiste oben in der App (Annehmen/Ablehnen), man kann weiterarbeiten.
-    func minimizeIncomingCall() {
-        guard let room = incomingCallRoom else { return }
-        SouveraCallBannerModel.shared.minimizedIncoming = room
-        // Dynamic Island / Lock-Screen: Live Activity für den klingelnden
-        // Anruf starten (Annehmen/Ablehnen per Insel-Buttons möglich).
-        SouveraCallLiveActivity.start(title: room.displayName)
-        dismissIncomingCall()
-    }
 }
 
 /// Kurzer Rückmelde-Hinweis für Link-Aktionen (Toast).

@@ -182,22 +182,6 @@ struct LinkView: View {
                 viewModel.actionFeedback = nil
             }
         }
-        .fullScreenCover(item: $viewModel.incomingCallRoom) { room in
-            IncomingCallOverlayView(
-                title: room.displayName,
-                hasVideo: false,
-                onAccept: {
-                    viewModel.dismissIncomingCall()
-                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
-                },
-                onDecline: {
-                    viewModel.dismissIncomingCall()
-                },
-                onMinimize: {
-                    viewModel.minimizeIncomingCall()
-                }
-            )
-        }
         .fullScreenCover(item: $callContext) { context in
             if let account = LinkAccount.active() {
                 LinkCallViewControllerWrapper(
