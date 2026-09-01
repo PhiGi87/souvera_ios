@@ -125,7 +125,9 @@ final class ShieldApi {
     }
 
     private func perform(_ path: String, method: String, form: [String: String]) async -> (status: Int, json: [String: Any]?, body: String)? {
-        guard let root, let url = URL(string: "\(root)/apps/souvera_shield/\(path)") else { return nil }
+        // Konsistent über index.php (wie ensureRequestToken) - einige Hosts
+        // routen die Pretty-URL `/apps/souvera_shield/...` nicht (502).
+        guard let root, let url = URL(string: "\(root)/index.php/apps/souvera_shield/\(path)") else { return nil }
         var req = URLRequest(url: url)
         req.httpMethod = method
         if let authHeader {
@@ -145,7 +147,7 @@ final class ShieldApi {
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
         let body = String(data: data.prefix(500), encoding: .utf8) ?? ""
         if !(200..<300).contains(status) {
-            JmapLog.write("ShieldApiLog \(method) \(path) -> \(status) \(body)")
+            JmapLog.write("ShieldApiLog \(method) \(url.absoluteString) (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-")) -> \(status) \(body)")
         }
         return (status, json, body)
     }

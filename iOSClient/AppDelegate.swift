@@ -364,6 +364,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if NCPreferences().deviceTokenPushNotification.isEmpty {
             application.registerForRemoteNotifications()
         }
+        // App-Icon-Badge: ungelesene Mails ALLER Accounts neu zählen (der
+        // Badge-Store aktualisiert daraus das System-Badge).
+        Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
     }
 
     /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).

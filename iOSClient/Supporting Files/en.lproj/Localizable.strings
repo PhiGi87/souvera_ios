@@ -1133,6 +1133,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_yesterday_" = "Yesterday";
 "_link_image_loading_" = "Image is loading…";
 "_mail_delete_failed_" = "Delete failed - the mail was restored";
+"_mail_deleted_" = "Mail deleted";
+"_mail_blacklist_deleted_" = "Sender blacklisted and mail deleted";
 "_settings_calendar_reminder_sound_" = "Sound for calendar reminders";
 "_cal_sound_default_" = "Default";
 "_cal_sound_bell_" = "Bell";

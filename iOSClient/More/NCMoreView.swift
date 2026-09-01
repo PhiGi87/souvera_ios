@@ -17,6 +17,7 @@ struct NCMoreView: View {
     @State private var autoUploadCounter = NCAutoUploadCounter()
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
+    @ObservedObject private var badgeStore = SouveraBadgeStore.shared
     private let loadItemsOnAppear: Bool
 
     init(account: String, controller: NCMainTabBarController?) {
@@ -131,10 +132,15 @@ struct NCMoreView: View {
                 Button {
                     model.switchAccount(item.account)
                 } label: {
-                    if item.account == model.tabBarController?.account {
-                        Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
-                    } else {
-                        Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
+                    HStack(spacing: 8) {
+                        if item.account == model.tabBarController?.account {
+                            Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
+                        } else {
+                            Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
+                        }
+                        Spacer()
+                        accountBadge(count: badgeStore.unreadMail(account: item.account), color: .red)
+                        accountBadge(count: badgeStore.unreadLink(account: item.account), color: .blue)
                     }
                 }
             }
@@ -168,6 +174,18 @@ struct NCMoreView: View {
             }
         }
         .foregroundStyle(.primary)
+    }
+
+    @ViewBuilder
+    private func accountBadge(count: Int, color: Color) -> some View {
+        if count > 0 {
+            Text("\(count)")
+                .font(.caption2.bold())
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(color, in: Capsule())
+        }
     }
 
     @ViewBuilder

@@ -37,6 +37,6 @@ final class LinkBadgeMonitor {
         let api = LinkOcsApi(account: account)
         guard let list = await api.listConversations() else { return }
         guard !Task.isCancelled else { return }
-        LinkViewModel.postUnreadTotal(list)
+        LinkViewModel.postUnreadTotal(list, account: account.account)
     }
 }

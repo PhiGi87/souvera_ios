@@ -477,7 +477,7 @@ final class LinkViewModel: ObservableObject {
             let sorted = cached.sorted { $0.lastActivity > $1.lastActivity }
             self.conversationsSignature = conversationSignature(sorted)
             self.conversations = .success(sorted)
-            Self.postUnreadTotal(cached)
+            Self.postUnreadTotal(cached, account: cacheAccount)
         }
         Task {
             if let list = await api.listConversations() {
@@ -501,7 +501,7 @@ final class LinkViewModel: ObservableObject {
                         self.route = .chat(token: token, title: fresh.displayName)
                     }
                 }
-                Self.postUnreadTotal(list)
+                Self.postUnreadTotal(list, account: cacheAccount)
                 self.offlineNotice = nil
             } else if let cached = LinkCache.loadConversations(account: cacheAccount) {
                 // Server nicht erreichbar (Wartung/offline): letzter Stand.
@@ -511,7 +511,7 @@ final class LinkViewModel: ObservableObject {
                     self.conversationsSignature = signature
                     self.conversations = .success(sorted)
                 }
-                Self.postUnreadTotal(cached)
+                Self.postUnreadTotal(cached, account: cacheAccount)
                 self.offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 self.cacheBannerActive = self.cacheBannerGate.shouldTrigger()
             }
@@ -519,10 +519,15 @@ final class LinkViewModel: ObservableObject {
     }
 
     /// Summiert ungelesene Nachrichten aller Channels und meldet sie als
-    /// Tab-Badge (NotificationCenter).
-    nonisolated static func postUnreadTotal(_ list: [LinkConversation]) {
+    /// Tab-Badge (NotificationCenter). `account` wird für den Account-Wechsel-
+    /// Badge im Mehr-Menü mitgegeben.
+    nonisolated static func postUnreadTotal(_ list: [LinkConversation], account: String) {
         let total = list.reduce(0) { $0 + $1.unreadMessages }
-        NotificationCenter.default.post(name: .linkUnreadChanged, object: total)
+        NotificationCenter.default.post(
+            name: .linkUnreadChanged,
+            object: total,
+            userInfo: ["account": account]
+        )
     }
 
     /// Raum-Avatar-URL für den Loader (Talk API v1, mit Versions-Parameter

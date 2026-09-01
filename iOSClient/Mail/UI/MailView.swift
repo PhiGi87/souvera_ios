@@ -45,12 +45,7 @@ struct MailView: View {
                         ) {
                             let target = blacklistTarget ?? []
                             blacklistTarget = nil
-                            Task {
-                                // Erst löschen - die Liste aktualisiert sofort;
-                                // der Blacklist-API-Lauf dauert länger.
-                                viewModel.delete(target)
-                                await viewModel.blacklistSenders(target)
-                            }
+                            Task { await viewModel.blacklistAndDelete(target) }
                         },
                         SouveraCenteredDialog.DialogAction(
                             label: NSLocalizedString("_cancel_", comment: ""),
@@ -859,10 +854,7 @@ private struct MailMessageListView: View {
                 ) {
                     let target = blacklistTarget ?? []
                     blacklistTarget = nil
-                    Task {
-                        await viewModel.blacklistSenders(target)
-                        viewModel.delete(target)
-                    }
+                    Task { await viewModel.blacklistAndDelete(target) }
                     selected.removeAll()
                     editing = false
                 },

@@ -275,7 +275,7 @@ final class SouveraBackgroundSync {
         // (der Badge-Monitor pollt ohnehin nur den aktiven Account - ein
         // Sync des Hintergrund-Accounts darf den Badge nicht überschreiben).
         if account == NCManageDatabase.shared.getActiveTableAccount()?.account {
-            LinkViewModel.postUnreadTotal(list)
+            LinkViewModel.postUnreadTotal(list, account: account)
         }
     }
 }

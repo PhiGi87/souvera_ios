@@ -940,6 +940,55 @@ final class MailViewModel: ObservableObject {
         }
     }
 
+    /// „Blacklist & löschen": löscht zuerst (über die FIFO-Queue) und trägt
+    /// danach die Absender in die Shield-Blacklist ein. Genau EIN kombiniertes
+    /// Feedback statt zweier konkurrierender Schreiber (sonst überschreibt
+    /// der langsamere Blacklist-Lauf das Lösch-Feedback).
+    func blacklistAndDelete(_ messages: [MailMessage]) async {
+        let ids = messages.map(\.emailId)
+        optimisticRemove(ids)
+        let previous = deleteWorkTask
+        await previous?.value
+        let deleted = await performDelete(messages, ids: ids)
+        // Queue-Marker aktualisieren, damit Folge-Löschungen hinter uns laufen.
+        deleteWorkTask = Task {}
+
+        let addresses = Array(Set(messages.map { $0.fromAddress.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }))
+        var blacklisted = 0
+        if !addresses.isEmpty {
+            let api = ShieldApi()
+            for address in addresses {
+                if await api.add(.blacklist, entry: address) {
+                    blacklisted += 1
+                }
+            }
+        }
+
+        let blacklistOk = addresses.isEmpty || blacklisted == addresses.count
+        if deleted && blacklistOk {
+            actionFeedback = MailSendFeedback(
+                success: true,
+                message: NSLocalizedString("_mail_blacklist_deleted_", comment: "")
+            )
+        } else if deleted {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_blacklist_failed_", comment: "")
+            )
+        } else if blacklistOk {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_delete_failed_", comment: "")
+            )
+        } else {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_blacklist_failed_", comment: "")
+            )
+        }
+    }
+
     // MARK: - Messages
 
     func openMailbox(_ mailbox: Mailbox) {
@@ -1245,13 +1294,19 @@ final class MailViewModel: ObservableObject {
                     }
                 }
                 guard !missing.isEmpty, self.listGeneration == generation else { return }
-                JmapLog.write("P64 stale verification removed \(missing.count) of \(cachedIds.count) cached mails")
-                var kept = finalSnapshot.filter { !missing.contains($0.optString("id") ?? "") }
+                let removedSet = Set(missing)
+                JmapLog.write("P64 stale verification removed \(removedSet.count) of \(cachedIds.count) cached mails")
+                var kept = finalSnapshot.filter { !removedSet.contains($0.optString("id") ?? "") }
                 kept = kept.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                // P62f-Fix: NUR den Cache bereinigen - kein erneutes
-                // Republish der Live-Liste (das war der zweite Race-Kanal
-                // für wiederauftauchende Mails).
                 MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
+                // Live-Liste ebenfalls bereinigen: auf einem anderen Gerät /
+                // im Web gelöschte Mails entfernen. NUR Entfernen auf Basis des
+                // AKTUELLEN Listenstands (kein Republish des alten Snapshots -
+                // das war der Reappear-Race-Kanal).
+                if case var .success(list) = self.messages {
+                    list.removeAll { removedSet.contains($0.emailId) }
+                    self.messages = .success(list)
+                }
             }
         } catch {
             isFetchingMail = false
@@ -1922,7 +1977,13 @@ final class MailViewModel: ObservableObject {
         // P62f: FIFO - Folge-Löschungen laufen nicht parallel (Session-Races).
         let ids = messagesToDelete.map(\.emailId)
         let work = { [weak self] in
-            await self?.performDelete(messagesToDelete, ids: ids)
+            let ok = await self?.performDelete(messagesToDelete, ids: ids) ?? false
+            if ok {
+                self?.actionFeedback = MailSendFeedback(
+                    success: true,
+                    message: NSLocalizedString("_mail_deleted_", comment: "")
+                )
+            }
         }
         let previous = deleteWorkTask
         deleteWorkTask = Task {
@@ -1934,12 +1995,12 @@ final class MailViewModel: ObservableObject {
     /// Server-Call des Löschens + Ergebnisprüfung (P62f): No-Op
     /// (oldState==newState) = bereits verschoben; echter Fehler = Zeile
     /// wiederherstellen + Feedback statt still schlucken.
-    private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async {
-        guard let first = messagesToDelete.first else { return }
+    private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async -> Bool {
+        guard let first = messagesToDelete.first else { return false }
         do {
             if useJmap {
                 guard let api = jmapApi,
-                      let client = jmapClient else { return }
+                      let client = jmapClient else { return false }
                 let session = try await client.refreshSession()
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 // Trash must live in the same JMAP account as the message.
@@ -1957,7 +2018,7 @@ final class MailViewModel: ObservableObject {
                 }
             } else {
                 guard let mailbox = currentMailbox,
-                      let client = imapClient else { return }
+                      let client = imapClient else { return false }
                 for message in messagesToDelete {
                     guard let uid = UInt64(message.emailId) else { continue }
                     if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {
@@ -1975,9 +2036,10 @@ final class MailViewModel: ObservableObject {
                 message: NSLocalizedString("_mail_delete_failed_", comment: "")
             )
             Task { await refreshMessages() }
-            return
+            return false
         }
         afterListMutation(ids)
+        return true
     }
 
     /// Moves messages to another mailbox of the same JMAP account

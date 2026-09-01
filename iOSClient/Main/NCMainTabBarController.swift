@@ -219,6 +219,9 @@ class NCMainTabBarController: UITabBarController {
             tag: 100
         )
         mailTabBarItem = mailController.tabBarItem
+        // App-Icon-Badge (nur ungelesene Mails, Summe aller Accounts) zentral
+        // über den Badge-Store - respektiert den iOS-Schalter "Badges".
+        _ = SouveraBadgeStore.shared
         NotificationCenter.default.addObserver(
             forName: .mailUnreadChanged,
             object: nil,
@@ -232,15 +235,6 @@ class NCMainTabBarController: UITabBarController {
             if account == active {
                 self?.updateMailBadge(count)
             }
-        }
-        NotificationCenter.default.addObserver(
-            forName: .mailTotalUnreadChanged,
-            object: nil,
-            queue: .main
-        ) { notification in
-            // System-Badge am App-Icon = Summe aller Accounts.
-            let total = notification.object as? Int ?? 0
-            UIApplication.shared.applicationIconBadgeNumber = total
         }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),
