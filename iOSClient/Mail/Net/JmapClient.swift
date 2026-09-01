@@ -494,7 +494,14 @@ private final class Http1Transport {
         let body: Data
     }
 
+    /// P68z: Begrenzt die GLEICHZEITIGEN JMAP-POSTs. Der Server lehnt zu viele
+    /// parallele Requests mit 400 `maxConcurrentRequests` ab (Mail-Sync +
+    /// Badge + Background-Sync + Auto-Refresh feuerten gleichzeitig).
+    static let concurrencyLimit = DispatchSemaphore(value: 4)
+
     static func post(url: URL, headers: [String: String], body: Data) async throws -> Response {
+        concurrencyLimit.wait()
+        defer { concurrencyLimit.signal() }
         guard let host = url.host, !host.isEmpty else {
             throw JmapException.protocolError("Invalid URL host: \(url)")
         }
@@ -601,7 +608,9 @@ private final class Http1Transport {
                 }
             }
 
-            DispatchQueue.global().asyncAfter(deadline: .now() + 30) {
+            // P68z: 90s statt 30s - große Syncs (300 Mails) liefen in den
+            // 30s-Timeout.
+            DispatchQueue.global().asyncAfter(deadline: .now() + 90) {
                 finish(.failure(JmapException.protocolError("HTTP/1.1 POST timed out")))
             }
 

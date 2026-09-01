@@ -41,6 +41,40 @@ final class CalendarViewModel: ObservableObject {
     private var cachedEntries: [CalDavEventEntry] = []
     private var autoRefreshTask: Task<Void, Never>?
     private var lastAutoRefresh: Date = Date()
+    private var accountChangeObserver: NSObjectProtocol?
+
+    init() {
+        // Multi-Account: beim Account-Wechsel den Kalender-Zustand auf den
+        // neuen Account umstellen (Cache-/Selektions-Keys + Client lösen den
+        // Account pro Request auf).
+        accountChangeObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(NCGlobal.shared.notificationCenterChangeUser),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resetForAccountChange()
+            }
+        }
+    }
+
+    deinit {
+        if let accountChangeObserver {
+            NotificationCenter.default.removeObserver(accountChangeObserver)
+        }
+    }
+
+    private func resetForAccountChange() {
+        events = .loading
+        eventsSignature = ""
+        calendars = []
+        cachedEntries = []
+        selectedCalendarHrefs = []
+        customCalendarColors = [:]
+        sessionDeselectedHrefs = []
+        offlineNotice = nil
+        Task { await self.load() }
+    }
 
     /// Periodically reloads mail/calendar in the foreground according to the
     /// "Hintergrundaktualisierung" setting (30 s check granularity).
@@ -64,12 +98,13 @@ final class CalendarViewModel: ObservableObject {
     /// nie wieder automatisch aktiviert.
     private var sessionDeselectedHrefs: Set<String> = []
 
-    /// P68t: Stabiler Cache-/Selection-Key. getAllTableAccount().first
-    /// ist ab App-Start gefüllt, während getActiveTableAccount() beim
-    /// allerersten Load (vor dem Session-Setup) noch nil ist - das
-    /// verursachte den Cache-Miss nach dem frischen App-Start.
+    /// Stabiler Cache-/Selection-Key. Priorität: AKTIVER Account; nur als
+    /// Fallback (vor dem Session-Setup beim ersten Load) das erste Konto.
+    /// Multi-Account: niemals die Daten eines anderen Accounts verwenden.
     private static func stableAccountKey() -> String {
-        NCManageDatabase.shared.getAllTableAccount().first?.account ?? "default"
+        NCManageDatabase.shared.getActiveTableAccount()?.account
+            ?? NCManageDatabase.shared.getAllTableAccount().first?.account
+            ?? "default"
     }
 
     private var accountKey: String {

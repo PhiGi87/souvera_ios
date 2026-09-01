@@ -29,6 +29,7 @@ final class ShieldViewModel: ObservableObject {
     @Published var selectedMailbox: String?
 
     private let api = ShieldApi()
+    private var accountChangeObserver: NSObjectProtocol?
     /// Signaturen der Listen (Redundanz-Guard gegen identische Updates).
     private var spamSignature = ""
     private var fileSignature = ""
@@ -36,6 +37,42 @@ final class ShieldViewModel: ObservableObject {
 
     /// Das persönliche Postfach des aktiven Kontos - nur dort darf man
     /// Whitelist-/Blacklist-Einträge hinzufügen.
+    init() {
+        // Multi-Account: beim Account-Wechsel die Quarantäne-/Listen-Zustände
+        // auf den neuen Account umstellen (die API löst den Account pro
+        // Request auf).
+        accountChangeObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(NCGlobal.shared.notificationCenterChangeUser),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resetForAccountChange()
+            }
+        }
+    }
+
+    deinit {
+        if let accountChangeObserver {
+            NotificationCenter.default.removeObserver(accountChangeObserver)
+        }
+    }
+
+    private func resetForAccountChange() {
+        spamSignature = ""
+        fileSignature = ""
+        virusSignature = ""
+        spamQuarantine = .loading
+        fileQuarantine = .loading
+        virusQuarantine = .loading
+        whitelist = .loading
+        blacklist = .loading
+        warnings = []
+        mailboxes = []
+        selectedMailbox = nil
+        Task { await self.loadAll() }
+    }
+
     var personalMailbox: String? {
         NCManageDatabase.shared.getActiveTableAccount()?.user
     }

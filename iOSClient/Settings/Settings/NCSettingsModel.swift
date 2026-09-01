@@ -26,8 +26,6 @@ class NCSettingsModel: ObservableObject, ViewOnAppearHandling {
     @Published var accountRequest: Bool = false
     // Push-Gruppen-Toggles (P70): Mail & Kalender sowie Link/Talk
     // (Standard "an" - siehe SouveraPushToggles).
-    @Published var pushMailCalendar: Bool = true
-    @Published var pushLinkTalk: Bool = true
     // Root View Controller
     @Published var controller: NCMainTabBarController?
     // Footer
@@ -55,8 +53,6 @@ class NCSettingsModel: ObservableObject, ViewOnAppearHandling {
         privacyScreen = keychain.privacyScreenEnabled
         resetWrongAttempts = keychain.resetAppCounterFail
         accountRequest = keychain.accountRequest
-        pushMailCalendar = SouveraPushToggles.mailCalendarEnabled
-        pushLinkTalk = SouveraPushToggles.linkTalkEnabled
 
     }
 
@@ -98,13 +94,4 @@ class NCSettingsModel: ObservableObject, ViewOnAppearHandling {
         keychain.accountRequest = accountRequest
     }
 
-    /// Push-Gruppe Mail & Kalender: Toggle anwenden (Zeilen aller Accounts).
-    func updatePushMailCalendar() {
-        SouveraPushToggles.applyMailCalendar(pushMailCalendar)
-    }
-
-    /// Push-Gruppe Link/Talk: Toggle anwenden (Talk-Zeile + Proxy).
-    func updatePushLinkTalk() {
-        SouveraPushToggles.applyLinkTalk(pushLinkTalk)
-    }
 }

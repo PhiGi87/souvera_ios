@@ -67,6 +67,7 @@ final class LinkViewModel: ObservableObject {
 
     /// Push-Deep-Link-Beobachter (Chat-Raum direkt öffnen).
     private var deepLinkObserver: NSObjectProtocol?
+    private var accountChangeObserver: NSObjectProtocol?
 
     init() {
         deepLinkObserver = NotificationCenter.default.addObserver(
@@ -79,6 +80,42 @@ final class LinkViewModel: ObservableObject {
                 self?.handleDeepLink(target)
             }
         }
+        // Multi-Account: beim Account-Wechsel den Link/Talk-Zustand auf den
+        // neuen Account umstellen (LinkOcsApi, Conversations, Chat-State).
+        accountChangeObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(NCGlobal.shared.notificationCenterChangeUser),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resetForAccountChange()
+            }
+        }
+    }
+
+    /// Multi-Account: verwirft den kompletten Link/Talk-Zustand und baut
+    /// ihn mit dem aktiven Account neu auf.
+    private func resetForAccountChange() {
+        api = nil
+        pollTask?.cancel()
+        pollTask = nil
+        route = .home
+        conversations = .loading
+        messages = .loading
+        currentRoom = nil
+        participants = []
+        userResults = []
+        avatarCache = [:]
+        chatImageCache = [:]
+        chatPdfThumbCache = [:]
+        chatPdfCache = [:]
+        unreadBoundary = nil
+        lastMessageId = 0
+        currentUserId = ""
+        offlineNotice = nil
+        typingNames = []
+        conversationsSignature = ""
+        start()
     }
 
     private func handleDeepLink(_ target: SouveraPushDeepLink.Target) {
@@ -885,6 +922,9 @@ final class LinkViewModel: ObservableObject {
         roomPollTask?.cancel()
         if let deepLinkObserver {
             NotificationCenter.default.removeObserver(deepLinkObserver)
+        }
+        if let accountChangeObserver {
+            NotificationCenter.default.removeObserver(accountChangeObserver)
         }
         let client = signaling
         Task { @MainActor in

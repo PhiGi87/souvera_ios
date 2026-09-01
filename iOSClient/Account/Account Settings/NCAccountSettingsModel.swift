@@ -30,6 +30,10 @@ class NCAccountSettingsModel: ObservableObject, ViewOnAppearHandling {
     @Published var indexActiveAccount: Int = 0
     // Current alias
     @Published var alias: String = ""
+    // Pro-Account-Einstellungen (Ton + Push-Toggles) des angezeigten Kontos.
+    @Published var reminderSoundRaw: String = SouveraCalendarReminderSound.systemDefault.rawValue
+    @Published var pushMailCalendar: Bool = true
+    @Published var pushLinkTalk: Bool = true
     // Set true for dismiss the view
     @Published var dismissView = false
     // DB
@@ -93,6 +97,7 @@ class NCAccountSettingsModel: ObservableObject, ViewOnAppearHandling {
         self.tblAccounts = tableAccounts
         self.tblAccount = tblAccount
         self.alias = alias
+        reloadAccountPreferences()
     }
 
     /// Func to get the user display name + alias
@@ -165,7 +170,35 @@ class NCAccountSettingsModel: ObservableObject, ViewOnAppearHandling {
         if let tableAccount = database.getTableAccount(predicate: NSPredicate(format: "account == %@", account)) {
             self.tblAccount = tableAccount
             self.alias = tableAccount.alias
+            reloadAccountPreferences()
         }
+    }
+
+    // MARK: - Pro-Account-Einstellungen (Ton + Push-Toggles)
+
+    func reloadAccountPreferences() {
+        guard let account = tblAccount?.account else { return }
+        reminderSoundRaw = SouveraCalendarReminderSound.sound(account: account).rawValue
+        pushMailCalendar = SouveraPushToggles.mailCalendarEnabled(account: account)
+        pushLinkTalk = SouveraPushToggles.linkTalkEnabled(account: account)
+    }
+
+    func updateReminderSound(_ raw: String) {
+        guard let account = tblAccount?.account,
+              let sound = SouveraCalendarReminderSound(rawValue: raw) else { return }
+        SouveraCalendarReminderSound.setSound(sound, account: account)
+        sound.previewPlay()
+        SouveraLog.write("Settings", "tone stored (account=\(account)): \(raw)")
+    }
+
+    func updatePushMailCalendar() {
+        guard let account = tblAccount?.account else { return }
+        SouveraPushToggles.applyMailCalendar(pushMailCalendar, account: account)
+    }
+
+    func updatePushLinkTalk() {
+        guard let account = tblAccount?.account else { return }
+        SouveraPushToggles.applyLinkTalk(pushLinkTalk, account: account)
     }
 
     /// Function to log out (remove) the current account

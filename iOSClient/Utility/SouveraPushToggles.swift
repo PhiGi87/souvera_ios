@@ -4,17 +4,19 @@
 import Foundation
 import NextcloudKit
 
-/// Per-Gruppen-Push-Toggles (P70). Standard ist "an": Solange der Nutzer
-/// nichts ändert, bleibt das Push-Verhalten wie bisher.
+/// Per-Account-Push-Toggles (P70/Multi-Account). Standard ist "an": Solange
+/// der Nutzer nichts ändert, bleibt das Push-Verhalten wie bisher.
 ///
 /// - Mail & Kalender: NC-Normal-Push-Zeile (Mail läuft über die NC-Kette,
 ///   Kalender-Erinnerungen sind lokal - der Toggle unterdrückt die
 ///   Mail-Push-Verarbeitung UND das lokale Zustellen).
 /// - Link/Talk: Talk/VoIP-Kanal (eigene Gerätezeile + Proxy).
+///
+/// Jeder Account kann seine Toggles unabhängig setzen.
 enum SouveraPushToggles {
 
-    static let mailCalendarKey = "souvera_push_mail_calendar_enabled"
-    static let linkTalkKey = "souvera_push_link_talk_enabled"
+    static let mailCalendarKey = "souvera_push_mail_calendar_enabled_"
+    static let linkTalkKey = "souvera_push_link_talk_enabled_"
 
     /// Ablage in der App-Gruppe, damit auch die Notification Service
     /// Extension den Filter liest (Übergangs-Pushes unterdrücken).
@@ -22,43 +24,46 @@ enum SouveraPushToggles {
         UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) ?? .standard
     }
 
-    static var mailCalendarEnabled: Bool {
-        get { store.object(forKey: mailCalendarKey) as? Bool ?? true }
-        set { store.set(newValue, forKey: mailCalendarKey) }
+    static func mailCalendarEnabled(account: String) -> Bool {
+        store.object(forKey: mailCalendarKey + account) as? Bool ?? true
     }
 
-    static var linkTalkEnabled: Bool {
-        get { store.object(forKey: linkTalkKey) as? Bool ?? true }
-        set { store.set(newValue, forKey: linkTalkKey) }
+    static func linkTalkEnabled(account: String) -> Bool {
+        store.object(forKey: linkTalkKey + account) as? Bool ?? true
     }
 
-    /// Umschalten Mail & Kalender: Push-Zeile aller Accounts an-/abmelden.
-    static func applyMailCalendar(_ enabled: Bool) {
-        mailCalendarEnabled = enabled
-        SouveraLog.write("PushToggles", "mail/calendar push -> \(enabled)")
+    static func setMailCalendar(_ enabled: Bool, account: String) {
+        store.set(enabled, forKey: mailCalendarKey + account)
+    }
+
+    static func setLinkTalk(_ enabled: Bool, account: String) {
+        store.set(enabled, forKey: linkTalkKey + account)
+    }
+
+    /// Umschalten Mail & Kalender für EINEN Account.
+    static func applyMailCalendar(_ enabled: Bool, account: String) {
+        setMailCalendar(enabled, account: account)
+        SouveraLog.write("PushToggles", "mail/calendar push -> \(enabled) account=\(account)")
         Task {
-            for tbl in await NCManageDatabase.shared.getAllTableAccountAsync() {
-                if enabled {
-                    await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
-                } else {
-                    await NCPushNotification.shared.unsubscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
-                }
+            guard let tbl = await NCManageDatabase.shared.getTableAccountAsync(predicate: NSPredicate(format: "account == %@", account)) else { return }
+            if enabled {
+                await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
+            } else {
+                await NCPushNotification.shared.unsubscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
             }
         }
     }
 
-    /// Umschalten Link/Talk: Talk-Gerätezeile + Proxy-Zeile abmelden bzw.
-    /// neu registrieren.
-    static func applyLinkTalk(_ enabled: Bool) {
-        linkTalkEnabled = enabled
-        SouveraLog.write("PushToggles", "link/talk push -> \(enabled)")
+    /// Umschalten Link/Talk für EINEN Account.
+    static func applyLinkTalk(_ enabled: Bool, account: String) {
+        setLinkTalk(enabled, account: account)
+        SouveraLog.write("PushToggles", "link/talk push -> \(enabled) account=\(account)")
         if enabled {
             LinkVoIPManager.shared.refreshVoipRegistration()
         } else {
             Task {
-                for tbl in await NCManageDatabase.shared.getAllTableAccountAsync() {
-                    await LinkVoIPManager.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user)
-                }
+                guard let tbl = await NCManageDatabase.shared.getTableAccountAsync(predicate: NSPredicate(format: "account == %@", account)) else { return }
+                await LinkVoIPManager.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user)
             }
         }
     }

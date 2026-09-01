@@ -82,7 +82,7 @@ final class SouveraBackgroundSync {
         // Push-Gruppe Mail & Kalender aus: KEINE lokalen Mail-Benachrichtigungen
         // (Sicherheitsnetz parallel zur Server-Abmeldung). Der Badge-Zähler
         // (refreshMailBadge) bleibt unabhängig.
-        let mailNotificationsEnabled = SouveraPushToggles.mailCalendarEnabled
+        let mailNotificationsEnabled = SouveraPushToggles.mailCalendarEnabled(account: account)
         var client = JmapClient(
             baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             username: credential.saslUser,
@@ -233,7 +233,7 @@ final class SouveraBackgroundSync {
               let linkAccount = LinkAccount.from(account: tbl.account, urlBase: tbl.urlBase, user: tbl.user) else { return }
         // Push-Gruppe Link/Talk aus: keine lokalen Chat-Benachrichtigungen
         // (Sicherheitsnetz parallel zur Server-Abmeldung).
-        guard SouveraPushToggles.linkTalkEnabled else { return }
+        guard SouveraPushToggles.linkTalkEnabled(account: account) else { return }
         let api = LinkOcsApi(account: linkAccount)
         guard let list = await api.listConversations() else { return }
 

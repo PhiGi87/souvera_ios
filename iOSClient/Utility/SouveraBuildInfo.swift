@@ -250,12 +250,12 @@ enum SouveraPushDeepLink {
             Target(kind: .mail, account: account, emailId: emailId, mailboxPath: mailboxPath, uid: "", start: 0, token: "", title: "")
         }
 
-        static func event(uid: String, start: TimeInterval) -> Target {
-            Target(kind: .event, account: "", emailId: "", mailboxPath: "", uid: uid, start: start, token: "", title: "")
+        static func event(uid: String, start: TimeInterval, account: String = "") -> Target {
+            Target(kind: .event, account: account, emailId: "", mailboxPath: "", uid: uid, start: start, token: "", title: "")
         }
 
-        static func room(token: String, title: String) -> Target {
-            Target(kind: .room, account: "", emailId: "", mailboxPath: "", uid: "", start: 0, token: token, title: title)
+        static func room(token: String, title: String, account: String = "") -> Target {
+            Target(kind: .room, account: account, emailId: "", mailboxPath: "", uid: "", start: 0, token: token, title: title)
         }
     }
 

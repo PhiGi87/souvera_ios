@@ -144,6 +144,8 @@ final class MailViewModel: ObservableObject {
     private var deepLinkObserver: NSObjectProtocol?
     /// P62g: Push-Refresh-Beobachter.
     private var pushRefreshObserver: NSObjectProtocol?
+    /// Multi-Account: Account-Wechsel-Beobachter.
+    private var accountChangeObserver: NSObjectProtocol?
     private var pendingDeepLink: SouveraPushDeepLink.Target?
 
     init() {
@@ -167,6 +169,17 @@ final class MailViewModel: ObservableObject {
                 self?.refreshOnEntry(force: true)
             }
         }
+        // Multi-Account: beim Account-Wechsel den gesamten Mail-Zustand
+        // (JmapClient, Cache, UI) auf den neuen Account umstellen.
+        accountChangeObserver = NotificationCenter.default.addObserver(
+            forName: Notification.Name(NCGlobal.shared.notificationCenterChangeUser),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.resetForAccountChange()
+            }
+        }
     }
 
     deinit {
@@ -175,6 +188,9 @@ final class MailViewModel: ObservableObject {
         }
         if let pushRefreshObserver {
             NotificationCenter.default.removeObserver(pushRefreshObserver)
+        }
+        if let accountChangeObserver {
+            NotificationCenter.default.removeObserver(accountChangeObserver)
         }
     }
 
@@ -352,6 +368,42 @@ final class MailViewModel: ObservableObject {
                 }
             }
         }
+    }
+
+    /// Multi-Account: nach einem Account-Wechsel den kompletten Mail-Zustand
+    /// verwerfen und mit dem aktiven Account neu aufbauen (JmapClient,
+    /// Cache-/UI-Zustand - kein Vermischen zwischen Accounts).
+    private func resetForAccountChange() {
+        imapClient = nil
+        jmapClient = nil
+        jmapApi = nil
+        mailAccount = nil
+        currentMailbox = nil
+        allMailboxes = []
+        queryStates = [:]
+        pageState = (nil, false)
+        hasMoreMessages = false
+        isLoadingMore = false
+        identityId = nil
+        allIdentities = []
+        hasRecoveredCredential = false
+        lastRecoveryAttempt = nil
+        mailboxesSignature = ""
+        dirtyFlagIds = [:]
+        expandedMailboxIds = []
+        collapsedGroupIds = []
+        fromAddress = ""
+        fromName = ""
+        fromAddresses = []
+        ownEmailLabel = ""
+        mailboxes = .loading
+        messages = .loading
+        body = .loading
+        searchResults = .success([])
+        offlineNotice = nil
+        sendError = nil
+        isInitialLoad = true
+        start()
     }
 
     /// Re-runs the setup from scratch, re-minting the mail credential if the

@@ -22,7 +22,6 @@ struct NCSettingsView: View {
     // Logs teilen: Bestätigung, Sendestatus und Ergebnis-Overlay
     @State private var showLogsConfirm = false
     @State private var isSendingLogs = false
-    @AppStorage("souvera_calendar_reminder_sound") private var reminderSoundRaw = SouveraCalendarReminderSound.systemDefault.rawValue
     @State private var logsResult: (success: Bool, message: String)?
     // Push-Diagnose-Sheet
     @State private var showPushDiagnostics = false
@@ -130,28 +129,6 @@ struct NCSettingsView: View {
                 .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
             }
 
-            // Push-Gruppen (P70): pro Gruppe ab-/anschaltbar; aus = die
-            // zugehörige Push-Zeile wird abgemeldet (Server-Zeile gelöscht),
-            // an = neu registriert. Standard: beides an.
-            Section(content: {
-                Toggle(NSLocalizedString("_push_toggle_mail_calendar_", comment: ""), isOn: $model.pushMailCalendar)
-                    .font(.body)
-                    .onChange(of: model.pushMailCalendar) {
-                        model.updatePushMailCalendar()
-                    }
-                Toggle(NSLocalizedString("_push_toggle_link_talk_", comment: ""), isOn: $model.pushLinkTalk)
-                    .font(.body)
-                    .onChange(of: model.pushLinkTalk) {
-                        model.updatePushLinkTalk()
-                    }
-            }, header: {
-                Text(NSLocalizedString("_push_section_title_", comment: "")).font(.headline)
-            }, footer: {
-                Text(NSLocalizedString("_push_section_footer_", comment: ""))
-                    .font(.footnote)
-            })
-            .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
-
             // Display
             // Standard-Kalenderansicht
             Section(header: Text(NSLocalizedString("_settings_calendar_default_view_", comment: "")).font(.headline), content: {
@@ -164,23 +141,6 @@ struct NCSettingsView: View {
                     Text(NSLocalizedString("_calendar_month_", comment: "")).tag("month")
                 }
                 .pickerStyle(.segmented)
-            })
-            // Ton für Kalender-Erinnerungen (System-Töne)
-            Section(header: Text(NSLocalizedString("_settings_calendar_reminder_sound_", comment: "")).font(.headline), content: {
-                Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: $reminderSoundRaw) {
-                    ForEach(SouveraCalendarReminderSound.allCases) { sound in
-                        Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound.rawValue)
-                    }
-                }
-                .onChange(of: reminderSoundRaw) { _, newRaw in
-                    guard let sound = SouveraCalendarReminderSound(rawValue: newRaw) else { return }
-                    SouveraLog.write("Settings", "tone selected: \(newRaw)")
-                    // Probehören: EINMAL bei tatsächlichem Wechsel der Auswahl.
-                    sound.previewPlay()
-                }
-                .onAppear {
-                    SouveraLog.write("Settings", "tone stored: \(reminderSoundRaw)")
-                }
             })
             // Auto-Refresh (Mail & Kalender)
             Section(header: Text(NSLocalizedString("_settings_auto_refresh_", comment: "")).font(.headline), content: {

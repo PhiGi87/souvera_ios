@@ -90,13 +90,14 @@ class NotificationService: UNNotificationServiceExtension {
                             let objectType = json["objectType"] as? String ?? ""
                             var suppressed = false
                             if appName == "souvera_mail" || objectType == "souvera_mail" {
-                                if pushDefaults?.object(forKey: "souvera_push_mail_calendar_enabled") as? Bool == false {
+                                // Multi-Account: Toggle pro Account (Key + Account).
+                                if pushDefaults?.object(forKey: "souvera_push_mail_calendar_enabled_" + tableAccount.account) as? Bool == false {
                                     suppressed = true
                                     nkLog(tag: NCGlobal.shared.logTagPN, emoji: .info, message: "Mail push suppressed by user toggle")
                                 }
                             }
                             if appName == "spreed" || appName == "talk" {
-                                if pushDefaults?.object(forKey: "souvera_push_link_talk_enabled") as? Bool == false {
+                                if pushDefaults?.object(forKey: "souvera_push_link_talk_enabled_" + tableAccount.account) as? Bool == false {
                                     suppressed = true
                                     nkLog(tag: NCGlobal.shared.logTagPN, emoji: .info, message: "Talk push suppressed by user toggle")
                                 }

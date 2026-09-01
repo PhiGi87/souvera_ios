@@ -303,12 +303,6 @@ final class LinkVoIPManager: NSObject {
 
     private func subscribeVoipToken() {
         let tokenPreview = voipToken.isEmpty ? "empty" : "len \(voipToken.count)"
-        // Push-Gruppe Link/Talk aus: keine VoIP-Registrierung.
-        guard SouveraPushToggles.linkTalkEnabled else {
-            nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: toggle disabled")
-            SouveraLog.write("PushVoip", "registration skipped: link/talk toggle disabled")
-            return
-        }
         guard !voipToken.isEmpty else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP registration skipped: no PushKit token (\(tokenPreview))")
             SouveraLog.write("PushVoip", "registration skipped: no PushKit token")
@@ -347,6 +341,8 @@ final class LinkVoIPManager: NSObject {
             for tblAccount in await NCManageDatabase.shared.getAllTableAccountAsync() {
                 let account = tblAccount.account
                 let urlBase = tblAccount.urlBase
+                // Multi-Account: nur Accounts mit aktivem Link/Talk-Toggle registrieren.
+                if !SouveraPushToggles.linkTalkEnabled(account: account) { continue }
                 // Reuse the device key pair NCPushNotification already provisioned for this account.
                 guard let publicKeyData = preferences.getPushNotificationPublicKey(account: account),
                       let devicePublicKey = String(data: publicKeyData, encoding: .utf8) else {

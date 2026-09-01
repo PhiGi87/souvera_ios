@@ -221,6 +221,28 @@ struct NCAccountSettingsView: View {
                     }
                 })
                 //
+                // Pro-Account-Einstellungen: Ton + Push-Toggles
+                Section(content: {
+                    Picker(NSLocalizedString("_settings_calendar_reminder_sound_", comment: ""), selection: $model.reminderSoundRaw) {
+                        ForEach(SouveraCalendarReminderSound.allCases) { sound in
+                            Text(NSLocalizedString(sound.titleKey, comment: "")).tag(sound.rawValue)
+                        }
+                    }
+                    .onChange(of: model.reminderSoundRaw) { _, newRaw in
+                        model.updateReminderSound(newRaw)
+                    }
+                    Toggle(NSLocalizedString("_push_toggle_mail_calendar_", comment: ""), isOn: $model.pushMailCalendar)
+                        .onChange(of: model.pushMailCalendar) {
+                            model.updatePushMailCalendar()
+                        }
+                    Toggle(NSLocalizedString("_push_toggle_link_talk_", comment: ""), isOn: $model.pushLinkTalk)
+                        .onChange(of: model.pushLinkTalk) {
+                            model.updatePushLinkTalk()
+                        }
+                }, header: {
+                    Text(NSLocalizedString("_settings_per_account_", comment: "")).font(.headline)
+                })
+                //
                 // Logout / account removal
                 Section(content: {
                     Button(action: {

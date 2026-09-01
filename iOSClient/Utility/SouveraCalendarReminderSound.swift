@@ -22,15 +22,23 @@ enum SouveraCalendarReminderSound: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    private static let defaultsKey = "souvera_calendar_reminder_sound"
+    private static let defaultsKeyPrefix = "souvera_calendar_reminder_sound_"
+    private static let legacyDefaultsKey = "souvera_calendar_reminder_sound"
 
-    static var stored: SouveraCalendarReminderSound {
-        get {
-            guard let raw = UserDefaults.standard.string(forKey: defaultsKey),
-                  let sound = SouveraCalendarReminderSound(rawValue: raw) else { return .systemDefault }
-            return sound
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: defaultsKey) }
+    /// PRO ACCOUNT gespeicherter Ton (Multi-Account: jeder Account kann
+    /// einen eigenen Erinnerungston haben). Fallback auf den früheren
+    /// globalen Wert (Migration).
+    static func sound(account: String) -> SouveraCalendarReminderSound {
+        let key = defaultsKeyPrefix + account
+        if let raw = UserDefaults.standard.string(forKey: key),
+           let s = SouveraCalendarReminderSound(rawValue: raw) { return s }
+        if let legacy = UserDefaults.standard.string(forKey: legacyDefaultsKey),
+           let s = SouveraCalendarReminderSound(rawValue: legacy) { return s }
+        return .systemDefault
+    }
+
+    static func setSound(_ sound: SouveraCalendarReminderSound, account: String) {
+        UserDefaults.standard.set(sound.rawValue, forKey: defaultsKeyPrefix + account)
     }
 
     /// UNNotificationSound für die Erinnerungen (nil = kein Ton).
