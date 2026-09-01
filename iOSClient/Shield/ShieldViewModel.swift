@@ -73,6 +73,10 @@ final class ShieldViewModel: ObservableObject {
         warnings = []
         mailboxes = []
         selectedMailbox = nil
+        // CSRF-Token ist Account-/Session-gebunden: beim Wechsel verwerfen,
+        // sonst schlägt der erste POST (Blacklist/Whitelist add/remove) des
+        // neuen Accounts mit dem alten Token fehl.
+        api.resetForAccountChange()
         Task { await self.loadAll() }
     }
 

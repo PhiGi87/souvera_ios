@@ -561,6 +561,12 @@ final class MailViewModel: ObservableObject {
             object: nil,
             userInfo: ["account": mailAccount?.account ?? "", "count": personalInboxUnread]
         )
+        // Direkt auch den App-Icon-Badge-Store füttern (redundant zum
+        // Observer, aber robust gegen fehlende Observer-Registrierung).
+        SouveraBadgeStore.shared.setMailUnread(
+            personalInboxUnread,
+            account: mailAccount?.account ?? ""
+        )
     }
 
     /// Ungelesen gesamt → Badge am Mail-Tab (NotificationCenter).
@@ -1196,6 +1202,11 @@ final class MailViewModel: ObservableObject {
             var state = ""
             let maxPages = 3
             var oldestDate: Date?
+            // Alle vom Server in den geladenen Seiten gelieferten IDs - Basis
+            // für den Stale-Abgleich (im Web/anderen Client gelöschte Mails
+            // müssen aus Liste + Cache verschwinden, nicht nur hinzugefügt
+            // werden).
+            var serverIds = Set<String>()
             for _ in 0..<maxPages {
                 // Pro-Seite-Fehlerisolation: Schlägt eine Folgeseite fehl,
                 // bricht der Loop ab und die bereits geladenen Mails werden
@@ -1214,6 +1225,7 @@ final class MailViewModel: ObservableObject {
                     ids = (resp["ids"] as? [String]) ?? []
                     state = resp.optString("queryState") ?? state
                     guard !ids.isEmpty else { break }
+                    serverIds.formUnion(ids)
                     page = try await api.getEmails(accountId: accId, ids: ids)
                 } catch {
                     // Auth-Fehler NIE verschlucken: der äußere Catch stößt
@@ -1256,13 +1268,25 @@ final class MailViewModel: ObservableObject {
                     break
                 }
             }
-            let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
+            // Stale-Abgleich bei VOLLSTÄNDIG geladenem Postfach: alle
+            // Cache-Einträge, die der Server nicht mehr liefert (gelöscht/
+            // verschoben in Web/anderem Client), entfernen. Nur wenn
+            // !hasMore, weil sonst ältere (per Scroll geladene) Mails
+            // außerhalb des geladenen Fensters fälschlich gelöscht würden.
+            if !hasMore, !serverIds.isEmpty {
+                let stale = byId.keys.filter { !serverIds.contains($0) }
+                if !stale.isEmpty {
+                    JmapLog.write("sync \(mailbox.name): removing \(stale.count) stale cached mails not on server")
+                    for id in stale { byId.removeValue(forKey: id) }
+                }
+            }
+            let finalCollected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
             guard generation == listGeneration else { return }
             queryStates[cacheKey] = state
             pageState = (lastId: lastId, hasMore: hasMore)
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
-            let savedCollected = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+            let savedCollected = finalCollected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
             MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
@@ -1278,7 +1302,7 @@ final class MailViewModel: ObservableObject {
             // mehr existieren (z. B. auf anderem Gerät gelöscht), per Batch
             // Email/get (max. 500 IDs) aus Cache + Liste entfernen. Läuft
             // im Hintergrund nach dem Full-Refresh.
-            let finalSnapshot = collected
+            let finalSnapshot = finalCollected
             let finalState = state
             Task { [weak self] in
                 guard let self else { return }
@@ -1996,13 +2020,20 @@ final class MailViewModel: ObservableObject {
     /// (oldState==newState) = bereits verschoben; echter Fehler = Zeile
     /// wiederherstellen + Feedback statt still schlucken.
     private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async -> Bool {
-        guard let first = messagesToDelete.first else { return false }
+        guard let first = messagesToDelete.first else {
+            JmapLog.write("delete: no messages to delete")
+            return false
+        }
         do {
             if useJmap {
                 guard let api = jmapApi,
-                      let client = jmapClient else { return false }
+                      let client = jmapClient else {
+                    JmapLog.write("delete: jmapApi/jmapClient nil (useJmap=true, account=\(mailAccount?.account ?? "-"))")
+                    return false
+                }
                 let session = try await client.refreshSession()
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
+                JmapLog.write("delete: deleting \(ids.count) mails in accId=\(accId) (account=\(mailAccount?.account ?? "-"))")
                 // Trash must live in the same JMAP account as the message.
                 if let trash = allMailboxes.first(where: { $0.kind == .trash && $0.accountId == accId }),
                    let trashJmapId = trash.jmapId,
@@ -2018,7 +2049,10 @@ final class MailViewModel: ObservableObject {
                 }
             } else {
                 guard let mailbox = currentMailbox,
-                      let client = imapClient else { return false }
+                      let client = imapClient else {
+                    JmapLog.write("delete: imap mailbox/client nil")
+                    return false
+                }
                 for message in messagesToDelete {
                     guard let uid = UInt64(message.emailId) else { continue }
                     if let trash = allMailboxes.first(where: { $0.kind == .trash }), trash.path != mailbox.path {

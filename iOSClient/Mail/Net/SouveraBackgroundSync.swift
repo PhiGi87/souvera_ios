@@ -58,7 +58,10 @@ final class SouveraBackgroundSync {
     }
 
     private func unreadCount(account: String) async -> Int? {
-        guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else { return nil }
+        guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else {
+            SouveraLog.write("BackgroundSync", "badge: no combined credential for \(account)")
+            return nil
+        }
         let client = JmapClient(
             baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             username: credential.saslUser,
@@ -66,12 +69,22 @@ final class SouveraBackgroundSync {
         )
         let api = JmapApi(client: client)
         guard let session = try? await client.refreshSession(),
-              !session.primaryAccountId.isEmpty else { return nil }
+              !session.primaryAccountId.isEmpty else {
+            SouveraLog.write("BackgroundSync", "badge: no JMAP session for \(account)")
+            return nil
+        }
         let accId = session.primaryAccountId
         guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
-              let inboxId = inbox.optString("id") else { return nil }
+              let inboxId = inbox.optString("id") else {
+            SouveraLog.write("BackgroundSync", "badge: no inbox for \(account) (accId \(accId))")
+            return nil
+        }
         guard let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
-              let total = resp["total"] as? Int else { return nil }
+              let total = resp["total"] as? Int else {
+            SouveraLog.write("BackgroundSync", "badge: query failed for \(account) inbox \(inboxId)")
+            return nil
+        }
+        SouveraLog.write("BackgroundSync", "badge: \(account) -> \(total) unread")
         return total
     }
 

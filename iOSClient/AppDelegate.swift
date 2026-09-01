@@ -364,8 +364,9 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if NCPreferences().deviceTokenPushNotification.isEmpty {
             application.registerForRemoteNotifications()
         }
-        // App-Icon-Badge: ungelesene Mails ALLER Accounts neu zählen (der
-        // Badge-Store aktualisiert daraus das System-Badge).
+        // App-Icon-Badge: "Badges"-Schalter neu einlesen und ungelesene Mails
+        // ALLER Accounts zählen (der Badge-Store setzt das System-Badge).
+        SouveraBadgeStore.shared.refreshNow()
         Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
     }
 

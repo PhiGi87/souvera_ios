@@ -69,7 +69,6 @@ final class LinkViewModel: ObservableObject {
     private var deepLinkObserver: NSObjectProtocol?
     private var accountChangeObserver: NSObjectProtocol?
     private var linkRoomsObserver: NSObjectProtocol?
-    private var linkUnreadObserver: NSObjectProtocol?
     /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
     /// Laufende asynchrone Ladungen tragen ihre Generation und verwerfen
     /// veraltete Ergebnisse (sonst überschreibt ein alter Task die Liste
@@ -105,11 +104,13 @@ final class LinkViewModel: ObservableObject {
         ) { [weak self] _ in
             self?.loadConversations()
         }
-        linkUnreadObserver = NotificationCenter.default.addObserver(
-            forName: .linkUnreadChanged, object: nil, queue: .main
-        ) { [weak self] _ in
-            self?.loadConversations()
-        }
+        // KEIN .linkUnreadChanged-Observer hier: loadConversations() postet
+        // selbst .linkUnreadChanged (via postUnreadTotal). Ein Observer darauf
+        // würde synchron re-entrant loadConversations() -> LinkAccount.active()
+        // -> Realm-Read auf dem Main-Thread auslösen (File-Lock-Deadlock,
+        // Watchdog-Kill 0xdead10cc) und zusätzlich eine Endlos-Reload-Schleife
+        // erzeugen. Der Badge wird vom Tab-Controller + SouveraBadgeStore
+        // konsumiert, nicht von LinkViewModel selbst.
     }
 
     /// Multi-Account: verwirft den kompletten Link/Talk-Zustand und baut
@@ -949,9 +950,6 @@ final class LinkViewModel: ObservableObject {
         }
         if let linkRoomsObserver {
             NotificationCenter.default.removeObserver(linkRoomsObserver)
-        }
-        if let linkUnreadObserver {
-            NotificationCenter.default.removeObserver(linkUnreadObserver)
         }
         let client = signaling
         Task { @MainActor in

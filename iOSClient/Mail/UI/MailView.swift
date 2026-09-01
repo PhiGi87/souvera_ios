@@ -20,6 +20,12 @@ struct MailView: View {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
+                .toolbarBackground(
+                    LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
+                    for: .navigationBar
+                )
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
                 .toolbar {
                     toolbar
                 }

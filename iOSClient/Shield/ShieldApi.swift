@@ -108,6 +108,12 @@ final class ShieldApi {
     /// the shield page; refreshed automatically after a 412.
     private var requestToken: String?
 
+    /// Verwirft den gecachten CSRF-Token (Account-Wechsel: der Token ist
+    /// an die Session des bisherigen Accounts gebunden).
+    func resetForAccountChange() {
+        requestToken = nil
+    }
+
     private func ensureRequestToken() async -> String? {
         if let requestToken { return requestToken }
         guard let root, let url = URL(string: "\(root)/index.php/apps/souvera_shield/") else { return nil }
@@ -117,7 +123,10 @@ final class ShieldApi {
         }
         guard let (data, _) = try? await urlSession.data(for: req),
               let html = String(data: data, encoding: .utf8),
-              let start = html.range(of: #"data-requesttoken=""#) else { return nil }
+              let start = html.range(of: #"data-requesttoken=""#) else {
+            JmapLog.write("ShieldApiLog requesttoken fetch failed: \(url.absoluteString) (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-"))")
+            return nil
+        }
         let rest = html[start.upperBound...]
         guard let end = rest.firstIndex(of: "\"") else { return nil }
         requestToken = String(rest[..<end])

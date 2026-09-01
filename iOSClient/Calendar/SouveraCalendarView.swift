@@ -113,6 +113,12 @@ struct SouveraCalendarView: View {
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(
+                LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
+                for: .navigationBar
+            )
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Ein einziger Button mit Auswahl-Menü (wie die

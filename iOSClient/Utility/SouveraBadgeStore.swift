@@ -21,6 +21,10 @@ final class SouveraBadgeStore: ObservableObject {
     @Published private(set) var linkUnread: [String: Int] = [:]
 
     private var observers: [NSObjectProtocol] = []
+    /// Gecachter "Badges"-Schalter aus den iOS-Einstellungen. Wird beim Init
+    /// einmal abgefragt und beim Setzen direkt angewendet (kein erneuter,
+    /// asynchroner Roundtrip pro Badge-Update).
+    private var badgesEnabled = true
 
     private init() {
         let center = NotificationCenter.default
@@ -42,19 +46,29 @@ final class SouveraBadgeStore: ObservableObject {
             queue: .main
         ) { [weak self] notification in
             let count = notification.object as? Int ?? 0
-            let account = (notification.userInfo?["account"] as? String)
-                ?? LinkAccount.active()?.account
-                ?? ""
+            let account = (notification.userInfo?["account"] as? String) ?? ""
             Task { @MainActor in
                 self?.setLinkUnread(count, account: account)
             }
         })
+        refreshBadgeSetting()
+    }
+
+    private func refreshBadgeSetting() {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            let enabled = settings.badgeSetting == .enabled
+            Task { @MainActor in
+                guard let self else { return }
+                self.badgesEnabled = enabled
+                self.applyAppIconBadge()
+            }
+        }
     }
 
     func setMailUnread(_ count: Int, account: String) {
         guard !account.isEmpty else { return }
         mailUnread[account] = max(0, count)
-        updateAppIconBadge()
+        applyAppIconBadge()
     }
 
     func setLinkUnread(_ count: Int, account: String) {
@@ -74,14 +88,18 @@ final class SouveraBadgeStore: ObservableObject {
         mailUnread.values.reduce(0, +)
     }
 
-    /// Aktualisiert das App-Icon-Badge. Respektiert den iOS-Schalter "Badges".
-    func updateAppIconBadge() {
+    /// Setzt das App-Icon-Badge synchron (Main-Thread). Zählt nur ungelesene
+    /// Mails über ALLE Accounts und respektiert den "Badges"-Schalter.
+    private func applyAppIconBadge() {
         let total = totalMailUnread
-        UNUserNotificationCenter.current().getNotificationSettings { settings in
-            let enabled = settings.badgeSetting == .enabled
-            DispatchQueue.main.async {
-                UIApplication.shared.applicationIconBadgeNumber = enabled ? total : 0
-            }
-        }
+        let value = badgesEnabled ? total : 0
+        UIApplication.shared.applicationIconBadgeNumber = value
+        SouveraLog.write("Badge", "app icon badge -> total=\(total) badgesEnabled=\(badgesEnabled) value=\(value)")
+    }
+
+    /// Öffentlicher Einstieg (z. B. nach Erteilung der Notifications-
+    /// Berechtigung), um den Schalter neu einzulesen und das Badge zu setzen.
+    func refreshNow() {
+        refreshBadgeSetting()
     }
 }
