@@ -68,6 +68,13 @@ final class LinkViewModel: ObservableObject {
     /// Push-Deep-Link-Beobachter (Chat-Raum direkt öffnen).
     private var deepLinkObserver: NSObjectProtocol?
     private var accountChangeObserver: NSObjectProtocol?
+    private var linkRoomsObserver: NSObjectProtocol?
+    private var linkUnreadObserver: NSObjectProtocol?
+    /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
+    /// Laufende asynchrone Ladungen tragen ihre Generation und verwerfen
+    /// veraltete Ergebnisse (sonst überschreibt ein alter Task die Liste
+    /// mit den Räumen des vorherigen Accounts -> Flapping).
+    private var generation = 0
 
     init() {
         deepLinkObserver = NotificationCenter.default.addObserver(
@@ -91,11 +98,24 @@ final class LinkViewModel: ObservableObject {
                 self?.resetForAccountChange()
             }
         }
+        // EINMALIG registriert (nicht in start() - sonst akkumulieren sich
+        // Observer bei jedem Account-Wechsel und die Liste flappt).
+        linkRoomsObserver = NotificationCenter.default.addObserver(
+            forName: .linkRoomsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.loadConversations()
+        }
+        linkUnreadObserver = NotificationCenter.default.addObserver(
+            forName: .linkUnreadChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            self?.loadConversations()
+        }
     }
 
     /// Multi-Account: verwirft den kompletten Link/Talk-Zustand und baut
     /// ihn mit dem aktiven Account neu auf.
     private func resetForAccountChange() {
+        generation += 1
         api = nil
         pollTask?.cancel()
         pollTask = nil
@@ -144,14 +164,6 @@ final class LinkViewModel: ObservableObject {
             }
             currentUserId = account.username
             api = LinkOcsApi(account: account)
-            NotificationCenter.default.addObserver(forName: .linkRoomsChanged, object: nil, queue: .main) { [weak self] _ in
-                self?.loadConversations()
-            }
-            // Badge-Poll meldet neue Ungelesen-Zahlen: Liste live
-            // aktualisieren, damit die Kanal-Badges sofort mitzählen.
-            NotificationCenter.default.addObserver(forName: .linkUnreadChanged, object: nil, queue: .main) { [weak self] _ in
-                self?.loadConversations()
-            }
         }
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
         // erstellte Channels sofort sichtbar sind.
@@ -458,6 +470,7 @@ final class LinkViewModel: ObservableObject {
 
     func loadConversations() {
         guard let api else { return }
+        let gen = generation
         // Cache-first bei erstem Laden: sofortiger Inhalt statt Spinner.
         let cacheAccount = LinkAccount.active()?.account ?? ""
         if case .loading = conversations, let cached = LinkCache.loadConversations(account: cacheAccount) {
@@ -468,6 +481,7 @@ final class LinkViewModel: ObservableObject {
         }
         Task {
             if let list = await api.listConversations() {
+                guard gen == self.generation else { return }
                 let sorted = list.sorted { $0.lastActivity > $1.lastActivity }
                 let signature = conversationSignature(sorted)
                 if self.conversationsSignature != signature {
@@ -553,6 +567,7 @@ final class LinkViewModel: ObservableObject {
         hideUnreadSeparator = false
         connectSignaling(token: token)
         guard let api else { return }
+        let gen = generation
         pollTask = Task {
             // Cache-first: gecachte Nachrichten SOFORT anzeigen - die
             // Eintrittsposition (Trennlinie bzw. Ende) wird im View über
@@ -565,6 +580,7 @@ final class LinkViewModel: ObservableObject {
                 self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             }
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
+            guard gen == self.generation else { return }
             if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
                 history = cached
@@ -925,6 +941,12 @@ final class LinkViewModel: ObservableObject {
         }
         if let accountChangeObserver {
             NotificationCenter.default.removeObserver(accountChangeObserver)
+        }
+        if let linkRoomsObserver {
+            NotificationCenter.default.removeObserver(linkRoomsObserver)
+        }
+        if let linkUnreadObserver {
+            NotificationCenter.default.removeObserver(linkUnreadObserver)
         }
         let client = signaling
         Task { @MainActor in

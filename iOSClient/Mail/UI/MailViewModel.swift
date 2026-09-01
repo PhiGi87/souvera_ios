@@ -146,6 +146,11 @@ final class MailViewModel: ObservableObject {
     private var pushRefreshObserver: NSObjectProtocol?
     /// Multi-Account: Account-Wechsel-Beobachter.
     private var accountChangeObserver: NSObjectProtocol?
+    /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel/
+    /// Reset. Laufende asynchrone Ladungen verwerfen veraltete Ergebnisse
+    /// (sonst überschreibt ein alter Task den Zustand mit den Mails des
+    /// vorherigen Accounts).
+    private var generation = 0
     private var pendingDeepLink: SouveraPushDeepLink.Target?
 
     init() {
@@ -374,6 +379,7 @@ final class MailViewModel: ObservableObject {
     /// verwerfen und mit dem aktiven Account neu aufbauen (JmapClient,
     /// Cache-/UI-Zustand - kein Vermischen zwischen Accounts).
     private func resetForAccountChange() {
+        generation += 1
         imapClient = nil
         jmapClient = nil
         jmapApi = nil
@@ -409,6 +415,7 @@ final class MailViewModel: ObservableObject {
     /// Re-runs the setup from scratch, re-minting the mail credential if the
     /// server rejected the stored one.
     func retry() {
+        generation += 1
         imapClient = nil
         jmapClient = nil
         jmapApi = nil
@@ -589,8 +596,10 @@ final class MailViewModel: ObservableObject {
 
     private func loadMailboxesJmap(autoOpenInbox: Bool) async {
         guard let api = jmapApi else { return }
+        let gen = generation
         do {
             let session = try await jmapClient?.refreshSession()
+            guard gen == self.generation else { return }
             // Leere Accounts = tote Credential: sofort erneuern.
             if !isSessionUsable(session) {
                 SouveraLog.write("Mail", "session with empty accounts - recovering credential")
@@ -1018,6 +1027,7 @@ final class MailViewModel: ObservableObject {
 
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
+        let accountGen = self.generation
         // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync dieser
         // Mailbox, wird der neue Wunsch nur vorgemerkt und danach EINMAL
         // nachgezogen (keine parallelen Publishes, die sich überschreiben).
@@ -1036,6 +1046,7 @@ final class MailViewModel: ObservableObject {
         }
         do {
             let session = try await jmapClient?.refreshSession()
+            guard accountGen == self.generation else { return }
             // Leere Accounts = tote Credential: erneuern und neu laden.
             if !isSessionUsable(session) {
                 SouveraLog.write("Mail", "sync: session with empty accounts - recovering credential")

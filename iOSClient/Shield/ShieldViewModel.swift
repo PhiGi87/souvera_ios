@@ -30,6 +30,8 @@ final class ShieldViewModel: ObservableObject {
 
     private let api = ShieldApi()
     private var accountChangeObserver: NSObjectProtocol?
+    /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
+    private var generation = 0
     /// Signaturen der Listen (Redundanz-Guard gegen identische Updates).
     private var spamSignature = ""
     private var fileSignature = ""
@@ -59,6 +61,7 @@ final class ShieldViewModel: ObservableObject {
     }
 
     private func resetForAccountChange() {
+        generation += 1
         spamSignature = ""
         fileSignature = ""
         virusSignature = ""
@@ -101,10 +104,12 @@ final class ShieldViewModel: ObservableObject {
     }
 
     func loadAll() async {
+        let gen = generation
         warnings = []
 
         var discovered: [String] = []
         if let result = await api.quarantineList(.spam) {
+            guard gen == self.generation else { return }
             warnings += result.warnings
             let entries = result.data.compactMap { ShieldSpamEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)

@@ -42,6 +42,8 @@ final class CalendarViewModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var lastAutoRefresh: Date = Date()
     private var accountChangeObserver: NSObjectProtocol?
+    /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
+    private var generation = 0
 
     init() {
         // Multi-Account: beim Account-Wechsel den Kalender-Zustand auf den
@@ -65,6 +67,7 @@ final class CalendarViewModel: ObservableObject {
     }
 
     private func resetForAccountChange() {
+        generation += 1
         events = .loading
         eventsSignature = ""
         calendars = []
@@ -252,6 +255,7 @@ final class CalendarViewModel: ObservableObject {
     }
 
     func load() async {
+        let gen = generation
         offlineNotice = nil
 
         let calendar = Calendar.current
@@ -281,6 +285,7 @@ final class CalendarViewModel: ObservableObject {
         }
 
         let discovered = await client.fetchCalendars()
+        guard gen == self.generation else { return }
         if !discovered.isEmpty {
             calendars = discovered
             restoreSelection(discovered)
