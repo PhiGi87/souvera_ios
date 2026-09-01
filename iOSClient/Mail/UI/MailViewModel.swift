@@ -952,15 +952,17 @@ final class MailViewModel: ObservableObject {
     /// der langsamere Blacklist-Lauf das Lösch-Feedback).
     func blacklistAndDelete(_ messages: [MailMessage]) async {
         let ids = messages.map(\.emailId)
+        let addresses = Array(Set(messages.map { $0.fromAddress.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }))
+        JmapLog.write("blacklistAndDelete: \(ids.count) mails, \(addresses.count) addresses [\(addresses.joined(separator: ", "))]")
         optimisticRemove(ids)
         let previous = deleteWorkTask
         await previous?.value
         let deleted = await performDelete(messages, ids: ids)
+        JmapLog.write("blacklistAndDelete: delete result=\(deleted)")
         // Queue-Marker aktualisieren, damit Folge-Löschungen hinter uns laufen.
         deleteWorkTask = Task {}
 
-        let addresses = Array(Set(messages.map { $0.fromAddress.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty }))
         var blacklisted = 0
         if !addresses.isEmpty {
             let api = ShieldApi()
@@ -970,6 +972,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
         }
+        JmapLog.write("blacklistAndDelete: blacklisted=\(blacklisted) of \(addresses.count)")
 
         let blacklistOk = addresses.isEmpty || blacklisted == addresses.count
         if deleted && blacklistOk {
@@ -1224,7 +1227,14 @@ final class MailViewModel: ObservableObject {
                     )
                     ids = (resp["ids"] as? [String]) ?? []
                     state = resp.optString("queryState") ?? state
-                    guard !ids.isEmpty else { break }
+                    guard !ids.isEmpty else {
+                        // Leere Folgeseite = Ende des Postfachs. hasMore muss
+                        // hier auf false, sonst bleibt der Stale-Abgleich
+                        // (`if !hasMore`) dauerhaft deaktiviert und im Web/
+                        // anderen Client gelöschte Mails bleiben sichtbar.
+                        hasMore = false
+                        break
+                    }
                     serverIds.formUnion(ids)
                     page = try await api.getEmails(accountId: accId, ids: ids)
                 } catch {

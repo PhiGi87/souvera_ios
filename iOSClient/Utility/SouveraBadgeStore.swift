@@ -25,6 +25,9 @@ final class SouveraBadgeStore: ObservableObject {
     /// einmal abgefragt und beim Setzen direkt angewendet (kein erneuter,
     /// asynchroner Roundtrip pro Badge-Update).
     private var badgesEnabled = true
+    /// Debounce-Task: kurzzeitige 0↔28-Schwankungen beim Laden werden
+    /// zusammengefasst, damit das App-Icon-Badge nicht flackert.
+    private var badgeDebounceTask: Task<Void, Never>?
 
     private init() {
         let center = NotificationCenter.default
@@ -88,13 +91,22 @@ final class SouveraBadgeStore: ObservableObject {
         mailUnread.values.reduce(0, +)
     }
 
-    /// Setzt das App-Icon-Badge synchron (Main-Thread). Zählt nur ungelesene
-    /// Mails über ALLE Accounts und respektiert den "Badges"-Schalter.
+    /// Setzt das App-Icon-Badge (debounced). Zählt nur ungelesene Mails über
+    /// ALLE Accounts und respektiert den "Badges"-Schalter.
     private func applyAppIconBadge() {
-        let total = totalMailUnread
-        let value = badgesEnabled ? total : 0
-        UIApplication.shared.applicationIconBadgeNumber = value
-        SouveraLog.write("Badge", "app icon badge -> total=\(total) badgesEnabled=\(badgesEnabled) value=\(value)")
+        badgeDebounceTask?.cancel()
+        badgeDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard !Task.isCancelled, let self else { return }
+            let total = self.totalMailUnread
+            let value = self.badgesEnabled ? total : 0
+            if #available(iOS 16.0, *) {
+                try? await UNUserNotificationCenter.current().setBadgeCount(value)
+            } else {
+                UIApplication.shared.applicationIconBadgeNumber = value
+            }
+            SouveraLog.write("Badge", "app icon badge -> total=\(total) badgesEnabled=\(self.badgesEnabled) value=\(value)")
+        }
     }
 
     /// Öffentlicher Einstieg (z. B. nach Erteilung der Notifications-

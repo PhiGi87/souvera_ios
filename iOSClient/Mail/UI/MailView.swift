@@ -14,6 +14,8 @@ struct MailView: View {
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
     @State private var showNewFolderSheet = false
+    @State private var searchQuery = ""
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -21,11 +23,15 @@ struct MailView: View {
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(
-                    LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
+                    SouveraAppearance.gradientBackgroundColor,
                     for: .navigationBar
                 )
                 .toolbarBackground(.visible, for: .navigationBar)
                 .toolbarColorScheme(.dark, for: .navigationBar)
+                .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_mail_search_hint_", comment: ""))
+                .onChange(of: searchQuery) { _, newValue in
+                    scheduleSearch(newValue)
+                }
                 .toolbar {
                     toolbar
                 }
@@ -263,47 +269,107 @@ struct MailView: View {
                 Button { showNewFolderSheet = true } label: { Image(systemName: "folder.badge.plus") }
                     .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { viewModel.route = .search } label: { Image(systemName: "magnifyingglass") }
-            }
         }
     }
 
     @ViewBuilder
     private var content: some View {
-        switch viewModel.route {
-        case .folders:
-            if viewModel.isInitialLoad {
-                // Während des ERSTEN Ladens nach dem App-Start: neutraler
-                // Spinner statt Ordnerliste - danach öffnet sich direkt der
-                // letzte Ordner (üblicherweise die INBOX).
-                VStack(spacing: 12) {
-                    Spacer()
-                    ProgressView()
-                    Text(NSLocalizedString("_mail_loading_", comment: ""))
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+        if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty, !viewModel.route.isDetail {
+            mailSearchResults
+        } else {
+            switch viewModel.route {
+            case .folders:
+                if viewModel.isInitialLoad {
+                    // Während des ERSTEN Ladens nach dem App-Start: neutraler
+                    // Spinner statt Ordnerliste - danach öffnet sich direkt der
+                    // letzte Ordner (üblicherweise die INBOX).
+                    VStack(spacing: 12) {
+                        Spacer()
+                        ProgressView()
+                        Text(NSLocalizedString("_mail_loading_", comment: ""))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                } else {
+                    MailFolderListView(viewModel: viewModel)
                 }
+            case .messages, .detail:
+                // P62b: EINE Listen-Instanz für beide Zustände - die Detailansicht
+                // liegt als deckendes Overlay darüber. Nur so bleibt die
+                // SwiftUI-Identität der Liste erhalten und die Scrollposition
+                // überlebt den Detail-Roundtrip (getrennte Branches erzeugten
+                // jeweils NEUE Instanzen -> Scroll ging verloren).
+                ZStack {
+                    MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
+                    if let message = viewModel.route.detailMessage {
+                        MailDetailView(viewModel: viewModel, message: message)
+                    }
+                }
+            case .compose:
+                MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
+            case .search:
+                mailSearchResults
+            }
+        }
+    }
+
+    /// Inline-Suchergebnisse (die Suchleiste selbst kommt über `.searchable`).
+    @ViewBuilder
+    private var mailSearchResults: some View {
+        switch viewModel.searchResults {
+        case .loading:
+            Spacer()
+            ProgressView()
+            Spacer()
+        case let .error(message):
+            Spacer()
+            Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
+            Spacer()
+        case let .success(items):
+            if items.isEmpty {
+                Spacer()
+                Text(NSLocalizedString("_mail_search_no_results_", comment: ""))
+                    .foregroundStyle(.secondary)
+                Spacer()
             } else {
-                MailFolderListView(viewModel: viewModel)
-            }
-        case .messages, .detail:
-            // P62b: EINE Listen-Instanz für beide Zustände - die Detailansicht
-            // liegt als deckendes Overlay darüber. Nur so bleibt die
-            // SwiftUI-Identität der Liste erhalten und die Scrollposition
-            // überlebt den Detail-Roundtrip (getrennte Branches erzeugten
-            // jeweils NEUE Instanzen -> Scroll ging verloren).
-            ZStack {
-                MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
-                if let message = viewModel.route.detailMessage {
-                    MailDetailView(viewModel: viewModel, message: message)
+                List(items) { message in
+                    Button { viewModel.openMessage(message, fromSearch: true) } label: {
+                        MailRow(message: message)
+                    }
+                    .buttonStyle(.plain)
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) { viewModel.delete([message]) } label: {
+                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        }
+                        Button { viewModel.toggleFlagged(message) } label: {
+                            Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
+                        }.tint(.orange)
+                    }
+                    .swipeActions(edge: .leading) {
+                        Button { viewModel.startCompose(mode: .reply, message: message) } label: {
+                            Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+                        }
+                        .tint(.green)
+                    }
                 }
+                .listStyle(.plain)
             }
-        case .compose:
-            MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
-        case .search:
-            MailSearchView(viewModel: viewModel)
+        }
+    }
+
+    /// Debounced die JMAP-Serversuche anstoßen.
+    private func scheduleSearch(_ query: String) {
+        searchDebounceTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            viewModel.searchResults = .success([])
+            return
+        }
+        searchDebounceTask = Task {
+            try? await Task.sleep(nanoseconds: 400_000_000)
+            guard !Task.isCancelled else { return }
+            await viewModel.search(trimmed)
         }
     }
 }
@@ -1226,71 +1292,6 @@ private struct MailNewFolderSheet: View {
             expanded.remove(id)
         } else {
             expanded.insert(id)
-        }
-    }
-}
-
-private struct MailSearchView: View {
-    @ObservedObject var viewModel: MailViewModel
-    @State private var query = ""
-
-    var body: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $query)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                    .onSubmit { Task { await viewModel.search(query) } }
-                if !query.isEmpty {
-                    Button {
-                        query = ""
-                        Task { await viewModel.search("") }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                    }
-                }
-            }
-            .padding(12)
-            Divider()
-            switch viewModel.searchResults {
-            case .loading:
-                Spacer()
-                ProgressView()
-                Spacer()
-            case let .error(message):
-                Spacer()
-                Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
-                Spacer()
-            case let .success(items):
-                if items.isEmpty {
-                    Spacer()
-                    Text(query.isEmpty
-                         ? NSLocalizedString("_mail_search_hint_", comment: "")
-                         : NSLocalizedString("_mail_search_no_results_", comment: ""))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                } else {
-                    List(items) { message in
-                        Button { viewModel.openMessage(message, fromSearch: true) } label: {
-                            MailRow(message: message)
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions(edge: .trailing) {
-                            Button(role: .destructive) { viewModel.delete([message]) } label: { Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash") }
-                            Button { viewModel.toggleFlagged(message) } label: { Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag") }.tint(.orange)
-                        }
-                        .swipeActions(edge: .leading) {
-                            Button { viewModel.startCompose(mode: .reply, message: message) } label: {
-                                Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
-                            }
-                            .tint(.green)
-                        }
-                    }
-                    .listStyle(.plain)
-                }
-            }
         }
     }
 }

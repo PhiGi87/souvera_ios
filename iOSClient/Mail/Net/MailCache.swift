@@ -16,6 +16,13 @@ enum MailCache {
         return base.appendingPathComponent("souvera-mail-cache", isDirectory: true)
     }()
 
+    /// Leert den kompletten Cache (Mail-Nachrichten, Postfächer, Bodies sowie
+    /// die darin abgelegten Kalender-/Kontakt-JSON-Blobs). Für den
+    /// „Cache leeren"-Button in den Einstellungen.
+    static func clearAll() {
+        try? FileManager.default.removeItem(at: rootDirectory)
+    }
+
     private static func fileURL(account: String, mailboxId: String) -> URL {
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let safeMailbox = mailboxId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)

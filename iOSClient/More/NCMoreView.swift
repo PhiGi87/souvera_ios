@@ -132,13 +132,15 @@ struct NCMoreView: View {
                 Button {
                     model.switchAccount(item.account)
                 } label: {
-                    HStack(spacing: 8) {
+                    // Kein Spacer(): in SwiftUI-Menüs wird trailing Content nach
+                    // einem Spacer() oft nicht gerendert - Badges daher inline
+                    // direkt hinter dem Namen.
+                    HStack(spacing: 6) {
                         if item.account == model.tabBarController?.account {
                             Label("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")", systemImage: "checkmark")
                         } else {
                             Text("\(item.name)\(item.host.isEmpty ? "" : " – \(item.host)")")
                         }
-                        Spacer()
                         accountBadge(count: badgeStore.unreadMail(account: item.account), color: .red)
                         accountBadge(count: badgeStore.unreadLink(account: item.account), color: .blue)
                     }

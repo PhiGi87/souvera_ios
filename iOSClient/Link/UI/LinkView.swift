@@ -45,7 +45,7 @@ struct LinkView: View {
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbarBackground(
-                    LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
+                    SouveraAppearance.gradientBackgroundColor,
                     for: .navigationBar
                 )
                 .toolbarBackground(.visible, for: .navigationBar)
@@ -645,7 +645,7 @@ struct LinkConversationListView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $searchQuery, prompt: NSLocalizedString("_link_search_people_", comment: ""))
+        .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_link_search_people_", comment: ""))
         .onChange(of: searchQuery) { _, newValue in
             viewModel.searchUsers(query: newValue)
         }

@@ -25,6 +25,9 @@ struct NCSettingsView: View {
     @State private var logsResult: (success: Bool, message: String)?
     // Push-Diagnose-Sheet
     @State private var showPushDiagnostics = false
+    // Cache leeren: Bestätigung + Ergebnis-Overlay
+    @State private var showClearCacheConfirm = false
+    @State private var clearCacheResult: String?
     // Object of ViewModel of this view
     @ObservedObject var model: NCSettingsModel
 
@@ -319,6 +322,21 @@ struct NCSettingsView: View {
                     }
                 })
                 .tint(Color(NCBrandColor.shared.textColor))
+
+                Button(action: {
+                    clearCacheResult = nil
+                    showClearCacheConfirm = true
+                }, label: {
+                    HStack {
+                        Image(systemName: "trash")
+                            .font(.icon())
+                            .foregroundColor(Color(NCBrandColor.shared.iconImageColor))
+                            .frame(width: 39)
+                        Text(NSLocalizedString("_settings_clear_cache_", comment: ""))
+                            .font(.body)
+                    }
+                })
+                .tint(Color(NCBrandColor.shared.textColor))
             })
         }
         .souveraCenteredDialog(
@@ -331,6 +349,23 @@ struct NCSettingsView: View {
                     role: .primary
                 ) {
                     sendLogs()
+                },
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_cancel_", comment: ""),
+                    role: .cancel
+                ) {}
+            ]
+        )
+        .souveraCenteredDialog(
+            isPresented: $showClearCacheConfirm,
+            title: NSLocalizedString("_settings_clear_cache_confirm_title_", comment: ""),
+            message: NSLocalizedString("_settings_clear_cache_confirm_message_", comment: ""),
+            actions: [
+                SouveraCenteredDialog.DialogAction(
+                    label: NSLocalizedString("_settings_clear_cache_confirm_", comment: ""),
+                    role: .destructive
+                ) {
+                    clearAllCaches()
                 },
                 SouveraCenteredDialog.DialogAction(
                     label: NSLocalizedString("_cancel_", comment: ""),
@@ -372,6 +407,27 @@ struct NCSettingsView: View {
                 self.logsResult = nil
             }
         }
+        .overlay(alignment: .bottom) {
+            if let clearCacheResult {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                    Text(clearCacheResult).font(.subheadline)
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .shadow(radius: 4)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .onChange(of: clearCacheResult) { _, newValue in
+            guard newValue != nil else { return }
+            Task {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                self.clearCacheResult = nil
+            }
+        }
         .sheet(isPresented: $showPushDiagnostics) {
             SouveraPushDiagnosticsView()
         }
@@ -408,6 +464,18 @@ struct NCSettingsView: View {
                 presentShareFallback()
             }
         }
+    }
+
+    /// Leert sämtliche App-Caches (Mail + Kalender + Kontakte über MailCache,
+    /// Link über LinkCache) für einen frischen Start im Fehlerfall.
+    private func clearAllCaches() {
+        MailCache.clearAll()
+        LinkCache.clearAll()
+        // Sichtbare Module neu laden, damit nicht erst nach einem Neustart
+        // frisch geladen wird.
+        NotificationCenter.default.post(name: Notification.Name(NCGlobal.shared.notificationCenterChangeUser), object: nil)
+        clearCacheResult = NSLocalizedString("_settings_clear_cache_done_", comment: "")
+        SouveraLog.write("Settings", "all app caches cleared")
     }
 
     /// Share-Sheet-Fallback, wenn der Mail-Versand der Logs fehlschlägt.

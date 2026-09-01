@@ -117,6 +117,7 @@ final class ShieldApi {
     private func ensureRequestToken() async -> String? {
         if let requestToken { return requestToken }
         guard let root, let url = URL(string: "\(root)/index.php/apps/souvera_shield/") else { return nil }
+        JmapLog.write("ShieldApiLog requesttoken fetch START \(url.absoluteString) (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-"))")
         var req = URLRequest(url: url)
         if let authHeader {
             req.setValue(authHeader, forHTTPHeaderField: "Authorization")
@@ -130,13 +131,33 @@ final class ShieldApi {
         let rest = html[start.upperBound...]
         guard let end = rest.firstIndex(of: "\"") else { return nil }
         requestToken = String(rest[..<end])
+        JmapLog.write("ShieldApiLog requesttoken ok (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-"))")
         return requestToken
     }
 
     private func perform(_ path: String, method: String, form: [String: String]) async -> (status: Int, json: [String: Any]?, body: String)? {
-        // Konsistent über index.php (wie ensureRequestToken) - einige Hosts
-        // routen die Pretty-URL `/apps/souvera_shield/...` nicht (502).
-        guard let root, let url = URL(string: "\(root)/index.php/apps/souvera_shield/\(path)") else { return nil }
+        guard let root else { return nil }
+        // Pretty-URL zuerst (funktioniert auf host-on.souvera.work); bei
+        // non-2xx Fallback auf index.php (team.souvera.work routet die
+        // Pretty-URL nicht -> 502). Muster wie SouveraMailLoginFlow.
+        if let url = URL(string: "\(root)/apps/souvera_shield/\(path)") {
+            let result = await performRequest(url, method: method, form: form)
+            if let result, (200..<300).contains(result.status) {
+                return result
+            }
+        }
+        if let url = URL(string: "\(root)/index.php/apps/souvera_shield/\(path)") {
+            return await performRequest(url, method: method, form: form)
+        }
+        return nil
+    }
+
+    /// Führt einen einzelnen Request aus und loggt Start, Dauer, Status und
+    /// einen großzügigen Body-Ausschnitt (Diagnose für den 2. Account).
+    private func performRequest(_ url: URL, method: String, form: [String: String]) async -> (status: Int, json: [String: Any]?, body: String)? {
+        let account = NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-"
+        let start = Date()
+        JmapLog.write("ShieldApiLog START \(method) \(url.absoluteString) (account=\(account))")
         var req = URLRequest(url: url)
         req.httpMethod = method
         if let authHeader {
@@ -151,13 +172,15 @@ final class ShieldApi {
             req.httpBody = components.query?.data(using: .utf8)
             req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         }
-        guard let (data, response) = try? await urlSession.data(for: req) else { return nil }
+        guard let (data, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("ShieldApiLog FAILED \(method) \(url.absoluteString) (account=\(account)) network error after \(Int(Date().timeIntervalSince(start) * 1000))ms")
+            return nil
+        }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-        let body = String(data: data.prefix(500), encoding: .utf8) ?? ""
-        if !(200..<300).contains(status) {
-            JmapLog.write("ShieldApiLog \(method) \(url.absoluteString) (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-")) -> \(status) \(body)")
-        }
+        let body = String(data: data, encoding: .utf8) ?? ""
+        let preview = String(body.prefix(4000))
+        JmapLog.write("ShieldApiLog \(method) \(url.absoluteString) (account=\(account)) -> \(status) in \(Int(Date().timeIntervalSince(start) * 1000))ms body=\(preview)")
         return (status, json, body)
     }
 

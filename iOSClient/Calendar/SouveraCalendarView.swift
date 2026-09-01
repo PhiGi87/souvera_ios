@@ -28,7 +28,6 @@ struct SouveraCalendarView: View {
         rawValue: SouveraCalendarSettings.defaultView
     ) ?? .day
     @State private var searchQuery = ""
-    @State private var showSearch = false
     @State private var scrollToNowTrigger = 0
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
@@ -83,42 +82,16 @@ struct SouveraCalendarView: View {
                     }
                 }
                 .padding(.top, 8)
-                .overlay(alignment: .top) {
-                    // Suchfeld als Overlay: überlagert den Inhalt, ohne ihn
-                    // zu verschieben (nur auf Knopfdruck sichtbar).
-                    if showSearch {
-                        HStack(spacing: 8) {
-                            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                            TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
-                                .textFieldStyle(.plain)
-                                .autocorrectionDisabled()
-                            if !searchQuery.isEmpty {
-                                Button {
-                                    searchQuery = ""
-                                } label: {
-                                    Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 16)
-                        .padding(.vertical, 10)
-                        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                        .shadow(radius: 4)
-                        .padding(.horizontal, 12)
-                        .padding(.top, 4)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                    }
-                }
-                .animation(.easeInOut(duration: 0.2), value: showSearch)
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbarBackground(
-                LinearGradient(colors: SouveraAppearance.gradientColors, startPoint: .top, endPoint: .bottom),
+                SouveraAppearance.gradientBackgroundColor,
                 for: .navigationBar
             )
             .toolbarBackground(.visible, for: .navigationBar)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_mail_search_hint_", comment: ""))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Ein einziger Button mit Auswahl-Menü (wie die
@@ -140,17 +113,9 @@ struct SouveraCalendarView: View {
                             Text(viewMode.title).font(.subheadline)
                             Image(systemName: "chevron.down").font(.caption2)
                         }
+                        .foregroundStyle(.white)
                     }
                     .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        showSearch.toggle()
-                        if !showSearch { searchQuery = "" }
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {

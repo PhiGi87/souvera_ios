@@ -34,7 +34,10 @@ final class SouveraBackgroundSync {
     func refreshMailBadge() async {
         var grandTotal = 0
         var anySucceeded = false
-        for tbl in NCManageDatabase.shared.getAllTableAccount() {
+        // Async Realm-Lesen (kein sync-Read auf einem Hintergrund-Task, das
+        // am File-Lock hängen konnte und den Badge-Refresh nie laufen ließ).
+        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+        for tbl in accounts {
             guard let total = await unreadCount(account: tbl.account) else {
                 // Tolerant (P66): Ein Account, der gerade nicht antwortet
                 // (Netz/Server), wirft den Zähler der anderen nicht weg.
@@ -51,7 +54,7 @@ final class SouveraBackgroundSync {
         }
         // Nur bei mindestens einem erfolgreichen Zähler das System-Badge
         // setzen - sonst würde ein Netzfehler das Badge auf 0 löschen.
-        if anySucceeded || NCManageDatabase.shared.getAllTableAccount().isEmpty {
+        if anySucceeded || accounts.isEmpty {
             NotificationCenter.default.post(name: .mailTotalUnreadChanged, object: grandTotal)
             SouveraLog.write("BackgroundSync", "mail badge refresh -> total \(grandTotal) unread")
         }

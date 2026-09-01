@@ -12,6 +12,12 @@ struct LinkCache {
             .appendingPathComponent("link-cache", isDirectory: true)
     }
 
+    /// Leert den kompletten Link-Cache (Konversationen + Chat-Nachrichten).
+    static func clearAll() {
+        guard let dir = cacheDirectory else { return }
+        try? FileManager.default.removeItem(at: dir)
+    }
+
     private static func fileURL(_ name: String) -> URL? {
         guard let dir = cacheDirectory else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
