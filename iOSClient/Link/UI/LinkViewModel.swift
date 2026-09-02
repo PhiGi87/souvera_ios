@@ -461,6 +461,29 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
+    /// Gäste-Zugang für einen Raum an/aus (public/private schalten).
+    /// Aktualisiert danach die Raumliste (neuer Typ public/group).
+    @discardableResult
+    func toggleGuestAccess(token: String, enabled: Bool) async -> Bool {
+        guard let api else { return false }
+        if enabled {
+            await api.makeRoomPublic(token: token)
+        } else {
+            await api.makeRoomPrivate(token: token)
+        }
+        loadConversations()
+        actionFeedback = LinkActionFeedback(
+            success: true,
+            message: NSLocalizedString(enabled ? "_link_guests_allowed_" : "_link_guests_disallowed_", comment: "")
+        )
+        return true
+    }
+
+    /// Gäste-Link für einen öffentlichen Raum (Talk-Muster: {server}/call/{token}).
+    func guestURL(for room: LinkConversation) -> String {
+        "\(accountBaseUrl())/index.php/call/\(room.token)"
+    }
+
     /// Signatur der Konversationsliste (Redundanz-Guard gegen identische
     /// SwiftUI-Updates, die List-Diff-Crashes auslösen können).
     private func conversationSignature(_ list: [LinkConversation]) -> String {

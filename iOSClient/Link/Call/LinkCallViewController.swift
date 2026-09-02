@@ -234,6 +234,26 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         localContainer.addSubview(localView)
         view.addSubview(localContainer)
 
+        // Kamera-Wechsel als kleiner Overlay-Button IN der Eigenansicht
+        // (unten rechts) - die untere Leiste bleibt für Mute/Video/Speaker/
+        // Auflegen frei.
+        let camButton = UIButton(type: .system)
+        camButton.setImage(UIImage(systemName: "camera.rotate"), for: .normal)
+        camButton.tintColor = .white
+        camButton.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        camButton.layer.cornerRadius = 18
+        camButton.translatesAutoresizingMaskIntoConstraints = false
+        camButton.addTarget(self, action: #selector(switchCamera), for: .touchUpInside)
+        camButton.isHidden = true
+        switchCameraButton = camButton
+        localContainer.addSubview(camButton)
+        NSLayoutConstraint.activate([
+            camButton.trailingAnchor.constraint(equalTo: localContainer.trailingAnchor, constant: -4),
+            camButton.bottomAnchor.constraint(equalTo: localContainer.bottomAnchor, constant: -4),
+            camButton.widthAnchor.constraint(equalToConstant: 36),
+            camButton.heightAnchor.constraint(equalToConstant: 36)
+        ])
+
         let pan = UIPanGestureRecognizer(target: self, action: #selector(localViewPanned(_:)))
         localContainer.addGestureRecognizer(pan)
         localContainer.isUserInteractionEnabled = true
@@ -280,6 +300,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         super.viewDidLayoutSubviews()
         layoutTiles()
     }
+
+    /// Fullscreen-Call rotiert mit der Display-Orientierung (Hochkant/
+    /// Landscape), unabhängig von der SwiftUI-Host-Umgebung.
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        [.portrait, .landscapeLeft, .landscapeRight]
+    }
+
+    override var shouldAutorotate: Bool { true }
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
@@ -438,7 +466,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let stack = UIStackView()
         stack.axis = .horizontal
         stack.distribution = .equalSpacing
-        stack.spacing = 24
+        stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
         NSLayoutConstraint.activate([
@@ -449,26 +477,45 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         muteButton = controlButton(systemName: "mic.fill", action: #selector(toggleMute))
         videoButton = controlButton(systemName: "video.slash.fill", action: #selector(toggleVideo))
         speakerButton = controlButton(systemName: "speaker.wave.2.fill", action: #selector(toggleSpeaker))
-        switchCameraButton = controlButton(systemName: "camera.rotate", action: #selector(switchCamera))
-        layoutToggleButton = controlButton(systemName: "person.crop.rectangle", action: #selector(toggleLayout))
-        chatButton = controlButton(systemName: "bubble.left.and.bubble.right.fill", action: #selector(openChat))
         hangupButton = controlButton(systemName: "phone.down.fill", tint: .systemRed, action: #selector(hangup))
+        let moreButton = moreMenuButton()
 
+        // Kern-Buttons + "…"-Menü (Layout/Chat) in EINER Reihe; Kamera-Wechsel
+        // liegt in der Eigenansicht. So bleiben Mute UND Auflegen sichtbar.
         stack.addArrangedSubview(muteButton!)
-        stack.addArrangedSubview(speakerButton!)
         stack.addArrangedSubview(videoButton!)
-        stack.addArrangedSubview(switchCameraButton!)
-        stack.addArrangedSubview(layoutToggleButton!)
-        stack.addArrangedSubview(chatButton!)
+        stack.addArrangedSubview(speakerButton!)
+        stack.addArrangedSubview(moreButton)
         stack.addArrangedSubview(hangupButton!)
+    }
+
+    /// "…"-Menü (Layout-Toggle + Chat) als Button in der unteren Leiste.
+    private func moreMenuButton() -> UIButton {
+        let button = UIButton(type: .system)
+        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        button.tintColor = .white
+        button.backgroundColor = UIColor.white.withAlphaComponent(0.15)
+        button.layer.cornerRadius = 28
+        button.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 56).isActive = true
+
+        let layoutAction = UIAction(
+            title: NSLocalizedString("_link_call_toggle_layout_", comment: ""),
+            image: UIImage(systemName: layoutMode == .raster ? "square.grid.2x2" : "person.crop.rectangle")
+        ) { [weak self] _ in self?.toggleLayout() }
+        let chatAction = UIAction(
+            title: NSLocalizedString("_link_call_chat_", comment: ""),
+            image: UIImage(systemName: "bubble.left.and.bubble.right.fill")
+        ) { [weak self] _ in self?.openChat() }
+        button.menu = UIMenu(options: .displayInline, children: [layoutAction, chatAction])
+        button.showsMenuAsPrimaryAction = true
+        return button
     }
 
     private var muteButton: UIButton?
     private var videoButton: UIButton?
     private var speakerButton: UIButton?
     private var switchCameraButton: UIButton?
-    private var layoutToggleButton: UIButton?
-    private var chatButton: UIButton?
     private var hangupButton: UIButton?
 
     private func controlButton(systemName: String, tint: UIColor = .white, action: Selector) -> UIButton {
@@ -476,9 +523,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         button.setImage(UIImage(systemName: systemName), for: .normal)
         button.tintColor = tint
         button.backgroundColor = UIColor.white.withAlphaComponent(0.15)
-        button.layer.cornerRadius = 30
-        button.widthAnchor.constraint(equalToConstant: 60).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 60).isActive = true
+        button.layer.cornerRadius = 28
+        button.widthAnchor.constraint(equalToConstant: 56).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 56).isActive = true
         button.addTarget(self, action: action, for: .touchUpInside)
         return button
     }
@@ -494,6 +541,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         isVideoOn.toggle()
         session?.setVideoEnabled(isVideoOn)
         videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
+        switchCameraButton?.isHidden = !isVideoOn
         CallDebugLog.log("CallVC", "video \(isVideoOn ? "on" : "off")")
     }
 
@@ -504,10 +552,6 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     @objc private func toggleLayout() {
         layoutMode = (layoutMode == .raster) ? .focus : .raster
-        layoutToggleButton?.setImage(
-            UIImage(systemName: layoutMode == .raster ? "square.grid.2x2" : "person.crop.rectangle"),
-            for: .normal
-        )
         CallDebugLog.log("CallVC", "layout \(layoutMode == .raster ? "raster" : "focus")")
         layoutTiles()
     }
@@ -568,6 +612,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 track.isEnabled = false
             } else {
                 track.add(self.localView)
+                self.switchCameraButton?.isHidden = false
             }
         }
     }

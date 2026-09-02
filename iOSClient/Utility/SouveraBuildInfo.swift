@@ -133,7 +133,9 @@ enum SouveraPushRegistrar {
         req.httpBody = form.data(using: .utf8)
         let result = try? await URLSession.shared.data(for: req)
         let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
-        SouveraLog.write("PushProxy", "unregister \(trimmed) -> http \(status)")
+        // deviceIdentifier (Hash) mitloggen, damit die Server-Admin-Seite
+        // die ggf. stale Gerätezeile am Proxy eindeutig identifizieren kann.
+        SouveraLog.write("PushProxy", "unregister \(trimmed) -> http \(status) deviceId=\(deviceIdentifier)")
     }
 
     /// Registriert das Gerät direkt am Push-Proxy. Eigene Implementierung
@@ -188,7 +190,7 @@ enum SouveraPushRegistrar {
             // (unregister des ALTEN Accounts mit DESSEN gespeichertem Key),
             // bevor der neue Account registriert wird.
             if status == 409 {
-                SouveraLog.write("PushProxy", "register \(trimmed) -> 409 conflict (device owned by another key); skipped destructive unregister")
+                SouveraLog.write("PushProxy", "register \(trimmed) -> 409 conflict (device owned by another key); skipped destructive unregister; deviceId=\(deviceIdentifier)")
             }
             return false
         } catch {

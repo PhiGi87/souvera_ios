@@ -20,6 +20,7 @@ struct LinkView: View {
     @State private var showAddParticipant = false
     @State private var startCallRequest: CallStartRequest?
     @State private var showParticipants = false
+    @State private var settingsRoom: LinkConversation?
     @State private var searchActive = false
     @State private var searchQuery = ""
 #if DEBUG
@@ -59,13 +60,24 @@ struct LinkView: View {
                             .contentShape(Rectangle())
                         }
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                viewModel.loadParticipants()
-                                showParticipants = true
+                            Menu {
+                                Button {
+                                    viewModel.loadParticipants()
+                                    showParticipants = true
+                                } label: {
+                                    Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
+                                }
+                                if viewModel.currentRoom?.canManage == true {
+                                    Button {
+                                        settingsRoom = viewModel.currentRoom
+                                    } label: {
+                                        Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
+                                    }
+                                }
                             } label: {
-                                Image(systemName: "person.2")
+                                Image(systemName: "gearshape")
                             }
-                            .accessibilityLabel(NSLocalizedString("_link_participants_", comment: ""))
+                            .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             if viewModel.currentRoom?.hasCall == true {
@@ -220,6 +232,9 @@ struct LinkView: View {
         }
         .sheet(isPresented: $showParticipants) {
             LinkParticipantsSheet(viewModel: viewModel)
+        }
+        .sheet(item: $settingsRoom) { room in
+            LinkRoomSettingsSheet(viewModel: viewModel, room: room)
         }
         .overlay {
             if let request = startCallRequest {
@@ -553,6 +568,7 @@ struct LinkConversationListView: View {
     @Binding var searchActive: Bool
     @Binding var searchQuery: String
     @State private var deleteRoom: LinkConversation?
+    @State private var settingsRoom: LinkConversation?
     /// Startet einen direkten Audio-Call für den Raum (vom Eltern-View).
     var onCall: (LinkConversation) -> Void = { _ in }
 
@@ -649,6 +665,15 @@ struct LinkConversationListView: View {
                             LinkConversationRow(viewModel: viewModel, room: room)
                         }
                         .buttonStyle(.plain)
+                        .contextMenu {
+                            if room.canManage {
+                                Button {
+                                    settingsRoom = room
+                                } label: {
+                                    Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
+                                }
+                            }
+                        }
                         .swipeActions(edge: .leading) {
                             Button {
                                 onCall(room)
@@ -695,6 +720,9 @@ struct LinkConversationListView: View {
         } message: {
             Text(NSLocalizedString("_link_delete_room_confirm_", comment: ""))
                 + Text("\n\"") + Text(deleteRoom?.displayName ?? "") + Text("\"")
+        }
+        .sheet(item: $settingsRoom) { room in
+            LinkRoomSettingsSheet(viewModel: viewModel, room: room)
         }
     }
     }
@@ -2016,6 +2044,71 @@ struct LinkParticipantsSheet: View {
         case "federated_users": return "globe"
         case "emails": return "envelope"
         default: return "person.crop.circle"
+        }
+    }
+}
+
+/// Raum-Einstellungen: Gäste-Zugang (öffentlich/privat) + Gäste-Link kopieren.
+struct LinkRoomSettingsSheet: View {
+    @ObservedObject var viewModel: LinkViewModel
+    let room: LinkConversation
+    @Environment(\.dismiss) private var dismiss
+    @State private var isPublic: Bool
+    @State private var working = false
+    @State private var copied = false
+
+    init(viewModel: LinkViewModel, room: LinkConversation) {
+        self.viewModel = viewModel
+        self.room = room
+        _isPublic = State(initialValue: room.isPublic)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { isPublic },
+                        set: { newValue in
+                            guard !working else { return }
+                            Task {
+                                working = true
+                                let ok = await viewModel.toggleGuestAccess(token: room.token, enabled: newValue)
+                                working = false
+                                if ok { isPublic = newValue }
+                            }
+                        }
+                    )) {
+                        Label(NSLocalizedString("_link_guests_allow_", comment: ""), systemImage: "person.crop.circle.badge.plus")
+                    }
+                    .disabled(working)
+                } footer: {
+                    Text(NSLocalizedString("_link_guests_allow_hint_", comment: ""))
+                }
+
+                if isPublic {
+                    Section {
+                        Button {
+                            UIPasteboard.general.string = viewModel.guestURL(for: room)
+                            copied = true
+                        } label: {
+                            Label(NSLocalizedString("_link_copy_room_link_", comment: ""), systemImage: "link")
+                        }
+                        if copied {
+                            Text(NSLocalizedString("_link_guest_link_copied_", comment: ""))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_link_room_settings_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                }
+            }
         }
     }
 }

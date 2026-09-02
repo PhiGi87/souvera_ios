@@ -117,6 +117,11 @@ final class MailViewModel: ObservableObject {
     private var mailAccount: MailAccount?
     var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
+    /// Account-Schlüssel für Cache/UserDefaults - funktioniert auch VOR der
+    /// Credential-Auflösung (offline) über den aktiven NC-Account.
+    private var cacheAccountKey: String {
+        mailAccount?.account ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+    }
     private var queryStates: [String: String] = [:]
     private let cacheBannerGate = SouveraCacheBannerGate()
     /// Signatur der Postfachliste (Redundanz-Guard gegen identische
@@ -317,10 +322,23 @@ final class MailViewModel: ObservableObject {
     func start() {
         if imapClient != nil || jmapClient != nil { return }
         startAutoRefresh()
+        // Cache-First SOFORT (synchron, vor der Credential-Auflösung): den
+        // letzten Postfach-/Nachrichten-Stand beim Öffnen anzeigen - kein
+        // ~1s-Spinner und offline-tauglich. Der Live-Load ersetzt ihn.
+        if case .loading = mailboxes,
+           let cached = MailCache.loadMailboxes(account: cacheAccountKey) {
+            let boxes = sortMailboxGroups(filterNonStandardSentFolders(cached.map { mailbox(from: $0) }))
+            applyMailboxes(boxes)
+            openPreferredMailbox(boxes)
+        }
         Task {
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
-                mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
+                // Nur Fehler, wenn KEIN Cache geladen werden konnte - sonst
+                // bleibt der Offline-Stand sichtbar (offlineNotice).
+                if case .loading = mailboxes {
+                    mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
+                }
                 isInitialLoad = false
                 return
             }
@@ -536,7 +554,7 @@ final class MailViewModel: ObservableObject {
         // Cache-First: letzten Postfach-Stand sofort anzeigen (kein Spinner
         // nach dem ersten Login), Live-Load ersetzt ihn im Hintergrund.
         if case .loading = mailboxes,
-           let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
+           let cached = MailCache.loadMailboxes(account: cacheAccountKey) {
             let boxes = sortMailboxGroups(filterNonStandardSentFolders(cached.map { mailbox(from: $0) }))
             applyMailboxes(boxes)
             // Sofort den zuletzt genutzten Ordner (INBOX) aus dem Cache
@@ -1005,7 +1023,7 @@ final class MailViewModel: ObservableObject {
     // MARK: - Messages
 
     func openMailbox(_ mailbox: Mailbox) {
-        Self.setLastMailboxId(mailbox.id, account: mailAccount?.account ?? "")
+        Self.setLastMailboxId(mailbox.id, account: cacheAccountKey)
         // Talk-Muster (markNotificationsAsRead): Beim Öffnen des Post-
         // eingangs zugestellte Mail-Notifications aus der Mitteilungs-
         // zentrale entfernen.
@@ -1038,7 +1056,7 @@ final class MailViewModel: ObservableObject {
 
     /// Öffnet beim App-Start den ZULETZT benutzten Ordner (Fallback INBOX).
     private func openPreferredMailbox(_ boxes: [Mailbox]) {
-        if let lastId = Self.lastMailboxId(account: mailAccount?.account ?? ""),
+        if let lastId = Self.lastMailboxId(account: cacheAccountKey),
            let last = boxes.first(where: { $0.id == lastId }) {
             openMailbox(last)
             return
@@ -1054,7 +1072,7 @@ final class MailViewModel: ObservableObject {
         // Cache-First: letzten Nachrichten-Snapshot SOFORT anzeigen, der
         // Live-Sync ersetzt ihn im Hintergrund. Spinner nur ohne Cache
         // (erster Aufruf nach Login).
-        let accountName = mailAccount?.account ?? ""
+        let accountName = cacheAccountKey
         if case .loading = messages,
            let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
             guard generation == listGeneration else { return }

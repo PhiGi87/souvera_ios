@@ -149,6 +149,11 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
             currentInput = input
         }
         session.commitConfiguration()
+        // Beim Input-Tausch (Front ↔ Rück) wird die AVCaptureConnection neu
+        // erzeugt und verliert die Porträt-Ausrichtung - die Frames landen
+        // quer und das Eigen-/Remote-Bild steht 90° gedreht. Hier erneut
+        // auf Portrait fixieren (Basis für die updateRotation()-Mappings).
+        output.connections.first?.videoOrientation = .portrait
         updateRotation()
     }
 
@@ -172,6 +177,10 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
 
     func startCapture() {
         updateRotation()
+        // Orientierungs-Benachrichtigungen aktivieren: ohne diesen Aufruf
+        // feuert orientationDidChangeNotification NIE - die Eigenansicht
+        // würde sich während des Calls nicht an Hochkant/Landscape anpassen.
+        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
         guard !session.isRunning else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
@@ -179,6 +188,7 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     }
 
     func stopCapture() {
+        UIDevice.current.endGeneratingDeviceOrientationNotifications()
         guard session.isRunning else { return }
         session.stopRunning()
     }

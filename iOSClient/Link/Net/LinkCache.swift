@@ -21,7 +21,10 @@ struct LinkCache {
     private static func fileURL(_ name: String) -> URL? {
         guard let dir = cacheDirectory else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent(name)
+        // Account-Keys enthalten "user https://host" - der Slash würde den
+        // Pfad zerlegen und den Write still scheitern lassen (Cache "weg").
+        let safe = name.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return dir.appendingPathComponent(safe)
     }
 
     // MARK: - Conversations

@@ -82,6 +82,9 @@ struct LinkConversation: Decodable, Identifiable {
     }
 
     var isOneToOne: Bool { type == LinkRoomType.oneToOne.rawValue }
+    /// Öffentlicher Raum (Gäste können über den Link beitreten) - Talk bildet
+    /// das über den Raumtyp `public` ab (kein eigenes "allowGuests"-Flag).
+    var isPublic: Bool { type == LinkRoomType.public.rawValue }
 }
 
 enum LinkRoomType: Int {

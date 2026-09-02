@@ -21,10 +21,6 @@ final class SouveraBadgeStore: ObservableObject {
     @Published private(set) var linkUnread: [String: Int] = [:]
 
     private var observers: [NSObjectProtocol] = []
-    /// Gecachter "Badges"-Schalter aus den iOS-Einstellungen. Wird beim Init
-    /// einmal abgefragt und beim Setzen direkt angewendet (kein erneuter,
-    /// asynchroner Roundtrip pro Badge-Update).
-    private var badgesEnabled = true
     /// Debounce-Task: kurzzeitige 0↔28-Schwankungen beim Laden werden
     /// zusammengefasst, damit das App-Icon-Badge nicht flackert.
     private var badgeDebounceTask: Task<Void, Never>?
@@ -58,18 +54,13 @@ final class SouveraBadgeStore: ObservableObject {
     }
 
     private func refreshBadgeSetting() {
-        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
-            let enabled = settings.badgeSetting == .enabled
-            Task { @MainActor in
-                guard let self else { return }
-                self.badgesEnabled = enabled
-                // Nicht mit leerem Store auf 0 setzen: beim App-Start würde
-                // sonst das letzte Badge kurz auf 0 flackern, bevor die Mail
-                // gezählt hat. Das Badge wird über setMailUnread gesetzt.
-                if !self.mailUnread.isEmpty {
-                    self.applyAppIconBadge()
-                }
-            }
+        // Kein badgeSetting-Gate mehr: iOS respektiert den "Badges"-Schalter
+        // des Nutzers (Einstellungen > Mitteilungen) bereits selbst und zeigt
+        // das Badge nur dann an. Die App setzt hier immer den Mail-Zähler;
+        // bei leerem Store wird bewusst NICHT auf 0 gesetzt (kein Flackern
+        // beim App-Start, bevor die Mail gezählt hat).
+        if !self.mailUnread.isEmpty {
+            self.applyAppIconBadge()
         }
     }
 
@@ -111,20 +102,19 @@ final class SouveraBadgeStore: ObservableObject {
     }
 
     /// Setzt das App-Icon-Badge (debounced). Zählt nur ungelesene Mails über
-    /// ALLE Accounts und respektiert den "Badges"-Schalter.
+    /// ALLE Accounts.
     private func applyAppIconBadge() {
         badgeDebounceTask?.cancel()
         badgeDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, let self else { return }
-            let total = self.totalMailUnread
-            let value = self.badgesEnabled ? total : 0
+            let value = self.totalMailUnread
             if #available(iOS 16.0, *) {
                 try? await UNUserNotificationCenter.current().setBadgeCount(value)
             } else {
                 UIApplication.shared.applicationIconBadgeNumber = value
             }
-            SouveraLog.write("Badge", "app icon badge -> total=\(total) badgesEnabled=\(self.badgesEnabled) value=\(value)")
+            SouveraLog.write("Badge", "app icon badge -> total=\(value) value=\(value)")
         }
     }
 

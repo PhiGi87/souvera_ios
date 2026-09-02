@@ -26,6 +26,11 @@ struct MailView: View {
                 .onChange(of: searchQuery) { _, newValue in
                     scheduleSearch(newValue)
                 }
+                .onChange(of: viewModel.route) { _, newRoute in
+                    // Zurück aus einer Detailansicht, die aus der Suche
+                    // geöffnet wurde: Suchfeld + Ergebnisliste wieder zeigen.
+                    searchActive = (newRoute == .search)
+                }
                 .toolbar {
                     toolbar
                 }
@@ -332,24 +337,36 @@ struct MailView: View {
                     .foregroundStyle(.secondary)
                 Spacer()
             } else {
-                List(items) { message in
-                    Button { viewModel.openMessage(message, fromSearch: true) } label: {
-                        MailRow(message: message)
-                    }
-                    .buttonStyle(.plain)
-                    .swipeActions(edge: .trailing) {
-                        Button(role: .destructive) { viewModel.delete([message]) } label: {
-                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                List {
+                    Section {
+                        ForEach(items) { message in
+                            Button {
+                                // Suchliste ausblenden, damit die Detailansicht
+                                // sichtbar wird (Route .detail liegt sonst dahinter).
+                                searchActive = false
+                                viewModel.openMessage(message, fromSearch: true)
+                            } label: {
+                                MailRow(message: message)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) { viewModel.delete([message]) } label: {
+                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                }
+                                Button { viewModel.toggleFlagged(message) } label: {
+                                    Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
+                                }.tint(.orange)
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
+                                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+                                }
+                                .tint(.green)
+                            }
                         }
-                        Button { viewModel.toggleFlagged(message) } label: {
-                            Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
-                        }.tint(.orange)
-                    }
-                    .swipeActions(edge: .leading) {
-                        Button { viewModel.startCompose(mode: .reply, message: message) } label: {
-                            Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
-                        }
-                        .tint(.green)
+                    } footer: {
+                        Text(NSLocalizedString("_mail_search_includes_attachments_", comment: ""))
+                            .font(.caption)
                     }
                 }
                 .listStyle(.plain)

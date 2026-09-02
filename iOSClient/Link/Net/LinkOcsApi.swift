@@ -227,6 +227,23 @@ actor LinkOcsApi {
         _ = try? await session.data(for: req)
     }
 
+    /// Raum privat schalten (Gäste-Zugang deaktivieren).
+    func makeRoomPrivate(token: String) async {
+        let req = signed(url: "\(base)/api/v4/room/\(token)/public", method: "DELETE")
+        _ = try? await session.data(for: req)
+    }
+
+    /// Raum-Details (v4) laden - u. a. `type` (public/group) für den
+    /// Gäste-Toggle. Liefert das `ocs.data`-Dictionary oder nil.
+    func getRoom(token: String) async -> [String: Any]? {
+        guard let body = await get("\(base)/api/v4/room/\(token)"),
+              let data = body.data(using: .utf8),
+              let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = env["ocs"] as? [String: Any],
+              let payload = ocs["data"] as? [String: Any] else { return nil }
+        return payload
+    }
+
     func addParticipants(token: String, userIds: [String], emails: [String], federatedIds: [String] = []) async {
         for userId in userIds {
             let encoded = userId.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? userId

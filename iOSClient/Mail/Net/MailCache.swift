@@ -134,15 +134,22 @@ enum MailCache {
 
     // MARK: - Generic compressed JSON blobs (contacts, calendar, ...)
 
+    /// Sanitisiert einen Blob-Key zu einem sicheren Dateinamen. Account-Keys
+    /// enthalten `"user https://host"` - ohne Sanitierung zerlegt der `/` den
+    /// Pfad und der Write schlägt still fehl (Cache wirkt "weg").
+    private static func sanitizedKey(_ key: String) -> String {
+        key.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+    }
+
     static func saveJSON(_ object: Any, key: String) {
         guard let data = try? JSONSerialization.data(withJSONObject: object),
               let compressed = compress(data) else { return }
         try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
-        try? compressed.write(to: rootDirectory.appendingPathComponent("\(key).json.gz"), options: .atomic)
+        try? compressed.write(to: rootDirectory.appendingPathComponent("\(sanitizedKey(key)).json.gz"), options: .atomic)
     }
 
     static func loadJSON(key: String) -> Any? {
-        guard let compressed = try? Data(contentsOf: rootDirectory.appendingPathComponent("\(key).json.gz")),
+        guard let compressed = try? Data(contentsOf: rootDirectory.appendingPathComponent("\(sanitizedKey(key)).json.gz")),
               let data = decompress(compressed),
               let json = try? JSONSerialization.jsonObject(with: data) else { return nil }
         return json

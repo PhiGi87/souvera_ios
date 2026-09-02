@@ -70,8 +70,9 @@ actor NCNetworkingProcess {
             guard let self else { return }
 
             Task {
-                let count = await self.scheduledAndInProgressCount()
-                try? await UNUserNotificationCenter.current().setBadgeCount(count)
+                // Kein setBadgeCount mehr beim Background: Der App-Icon-Badge
+                // zählt ungelesene MAILS (SouveraBadgeStore) und darf nicht
+                // mit der Transfer-Anzahl (hier 0) überschrieben werden.
 
                 await self.stopTimer()
                 await self.cancelCurrentTaskOnBackground()
