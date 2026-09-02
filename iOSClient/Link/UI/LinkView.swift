@@ -697,6 +697,7 @@ struct LinkConversationListView: View {
                 + Text("\n\"") + Text(deleteRoom?.displayName ?? "") + Text("\"")
         }
     }
+    }
 }
 
 private struct LinkConversationRow: View {

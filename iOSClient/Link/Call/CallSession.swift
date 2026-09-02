@@ -631,7 +631,8 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func setVideoEnabled(_ enabled: Bool) {
-        CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")        if enabled {
+        CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")
+        if enabled {
             Task { @MainActor in
                 // Kamera-Rechte VOR der Track-Erstellung: Ohne Freigabe
                 // liefert der Capturer nur schwarze/keine Frames und der
