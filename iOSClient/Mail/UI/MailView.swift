@@ -29,29 +29,29 @@ struct MailView: View {
                 .toolbar {
                     toolbar
                 }
-                .confirmationDialog(
-                    NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
-                    isPresented: Binding(
-                        get: { blacklistTarget != nil },
-                        set: { if !$0 { blacklistTarget = nil } }
-                    ),
-                    presenting: blacklistTarget,
-                    titleVisibility: .visible
-                ) { messages in
-                    Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
-                        blacklistTarget = nil
-                        Task { await viewModel.blacklistSenders(messages) }
-                    }
-                    Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
-                        blacklistTarget = nil
-                        Task { await viewModel.blacklistAndDelete(messages) }
-                    }
-                    Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
-                        blacklistTarget = nil
-                    }
-                } message: { messages in
-                    Text(blacklistMessage(for: messages))
-                }
+        }
+        .confirmationDialog(
+            NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
+            isPresented: Binding(
+                get: { blacklistTarget != nil },
+                set: { if !$0 { blacklistTarget = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: blacklistTarget
+        ) { messages in
+            Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
+                blacklistTarget = nil
+                Task { await viewModel.blacklistSenders(messages) }
+            }
+            Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
+                blacklistTarget = nil
+                Task { await viewModel.blacklistAndDelete(messages) }
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                blacklistTarget = nil
+            }
+        } message: { messages in
+            Text(blacklistMessage(for: messages))
         }
         .onAppear {
             viewModel.start()
@@ -909,8 +909,8 @@ private struct MailMessageListView: View {
                 get: { blacklistTarget != nil },
                 set: { if !$0 { blacklistTarget = nil } }
             ),
-            presenting: blacklistTarget,
-            titleVisibility: .visible
+            titleVisibility: .visible,
+            presenting: blacklistTarget
         ) { messages in
             Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
                 blacklistTarget = nil
