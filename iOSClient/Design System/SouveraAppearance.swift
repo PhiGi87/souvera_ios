@@ -16,12 +16,6 @@ enum SouveraAppearance {
         Color(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0)
     ]
 
-    /// Der exakt gleiche Gradient-Hintergrund wie im Mehr-Menü (Pattern-Image,
-    /// identisches Tiling und identische Farben) für SwiftUI `.toolbarBackground`.
-    static var gradientBackgroundColor: Color {
-        Color(uiColor: UIColor(patternImage: gradientPatternImage()))
-    }
-
     /// Gradient als Kachelbild (UIKit, Pattern-Hintergrund).
     static func gradientPatternImage() -> UIImage {
         let size = CGSize(width: 1, height: 120)

@@ -28,6 +28,7 @@ struct SouveraCalendarView: View {
         rawValue: SouveraCalendarSettings.defaultView
     ) ?? .day
     @State private var searchQuery = ""
+    @State private var searchActive = false
     @State private var scrollToNowTrigger = 0
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
@@ -75,7 +76,9 @@ struct SouveraCalendarView: View {
                 let isWide = geometry.size.width > geometry.size.height
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 VStack(spacing: 0) {
-                    if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
+                    if searchActive {
+                        calendarSearchField
+                    } else if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
                         content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                     } else {
                         searchResults
@@ -85,13 +88,6 @@ struct SouveraCalendarView: View {
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbarBackground(
-                SouveraAppearance.gradientBackgroundColor,
-                for: .navigationBar
-            )
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_mail_search_hint_", comment: ""))
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Ein einziger Button mit Auswahl-Menü (wie die
@@ -113,7 +109,6 @@ struct SouveraCalendarView: View {
                             Text(viewMode.title).font(.subheadline)
                             Image(systemName: "chevron.down").font(.caption2)
                         }
-                        .foregroundStyle(.white)
                     }
                     .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
                 }
@@ -123,6 +118,14 @@ struct SouveraCalendarView: View {
                     } label: {
                         Image(systemName: "plus")
                     }
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        searchActive = true
+                    } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
@@ -531,6 +534,26 @@ struct SouveraCalendarView: View {
     }
 
     // MARK: - Search
+
+    /// Suchfeld + Inline-Suchergebnisse (ausgelöst per Such-Button im Header).
+    private var calendarSearchField: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                Button(NSLocalizedString("_cancel_", comment: "")) {
+                    searchActive = false
+                    searchQuery = ""
+                }
+            }
+            .padding(12)
+            Divider()
+            searchResults
+        }
+    }
 
     @ViewBuilder
     private var searchResults: some View {

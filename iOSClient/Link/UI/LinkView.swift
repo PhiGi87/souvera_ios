@@ -20,6 +20,8 @@ struct LinkView: View {
     @State private var showAddParticipant = false
     @State private var startCallRequest: CallStartRequest?
     @State private var showParticipants = false
+    @State private var searchActive = false
+    @State private var searchQuery = ""
 #if DEBUG
     @State private var simulatedIncoming: SimulatedCall?
 #endif
@@ -44,12 +46,6 @@ struct LinkView: View {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(
-                    SouveraAppearance.gradientBackgroundColor,
-                    for: .navigationBar
-                )
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
                 .toolbar {
                     if case let .chat(token, title) = viewModel.route {
                         ToolbarItem(placement: .topBarLeading) {
@@ -97,6 +93,14 @@ struct LinkView: View {
                         }
                     }
                     if case .home = viewModel.route {
+                        ToolbarItem(placement: .topBarLeading) {
+                            Button {
+                                searchActive = true
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                            }
+                            .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                        }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
                                 channelName = ""
@@ -316,7 +320,11 @@ struct LinkView: View {
     private var content: some View {
         switch viewModel.route {
         case .home:
-            LinkConversationListView(viewModel: viewModel) { room in
+            LinkConversationListView(
+                viewModel: viewModel,
+                searchActive: $searchActive,
+                searchQuery: $searchQuery
+            ) { room in
                 callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
             }
         case let .chat(token, title):
@@ -542,7 +550,8 @@ struct IncomingCallOverlayView: View {
 /// The list of conversations with a "start new conversation" search bar.
 struct LinkConversationListView: View {
     @ObservedObject var viewModel: LinkViewModel
-    @State private var searchQuery = ""
+    @Binding var searchActive: Bool
+    @Binding var searchQuery: String
     @State private var deleteRoom: LinkConversation?
     /// Startet einen direkten Audio-Call für den Raum (vom Eltern-View).
     var onCall: (LinkConversation) -> Void = { _ in }
@@ -570,7 +579,24 @@ struct LinkConversationListView: View {
     }
 
     var body: some View {
-        List {
+        VStack(spacing: 0) {
+            if searchActive {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $searchQuery)
+                        .textFieldStyle(.plain)
+                        .autocorrectionDisabled()
+                        .submitLabel(.search)
+                    Button(NSLocalizedString("_cancel_", comment: "")) {
+                        searchActive = false
+                        searchQuery = ""
+                        viewModel.searchUsers(query: "")
+                    }
+                }
+                .padding(12)
+                Divider()
+            }
+            List {
             if let offlineNotice = viewModel.offlineNotice {
                 Section {
                     HStack(spacing: 8) {
@@ -645,11 +671,10 @@ struct LinkConversationListView: View {
             }
         }
         .listStyle(.plain)
-        .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_link_search_people_", comment: ""))
+        .refreshable { viewModel.loadConversations() }
         .onChange(of: searchQuery) { _, newValue in
             viewModel.searchUsers(query: newValue)
         }
-        .refreshable { viewModel.loadConversations() }
         .confirmationDialog(
             NSLocalizedString("_link_delete_room_", comment: ""),
             isPresented: Binding(

@@ -69,6 +69,11 @@ final class WebRtcClient {
         videoCapturer?.stopCapture()
     }
 
+    /// Wechselt zwischen Front- und Rückkamera.
+    func switchCamera() {
+        videoCapturer?.switchCamera()
+    }
+
     func dispose() {
         if disposed { return }
         disposed = true
@@ -88,7 +93,8 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     private let session = AVCaptureSession()
     private let output = AVCaptureVideoDataOutput()
     private let captureQueue = DispatchQueue(label: "souvera.camera.capture")
-    private let usingFrontCamera = true
+    private var usingFrontCamera = true
+    private var currentInput: AVCaptureDeviceInput?
     private var videoRotation: RTCVideoRotation = ._0
     private var deviceOrientation: UIDeviceOrientation = .portrait
 
@@ -102,15 +108,7 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     }
 
     private func configureSession() {
-        session.beginConfiguration()
         session.sessionPreset = .high
-        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .front)
-            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified)
-        if let device,
-           let input = try? AVCaptureDeviceInput(device: device),
-           session.canAddInput(input) {
-            session.addInput(input)
-        }
         output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: captureQueue)
@@ -118,7 +116,40 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
             session.addOutput(output)
         }
         output.connections.first?.videoOrientation = .portrait
+        installCameraInput()
+    }
+
+    /// Tauscht den Kamera-Input (Front ↔ Rück) und aktualisiert die Rotation.
+    func switchCamera() {
+        let newPosition: AVCaptureDevice.Position = usingFrontCamera ? .back : .front
+        guard AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: newPosition) != nil
+            || AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified) != nil else {
+            return
+        }
+        usingFrontCamera.toggle()
+        let wasRunning = session.isRunning
+        if wasRunning { session.stopRunning() }
+        installCameraInput()
+        if wasRunning { session.startRunning() }
+    }
+
+    private func installCameraInput() {
+        session.beginConfiguration()
+        if let currentInput, session.inputs.contains(currentInput) {
+            session.removeInput(currentInput)
+            self.currentInput = nil
+        }
+        let position: AVCaptureDevice.Position = usingFrontCamera ? .front : .back
+        let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: position)
+            ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .unspecified)
+        if let device,
+           let input = try? AVCaptureDeviceInput(device: device),
+           session.canAddInput(input) {
+            session.addInput(input)
+            currentInput = input
+        }
         session.commitConfiguration()
+        updateRotation()
     }
 
     @objc private func orientationChanged() {

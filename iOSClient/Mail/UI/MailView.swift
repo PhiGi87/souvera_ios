@@ -15,6 +15,7 @@ struct MailView: View {
     @State private var blacklistTarget: [MailMessage]?
     @State private var showNewFolderSheet = false
     @State private var searchQuery = ""
+    @State private var searchActive = false
     @State private var searchDebounceTask: Task<Void, Never>?
 
     var body: some View {
@@ -22,51 +23,35 @@ struct MailView: View {
             content
                 .navigationTitle(navigationTitle)
                 .navigationBarTitleDisplayMode(.inline)
-                .toolbarBackground(
-                    SouveraAppearance.gradientBackgroundColor,
-                    for: .navigationBar
-                )
-                .toolbarBackground(.visible, for: .navigationBar)
-                .toolbarColorScheme(.dark, for: .navigationBar)
-                .searchable(text: $searchQuery, placement: .navigationBarDrawer(displayMode: .automatic), prompt: NSLocalizedString("_mail_search_hint_", comment: ""))
                 .onChange(of: searchQuery) { _, newValue in
                     scheduleSearch(newValue)
                 }
                 .toolbar {
                     toolbar
                 }
-                .souveraCenteredDialog(
+                .confirmationDialog(
+                    NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
                     isPresented: Binding(
                         get: { blacklistTarget != nil },
                         set: { if !$0 { blacklistTarget = nil } }
                     ),
-                    title: NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
-                    message: blacklistMessage,
-                    actions: [
-                        SouveraCenteredDialog.DialogAction(
-                            label: NSLocalizedString("_mail_blacklist_short_", comment: ""),
-                            role: .destructive
-                        ) {
-                            let target = blacklistTarget ?? []
-                            blacklistTarget = nil
-                            Task { await viewModel.blacklistSenders(target) }
-                        },
-                        SouveraCenteredDialog.DialogAction(
-                            label: NSLocalizedString("_mail_blacklist_and_delete_", comment: ""),
-                            role: .destructive
-                        ) {
-                            let target = blacklistTarget ?? []
-                            blacklistTarget = nil
-                            Task { await viewModel.blacklistAndDelete(target) }
-                        },
-                        SouveraCenteredDialog.DialogAction(
-                            label: NSLocalizedString("_cancel_", comment: ""),
-                            role: .cancel
-                        ) {
-                            blacklistTarget = nil
-                        }
-                    ]
-                )
+                    presenting: blacklistTarget,
+                    titleVisibility: .visible
+                ) { messages in
+                    Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
+                        blacklistTarget = nil
+                        Task { await viewModel.blacklistSenders(messages) }
+                    }
+                    Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
+                        blacklistTarget = nil
+                        Task { await viewModel.blacklistAndDelete(messages) }
+                    }
+                    Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                        blacklistTarget = nil
+                    }
+                } message: { messages in
+                    Text(blacklistMessage(for: messages))
+                }
         }
         .onAppear {
             viewModel.start()
@@ -169,8 +154,8 @@ struct MailView: View {
         return false
     }
 
-    private var blacklistMessage: String {
-        let addresses = Array(Set((blacklistTarget ?? []).map { $0.fromAddress }
+    private func blacklistMessage(for messages: [MailMessage]) -> String {
+        let addresses = Array(Set(messages.map { $0.fromAddress }
             .filter { !$0.isEmpty }))
         if addresses.isEmpty { return "" }
         let preview = addresses.prefix(3).joined(separator: ", ")
@@ -266,6 +251,10 @@ struct MailView: View {
                 AutoRefreshRingView(viewModel: viewModel)
             }
             ToolbarItem(placement: .topBarTrailing) {
+                Button { searchActive = true } label: { Image(systemName: "magnifyingglass") }
+                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+            }
+            ToolbarItem(placement: .topBarTrailing) {
                 Button { showNewFolderSheet = true } label: { Image(systemName: "folder.badge.plus") }
                     .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
             }
@@ -274,26 +263,15 @@ struct MailView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty, !viewModel.route.isDetail {
-            mailSearchResults
+        if searchActive {
+            mailSearchField
         } else {
             switch viewModel.route {
             case .folders:
-                if viewModel.isInitialLoad {
-                    // Während des ERSTEN Ladens nach dem App-Start: neutraler
-                    // Spinner statt Ordnerliste - danach öffnet sich direkt der
-                    // letzte Ordner (üblicherweise die INBOX).
-                    VStack(spacing: 12) {
-                        Spacer()
-                        ProgressView()
-                        Text(NSLocalizedString("_mail_loading_", comment: ""))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                } else {
-                    MailFolderListView(viewModel: viewModel)
-                }
+                // Cache-first: MailFolderListView zeigt den gecachten
+                // Postfach-Stand sofort (eigener Spinner nur ohne Cache),
+                // der Live-Load ersetzt ihn im Hintergrund.
+                MailFolderListView(viewModel: viewModel)
             case .messages, .detail:
                 // P62b: EINE Listen-Instanz für beide Zustände - die Detailansicht
                 // liegt als deckendes Overlay darüber. Nur so bleibt die
@@ -314,7 +292,28 @@ struct MailView: View {
         }
     }
 
-    /// Inline-Suchergebnisse (die Suchleiste selbst kommt über `.searchable`).
+    /// Suchfeld + Inline-Suchergebnisse (ausgelöst per Such-Button im Header).
+    private var mailSearchField: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .autocorrectionDisabled()
+                    .submitLabel(.search)
+                Button(NSLocalizedString("_cancel_", comment: "")) {
+                    searchActive = false
+                    searchQuery = ""
+                    viewModel.searchResults = .success([])
+                }
+            }
+            .padding(12)
+            Divider()
+            mailSearchResults
+        }
+    }
+
+    /// Inline-Suchergebnisse.
     @ViewBuilder
     private var mailSearchResults: some View {
         switch viewModel.searchResults {
@@ -904,40 +903,31 @@ private struct MailMessageListView: View {
         } message: {
             Text(NSLocalizedString("_mail_trash_empty_confirm_", comment: ""))
         }
-        .souveraCenteredDialog(
+        .confirmationDialog(
+            NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
             isPresented: Binding(
                 get: { blacklistTarget != nil },
                 set: { if !$0 { blacklistTarget = nil } }
             ),
-            title: NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
-            message: blacklistConfirmMessage,
-            actions: [
-                SouveraCenteredDialog.DialogAction(
-                    label: NSLocalizedString("_mail_blacklist_short_", comment: ""),
-                    role: .destructive
-                ) {
-                    let target = blacklistTarget ?? []
-                    blacklistTarget = nil
-                    Task { await viewModel.blacklistSenders(target) }
-                },
-                SouveraCenteredDialog.DialogAction(
-                    label: NSLocalizedString("_mail_blacklist_and_delete_", comment: ""),
-                    role: .destructive
-                ) {
-                    let target = blacklistTarget ?? []
-                    blacklistTarget = nil
-                    Task { await viewModel.blacklistAndDelete(target) }
-                    selected.removeAll()
-                    editing = false
-                },
-                SouveraCenteredDialog.DialogAction(
-                    label: NSLocalizedString("_cancel_", comment: ""),
-                    role: .cancel
-                ) {
-                    blacklistTarget = nil
-                }
-            ]
-        )
+            presenting: blacklistTarget,
+            titleVisibility: .visible
+        ) { messages in
+            Button(NSLocalizedString("_mail_blacklist_short_", comment: ""), role: .destructive) {
+                blacklistTarget = nil
+                Task { await viewModel.blacklistSenders(messages) }
+            }
+            Button(NSLocalizedString("_mail_blacklist_and_delete_", comment: ""), role: .destructive) {
+                blacklistTarget = nil
+                Task { await viewModel.blacklistAndDelete(messages) }
+                selected.removeAll()
+                editing = false
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                blacklistTarget = nil
+            }
+        } message: { messages in
+            Text(blacklistConfirmMessage(for: messages))
+        }
     }
 
     /// Die Nachrichtenliste als eigene Funktion (hält den Body klein).
@@ -988,8 +978,8 @@ private struct MailMessageListView: View {
         )
     }
 
-    private var blacklistConfirmMessage: String {
-        let addresses = Array(Set((blacklistTarget ?? []).map { $0.fromAddress }
+    private func blacklistConfirmMessage(for messages: [MailMessage]) -> String {
+        let addresses = Array(Set(messages.map { $0.fromAddress }
             .filter { !$0.isEmpty }))
         if addresses.isEmpty { return "" }
         let preview = addresses.prefix(3).joined(separator: ", ")

@@ -625,9 +625,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// hinzugefügt und neu verhandelt; zusätzlich werden die Call-Flags auf
     /// "mit Video" angehoben (Talk-Standard). Aus: Capture stoppen (Kamera
     /// aus), Track deaktivieren.
+    /// Wechselt zwischen Front- und Rückkamera (Video muss aktiv sein).
+    func switchCamera() {
+        webRtc.switchCamera()
+    }
+
     func setVideoEnabled(_ enabled: Bool) {
-        CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")
-        if enabled {
+        CallDebugLog.log("CallSession", "setVideoEnabled \(enabled)")        if enabled {
             Task { @MainActor in
                 // Kamera-Rechte VOR der Track-Erstellung: Ohne Freigabe
                 // liefert der Capturer nur schwarze/keine Frames und der

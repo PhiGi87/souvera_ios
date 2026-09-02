@@ -146,6 +146,9 @@ enum SouveraLogSender {
             let identities = try await api.getIdentities(accountId: accId)
             let identityId = identities.first?.optString("id") ?? ""
             _ = try await api.submitEmail(accountId: accId, emailId: createdId, identityId: identityId)
+            // $draft-Keyword entfernen, damit die gesendete Mail nicht als
+            // Entwurf hängen bleibt (IMAP/Web "Drafts").
+            _ = try? await api.setEmailFlags(accountId: accId, emailIds: [createdId], keywordsToRemove: ["$draft"])
             SouveraLog.write("LogSender", "logs sent to \(recipient)")
             return .success(recipient)
         } catch {

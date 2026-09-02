@@ -46,6 +46,22 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Zuletzt angezeigte Fokus-Kachel.
     private var lastFocusedKey: String?
 
+    /// Layout-Modus: Raster (Standard) oder Fokus/Speaker.
+    private enum CallLayoutMode {
+        case raster, focus
+    }
+    private var layoutMode: CallLayoutMode = .raster
+    /// Container für das lokale Bild, damit es im Raster als Kachel
+    /// eingereiht werden kann.
+    private lazy var localContainer: UIView = {
+        let c = UIView()
+        c.backgroundColor = .black
+        c.layer.cornerRadius = 10
+        c.clipsToBounds = true
+        return c
+    }()
+    private var localViewPanOrigin: CGPoint = .zero
+
     private var isMuted = false
     private var isVideoOn: Bool
 
@@ -213,16 +229,51 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     private func setupVideoViews() {
         localView.videoContentMode = .scaleAspectFill
-        localView.translatesAutoresizingMaskIntoConstraints = false
-        localView.layer.cornerRadius = 8
-        localView.clipsToBounds = true
-        view.addSubview(localView)
-        NSLayoutConstraint.activate([
-            localView.widthAnchor.constraint(equalToConstant: 110),
-            localView.heightAnchor.constraint(equalToConstant: 160),
-            localView.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
-            localView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 16)
-        ])
+        localView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+        localView.frame = localContainer.bounds
+        localContainer.addSubview(localView)
+        view.addSubview(localContainer)
+
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(localViewPanned(_:)))
+        localContainer.addGestureRecognizer(pan)
+        localContainer.isUserInteractionEnabled = true
+    }
+
+    @objc private func localViewPanned(_ gesture: UIPanGestureRecognizer) {
+        // Nur im Floating-Modus (1:1/Fokus) verschiebbar; im Raster bleibt
+        // die Eigenansicht als feste Kachel.
+        guard layoutMode != .raster || tiles.count <= 1 else { return }
+        switch gesture.state {
+        case .began:
+            localViewPanOrigin = localContainer.frame.origin
+        case .changed:
+            let t = gesture.translation(in: view)
+            var f = localContainer.frame
+            f.origin = CGPoint(x: localViewPanOrigin.x + t.x, y: localViewPanOrigin.y + t.y)
+            localContainer.frame = f
+        case .ended, .cancelled:
+            snapLocalViewToCorner()
+        default:
+            break
+        }
+    }
+
+    /// Schnappt die Eigenansicht in die nächstgelegene Ecke.
+    private func snapLocalViewToCorner() {
+        let size = localContainer.frame.size
+        let inset: CGFloat = 16
+        let safeTop = view.safeAreaInsets.top
+        let safeBottom = view.safeAreaInsets.bottom
+        let minX = inset
+        let maxX = view.bounds.width - size.width - inset
+        let minY = safeTop + inset
+        let maxY = view.bounds.height - safeBottom - 120 - size.height - inset
+        var target = localContainer.frame.origin
+        if target.x < (minX + maxX) / 2 { target.x = minX } else { target.x = maxX }
+        if target.y < (minY + maxY) / 2 { target.y = minY } else { target.y = maxY }
+        UIView.animate(withDuration: 0.2) {
+            self.localContainer.frame.origin = target
+        }
     }
 
     override func viewDidLayoutSubviews() {
@@ -237,19 +288,80 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         LinkVoIPManager.shared.noteCallUIDismissed()
     }
 
-    /// Fokus-Modus-Layout: 1:1 = ein Vollbild-Stream (wie bisher);
-    /// mehrere Streams = große Fokus-Kachel + kleine Kacheln unten.
-    /// Screen-Share hat Vorrang vor dem aktiven Sprecher.
+    /// Layout-Dispatcher: Raster (Standard) oder Fokus/Speaker.
     private func layoutTiles() {
+        // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
+        if let _ = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }) {
+            layoutFocus()
+            return
+        }
+        if tiles.count == 1 {
+            // 1:1: entfernter Teilnehmer groß, Eigenansicht floating.
+            layoutFocus()
+        } else if layoutMode == .raster {
+            layoutRaster()
+        } else {
+            layoutFocus()
+        }
+    }
+
+    /// Raster: alle Kacheln (remote + Eigenansicht) gleich groß.
+    private func layoutRaster() {
+        let width = view.bounds.width
+        let safeTop = view.safeAreaInsets.top
+
+        let remoteKeys = tiles.keys.sorted()
+        let totalTiles = remoteKeys.count + 1 // + Eigenansicht
+
+        let columns: Int
+        if totalTiles <= 1 { columns = 1 }
+        else if totalTiles <= 4 { columns = 2 }
+        else { columns = 3 }
+
+        let gap: CGFloat = 8
+        let margin: CGFloat = 8
+        let availableWidth = width - margin * 2 - gap * CGFloat(columns - 1)
+        let tileWidth = availableWidth / CGFloat(columns)
+        let tileHeight = tileWidth * 1.4
+
+        var index = 0
+        var x = margin
+        var y = safeTop + margin
+
+        func place(_ container: UIView) {
+            container.layer.cornerRadius = 10
+            container.layer.borderWidth = 1.5
+            container.layer.borderColor = UIColor.white.withAlphaComponent(0.6).cgColor
+            container.frame = CGRect(x: x, y: y, width: tileWidth, height: tileHeight)
+            index += 1
+            if index % columns == 0 {
+                x = margin
+                y += tileHeight + gap
+            } else {
+                x += tileWidth + gap
+            }
+        }
+
+        for key in remoteKeys {
+            guard let tile = tiles[key] else { continue }
+            place(tile.container)
+        }
+        place(localContainer)
+    }
+
+    /// Fokus/Speaker: große Fokus-Kachel + kleine Kacheln unten.
+    private func layoutFocus() {
         let width = view.bounds.width
         let height = view.bounds.height
         let safeTop = view.safeAreaInsets.top
         let safeBottom = view.safeAreaInsets.bottom
 
         let focusKey = resolveFocusKey()
-        guard let focusKey, let focusTile = tiles[focusKey] else { return }
+        guard let focusKey, let focusTile = tiles[focusKey] else {
+            layoutRaster()
+            return
+        }
 
-        // Screen-Kacheln kommen nicht in den Streifen (nur Fokus).
         let stripKeys = tiles.keys
             .filter { $0 != focusKey && tiles[$0]?.roomType != "screen" }
             .sorted()
@@ -258,7 +370,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         focusTile.container.layer.borderWidth = 0
 
         if stripKeys.isEmpty {
-            // 1:1-Modus: Fokus füllt den gesamten Bildschirm.
+            // 1:1: Fokus füllt den gesamten Bildschirm.
             focusTile.container.frame = CGRect(x: 0, y: 0, width: width, height: height)
         } else {
             let focusHeight = height * 0.66
@@ -284,6 +396,20 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             }
         }
         lastFocusedKey = focusKey
+        layoutLocalFloating()
+    }
+
+    /// Eigenansicht als kleines Floating-Tile (oben rechts).
+    private func layoutLocalFloating() {
+        let size = CGSize(width: 110, height: 160)
+        localContainer.layer.cornerRadius = 8
+        localContainer.layer.borderWidth = 0
+        localContainer.frame = CGRect(
+            x: view.bounds.width - size.width - 16,
+            y: view.safeAreaInsets.top + 16,
+            width: size.width,
+            height: size.height
+        )
     }
 
     /// Vorrang: Screen-Share > aktiver Sprecher > manueller Fokus > zuletzt
@@ -323,12 +449,16 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         muteButton = controlButton(systemName: "mic.fill", action: #selector(toggleMute))
         videoButton = controlButton(systemName: "video.slash.fill", action: #selector(toggleVideo))
         speakerButton = controlButton(systemName: "speaker.wave.2.fill", action: #selector(toggleSpeaker))
+        switchCameraButton = controlButton(systemName: "camera.rotate", action: #selector(switchCamera))
+        layoutToggleButton = controlButton(systemName: "person.crop.rectangle", action: #selector(toggleLayout))
         chatButton = controlButton(systemName: "bubble.left.and.bubble.right.fill", action: #selector(openChat))
         hangupButton = controlButton(systemName: "phone.down.fill", tint: .systemRed, action: #selector(hangup))
 
         stack.addArrangedSubview(muteButton!)
         stack.addArrangedSubview(speakerButton!)
         stack.addArrangedSubview(videoButton!)
+        stack.addArrangedSubview(switchCameraButton!)
+        stack.addArrangedSubview(layoutToggleButton!)
         stack.addArrangedSubview(chatButton!)
         stack.addArrangedSubview(hangupButton!)
     }
@@ -336,6 +466,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var muteButton: UIButton?
     private var videoButton: UIButton?
     private var speakerButton: UIButton?
+    private var switchCameraButton: UIButton?
+    private var layoutToggleButton: UIButton?
     private var chatButton: UIButton?
     private var hangupButton: UIButton?
 
@@ -363,6 +495,21 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         session?.setVideoEnabled(isVideoOn)
         videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
         CallDebugLog.log("CallVC", "video \(isVideoOn ? "on" : "off")")
+    }
+
+    @objc private func switchCamera() {
+        session?.switchCamera()
+        CallDebugLog.log("CallVC", "switch camera")
+    }
+
+    @objc private func toggleLayout() {
+        layoutMode = (layoutMode == .raster) ? .focus : .raster
+        layoutToggleButton?.setImage(
+            UIImage(systemName: layoutMode == .raster ? "square.grid.2x2" : "person.crop.rectangle"),
+            for: .normal
+        )
+        CallDebugLog.log("CallVC", "layout \(layoutMode == .raster ? "raster" : "focus")")
+        layoutTiles()
     }
 
     @objc private func toggleSpeaker() {

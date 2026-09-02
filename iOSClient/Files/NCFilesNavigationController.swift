@@ -10,10 +10,6 @@ class NCFilesNavigationController: NCMainNavigationController {
     override func viewDidLoad() {
         super.viewDidLoad()
 
-        // Souvera-Gradient-Header (dekkend, wie das Mehr-Menü) für den
-        // Dateien-Tab.
-        applyBlueHeader()
-
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: NCGlobal.shared.notificationCenterReloadAvatar), object: nil, queue: nil) { notification in
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                 self.collectionViewCommon?.showTipAccounts()
@@ -32,18 +28,6 @@ class NCFilesNavigationController: NCMainNavigationController {
     }
 
     // MARK: - Right
-
-    /// Souvera-Gradient-Header (dekkend, wie das Mehr-Menü).
-    private func applyBlueHeader() {
-        let appearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationBar.standardAppearance = appearance
-        navigationBar.scrollEdgeAppearance = appearance
-        navigationBar.compactAppearance = appearance
-        navigationBar.compactScrollEdgeAppearance = appearance
-        navigationBar.isTranslucent = false
-        navigationBar.tintColor = .white
-        navigationBar.overrideUserInterfaceStyle = .light
-    }
 
     override func createOptionMenu() async -> UIMenu? {
         guard let collectionViewCommon,

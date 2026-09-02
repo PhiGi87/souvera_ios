@@ -63,7 +63,12 @@ final class SouveraBadgeStore: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.badgesEnabled = enabled
-                self.applyAppIconBadge()
+                // Nicht mit leerem Store auf 0 setzen: beim App-Start würde
+                // sonst das letzte Badge kurz auf 0 flackern, bevor die Mail
+                // gezählt hat. Das Badge wird über setMailUnread gesetzt.
+                if !self.mailUnread.isEmpty {
+                    self.applyAppIconBadge()
+                }
             }
         }
     }

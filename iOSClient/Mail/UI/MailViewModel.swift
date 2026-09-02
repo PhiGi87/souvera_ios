@@ -539,6 +539,10 @@ final class MailViewModel: ObservableObject {
            let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
             let boxes = sortMailboxGroups(filterNonStandardSentFolders(cached.map { mailbox(from: $0) }))
             applyMailboxes(boxes)
+            // Sofort den zuletzt genutzten Ordner (INBOX) aus dem Cache
+            // öffnen, damit die gecachten Nachrichten erscheinen, bevor der
+            // Netzabruf der Postfachliste durchläuft.
+            if autoOpenInbox { openPreferredMailbox(boxes) }
         }
         if useJmap {
             await loadMailboxesJmap(autoOpenInbox: autoOpenInbox)
@@ -1278,13 +1282,21 @@ final class MailViewModel: ObservableObject {
                     break
                 }
             }
-            // Stale-Abgleich bei VOLLSTÄNDIG geladenem Postfach: alle
-            // Cache-Einträge, die der Server nicht mehr liefert (gelöscht/
-            // verschoben in Web/anderem Client), entfernen. Nur wenn
-            // !hasMore, weil sonst ältere (per Scroll geladene) Mails
-            // außerhalb des geladenen Fensters fälschlich gelöscht würden.
-            if !hasMore, !serverIds.isEmpty {
-                let stale = byId.keys.filter { !serverIds.contains($0) }
+            // Fensterbasierter Stale-Abgleich: alle Cache-Einträge, die
+            // innerhalb des geladenen Zeitfensters liegen (receivedAt >=
+            // oldestDate) und die der Server nicht mehr liefert, entfernen
+            // (im Web/anderen Client gelöscht/verschoben). Ältere (per
+            // Scroll geladene) Einträge bleiben erhalten. Unabhängig von
+            // `hasMore`, sonst lief der Abgleich bei Mailboxen mit mehr als
+            // 30 Tagen Historie (30-Tage-Coverage-Break) nie.
+            if !serverIds.isEmpty, let oldestDate {
+                let stale = byId.keys.filter { id in
+                    guard !serverIds.contains(id),
+                          let raw = byId[id],
+                          let dateStr = raw["receivedAt"] as? String,
+                          let date = Self.jmapDate(dateStr) else { return false }
+                    return date >= oldestDate
+                }
                 if !stale.isEmpty {
                     JmapLog.write("sync \(mailbox.name): removing \(stale.count) stale cached mails not on server")
                     for id in stale { byId.removeValue(forKey: id) }
@@ -2409,6 +2421,15 @@ final class MailViewModel: ObservableObject {
             let resolvedIdentity = identity(for: fromAddress) ?? identityId
             if !emailId.isEmpty, let identId = resolvedIdentity, !identId.isEmpty {
                 _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId)
+
+                // $draft-Keyword entfernen: sonst taucht die gesendete Mail
+                // weiterhin in "Entwürfe" auf (IMAP/Web sichtbar). Der Submit
+                // allein entfernt es bei Stalwart nicht zuverlässig.
+                _ = try? await api.setEmailFlags(
+                    accountId: accId,
+                    emailIds: [emailId],
+                    keywordsToRemove: ["$draft"]
+                )
 
                 // Make sure the submitted mail lands in the Sent folder of
                 // this account (some servers do not move it automatically),

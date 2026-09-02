@@ -51,21 +51,23 @@ enum JmapMapper {
         mailboxId: String,
         json: [String: Any]
     ) -> MailMessage {
-        let fromList = json["from"] as? [[String: Any]] ?? []
-        let toList = json["to"] as? [[String: Any]] ?? []
-        let ccList = json["cc"] as? [[String: Any]] ?? []
+        // NSDictionary-Zugriff statt `as? [[String: Any]]`: die ObjC→Swift-
+        // Bridging-Kaskade (NSArray → [[String: Any]]) blockierte bei großen
+        // Mailboxen den Main-Thread (Watchdog 0xdead10cc).
+        let fromFirst = (json["from"] as? [Any])?.first as? NSDictionary
+        let fromAddress = fromFirst?["email"] as? String ?? ""
+        let fromName = fromFirst?["name"] as? String
+
+        let toList = json["to"] as? [Any] ?? []
+        let ccList = json["cc"] as? [Any] ?? []
         let hasAtt = json.optBool("hasAttachment") || ((json["attachments"] as? [Any])?.count ?? 0) > 0
         let keywords = json["keywords"] as? [String: Any]
 
         let isRead = (keywords?["$seen"] as? Bool) ?? false
         let isFlagged = (keywords?["$flagged"] as? Bool) ?? false
 
-        let fromFirst = fromList.first
-        let fromAddress = fromFirst?.optString("email") ?? ""
-        let fromName = fromFirst?.optString("name")
-
-        let toAddressStr = toList.compactMap { $0.optString("email") }.joined(separator: ", ")
-        let ccAddressStr = ccList.compactMap { $0.optString("email") }.joined(separator: ", ")
+        let toAddressStr = toList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
+        let ccAddressStr = ccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
 
         return MailMessage(
             id: "\(mailboxId)|\(json.optString("id") ?? "")",
@@ -73,7 +75,7 @@ enum JmapMapper {
             accountId: accountId,
             mailboxId: mailboxId,
             emailId: json.optString("id") ?? "",
-            messageId: (json["messageId"] as? [String])?.first,
+            messageId: (json["messageId"] as? [Any])?.first as? String,
             subject: json.optString("subject") ?? "",
             fromAddress: fromAddress,
             fromDisplayName: fromName,
