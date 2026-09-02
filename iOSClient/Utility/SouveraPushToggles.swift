@@ -63,7 +63,7 @@ enum SouveraPushToggles {
         } else {
             Task {
                 guard let tbl = await NCManageDatabase.shared.getTableAccountAsync(predicate: NSPredicate(format: "account == %@", account)) else { return }
-                await LinkVoIPManager.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user)
+                await LinkVoIPManager.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user, account: account)
             }
         }
     }

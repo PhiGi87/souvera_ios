@@ -97,6 +97,34 @@ class NCPushNotification {
         preferences.setPushNotificationSubscribingPublicKey(account: account, publicKey: subscribingPublicKey)
     }
 
+    /// Multi-Account (Variante 1): Ein APNs-Token kann am Push-Proxy nur
+    /// EINEM Account gehören. Deshalb bekommt NUR der AKTIVE Account Push -
+    /// alle anderen Accounts werden sauber abgemeldet (Server + Proxy, mit
+    /// deren gespeichertem Key), bevor der aktive Account registriert wird.
+    /// Das verhindert die 409-Konflikte und verspätete/verlorene Pushs für
+    /// den aktiven Account.
+    func reconcilePushForActiveAccount() async {
+        guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
+        let active = activeTbl.account
+        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+        // 1. Inaktive Accounts abmelden (nur wenn eine Registrierung existiert).
+        var unregisteredAny = false
+        for tbl in accounts where tbl.account != active {
+            if NCPreferences().getPushNotificationDeviceIdentifier(account: tbl.account) != nil {
+                await unsubscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
+                unregisteredAny = true
+            }
+        }
+        // 2. Kurz warten, damit der Proxy das DELETE verarbeitet hat - sonst
+        //    kollidiert der neue POST mit dem noch nicht entfernten alten
+        //    Gerät (409).
+        if unregisteredAny {
+            try? await Task.sleep(for: .seconds(1))
+        }
+        // 3. Aktiven Account registrieren.
+        await subscribingNextcloudServerPushNotification(account: activeTbl.account, urlBase: activeTbl.urlBase)
+    }
+
     /// P68y: Abonniert Push am NC-Server und wiederholt bei -1000
     /// (NSURLErrorBadURL = NextcloudKit .urlError). Der NCK-Call baut seine
     /// Request-URL aus der INTERNEN Session (nksessions.session(forAccount:)),

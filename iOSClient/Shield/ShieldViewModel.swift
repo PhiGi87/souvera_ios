@@ -36,6 +36,13 @@ final class ShieldViewModel: ObservableObject {
     private var spamSignature = ""
     private var fileSignature = ""
     private var virusSignature = ""
+    /// Ob die jeweilige Liste mindestens einmal geladen wurde. Eine leere
+    /// Liste hat die Signatur "" (gleich dem Initialwert) - ohne dieses
+    /// Flag bliebe der Zustand sonst ewig auf `.loading` (Bug: 2. Account
+    /// mit leerer Quarantäne zeigte nur den Ladekreis).
+    private var spamLoaded = false
+    private var fileLoaded = false
+    private var virusLoaded = false
 
     /// Das persönliche Postfach des aktiven Kontos - nur dort darf man
     /// Whitelist-/Blacklist-Einträge hinzufügen.
@@ -65,6 +72,9 @@ final class ShieldViewModel: ObservableObject {
         spamSignature = ""
         fileSignature = ""
         virusSignature = ""
+        spamLoaded = false
+        fileLoaded = false
+        virusLoaded = false
         spamQuarantine = .loading
         fileQuarantine = .loading
         virusQuarantine = .loading
@@ -119,7 +129,8 @@ final class ShieldViewModel: ObservableObject {
             let entries = result.data.compactMap { ShieldSpamEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
             let signature = entries.map { "\($0.id):\($0.seen)" }.joined(separator: ",")
-            if signature != spamSignature {
+            if !spamLoaded || signature != spamSignature {
+                spamLoaded = true
                 spamSignature = signature
                 spamQuarantine = .success(entries)
             }
@@ -130,7 +141,8 @@ final class ShieldViewModel: ObservableObject {
             let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
             let signature = entries.map(\.id).joined(separator: ",")
-            if signature != fileSignature {
+            if !fileLoaded || signature != fileSignature {
+                fileLoaded = true
                 fileSignature = signature
                 fileQuarantine = .success(entries)
             }
@@ -141,7 +153,8 @@ final class ShieldViewModel: ObservableObject {
             let entries = result.data.compactMap { ShieldGenericEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
             let signature = entries.map(\.id).joined(separator: ",")
-            if signature != virusSignature {
+            if !virusLoaded || signature != virusSignature {
+                virusLoaded = true
                 virusSignature = signature
                 virusQuarantine = .success(entries)
             }

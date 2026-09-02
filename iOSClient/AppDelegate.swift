@@ -325,13 +325,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
                 try? await Task.sleep(for: .seconds(1))
 
+                // Variante 1: Push nur für den aktiven Account (ein APNs-
+                // Token kann am Proxy nur einem Account gehören). Inaktive
+                // Accounts werden sauber abgemeldet, der aktive registriert.
+                await NCPushNotification.shared.reconcilePushForActiveAccount()
+
+                // Mail-Push läuft im Zielzustand über die NC-Push-Kette
+                // (keine eigene Registrierung). One-Time-Cleanup: eine
+                // frühere Direkt-Registrierung (Legacy push_mode=direct)
+                // einmalig abmelden - keine Leichen.
                 let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
                 for tblAccount in tblAccounts {
-                    await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
-                    // Mail-Push läuft im Zielzustand über die NC-Push-Kette
-                    // (keine eigene Registrierung). One-Time-Cleanup: eine
-                    // frühere Direkt-Registrierung (Legacy push_mode=direct)
-                    // einmalig abmelden - keine Leichen.
                     if let legacyId = SouveraMailDeviceRegistrar.storedDeviceId(account: tblAccount.account) {
                         let davPassword = NCPreferences().getPassword(account: tblAccount.account)
                         if !davPassword.isEmpty {

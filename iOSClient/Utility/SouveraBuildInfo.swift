@@ -180,29 +180,15 @@ enum SouveraPushRegistrar {
             if (200..<300).contains(status) {
                 return true
             }
-            // P68x: 409 = Gerät existiert bereits am Proxy (z. B. nach einem
-            // Reinstall hängt dort noch die alte Registrierung mit anderem
-            // Token). Dann erst abmelden (DELETE) und genau einmal neu
-            // anlegen - sonst bleibt der Proxy auf dem veralteten Token
-            // stehen und Push kommt nie an.
+            // 409 = Gerät/Token existiert am Proxy bereits unter einem ANDEREN
+            // Schlüssel (anderer Account oder Alt-Registrierung). Ein DELETE
+            // mit dem aktuellen (falschen) Schlüssel würde am Proxy mit 403
+            // scheitern und nur Churn erzeugen -> bewusst NICHT löschen.
+            // Die saubere Abmeldung übernimmt der Account-Wechsel-Flow
+            // (unregister des ALTEN Accounts mit DESSEN gespeichertem Key),
+            // bevor der neue Account registriert wird.
             if status == 409 {
-                await unregisterAtProxy(proxyServerUrl: proxyServerUrl,
-                                        deviceIdentifier: deviceIdentifier,
-                                        signature: signature,
-                                        publicKey: publicKey)
-                // P68z: Der Proxy verarbeitet DELETE offenbar asynchron -
-                // ein sofortiger Re-POST traf weiterhin auf den alten
-                // Geräteeintrag (409). Kurz warten, dann erneut anlegen.
-                try? await Task.sleep(for: .seconds(1))
-                var retryReq = URLRequest(url: url)
-                retryReq.httpMethod = "POST"
-                retryReq.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-                retryReq.httpBody = form.data(using: .utf8)
-                let (retryData, retryResponse) = try await URLSession.shared.data(for: retryReq)
-                let retryStatus = (retryResponse as? HTTPURLResponse)?.statusCode ?? -1
-                let retryBody = String(data: retryData.prefix(400), encoding: .utf8) ?? ""
-                SouveraLog.write("PushProxy", "register retry \(trimmed) -> http \(retryStatus) body=\(retryBody)")
-                return (200..<300).contains(retryStatus)
+                SouveraLog.write("PushProxy", "register \(trimmed) -> 409 conflict (device owned by another key); skipped destructive unregister")
             }
             return false
         } catch {

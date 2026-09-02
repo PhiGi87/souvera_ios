@@ -264,9 +264,23 @@ final class ShieldApi {
     func list(_ kind: ListKind) async -> ShieldListResult? {
         let path = kind == .whitelist ? "api/whitelist" : "api/blacklist"
         guard let result = await request(path) else { return nil }
-        let data = (result.json?["data"] as? [String])?.map { ["value": $0] } ?? []
+        // Die souvera_shield-API liefert die Einträge je nach Server/Version
+        // unterschiedlich: mehrere Einträge als ["a@b.c", ...], einzelne
+        // Einträge teils als [{"address":"a@b.c"}]. Beide Formen normalisieren.
+        var entries: [[String: Any]] = []
+        if let strings = result.json?["data"] as? [String] {
+            entries = strings.map { ["value": $0] }
+        } else if let objects = result.json?["data"] as? [[String: Any]] {
+            entries = objects.map { obj in
+                let value = (obj["address"] as? String)
+                    ?? (obj["value"] as? String)
+                    ?? (obj["entry"] as? String)
+                    ?? ""
+                return ["value": value]
+            }
+        }
         let warnings = (result.json?["warnings"] as? [String]) ?? []
-        return ShieldListResult(data: data, warnings: warnings)
+        return ShieldListResult(data: entries, warnings: warnings)
     }
 
     func add(_ kind: ListKind, entry: String) async -> Bool {

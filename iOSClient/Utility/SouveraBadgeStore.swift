@@ -102,8 +102,12 @@ final class SouveraBadgeStore: ObservableObject {
         mailUnread.values.reduce(0, +)
     }
 
-    var totalLinkUnread: Int {
-        linkUnread.values.reduce(0, +)
+    /// Summe aus Mail + Link über alle Accounts AUSSER dem übergebenen
+    /// (für den Mehr-Tab-Badge: der aktive Account wird nicht mitgezählt).
+    func unreadExcluding(account: String) -> Int {
+        let mail = mailUnread.filter { $0.key != account }.values.reduce(0, +)
+        let link = linkUnread.filter { $0.key != account }.values.reduce(0, +)
+        return mail + link
     }
 
     /// Setzt das App-Icon-Badge (debounced). Zählt nur ungelesene Mails über

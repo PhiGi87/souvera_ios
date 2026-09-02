@@ -88,7 +88,7 @@ class NCAccount: NSObject {
     }
 
     func changeAccount(_ account: String, userProfile: NKUserProfile?, controller: NCMainTabBarController?) async {
-        if let tblAccount = await database.setAccountActiveAsync(account) {
+        if await database.setAccountActiveAsync(account) != nil {
             // Set account
             controller?.account = account
             // Set User Profile
@@ -97,10 +97,10 @@ class NCAccount: NSObject {
             }
             // Networking Certificate
             NCNetworking.shared.activeAccountCertificate(account: account)
-            // Subscribing Push Notification
-            await NCPushNotification.shared.subscribingNextcloudServerPushNotification(account: tblAccount.account, urlBase: tblAccount.urlBase)
-            // Talk/VoIP-Kanal ebenfalls für ALLE Accounts neu registrieren
-            // (neuer Account bekommt seinen eigenen Talk-Push).
+            // Subscribing Push Notification (Variante 1: nur der aktive
+            // Account bekommt Push; inaktive Accounts werden abgemeldet).
+            await NCPushNotification.shared.reconcilePushForActiveAccount()
+            // Talk/VoIP-Kanal ebenfalls für den aktiven Account neu registrieren.
             LinkVoIPManager.shared.refreshVoipRegistration()
             // Start the service
             Task(priority: .utility) {
@@ -135,7 +135,7 @@ class NCAccount: NSObject {
             // Talk/VoIP-Kanal ebenfalls abmelden (Proxy + Server) - die
             // Talk-Zeile läuft über die Mail-Credential Y und wird von der
             // normalen Abmeldung nicht erfasst.
-            await LinkVoIPManager.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user)
+            await LinkVoIPManager.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user, account: tblAccount.account)
             // Mail-Push-Gerät (souvera_mail) ebenfalls abmelden.
             if let mailDeviceId = SouveraMailDeviceRegistrar.storedDeviceId(account: tblAccount.account) {
                 let davPassword = NCPreferences().getPassword(account: tblAccount.account)

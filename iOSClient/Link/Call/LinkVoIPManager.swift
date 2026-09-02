@@ -325,96 +325,115 @@ final class LinkVoIPManager: NSObject {
         }
 
         Task {
-            let preferences = NCPreferences()
             // Token-Hygiene: hat der VoIP-Token gewechselt (Reinstall),
-            // wird die alte Registrierung VOR der neuen abgemeldet -
+            // werden die alten Registrierungen VOR der neuen abgemeldet -
             // keine Geräte-Leichen.
             let previousVoipToken = UserDefaults.standard.string(forKey: Self.voipTokenKey)
-            if let previousVoipToken, previousVoipToken != voipToken,
-               UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey) != nil {
+            if let previousVoipToken, previousVoipToken != voipToken {
                 let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
-                for tblAccount in tblAccounts {
-                    await Self.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user)
+                for tblAccount in tblAccounts
+                where UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey(tblAccount.account)) != nil {
+                    await Self.unregisterVoipPush(baseUrl: tblAccount.urlBase, username: tblAccount.user, account: tblAccount.account)
                 }
             }
             UserDefaults.standard.set(voipToken, forKey: Self.voipTokenKey)
-            for tblAccount in await NCManageDatabase.shared.getAllTableAccountAsync() {
-                let account = tblAccount.account
-                let urlBase = tblAccount.urlBase
-                // Multi-Account: nur Accounts mit aktivem Link/Talk-Toggle registrieren.
-                if !SouveraPushToggles.linkTalkEnabled(account: account) { continue }
-                // Reuse the device key pair NCPushNotification already provisioned for this account.
-                guard let publicKeyData = preferences.getPushNotificationPublicKey(account: account),
-                      let devicePublicKey = String(data: publicKeyData, encoding: .utf8) else {
-                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP: no device public key for \(urlBase); regular push must register first")
-                    continue
-                }
+            await reconcileVoipForActiveAccount(
+                proxyServerUrl: proxyServerUrl,
+                pushTokenHash: pushTokenHash,
+                combinedPushToken: combinedPushToken
+            )
+        }
+    }
 
-                nkLog(tag: global.logTagPN, emoji: .start, message: "Registering Link VoIP push for \(urlBase) via proxy \(proxyServerUrl)")
-                // KANAL-TRENNUNG mit ZWEI Servertoken: Die Server-Tabelle
-                // dedupliziert Gerätezeilen pro (Benutzer, Session-Token).
-                // Diese Registrierung läuft daher über die MAIL-Credential
-                // Y (zweites NC-Login, eigener Token) - sonst würde sie die
-                // Normal-Push-Zeile überschreiben und der Talk-Kanal fehlt.
-                let talkUserAgent = "Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)"
-                let registration = await Self.registerTalkDevice(
-                    account: account,
-                    baseUrl: urlBase,
-                    username: tblAccount.user,
-                    pushTokenHash: pushTokenHash,
-                    devicePublicKey: devicePublicKey,
-                    proxyServerUrl: proxyServerUrl,
-                    talkUserAgent: talkUserAgent
-                )
-                guard let registration,
-                      let deviceIdentifier = registration.deviceIdentifier,
-                      let signature = registration.signature,
-                      let subscribingPublicKey = registration.publicKey else {
-                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP Nextcloud registration FAILED for \(urlBase)")
-                    UserDefaults.standard.set("failed NC \(Date())", forKey: "SouveraPushRegStatusVoip")
-                    SouveraLog.write("PushVoip", "NC registration FAILED \(urlBase)")
-                    continue
-                }
-                nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(urlBase) (proxyServer=\(proxyServerUrl))")
-                SouveraLog.write("PushVoip", "NC registration OK \(urlBase) (via mail credential)")
-                // Für die Abmeldung beim Logout (P45a) die Gerätedaten merken.
-                UserDefaults.standard.set(deviceIdentifier, forKey: Self.voipDeviceIdentifierKey)
-                UserDefaults.standard.set(signature, forKey: Self.voipDeviceSignatureKey)
-                UserDefaults.standard.set(subscribingPublicKey, forKey: Self.voipDevicePublicKeyKey)
-
-                let combined = combinedPushToken
-                // Tolerante Registrierung: 2xx = Erfolg (Proxy antwortet
-                // mit leerem Body).
-                let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
-                                                                         pushToken: combined,
-                                                                         deviceIdentifier: deviceIdentifier,
-                                                                         signature: signature,
-                                                                         publicKey: subscribingPublicKey)
-                if proxyOk {
-                    nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
-                    UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
-                    SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
-                } else {
-                    nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl)")
-                    UserDefaults.standard.set("failed proxy \(Date())", forKey: "SouveraPushRegStatusVoip")
-                    SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl)")
-                }
+    /// Multi-Account (Variante 1): VoIP/Talk-Push nur für den AKTIVEN Account.
+    /// Meldet die VoIP-Geräte aller anderen Accounts ab und registriert den
+    /// aktiven - sonst kollidiert das gemeinsame kombinierte Token am Proxy
+    /// (409) und Call-Push bleibt aus.
+    private func reconcileVoipForActiveAccount(proxyServerUrl: String, pushTokenHash: String, combinedPushToken: String) async {
+        guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
+        let active = activeTbl.account
+        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+        // 1. Inaktive Accounts mit gespeicherter VoIP-Registrierung abmelden.
+        var unregisteredAny = false
+        for tbl in accounts where tbl.account != active {
+            if UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey(tbl.account)) != nil {
+                await Self.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user, account: tbl.account)
+                unregisteredAny = true
             }
+        }
+        // 2. Aktiven Account registrieren (nur bei aktivem Link/Talk-Toggle).
+        guard SouveraPushToggles.linkTalkEnabled(account: active) else { return }
+        guard let publicKeyData = NCPreferences().getPushNotificationPublicKey(account: active),
+              let devicePublicKey = String(data: publicKeyData, encoding: .utf8) else {
+            nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP: no device public key for \(activeTbl.urlBase); regular push must register first")
+            return
+        }
+        // Kurz warten, damit der Proxy das DELETE verarbeitet hat - sonst
+        // kollidiert der neue POST mit dem noch nicht entfernten Gerät.
+        if unregisteredAny {
+            try? await Task.sleep(for: .seconds(1))
+        }
+        nkLog(tag: global.logTagPN, emoji: .start, message: "Registering Link VoIP push for \(activeTbl.urlBase) via proxy \(proxyServerUrl)")
+        // KANAL-TRENNUNG mit ZWEI Servertoken: Die Server-Tabelle dedupliziert
+        // Gerätezeilen pro (Benutzer, Session-Token). Diese Registrierung
+        // läuft daher über die MAIL-Credential Y (zweites NC-Login, eigener
+        // Token) - sonst würde sie die Normal-Push-Zeile überschreiben.
+        let talkUserAgent = "Mozilla/5.0 (iOS) Nextcloud-Talk v21.0.0 (Souvera Workspace)"
+        let registration = await Self.registerTalkDevice(
+            account: active,
+            baseUrl: activeTbl.urlBase,
+            username: activeTbl.user,
+            pushTokenHash: pushTokenHash,
+            devicePublicKey: devicePublicKey,
+            proxyServerUrl: proxyServerUrl,
+            talkUserAgent: talkUserAgent
+        )
+        guard let registration,
+              let deviceIdentifier = registration.deviceIdentifier,
+              let signature = registration.signature,
+              let subscribingPublicKey = registration.publicKey else {
+            nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP Nextcloud registration FAILED for \(activeTbl.urlBase)")
+            UserDefaults.standard.set("failed NC \(Date())", forKey: "SouveraPushRegStatusVoip")
+            SouveraLog.write("PushVoip", "NC registration FAILED \(activeTbl.urlBase)")
+            return
+        }
+        nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(activeTbl.urlBase) (proxyServer=\(proxyServerUrl))")
+        SouveraLog.write("PushVoip", "NC registration OK \(activeTbl.urlBase) (via mail credential)")
+        // Für die Abmeldung beim Logout/Account-Wechsel die Gerätedaten pro
+        // Account merken.
+        UserDefaults.standard.set(deviceIdentifier, forKey: Self.voipDeviceIdentifierKey(active))
+        UserDefaults.standard.set(signature, forKey: Self.voipDeviceSignatureKey(active))
+        UserDefaults.standard.set(subscribingPublicKey, forKey: Self.voipDevicePublicKeyKey(active))
+
+        // Tolerante Registrierung: 2xx = Erfolg (Proxy antwortet mit leerem Body).
+        let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
+                                                                 pushToken: combinedPushToken,
+                                                                 deviceIdentifier: deviceIdentifier,
+                                                                 signature: signature,
+                                                                 publicKey: subscribingPublicKey)
+        if proxyOk {
+            nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
+            UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
+            SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
+        } else {
+            nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl)")
+            UserDefaults.standard.set("failed proxy \(Date())", forKey: "SouveraPushRegStatusVoip")
+            SouveraLog.write("PushVoip", "proxy registration FAILED \(proxyServerUrl)")
         }
     }
 
     private static let voipTokenKey = "souvera_voip_token"
-    private static let voipDeviceIdentifierKey = "souvera_voip_device_identifier"
-    private static let voipDeviceSignatureKey = "souvera_voip_device_signature"
-    private static let voipDevicePublicKeyKey = "souvera_voip_device_public_key"
+    private static func voipDeviceIdentifierKey(_ account: String) -> String { "souvera_voip_device_identifier_" + account }
+    private static func voipDeviceSignatureKey(_ account: String) -> String { "souvera_voip_device_signature_" + account }
+    private static func voipDevicePublicKeyKey(_ account: String) -> String { "souvera_voip_device_public_key_" + account }
 
     /// Logout-Cleanup: Talk-Gerät am Proxy UND am Server abmelden
     /// (Talk-Muster unsubscribeAccount) - keine toten Zeilen mehr.
-    static func unregisterVoipPush(baseUrl: String, username: String) async {
+    static func unregisterVoipPush(baseUrl: String, username: String, account: String) async {
         let defaults = UserDefaults.standard
-        let identifier = defaults.string(forKey: voipDeviceIdentifierKey)
-        let signature = defaults.string(forKey: voipDeviceSignatureKey)
-        let publicKey = defaults.string(forKey: voipDevicePublicKeyKey)
+        let identifier = defaults.string(forKey: voipDeviceIdentifierKey(account))
+        let signature = defaults.string(forKey: voipDeviceSignatureKey(account))
+        let publicKey = defaults.string(forKey: voipDevicePublicKeyKey(account))
         let proxy = NCBrandOptions.shared.pushNotificationServerProxy
         if let identifier, let signature, let publicKey, !proxy.isEmpty {
             await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxy,
@@ -424,15 +443,15 @@ final class LinkVoIPManager: NSObject {
         }
         // NC-Zeile (Talk, Token Y) entfernen - best effort.
         let manager = SouveraMailCredentialManager()
-        if let mailAccount = await manager.ensureCombinedCredential() {
+        if let mailAccount = await manager.ensureCombinedCredential(account: account) {
             await unregisterTalkDeviceOcs(baseUrl: baseUrl,
                                           username: username,
                                           ncPassword: mailAccount.mailPassword)
         }
-        defaults.removeObject(forKey: voipDeviceIdentifierKey)
-        defaults.removeObject(forKey: voipDeviceSignatureKey)
-        defaults.removeObject(forKey: voipDevicePublicKeyKey)
-        SouveraLog.write("PushVoip", "voip push unregistered")
+        defaults.removeObject(forKey: voipDeviceIdentifierKey(account))
+        defaults.removeObject(forKey: voipDeviceSignatureKey(account))
+        defaults.removeObject(forKey: voipDevicePublicKeyKey(account))
+        SouveraLog.write("PushVoip", "voip push unregistered for \(account)")
     }
 
     /// Eigener OCS-DELETE `ocs/v2.php/apps/notifications/api/v2/push` mit
