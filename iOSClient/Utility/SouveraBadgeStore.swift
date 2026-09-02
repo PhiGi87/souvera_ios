@@ -77,11 +77,17 @@ final class SouveraBadgeStore: ObservableObject {
         guard !account.isEmpty else { return }
         mailUnread[account] = max(0, count)
         applyAppIconBadge()
+        postTotalsChanged()
     }
 
     func setLinkUnread(_ count: Int, account: String) {
         guard !account.isEmpty else { return }
         linkUnread[account] = max(0, count)
+        postTotalsChanged()
+    }
+
+    private func postTotalsChanged() {
+        NotificationCenter.default.post(name: .souveraBadgeTotalsChanged, object: nil)
     }
 
     func unreadMail(account: String) -> Int {
@@ -94,6 +100,10 @@ final class SouveraBadgeStore: ObservableObject {
 
     var totalMailUnread: Int {
         mailUnread.values.reduce(0, +)
+    }
+
+    var totalLinkUnread: Int {
+        linkUnread.values.reduce(0, +)
     }
 
     /// Setzt das App-Icon-Badge (debounced). Zählt nur ungelesene Mails über

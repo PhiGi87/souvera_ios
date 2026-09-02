@@ -368,6 +368,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // ALLER Accounts zählen (der Badge-Store setzt das System-Badge).
         SouveraBadgeStore.shared.refreshNow()
         Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
+        Task { await SouveraBackgroundSync.shared.refreshLinkBadges() }
     }
 
     /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).

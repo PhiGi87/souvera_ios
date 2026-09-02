@@ -149,6 +149,12 @@ enum SouveraLogSender {
             // $draft-Keyword entfernen, damit die gesendete Mail nicht als
             // Entwurf hängen bleibt (IMAP/Web "Drafts").
             _ = try? await api.setEmailFlags(accountId: accId, emailIds: [createdId], keywordsToRemove: ["$draft"])
+            // Zusätzlich in den Sent-Ordner verschieben: sonst bleibt die Mail
+            // in der Drafts-Mailbox sichtbar (auch ohne $draft-Keyword).
+            if let sent = boxes.first(where: { ($0["role"] as? String) == "sent" }),
+               let sentId = sent.optString("id"), !sentId.isEmpty {
+                _ = try? await api.moveEmails(accountId: accId, emailIds: [createdId], targetMailboxId: sentId, markRead: true)
+            }
             SouveraLog.write("LogSender", "logs sent to \(recipient)")
             return .success(recipient)
         } catch {

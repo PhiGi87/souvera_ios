@@ -32,11 +32,13 @@ final class SouveraBackgroundSync {
     /// Zählt die ungelesenen Mails ALLER Accounts und aktualisiert das
     /// System-Badge (Summe) + die per-Account-Badges.
     func refreshMailBadge() async {
+        SouveraLog.write("BackgroundSync", "refreshMailBadge start")
         var grandTotal = 0
         var anySucceeded = false
         // Async Realm-Lesen (kein sync-Read auf einem Hintergrund-Task, das
         // am File-Lock hängen konnte und den Badge-Refresh nie laufen ließ).
         let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+        SouveraLog.write("BackgroundSync", "refreshMailBadge accounts=\(accounts.count)")
         for tbl in accounts {
             guard let total = await unreadCount(account: tbl.account) else {
                 // Tolerant (P66): Ein Account, der gerade nicht antwortet
@@ -58,6 +60,22 @@ final class SouveraBackgroundSync {
             NotificationCenter.default.post(name: .mailTotalUnreadChanged, object: grandTotal)
             SouveraLog.write("BackgroundSync", "mail badge refresh -> total \(grandTotal) unread")
         }
+    }
+
+    /// Zählt ungelesene Link/Talk-Nachrichten ALLER Accounts aus dem lokalen
+    /// Cache und meldet sie per Account (Badge im Account-Switcher + Summe).
+    func refreshLinkBadges() async {
+        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+        for tbl in accounts {
+            let cached = LinkCache.loadConversations(account: tbl.account)
+            let total = cached?.reduce(0) { $0 + $1.unreadMessages } ?? 0
+            NotificationCenter.default.post(
+                name: .linkUnreadChanged,
+                object: total,
+                userInfo: ["account": tbl.account]
+            )
+        }
+        SouveraLog.write("BackgroundSync", "link badge refresh -> \(accounts.count) accounts")
     }
 
     private func unreadCount(account: String) async -> Int? {

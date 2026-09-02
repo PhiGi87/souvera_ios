@@ -2504,4 +2504,6 @@ extension Notification.Name {
     static let mailPushReceived = Notification.Name("mailPushReceived")
     /// Summe über ALLE Accounts (System-Badge am App-Icon).
     static let mailTotalUnreadChanged = Notification.Name("mailTotalUnreadChanged")
+    /// Mail- und/oder Link-Totals geändert (Mehr-Tab-Badge neu rendern).
+    static let souveraBadgeTotalsChanged = Notification.Name("SouveraBadgeTotalsChanged")
 }

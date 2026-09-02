@@ -22,6 +22,7 @@ class NCMainTabBarController: UITabBarController {
     var availableNotifications: Bool = false
     private weak var mailTabBarItem: UITabBarItem?
     private weak var linkTabBarItem: UITabBarItem?
+    private var maintenanceDotActive = false
     var documentPickerViewController: NCDocumentPickerViewController?
     let navigationCollectionViewCommon = ThreadSafeArray<NavigationCollectionViewCommon>()
     private var previousIndex: Int?
@@ -255,7 +256,22 @@ class NCMainTabBarController: UITabBarController {
             queue: .main
         ) { [weak self] notification in
             let count = notification.object as? Int ?? 0
-            self?.updateLinkBadge(count)
+            let account = (notification.userInfo?["account"] as? String) ?? ""
+            let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            // Nur der AKTIVE Account steuert den Link-Tab-Badge; Accounts ohne
+            // Angabe (Alt-Pfade) werden weiterhin akzeptiert.
+            if account.isEmpty || account == active {
+                self?.updateLinkBadge(count)
+            }
+        }
+        // Mehr-Tab-Badge (Summe Mail+Link, farbcodiert) bei jeder
+        // Totals-Änderung neu rendern.
+        NotificationCenter.default.addObserver(
+            forName: .souveraBadgeTotalsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.updateMoreBadge()
         }
         // Hintergrund-Poller für ungelesene Talk-Nachrichten (Badge).
         LinkBadgeMonitor.shared.start()
@@ -346,13 +362,48 @@ class NCMainTabBarController: UITabBarController {
         JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
     }
 
-    /// Link-Badge als System-Badge (identisch zum Mail-Badge).
+    /// Link-Badge als blauer System-Badge-Nachbau (gleiche Position/Form/Größe
+    /// wie der rote Mail-Badge, nur blau gefüllt).
     private func updateLinkBadge(_ count: Int) {
-        linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+        applyCountBadge(to: linkTabBarItem, baseName: "bubble.left.and.bubble.right.fill", count: count, color: .systemBlue)
     }
 
     private func updateMaintenanceDot(_ maintenance: Bool) {
-        applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: maintenance)
+        maintenanceDotActive = maintenance
+        updateMoreTabItem()
+    }
+
+    /// Mehr-Tab-Badge: Summe aus Mail + Link. Blau, wenn Link-Ungelesen > 0,
+    /// sonst rot (Mail). Ohne Ungelesen nur der Wartungs-Punkt.
+    private func updateMoreBadge() {
+        updateMoreTabItem()
+    }
+
+    private func updateMoreTabItem() {
+        let store = SouveraBadgeStore.shared
+        let total = store.totalMailUnread + store.totalLinkUnread
+        if total > 0 {
+            let color: UIColor = store.totalLinkUnread > 0 ? .systemBlue : .systemRed
+            applyCountBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: total, color: color)
+        } else if maintenanceDotActive {
+            applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: true)
+        } else {
+            applyBadge(to: moreTabBarItem, baseName: "ellipsis.circle.fill", count: nil, dot: false)
+        }
+    }
+
+    /// Setzt ein Zähler-Badge (Farbe wählbar) auf ein Tab-Icon. count <= 0
+    /// entfernt das Badge und setzt das Original-Icon zurück.
+    private func applyCountBadge(to item: UITabBarItem?, baseName: String, count: Int, color: UIColor) {
+        guard let item else { return }
+        if count > 0 {
+            item.image = Self.countBadgedIcon(baseName: baseName, count: count, color: color, selected: false)
+            item.selectedImage = Self.countBadgedIcon(baseName: baseName, count: count, color: color, selected: true)
+        } else {
+            item.image = UIImage(systemName: baseName)
+            item.selectedImage = UIImage(systemName: baseName)
+        }
+        item.badgeValue = nil
     }
 
     /// Rendert den Wartungs-Punkt in das Mehr-Icon (nur Punkt-Variante).
@@ -402,6 +453,58 @@ class NCMainTabBarController: UITabBarController {
                 path.lineWidth = max(0.5, dotSide * 0.14)
                 path.stroke()
             }
+        }.withRenderingMode(.alwaysOriginal)
+    }
+
+    /// Zähler-Badge (System-Badge-Nachbau) auf einem Tab-Icon. Gleiche Position,
+    /// Form und weiße fette Schrift wie das native rote Badge - nur die Füllung
+    /// ist frei wählbar (z. B. blau für Link).
+    private static func countBadgedIcon(baseName: String, count: Int, color: UIColor, selected: Bool) -> UIImage? {
+        let base = UIImage(systemName: baseName)
+        var canvasSize = base?.size ?? CGSize(width: 25, height: 25)
+        if canvasSize.width < 10 || canvasSize.height < 10 {
+            canvasSize = CGSize(width: 25, height: 25)
+        }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 3
+        format.opaque = false
+        let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
+        return renderer.image { _ in
+            let iconColor: UIColor = selected
+                ? NCBrandColor.shared.customer
+                : UIColor.white
+            if let base {
+                base.withTintColor(iconColor, renderingMode: .alwaysOriginal)
+                    .draw(in: CGRect(origin: .zero, size: canvasSize))
+            }
+            let text = count > 99 ? "99+" : "\(count)"
+            let font = UIFont.systemFont(ofSize: 11, weight: .semibold)
+            let attrs: [NSAttributedString.Key: Any] = [
+                .font: font,
+                .foregroundColor: UIColor.white
+            ]
+            let textSize = (text as NSString).size(withAttributes: attrs)
+            let badgeHeight: CGFloat = 14
+            let badgeWidth = max(textSize.width + 8, badgeHeight)
+            let badgeRect = CGRect(
+                x: canvasSize.width - badgeWidth * 0.82,
+                y: -badgeHeight * 0.12,
+                width: badgeWidth,
+                height: badgeHeight
+            )
+            let badgePath = UIBezierPath(roundedRect: badgeRect, cornerRadius: badgeHeight / 2)
+            color.setFill()
+            badgePath.fill()
+            UIColor.white.setStroke()
+            badgePath.lineWidth = 0.8
+            badgePath.stroke()
+            let textRect = CGRect(
+                x: badgeRect.midX - textSize.width / 2,
+                y: badgeRect.midY - textSize.height / 2,
+                width: textSize.width,
+                height: textSize.height
+            )
+            text.draw(in: textRect, withAttributes: attrs)
         }.withRenderingMode(.alwaysOriginal)
     }
 

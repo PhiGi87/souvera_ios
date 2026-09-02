@@ -136,7 +136,10 @@ final class ShieldApi {
     }
 
     private func perform(_ path: String, method: String, form: [String: String]) async -> (status: Int, json: [String: Any]?, body: String)? {
-        guard let root else { return nil }
+        guard let root else {
+            JmapLog.write("ShieldApiLog NO ROOT \(method) \(path) (activeAccount=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "nil"))")
+            return nil
+        }
         // Pretty-URL zuerst (funktioniert auf host-on.souvera.work); bei
         // non-2xx Fallback auf index.php (team.souvera.work routet die
         // Pretty-URL nicht -> 502). Muster wie SouveraMailLoginFlow.

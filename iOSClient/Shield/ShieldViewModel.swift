@@ -110,6 +110,7 @@ final class ShieldViewModel: ObservableObject {
     func loadAll() async {
         let gen = generation
         warnings = []
+        JmapLog.write("ShieldViewModel loadAll start (account=\(NCManageDatabase.shared.getActiveTableAccount()?.account ?? "-"))")
 
         var discovered: [String] = []
         if let result = await api.quarantineList(.spam) {
