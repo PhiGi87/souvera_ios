@@ -150,19 +150,17 @@ struct SouveraMailCredentialManager {
     }
 
     /// Live-Validierung: Liefert die gespeicherte Credential eine
-    /// JMAP-Session MIT Accounts?
+    /// JMAP-Session MIT Accounts? Nur ein echter 401 gilt als "ungültig" -
+    /// Netzfehler/offline melden "gültig", damit ein kurzer Ausfall nicht
+    /// eine gültige Credential löscht und unnötig neu mintet (neuer
+    /// Auth-Token -> neuer Push-deviceIdentifier -> stale Proxy-Zeile).
     private func validate(_ account: MailAccount) async -> Bool {
         let client = JmapClient(
             baseUrl: account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
             username: account.saslUser,
             password: account.mailPassword
         )
-        do {
-            let session = try await client.refreshSession()
-            return !session.primaryAccountId.isEmpty && !session.accounts.isEmpty
-        } catch {
-            return false
-        }
+        return await client.credentialLooksValid()
     }
 
     private func mint(account: String, baseUrl: String, username: String, davPassword: String) async -> MailAccount? {

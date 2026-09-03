@@ -18,6 +18,12 @@ struct LinkCache {
         try? FileManager.default.removeItem(at: dir)
     }
 
+    /// Löscht die Konversationsliste EINES Accounts (Abmelden).
+    static func removeAccount(account: String) {
+        guard let url = fileURL("conversations_" + account + ".json") else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
     private static func fileURL(_ name: String) -> URL? {
         guard let dir = cacheDirectory else { return nil }
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)

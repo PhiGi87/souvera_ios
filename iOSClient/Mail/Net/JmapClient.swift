@@ -96,6 +96,27 @@ actor JmapClient {
         return info
     }
 
+    /// Validiert die Credential DIREKT gegen /jmap/session, ohne den
+    /// Session-Cache zu verändern:
+    /// - 401 -> false (eindeutig ungültig)
+    /// - 2xx mit Konten -> true
+    /// - Netzfehler/offline -> true (nicht feststellbar -> Credential BEHALTEN,
+    ///   sonst würde ein kurzer Ausfall eine gültige Credential verwerfen und
+    ///   einen neuen Auth-Token (neuer Push-deviceIdentifier) erzwingen).
+    func credentialLooksValid() async -> Bool {
+        do {
+            guard let json = try await httpGet("\(baseUrl)/jmap/session") else {
+                return true
+            }
+            let session = parseSession(json)
+            return !session.primaryAccountId.isEmpty && !session.accounts.isEmpty
+        } catch JmapException.authNeedsBearer(_) {
+            return false
+        } catch {
+            return true
+        }
+    }
+
     // MARK: - Method calls (batch)
 
     func call(

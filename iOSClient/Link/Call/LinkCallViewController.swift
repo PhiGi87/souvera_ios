@@ -51,6 +51,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         case raster, focus
     }
     private var layoutMode: CallLayoutMode = .raster
+    /// Eigenansicht nur bei aktivem Video (Kamera an + Track vorhanden).
+    private var shouldShowLocalView: Bool { isVideoOn && localTrack != nil }
     /// Container für das lokale Bild, damit es im Raster als Kachel
     /// eingereiht werden kann.
     private lazy var localContainer: UIView = {
@@ -318,6 +320,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Layout-Dispatcher: Raster (Standard) oder Fokus/Speaker.
     private func layoutTiles() {
+        // Eigenansicht ausblenden, solange das Video nicht aktiv ist.
+        localContainer.isHidden = !shouldShowLocalView
         // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
         if let _ = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }) {
             layoutFocus()
@@ -339,7 +343,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let safeTop = view.safeAreaInsets.top
 
         let remoteKeys = tiles.keys.sorted()
-        let totalTiles = remoteKeys.count + 1 // + Eigenansicht
+        let totalTiles = remoteKeys.count + (shouldShowLocalView ? 1 : 0)
 
         let columns: Int
         if totalTiles <= 1 { columns = 1 }
@@ -374,7 +378,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             guard let tile = tiles[key] else { continue }
             place(tile.container)
         }
-        place(localContainer)
+        if shouldShowLocalView {
+            place(localContainer)
+        }
     }
 
     /// Fokus/Speaker: große Fokus-Kachel + kleine Kacheln unten.
@@ -401,13 +407,17 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // 1:1: Fokus füllt den gesamten Bildschirm.
             focusTile.container.frame = CGRect(x: 0, y: 0, width: width, height: height)
         } else {
-            let focusHeight = height * 0.66
-            focusTile.container.frame = CGRect(x: 0, y: safeTop, width: width, height: focusHeight)
-
             let tileWidth: CGFloat = 96
             let tileHeight: CGFloat = 136
             let gap: CGFloat = 8
             let controlsHeight: CGFloat = 92
+            // Klarer Abstand zwischen der großen Fokus-/Speaker-Kachel und den
+            // darunter liegenden Mini-Kacheln (vorher überlappten sie fast).
+            let stripSpacing: CGFloat = 24
+            let stripTopY = height - safeBottom - controlsHeight - tileHeight - gap
+            let focusHeight = max(height * 0.4, min(height * 0.66, stripTopY - safeTop - stripSpacing))
+            focusTile.container.frame = CGRect(x: 0, y: safeTop, width: width, height: focusHeight)
+
             var x: CGFloat = 12
             for key in stripKeys {
                 guard let tile = tiles[key] else { continue }
@@ -416,7 +426,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 tile.container.layer.borderColor = UIColor.white.withAlphaComponent(0.6).cgColor
                 tile.container.frame = CGRect(
                     x: x,
-                    y: height - safeBottom - controlsHeight - tileHeight - 8,
+                    y: stripTopY,
                     width: tileWidth,
                     height: tileHeight
                 )

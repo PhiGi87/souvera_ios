@@ -204,18 +204,22 @@ class NCAccountSettingsModel: ObservableObject, ViewOnAppearHandling {
     /// Function to log out (remove) the current account
     func deleteAccount() {
         Task { @MainActor in
-            if let tblAccount {
-                await NCAccount().deleteAccount(tblAccount.account)
-                let remaining = database.getAllTableAccount()
-                if remaining.isEmpty {
-                    // P68x: letztes Konto abgemeldet -> zurück zum
-                    // Login-/Intro-Start-Screen (App-Einstellungen bleiben).
-                    dismissView = true
-                    NCAccount().showLoginAfterLastLogout()
-                } else {
-                    setAccount(account: remaining.first?.account)
-                    dismissView = true
+            guard let tblAccount else { return }
+            await NCAccount().deleteAccount(tblAccount.account)
+            let remaining = await database.getAllTableAccountAsync()
+            if remaining.isEmpty {
+                // P68x: letztes Konto abgemeldet -> zurück zum
+                // Login-/Intro-Start-Screen (App-Einstellungen bleiben).
+                dismissView = true
+                NCAccount().showLoginAfterLastLogout()
+            } else {
+                // Nächsten Account GLOBAL aktivieren (statt nur den lokalen
+                // Settings-State umzustellen) - sonst bleibt die App ohne
+                // aktiven Account "kaputt".
+                if let next = remaining.first {
+                    await NCAccount().changeAccount(next.account, userProfile: nil, controller: controller)
                 }
+                dismissView = true
             }
         }
     }

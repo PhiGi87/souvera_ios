@@ -273,9 +273,10 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         if selfInCall {
             listener?.onSelfInCall()
         }
-        if !remotes.isEmpty {
-            listener?.onParticipants(sessionIds: remotes)
-        }
+        // Auch bei leerer Liste melden: sonst erfährt der CallSession nie,
+        // dass der letzte Remote-Teilnehmer gegangen ist (Raster bliebe
+        // stehen statt in 1:1 zu wechseln).
+        listener?.onParticipants(sessionIds: remotes)
     }
 
     private func handleMessage(_ root: [String: Any]) {

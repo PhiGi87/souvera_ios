@@ -71,8 +71,9 @@ class NCPushNotification {
 
         // KANAL-TRENNUNG: Diese Registrierung läuft als Nextcloud-Client
         // (apptype=nextcloud) mit dem REINEN Normal-Token - sie bekommt
-        // Mail-/Chat-/Admin-Benachrichtigungen. Die Talk-Registrierung
-        // (kombiniertes Token, VoIP) übernimmt LinkVoIPManager.
+        // Mail-/Kalender-/Files-/Admin-Benachrichtigungen. Talk (Chat UND
+        // Calls) läuft serverseitig über das TALK-Gerät (apptype=talk,
+        // kombiniertes Token) - das übernimmt LinkVoIPManager.
         // Registrierung tolerant: 2xx = Erfolg (der Proxy antwortet mit
         // leerem Body, was NextcloudKit als Fehler wertet).
         let normalToken = preferences.deviceTokenPushNotification

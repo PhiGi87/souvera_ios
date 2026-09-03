@@ -519,6 +519,16 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onParticipants(sessionIds: [String]) {
+        // Remote-Streams aufräumen, deren Session nicht mehr in der Liste
+        // ist (Teilnehmer hat den Call verlassen). Das WebRTC-didRemove-
+        // Delegat feuert im MCU-Betrieb unzuverlässig - ohne dieses Cleanup
+        // bleibt die Kachel stehen und das Raster springt nicht in 1:1 zurück.
+        let activeSessions = Set(sessionIds)
+        for (key, stream) in remoteStreams where !activeSessions.contains(stream.session) {
+            remoteStreams.removeValue(forKey: key)
+            callbacks?.onRemoteVideoRemoved(session: stream.session, roomType: stream.roomType)
+        }
+
         if mcuActive {
             // NIE ein Angebot für die eigene Session anfordern - das
             // korrumpiert den Publisher-Zustand am MCU (Uplink stirbt).

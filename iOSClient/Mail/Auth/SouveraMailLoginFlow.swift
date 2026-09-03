@@ -12,6 +12,7 @@
 // broken sync. Auth is HTTP Basic with `X`.
 
 import Foundation
+import KeychainAccess
 
 struct CombinedAppPassword: Decodable {
     let loginName: String
@@ -20,18 +21,28 @@ struct CombinedAppPassword: Decodable {
 }
 
 enum SouveraMailLoginFlow {
-    /// Eindeutige Mint-Beschreibung PRO INSTALLATION: Der Server ersetzt
-    /// beim Mint das App-Passwort derselben Beschreibung. Ohne UUID würden
-    /// sich mehrere Instanzen (Gerät + Simulator, 2. Gerät) gegenseitig
-    /// entminten und eine Endlos-401-Schleife erzeugen.
+    private static let uuidKey = "souvera_mail_app_password_uuid"
+    private static let uuidKeychain = Keychain(service: "eu.souvera.workspace.mail")
+
+    /// Eindeutige Mint-Beschreibung PRO GERÄT: Der Server ersetzt beim Mint
+    /// das App-Passwort derselben Beschreibung. Ohne UUID würden sich mehrere
+    /// Instanzen (Gerät + Simulator, 2. Gerät) gegenseitig entminten und eine
+    /// Endlos-401-Schleife erzeugen. Die UUID liegt im KEYCHAIN, damit sie
+    /// einen Reinstall überlebt (sonst verwaist der alte Token + dessen
+    /// Push-Gerätezeile am Proxy bei jeder Neuinstallation).
     private static var description: String {
-        let key = "souvera_mail_app_password_uuid"
-        let defaults = UserDefaults.standard
-        if let existing = defaults.string(forKey: key), !existing.isEmpty {
+        if let existing = try? uuidKeychain.get(uuidKey), !existing.isEmpty {
             return "Souvera iOS \(existing)"
         }
+        // Migration: früher lag die UUID in den UserDefaults.
+        let defaults = UserDefaults.standard
+        if let legacy = defaults.string(forKey: uuidKey), !legacy.isEmpty {
+            try? uuidKeychain.set(legacy, key: uuidKey)
+            return "Souvera iOS \(legacy)"
+        }
         let uuid = UUID().uuidString
-        defaults.set(uuid, forKey: key)
+        try? uuidKeychain.set(uuid, key: uuidKey)
+        defaults.set(uuid, forKey: uuidKey)
         return "Souvera iOS \(uuid)"
     }
 

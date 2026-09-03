@@ -23,6 +23,20 @@ enum MailCache {
         try? FileManager.default.removeItem(at: rootDirectory)
     }
 
+    /// Löscht alle Cache-Dateien EINES Accounts (Abmelden): Mail-Snapshots,
+    /// Bodies sowie die darin abgelegten Kalender-/Kontakt-Blobs dieses
+    /// Accounts. Andere Accounts bleiben unberührt.
+    static func removeAccount(account: String) {
+        let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        let fm = FileManager.default
+        if let files = try? fm.contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil) {
+            for url in files where url.lastPathComponent.contains(safeAccount) {
+                try? fm.removeItem(at: url)
+            }
+        }
+        try? fm.removeItem(at: rootDirectory.appendingPathComponent("bodies-\(safeAccount)", isDirectory: true))
+    }
+
     private static func fileURL(account: String, mailboxId: String) -> URL {
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let safeMailbox = mailboxId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)

@@ -117,6 +117,10 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 UserDefaults.standard.removePersistentDomain(forName: bundleID)
             }
 
+            // Kein Konto (frisch installiert/alles abgemeldet): den vom OS
+            // übernommenen Badge-Stand explizit löschen.
+            UIApplication.shared.applicationIconBadgeNumber = 0
+
             if NCBrandOptions.shared.disable_intro {
                 if let viewController = UIStoryboard(name: "NCLogin", bundle: nil).instantiateViewController(withIdentifier: "NCLogin") as? NCLogin {
                     let navigationController = UINavigationController(rootViewController: viewController)
@@ -152,28 +156,34 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             await NCNetworkingProcess.shared.startTimer(interval: NCNetworkingProcess.shared.maxInterval)
         }
 
-        // Set up networking session for all configured accounts
-        for tblAccount in NCManageDatabase.shared.getAllTableAccount() {
-            // Append account to NextcloudKit shared session
-            NextcloudKit.shared.appendSession(account: tblAccount.account,
-                                              urlBase: tblAccount.urlBase,
-                                              user: tblAccount.user,
-                                              userId: tblAccount.userId,
-                                              password: NCPreferences().getPassword(account: tblAccount.account),
-                                              userAgent: userAgent,
-                                              httpMaximumConnectionsPerHost: NCBrandOptions.shared.httpMaximumConnectionsPerHost,
-                                              httpMaximumConnectionsPerHostInDownload: NCBrandOptions.shared.httpMaximumConnectionsPerHostInDownload,
-                                              httpMaximumConnectionsPerHostInUpload: NCBrandOptions.shared.httpMaximumConnectionsPerHostInUpload,
-                                              groupIdentifier: NCBrandOptions.shared.capabilitiesGroup)
+        // Set up networking session for all configured accounts.
+        // Async ausgeführt: der SYNCHRONE Realm-Read blockierte den
+        // Haupt-Thread, wenn die File-Provider-Extension die geteilte
+        // Realm-DB hielt -> Watchdog-Kill (0xdead10cc).
+        Task { @MainActor in
+            let tblAccounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+            for tblAccount in tblAccounts {
+                // Append account to NextcloudKit shared session
+                NextcloudKit.shared.appendSession(account: tblAccount.account,
+                                                  urlBase: tblAccount.urlBase,
+                                                  user: tblAccount.user,
+                                                  userId: tblAccount.userId,
+                                                  password: NCPreferences().getPassword(account: tblAccount.account),
+                                                  userAgent: userAgent,
+                                                  httpMaximumConnectionsPerHost: NCBrandOptions.shared.httpMaximumConnectionsPerHost,
+                                                  httpMaximumConnectionsPerHostInDownload: NCBrandOptions.shared.httpMaximumConnectionsPerHostInDownload,
+                                                  httpMaximumConnectionsPerHostInUpload: NCBrandOptions.shared.httpMaximumConnectionsPerHostInUpload,
+                                                  groupIdentifier: NCBrandOptions.shared.capabilitiesGroup)
 
-            // Perform async setup: restore capabilities and ensure file provider domain
-            Task {
-                await NCManageDatabase.shared.getCapabilities(account: tblAccount.account)
-                try? await FileProviderDomain().ensureDomainRegistered(userId: tblAccount.userId, user: tblAccount.user, urlBase: tblAccount.urlBase)
+                // Perform async setup: restore capabilities and ensure file provider domain
+                Task {
+                    await NCManageDatabase.shared.getCapabilities(account: tblAccount.account)
+                    try? await FileProviderDomain().ensureDomainRegistered(userId: tblAccount.userId, user: tblAccount.user, urlBase: tblAccount.urlBase)
+                }
+
+                // Append session to internal session manager
+                NCSession.shared.appendSession(account: tblAccount.account, urlBase: tblAccount.urlBase, user: tblAccount.user, userId: tblAccount.userId)
             }
-
-            // Append session to internal session manager
-            NCSession.shared.appendSession(account: tblAccount.account, urlBase: tblAccount.urlBase, user: tblAccount.user, userId: tblAccount.userId)
         }
 
         // Load Main.storyboard

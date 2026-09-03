@@ -171,6 +171,9 @@ class NCAccount: NSObject {
             // Remove autoupload
             await database.clearTableAsync(tableAutoUploadTransfer.self, account: account)
         }
+        // Offline-Caches dieses Kontos löschen (Mail, Link, Kalender-Blobs).
+        MailCache.removeAccount(account: account)
+        LinkCache.removeAccount(account: account)
         // Remove session in NextcloudKit
         NextcloudKit.shared.nkCommonInstance.nksessions.remove(account: account)
         // Remove session
@@ -199,6 +202,8 @@ class NCAccount: NSObject {
     /// Kalender-Ton) bleiben erhalten - es wird NUR die Oberfläche gewechselt
     /// (analog zum No-Account-Zweig im SceneDelegate).
     func showLoginAfterLastLogout() {
+        // Badge löschen, wenn kein Konto mehr da ist.
+        UIApplication.shared.applicationIconBadgeNumber = 0
         if NCBrandOptions.shared.disable_intro {
             if let viewController = UIStoryboard(name: "NCLogin", bundle: nil).instantiateViewController(withIdentifier: "NCLogin") as? NCLogin {
                 let navigationController = UINavigationController(rootViewController: viewController)

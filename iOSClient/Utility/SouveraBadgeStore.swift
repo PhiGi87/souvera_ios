@@ -102,25 +102,37 @@ final class SouveraBadgeStore: ObservableObject {
     }
 
     /// Setzt das App-Icon-Badge (debounced). Zählt nur ungelesene Mails über
-    /// ALLE Accounts.
-    private func applyAppIconBadge() {
+    /// ALLE Accounts; `forceValue` überschreibt den Zähler (z. B. 0 beim
+    /// frischen Install ohne Konto).
+    private func applyAppIconBadge(forceValue: Int? = nil) {
         badgeDebounceTask?.cancel()
         badgeDebounceTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 700_000_000)
             guard !Task.isCancelled, let self else { return }
-            let value = self.totalMailUnread
+            let value = forceValue ?? self.totalMailUnread
             if #available(iOS 16.0, *) {
                 try? await UNUserNotificationCenter.current().setBadgeCount(value)
             } else {
                 UIApplication.shared.applicationIconBadgeNumber = value
             }
-            SouveraLog.write("Badge", "app icon badge -> total=\(value) value=\(value)")
+            SouveraLog.write("Badge", "app icon badge -> value=\(value)")
         }
     }
 
     /// Öffentlicher Einstieg (z. B. nach Erteilung der Notifications-
     /// Berechtigung), um den Schalter neu einzulesen und das Badge zu setzen.
     func refreshNow() {
-        refreshBadgeSetting()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
+            if accounts.isEmpty {
+                // Frische Installation / alle Konten abgemeldet: der alte
+                // Badge-Stand überlebt das App-Löschen im OS und würde sonst
+                // fälschlich weiter angezeigt -> explizit auf 0 setzen.
+                self.applyAppIconBadge(forceValue: 0)
+            } else {
+                self.refreshBadgeSetting()
+            }
+        }
     }
 }
