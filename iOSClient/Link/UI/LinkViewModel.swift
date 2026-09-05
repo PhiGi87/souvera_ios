@@ -15,6 +15,9 @@ extension Notification.Name {
     static let linkCallStateChanged = Notification.Name("SouveraLinkCallStateChanged")
     /// Posted with the total number of unread messages (Link tab badge).
     static let linkUnreadChanged = Notification.Name("SouveraLinkUnreadChanged")
+    /// Vordergrund-Auffrischung der Konversationsliste (LinkBadgeMonitor):
+    /// List + Badge in einem loadConversations()-Durchlauf aktualisieren.
+    static let linkConversationsRefreshRequested = Notification.Name("SouveraLinkConversationsRefreshRequested")
 }
 
 /// Loading/content/error state for a Link screen's data.
@@ -69,6 +72,7 @@ final class LinkViewModel: ObservableObject {
     private var deepLinkObserver: NSObjectProtocol?
     private var accountChangeObserver: NSObjectProtocol?
     private var linkRoomsObserver: NSObjectProtocol?
+    private var refreshObserver: NSObjectProtocol?
     /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
     /// Laufende asynchrone Ladungen tragen ihre Generation und verwerfen
     /// veraltete Ergebnisse (sonst überschreibt ein alter Task die Liste
@@ -103,6 +107,16 @@ final class LinkViewModel: ObservableObject {
             forName: .linkRoomsChanged, object: nil, queue: .main
         ) { [weak self] _ in
             self?.loadConversations()
+        }
+        // Vordergrund-Poll des LinkBadgeMonitor: den gelieferten Listenstand
+        // übernehmen (Liste UND Badge aktuell, ohne zweiten Netz-Fetch).
+        refreshObserver = NotificationCenter.default.addObserver(
+            forName: .linkConversationsRefreshRequested, object: nil, queue: .main
+        ) { [weak self] notification in
+            guard let list = notification.object as? [LinkConversation] else { return }
+            Task { @MainActor [weak self] in
+                self?.applyRefreshedConversations(list)
+            }
         }
         // KEIN .linkUnreadChanged-Observer hier: loadConversations() postet
         // selbst .linkUnreadChanged (via postUnreadTotal). Ein Observer darauf
@@ -482,6 +496,29 @@ final class LinkViewModel: ObservableObject {
     /// Gäste-Link für einen öffentlichen Raum (Talk-Muster: {server}/call/{token}).
     func guestURL(for room: LinkConversation) -> String {
         "\(accountBaseUrl())/index.php/call/\(room.token)"
+    }
+
+    /// Übernimmt einen vom LinkBadgeMonitor gelieferten Listenstand (ohne
+    /// zweiten Netz-Fetch); gleiche Logik wie der Netz-Zweig in
+    /// loadConversations (Signatur-Guard gegen identische Updates).
+    func applyRefreshedConversations(_ list: [LinkConversation]) {
+        let sorted = list.sorted { $0.lastActivity > $1.lastActivity }
+        let signature = conversationSignature(sorted)
+        if conversationsSignature != signature {
+            conversationsSignature = signature
+            conversations = .success(sorted)
+        }
+        // Call-Status des geöffneten Raums nachziehen (hasCall) und offene
+        // Räume mit leerem Titel benennen - wie in loadConversations.
+        if let room = currentRoom,
+           let fresh = sorted.first(where: { $0.token == room.token }) {
+            if fresh.hasCall != room.hasCall {
+                currentRoom = fresh
+            }
+            if case let .chat(token, title) = route, token == fresh.token, title.isEmpty {
+                route = .chat(token: token, title: fresh.displayName)
+            }
+        }
     }
 
     /// Signatur der Konversationsliste (Redundanz-Guard gegen identische
@@ -973,6 +1010,9 @@ final class LinkViewModel: ObservableObject {
         }
         if let linkRoomsObserver {
             NotificationCenter.default.removeObserver(linkRoomsObserver)
+        }
+        if let refreshObserver {
+            NotificationCenter.default.removeObserver(refreshObserver)
         }
         let client = signaling
         Task { @MainActor in

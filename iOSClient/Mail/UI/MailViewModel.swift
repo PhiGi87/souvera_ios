@@ -117,10 +117,14 @@ final class MailViewModel: ObservableObject {
     private var mailAccount: MailAccount?
     var currentMailbox: Mailbox?
     private var allMailboxes: [Mailbox] = []
-    /// Account-Schlüssel für Cache/UserDefaults - funktioniert auch VOR der
-    /// Credential-Auflösung (offline) über den aktiven NC-Account.
+    /// Asynchron aufgelöster Fallback-Account-Key (für die Phase VOR
+    /// `applyAccount`, z. B. Cache-First beim Start). Bewusst NICHT über
+    /// `getActiveTableAccount()` synchron gelesen - sync Realm-Reads im
+    /// SwiftUI-Update-Zyklus verursachten 0xdead10cc-Kills.
+    private var fallbackAccountKey: String = ""
+    /// Account-Schlüssel für Cache/UserDefaults - blockiert nie die UI.
     private var cacheAccountKey: String {
-        mailAccount?.account ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+        mailAccount?.account ?? fallbackAccountKey
     }
     private var queryStates: [String: String] = [:]
     private let cacheBannerGate = SouveraCacheBannerGate()
@@ -322,35 +326,44 @@ final class MailViewModel: ObservableObject {
     func start() {
         if imapClient != nil || jmapClient != nil { return }
         startAutoRefresh()
-        // Cache-First SOFORT (synchron, vor der Credential-Auflösung): den
-        // letzten Postfach-/Nachrichten-Stand beim Öffnen anzeigen - kein
-        // ~1s-Spinner und offline-tauglich. Der Live-Load ersetzt ihn.
-        if case .loading = mailboxes,
-           let cached = MailCache.loadMailboxes(account: cacheAccountKey) {
-            let boxes = sortMailboxGroups(filterNonStandardSentFolders(cached.map { mailbox(from: $0) }))
-            applyMailboxes(boxes)
-            openPreferredMailbox(boxes)
-        }
-        Task {
+        // ALLES asynchron (Task statt synchron im SwiftUI-Update-Zyklus):
+        // Der vorherige synchrone Cache-First-Block machte einen SYNC
+        // Realm-Read auf dem Haupt-Thread (Crash 0xdead10cc am 04.09.,
+        // Stack: start -> openPreferredMailbox -> cacheAccountKey ->
+        // getActiveTableAccount -> Realm.init, während die File-Provider-
+        // Extension die geteilte Realm-DB hielt).
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Account-Key ASYNCHRON auflösen (kein sync Realm-Read).
+            self.fallbackAccountKey = await NCManageDatabase.shared.getActiveTableAccountAsync()?.account ?? ""
+            // Cache-First: letzten Postfach-/Nachrichten-Stand sofort
+            // anzeigen - kein Spinner und offline-tauglich. Der Live-Load
+            // ersetzt ihn.
+            if case .loading = self.mailboxes,
+               let cached = MailCache.loadMailboxes(account: self.cacheAccountKey) {
+                let boxes = self.sortMailboxGroups(self.filterNonStandardSentFolders(cached.map { self.mailbox(from: $0) }))
+                self.applyMailboxes(boxes)
+                self.openPreferredMailbox(boxes)
+            }
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
                 // Nur Fehler, wenn KEIN Cache geladen werden konnte - sonst
                 // bleibt der Offline-Stand sichtbar (offlineNotice).
-                if case .loading = mailboxes {
-                    mailboxes = .error(errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
+                if case .loading = self.mailboxes {
+                    self.mailboxes = .error(self.errorText(NSLocalizedString("_mail_credential_failed_", comment: "")))
                 }
-                isInitialLoad = false
+                self.isInitialLoad = false
                 return
             }
-            applyAccount(account)
-            await loadMailboxes()
-            isInitialLoad = false
-            if let pending = pendingDeepLink {
-                pendingDeepLink = nil
-                handleDeepLink(pending)
+            self.applyAccount(account)
+            await self.loadMailboxes()
+            self.isInitialLoad = false
+            if let pending = self.pendingDeepLink {
+                self.pendingDeepLink = nil
+                self.handleDeepLink(pending)
             }
-            await loadAliases()
-            await loadIdentities()
+            await self.loadAliases()
+            await self.loadIdentities()
         }
     }
 

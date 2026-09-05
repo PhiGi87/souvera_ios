@@ -106,7 +106,15 @@ actor LinkOcsApi {
             // mit jeder älteren Seite den Cache überschreiben.
             LinkCache.saveMessages(token: token, raw: Data(body.utf8))
         }
-        return decodeList(body)
+        let messages: [LinkChatMessage] = decodeList(body)
+        // Truncation-Diagnose (Feedback 05.09. "Nachrichten nur mit ..."):
+        // Der Renderer kürzt nicht - vom Server mit "…" gekürzt gelieferte
+        // Texte sichtbar machen (unterscheidet "Server liefert gekürzt"
+        // von "App kürzt").
+        for message in messages where message.message.hasSuffix("…") {
+            CallDebugLog.log("OcsApi", "chat msg \(message.id) server-truncated (\(message.message.count) chars): \(message.message.prefix(200))")
+        }
+        return messages
     }
 
     func sendMessage(token: String, message: String, replyTo: Int64? = nil) async {

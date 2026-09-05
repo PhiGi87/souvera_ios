@@ -624,6 +624,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 track.add(self.localView)
                 self.switchCameraButton?.isHidden = false
             }
+            // Eigenansicht einblenden, sobald der lokale Track da ist: Der
+            // erste layoutTiles()-Durchlauf lief noch mit localTrack == nil
+            // (Track wird lazy erst nach dem Publisher-Handshake erzeugt)
+            // und hatte die Eigenansicht deshalb versteckt.
+            self.layoutTiles()
         }
     }
 
