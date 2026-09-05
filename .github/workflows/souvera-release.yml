@@ -181,6 +181,15 @@ jobs:
           path: ${{ env.DERIVED_DATA }}
           key: souvera-deriveddata-v4-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
 
+      # Der gecachte Clang-Module-Cache ist an die SDK-mtimes des Runners
+      # gebunden, der ihn gebaut hat. Läuft der Restore auf einem ANDEREN
+      # Runner, scheitert der Archive mit "Clang dependency scanner failure:
+      # ... has been modified since the module file ... mtime changed".
+      # Der Module-Cache wird daher nach jedem Restore verworfen und frisch
+      # gebaut (Build-Zeit + einige Minuten, dafür verlässlich).
+      - name: Clear stale Clang module cache
+        run: rm -rf "${{ env.DERIVED_DATA }}/ModuleCache.noindex"
+
       # Downloads the pre-created App Store provisioning profiles (which carry
       # the App Groups capabilities) and writes ExportOptions.plist for manual
       # signing. Must run BEFORE the archive, because the archive signs with
@@ -347,6 +356,11 @@ jobs:
         with:
           path: ${{ env.SIM_DERIVED_DATA }}
           key: souvera-sim-v2-${{ steps.depfingerprint.outputs.key }}-${{ runner.os }}-${{ env.XCODE_VERSION }}
+
+      # Wie im Archive-Job: Modul-Cache nach Restore verwerfen (Runner-
+      # übergreifende SDK-mtime-Abweichung -> "mtime changed" Build-Fail).
+      - name: Clear stale Clang module cache
+        run: rm -rf "${{ env.SIM_DERIVED_DATA }}/ModuleCache.noindex"
 
       - name: Build for simulator
         id: sim-build
