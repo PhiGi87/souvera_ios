@@ -49,8 +49,8 @@ enum SouveraToneSynthesizer {
                 SouveraLog.write("ToneSynthesizer", "tone synthesis failed for \(sound.rawValue)")
             }
         }
-    }
         ensureCallRingbackGenerated()
+    }
 
     // MARK: - Call-Warteton (sanfter Doppel-Chime, loopbar)
 
