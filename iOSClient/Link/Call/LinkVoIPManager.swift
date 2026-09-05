@@ -325,6 +325,20 @@ final class LinkVoIPManager: NSObject {
         }
 
         Task {
+            // Vault-Seeding (VoIP-Kanal): gespeicherte Registrierungen aus
+            // Builds ohne Vault in den Keychain-Vault übernehmen.
+            let tblAccountsForSeed = await NCManageDatabase.shared.getAllTableAccountAsync()
+            for tbl in tblAccountsForSeed {
+                if let id = UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey(tbl.account)),
+                   let sig = UserDefaults.standard.string(forKey: Self.voipDeviceSignatureKey(tbl.account)),
+                   let pk = UserDefaults.standard.string(forKey: Self.voipDevicePublicKeyKey(tbl.account)) {
+                    SouveraPushCredentialVault.record(deviceIdentifier: id,
+                                                      signature: sig,
+                                                      publicKey: pk,
+                                                      account: tbl.account,
+                                                      channel: "voip")
+                }
+            }
             // Token-Hygiene: hat der VoIP-Token gewechselt (Reinstall),
             // werden die alten Registrierungen VOR der neuen abgemeldet -
             // keine Geräte-Leichen.

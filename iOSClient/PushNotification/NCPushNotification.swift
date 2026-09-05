@@ -112,6 +112,10 @@ class NCPushNotification {
     func reconcilePushForActiveAccount() async {
         guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
         let active = activeTbl.account
+        // Vault-Seeding: Registrierungen aus Builds OHNE Credential-Vault
+        // nachtragen. Nur so kann die 409-Selbstheilung auch Alt-Zeilen
+        // löschen (DELETE mit deren historischem Key).
+        seedVaultFromStoredCredentials()
         let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
         // 1. Inaktive Accounts abmelden (nur wenn eine Registrierung existiert).
         var unregisteredAny = false
@@ -143,6 +147,23 @@ class NCPushNotification {
     /// Merker "erfolgreich registriert": Account + gültiger APNs-Token.
     private static func pushRegStateKey(_ account: String) -> String {
         "souvera_push_reg_state_" + account
+    }
+
+    /// Übernimmt die pro Account gespeicherten Geräte-Credentials in den
+    /// Keychain-Vault (idempotent) - macht Registrierungen aus Builds ohne
+    /// Vault für die 409-Selbstheilung nutzbar.
+    private static func seedVaultFromStoredCredentials() {
+        let preferences = NCPreferences()
+        for tbl in NCManageDatabase.shared.getAllTableAccount() {
+            guard let id = preferences.getPushNotificationDeviceIdentifier(account: tbl.account),
+                  let sig = preferences.getPushNotificationDeviceIdentifierSignature(account: tbl.account),
+                  let pk = preferences.getPushNotificationSubscribingPublicKey(account: tbl.account) else { continue }
+            SouveraPushCredentialVault.record(deviceIdentifier: id,
+                                              signature: sig,
+                                              publicKey: pk,
+                                              account: tbl.account,
+                                              channel: "normal")
+        }
     }
 
     /// P68y: Abonniert Push am NC-Server und wiederholt bei -1000

@@ -1181,3 +1181,4 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_settings_mail_focus_reader_desc_" = "Shows an opened email on the iPad as a centered card over a dimmed backdrop.";
 "_mail_select_folder_" = "Select folder";
 "_souvera_fg_tone_" = "Alert tone for new mail in foreground";
+"_mail_refresh_now_" = "Refresh now";

@@ -348,7 +348,7 @@ struct MailView: View {
             // wird.
             let folderWidth = min(320, max(260, geo.size.width / 3))
             HStack(spacing: 0) {
-                MailFolderListView(viewModel: viewModel)
+                MailFolderListView(viewModel: viewModel, sidebarStyle: true)
                     .frame(width: folderWidth)
                 Divider()
                 ZStack {
@@ -514,6 +514,9 @@ struct MailSendBanner: View {
 
 private struct MailFolderListView: View {
     @ObservedObject var viewModel: MailViewModel
+    /// Landscape-Spalte: flacher "Dateien"-Sidebar-Stil statt
+    /// insetGrouped-Karten (Look & Feel wie die iCloud-Drive-Sidebar).
+    var sidebarStyle: Bool = false
     @State private var showScrollTop = false
     @State private var renameTarget: Mailbox?
     @State private var renameText = ""
@@ -534,14 +537,179 @@ private struct MailFolderListView: View {
                 }
                 .padding()
             case let .success(boxes):
-                folderList(boxes)
+                if sidebarStyle {
+                    sidebarContent(boxes)
+                } else {
+                    folderListContent(boxes)
+                }
+            }
+        }
+        .background(sidebarStyle ? Color(.systemGroupedBackground) : Color.clear)
+        .alert(NSLocalizedString("_mail_rename_folder_", comment: ""), isPresented: Binding(
+            get: { renameTarget != nil },
+            set: { if !$0 { renameTarget = nil } }
+        )) {
+            TextField(NSLocalizedString("_mail_folder_name_", comment: ""), text: $renameText)
+            Button(NSLocalizedString("_ok_", comment: "")) {
+                if let target = renameTarget {
+                    let newName = renameText.trimmingCharacters(in: .whitespaces)
+                    if !newName.isEmpty {
+                        Task { await viewModel.renameMailbox(target, to: newName) }
+                    }
+                }
+                renameTarget = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { renameTarget = nil }
+        }
+        .confirmationDialog(
+            NSLocalizedString("_mail_delete_folder_", comment: ""),
+            isPresented: Binding(
+                get: { deleteTarget != nil },
+                set: { if !$0 { deleteTarget = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button(NSLocalizedString("_mail_delete_folder_with_mails_", comment: ""), role: .destructive) {
+                if let target = deleteTarget {
+                    Task { await viewModel.deleteMailbox(target, removeEmails: true) }
+                }
+                deleteTarget = nil
+            }
+            Button(NSLocalizedString("_mail_delete_folder_only_", comment: ""), role: .destructive) {
+                if let target = deleteTarget {
+                    Task { await viewModel.deleteMailbox(target, removeEmails: false) }
+                }
+                deleteTarget = nil
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { deleteTarget = nil }
+        } message: {
+            Text(deleteTarget.map { String(format: NSLocalizedString("_mail_delete_folder_confirm_", comment: ""), $0.displayName) } ?? "")
+        }
+    }
+
+    /// Landscape-Spalte im "Dateien"-Sidebar-Stil: flache Liste auf grauem
+    /// Grund, dezente Sektions-Header mit Collapse-Chevron, aktiver Ordner
+    /// als rundes Highlight, Umbenennen/Löschen per Kontextmenü.
+    private func sidebarContent(_ boxes: [Mailbox]) -> some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2, pinnedViews: []) {
+                    ForEach(groups(boxes)) { group in
+                        sidebarSectionHeader(group)
+                        if !viewModel.collapsedGroupIds.contains(group.id) {
+                            ForEach(visibleRows(for: viewModel.mailboxTree(for: group.folders))) { row in
+                                sidebarRow(row)
+                                    .id(row.id)
+                            }
+                        }
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .padding(.bottom, 24)
+            }
+            .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
+            .overlay(alignment: .bottomTrailing) {
+                if let firstId = firstVisibleRowId(boxes) {
+                    Button {
+                        withAnimation { proxy.scrollTo(firstId, anchor: .top) }
+                    } label: {
+                        Image(systemName: "arrow.up")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: Circle())
+                            .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                            .shadow(color: .black.opacity(0.18), radius: 10, x: 0, y: 4)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 16)
+                    .opacity(showScrollTop ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.25), value: showScrollTop)
+                }
+            }
+            .scrollTopObserver { offset in
+                let visible = offset > 120
+                if visible != showScrollTop {
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        showScrollTop = visible
+                    }
+                }
             }
         }
     }
 
-    @ViewBuilder
-    private func folderList(_ boxes: [Mailbox]) -> some View {
-        folderListContent(boxes)
+    private func sidebarSectionHeader(_ group: FolderGroup) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { toggleGroup(group.id) }
+        } label: {
+            HStack(spacing: 6) {
+                Text(group.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: viewModel.collapsedGroupIds.contains(group.id) ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if group.totalUnread > 0 {
+                    Text("\(group.totalUnread)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func sidebarRow(_ row: VisibleTreeRow) -> some View {
+        let isActive = viewModel.currentMailbox?.id == row.node.mailbox.id
+        return MailboxTreeRowBase(
+            node: row.node,
+            depth: 0,
+            isExpanded: viewModel.expandedMailboxIds.contains(row.node.mailbox.id),
+            showsUnread: true,
+            isActive: isActive,
+            onToggleExpand: {
+                if viewModel.expandedMailboxIds.contains(row.node.mailbox.id) {
+                    viewModel.expandedMailboxIds.remove(row.node.mailbox.id)
+                } else {
+                    viewModel.expandedMailboxIds.insert(row.node.mailbox.id)
+                }
+            },
+            onTap: { viewModel.openMailbox(row.node.mailbox) }
+        )
+        .padding(.leading, CGFloat(row.depth) * 14)
+        .padding(.horizontal, 10)
+        .background {
+            if isActive {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color.primary.opacity(0.10))
+            }
+        }
+        .contextMenu {
+            if row.node.mailbox.mayRename {
+                Button {
+                    renameText = row.node.mailbox.name
+                    renameTarget = row.node.mailbox
+                } label: {
+                    Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
+                }
+            }
+            if row.node.mailbox.mayDelete {
+                Button(role: .destructive) {
+                    deleteTarget = row.node.mailbox
+                } label: {
+                    Label(NSLocalizedString("_mail_delete_folder_", comment: ""), systemImage: "trash")
+                }
+            }
+        }
     }
 
     private func folderListContent(_ boxes: [Mailbox]) -> some View {
@@ -618,46 +786,6 @@ private struct MailFolderListView: View {
                     showScrollTop = visible
                 }
             }
-        }
-        .alert(NSLocalizedString("_mail_rename_folder_", comment: ""), isPresented: Binding(
-            get: { renameTarget != nil },
-            set: { if !$0 { renameTarget = nil } }
-        )) {
-            TextField(NSLocalizedString("_mail_folder_name_", comment: ""), text: $renameText)
-            Button(NSLocalizedString("_ok_", comment: "")) {
-                if let target = renameTarget {
-                    let newName = renameText.trimmingCharacters(in: .whitespaces)
-                    if !newName.isEmpty {
-                        Task { await viewModel.renameMailbox(target, to: newName) }
-                    }
-                }
-                renameTarget = nil
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { renameTarget = nil }
-        }
-        .confirmationDialog(
-            NSLocalizedString("_mail_delete_folder_", comment: ""),
-            isPresented: Binding(
-                get: { deleteTarget != nil },
-                set: { if !$0 { deleteTarget = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(NSLocalizedString("_mail_delete_folder_with_mails_", comment: ""), role: .destructive) {
-                if let target = deleteTarget {
-                    Task { await viewModel.deleteMailbox(target, removeEmails: true) }
-                }
-                deleteTarget = nil
-            }
-            Button(NSLocalizedString("_mail_delete_folder_only_", comment: ""), role: .destructive) {
-                if let target = deleteTarget {
-                    Task { await viewModel.deleteMailbox(target, removeEmails: false) }
-                }
-                deleteTarget = nil
-            }
-            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) { deleteTarget = nil }
-        } message: {
-            Text(deleteTarget.map { String(format: NSLocalizedString("_mail_delete_folder_confirm_", comment: ""), $0.displayName) } ?? "")
         }
         }
     }
@@ -2079,25 +2207,41 @@ struct AutoRefreshRingView: View {
     @ObservedObject var viewModel: MailViewModel
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { _ in
-            if let nextAt = viewModel.nextAutoRefreshAt,
-               let interval = SouveraAutoRefresh.interval, interval > 0 {
-                let remaining = max(0, nextAt.timeIntervalSinceNow)
-                let progress = remaining / interval
-                ZStack {
-                    Circle()
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
-                    Circle()
-                        .trim(from: 0, to: min(1, progress))
-                        .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 1), value: progress)
+        // Antippbar: manueller Voll-Refresh; während des Abrufs läuft ein
+        // Spinner statt des Countdown-Rings.
+        Button {
+            Task { await viewModel.manualRefresh() }
+        } label: {
+            Group {
+                if viewModel.isFetchingMail {
+                    ProgressView()
+                        .frame(width: 18, height: 18)
+                } else {
+                    TimelineView(.periodic(from: .now, by: 1)) { _ in
+                        if let nextAt = viewModel.nextAutoRefreshAt,
+                           let interval = SouveraAutoRefresh.interval, interval > 0 {
+                            let remaining = max(0, nextAt.timeIntervalSinceNow)
+                            let progress = remaining / interval
+                            ZStack {
+                                Circle()
+                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
+                                Circle()
+                                    .trim(from: 0, to: min(1, progress))
+                                    .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                    .rotationEffect(.degrees(-90))
+                                    .animation(.linear(duration: 1), value: progress)
+                            }
+                            .frame(width: 18, height: 18)
+                            .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
+                        }
+                    }
                 }
-                .frame(width: 18, height: 18)
-                .frame(width: 24, height: 24, alignment: .center)
-                .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
             }
+            .frame(width: 44, height: 44, alignment: .center)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityHint(NSLocalizedString("_mail_refresh_now_", comment: ""))
     }
 }
 

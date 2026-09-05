@@ -77,7 +77,19 @@ struct SouveraMailCredentialManager {
             SouveraLog.write("MailCredential", "mint throttled (no stored credential, last mint < 120s)")
             return nil
         }
-        return await mint(account: account, baseUrl: baseUrl, username: username, davPassword: davPassword)
+        // Transiente Mint-Fehler (429/Netzwerk, Log 06.09.: FAILED -> 66 ms
+        // später OK) NICHT sofort als Setup-Fehler melden - bis zu zwei
+        // Retries mit kurzem Backoff, bevor das Mail-Modul aufgibt.
+        for delay in [0.0, 1.0, 3.0] {
+            if delay > 0 {
+                try? await Task.sleep(for: .seconds(delay))
+            }
+            if let account_ = await mint(account: account, baseUrl: baseUrl, username: username, davPassword: davPassword) {
+                return account_
+            }
+            SouveraLog.write("MailCredential", "mint retry scheduled (attempt failed)")
+        }
+        return nil
     }
 
     /// Erneuert die Mail-Credential. WICHTIG: Vor dem Mint wird die
@@ -145,10 +157,6 @@ struct SouveraMailCredentialManager {
         return Date(timeIntervalSince1970: interval)
     }
 
-    private func markMinted(account: String) {
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.keyLastMint + account)
-    }
-
     /// Live-Validierung: Liefert die gespeicherte Credential eine
     /// JMAP-Session MIT Accounts? Nur ein echter 401 gilt als "ungültig" -
     /// Netzfehler/offline melden "gültig", damit ein kurzer Ausfall nicht
@@ -164,12 +172,44 @@ struct SouveraMailCredentialManager {
     }
 
     private func mint(account: String, baseUrl: String, username: String, davPassword: String) async -> MailAccount? {
+        // Single-Flight: VoIP-, Push- und Mail-Pfad minten parallel bei
+        // Account-Wechsel/Start - NUR EIN Mint pro Account läuft wirklich,
+        // alle anderen warten auf dasselbe Ergebnis (jeder Mint entwertet
+        // das vorherige Passwort derselben Beschreibung und erzeugt 429s).
+        await MintFlight.shared.join(account) {
+            await Self.performMint(account: account,
+                                   baseUrl: baseUrl,
+                                   username: username,
+                                   davPassword: davPassword)
+        }
+    }
+
+    /// Serialisiert gleichzeitige Mints pro Account.
+    private actor MintFlight {
+        static let shared = MintFlight()
+        private var running: [String: Task<MailAccount?, Never>] = [:]
+
+        func join(_ account: String, _ op: @escaping @Sendable () async -> MailAccount?) async -> MailAccount? {
+            if let existing = running[account] {
+                SouveraLog.write("MailCredential", "mint single-flight: joining in-flight mint for \(account)")
+                return await existing.value
+            }
+            let task = Task { await op() }
+            running[account] = task
+            let result = await task.value
+            running.removeValue(forKey: account)
+            return result
+        }
+    }
+
+    private static func performMint(account: String, baseUrl: String, username: String, davPassword: String) async -> MailAccount? {
+        let keychain = Keychain(service: service)
         do {
             let combined = try await SouveraMailLoginFlow.fetchCombinedAppPassword(baseUrl: baseUrl, username: username, currentAppPassword: davPassword)
             try? keychain.set(combined.appPassword, key: Self.keyPassword + account)
             try? keychain.set(combined.stalwartId, key: Self.keyStalwartId + account)
             try? keychain.set(combined.loginName, key: Self.keyLoginName + account)
-            markMinted(account: account)
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.keyLastMint + account)
             SouveraLog.write("MailCredential", "mint OK stalwart=\(combined.stalwartId) pwd=…\(Self.suffix(combined.appPassword))")
             return MailAccount(account: account, baseUrl: baseUrl, username: username, loginName: combined.loginName, mailPassword: combined.appPassword, stalwartId: combined.stalwartId)
         } catch {

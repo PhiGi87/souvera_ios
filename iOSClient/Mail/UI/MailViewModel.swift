@@ -1675,6 +1675,15 @@ final class MailViewModel: ObservableObject {
 
     /// Pull-to-refresh: always a full query so read/unread states stay fresh.
     /// Der bestehende Listenstand bleibt während des Ladens sichtbar.
+    /// Manueller Refresh über den antippbaren AutoRefresh-Ring: voller
+    /// Abruf des offenen Ordners + Auto-Refresh-Timer neu starten
+    /// (der Ring läuft sofort wieder von vorne).
+    func manualRefresh() async {
+        lastAutoRefresh = Date()
+        nextAutoRefreshAt = Date().addingTimeInterval(SouveraAutoRefresh.intervalSeconds)
+        await refreshMessages()
+    }
+
     func refreshMessages() async {
         guard let mailbox = currentMailbox else { return }
         if useJmap {
