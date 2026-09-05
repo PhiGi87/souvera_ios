@@ -11,6 +11,8 @@ import WebKit
 
 struct MailView: View {
     @StateObject private var viewModel = MailViewModel()
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
     @State private var showNewFolderSheet = false
@@ -159,6 +161,24 @@ struct MailView: View {
         return false
     }
 
+    // MARK: - iPad Landscape (Ordnerspalte links + Liste rechts)
+
+    /// Split nur auf dem iPad im Landscape (regular horizontal + compact
+    /// vertical); Portrait und iPhone verhalten sich wie bisher.
+    private var isIpadLandscape: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+            && horizontalSizeClass == .regular
+            && verticalSizeClass == .compact
+    }
+
+    /// Fokus-Leser: iPad-Setting, Detail als Karte über abgedunkeltem
+    /// Hintergrund (ganze Display-Breite).
+    private var focusReaderActive: Bool {
+        isIpadLandscape && SouveraMailDisplaySettings.focusReaderEnabled(
+            account: viewModel.accountKey
+        )
+    }
+
     private func blacklistMessage(for messages: [MailMessage]) -> String {
         let addresses = Array(Set(messages.map { $0.fromAddress }
             .filter { !$0.isEmpty }))
@@ -172,7 +192,9 @@ struct MailView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if !isFolders {
+        // iPad-Split: kein Zurück nötig, solange kein Detail offen ist
+        // (Ordnerwahl aktualisiert die Liste in place).
+        if !isFolders && !(isIpadLandscape && !viewModel.route.isDetail) {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: {
                     Image(systemName: "chevron.backward")
@@ -251,7 +273,7 @@ struct MailView: View {
                 }
             }
         }
-        if isFolders {
+        if isFolders || isIpadLandscape {
             ToolbarItem(placement: .topBarLeading) {
                 AutoRefreshRingView(viewModel: viewModel)
             }
@@ -270,6 +292,8 @@ struct MailView: View {
     private var content: some View {
         if searchActive {
             mailSearchField
+        } else if isIpadLandscape {
+            ipadSplitContent
         } else {
             switch viewModel.route {
             case .folders:
@@ -294,6 +318,69 @@ struct MailView: View {
             case .search:
                 mailSearchResults
             }
+        }
+    }
+
+    /// iPad Landscape: Ordnerspalte (~1/3) links, Nachrichtenliste (~2/3)
+    /// rechts. Die Ordnerauswahl aktualisiert die Liste in place (kein Push),
+    /// die Detailansicht liegt als Overlay über der Liste - bzw. als
+    /// Fokus-Leser-Karte über der GESAMTEN Breite.
+    @ViewBuilder
+    private var ipadSplitContent: some View {
+        GeometryReader { geo in
+            // ~1/3 für die Ordnerspalte, mit Minimum, damit sie auf
+            // kleineren iPads nicht zu schmal wird.
+            let folderWidth = max(260, geo.size.width / 3)
+            HStack(spacing: 0) {
+                MailFolderListView(viewModel: viewModel)
+                    .frame(width: folderWidth)
+                Divider()
+                ZStack {
+                    if case .folders = viewModel.route {
+                        // Noch kein Ordner geöffnet: dezenter Platzhalter.
+                        VStack(spacing: 10) {
+                            Image(systemName: "mail.stack")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text(NSLocalizedString("_mail_select_folder_", comment: ""))
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        MailMessageListView(viewModel: viewModel, toolbarActive: false)
+                        if !focusReaderActive, let message = viewModel.route.detailMessage {
+                            MailDetailView(viewModel: viewModel, message: message)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .overlay {
+            // Fokus-Leser: Abdunklung über die GESAMTE Display-Breite
+            // (auch über die Ordnerspalte), Karte zentriert.
+            if focusReaderActive, let message = viewModel.route.detailMessage {
+                focusReaderCard(message)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: viewModel.route.detailMessage?.id)
+    }
+
+    /// Karte im Stil des Web-"Fokus-Leser": zentriertes Karten-Element über
+    /// abgedunkeltem Backdrop; Tap auf den Backdrop schließt die Ansicht.
+    private func focusReaderCard(_ message: MailMessage) -> some View {
+        ZStack {
+            Color.black.opacity(0.72)
+                .ignoresSafeArea()
+                .contentShape(Rectangle())
+                .onTapGesture { viewModel.back() }
+            MailDetailView(viewModel: viewModel, message: message)
+                .frame(maxWidth: 1060, maxHeight: .infinity)
+                .background(Color(.systemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 8)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 32)
         }
     }
 
@@ -642,6 +729,8 @@ private struct MailboxTreeRowBase: View {
     let depth: Int
     let isExpanded: Bool
     var showsUnread: Bool = true
+    /// iPad-Split: aktuell geöffneter Ordner wird hervorgehoben.
+    var isActive: Bool = false
     let onToggleExpand: () -> Void
     let onTap: () -> Void
 
@@ -667,6 +756,8 @@ private struct MailboxTreeRowBase: View {
                         .frame(width: 24)
                     Text(node.mailbox.displayName)
                         .font(.body)
+                        .fontWeight(isActive ? .semibold : .regular)
+                        .foregroundStyle(isActive ? Color(NCBrandColor.shared.customer) : Color.primary)
                     Spacer()
                     if showsUnread {
                         // Immer die EIGENEN Ungelesenen des Ordners zeigen -
@@ -712,6 +803,7 @@ private struct MailboxTreeRow: View {
             node: node,
             depth: depth,
             isExpanded: viewModel.expandedMailboxIds.contains(node.mailbox.id),
+            isActive: viewModel.currentMailbox?.id == node.mailbox.id,
             onToggleExpand: {
                 if viewModel.expandedMailboxIds.contains(node.mailbox.id) {
                     viewModel.expandedMailboxIds.remove(node.mailbox.id)
@@ -1788,7 +1880,7 @@ struct MailComposeView: View {
                                 .split(separator: ",").last.map(String.init)?
                                 .split(separator: ";").last.map(String.init)?
                                 .trimmingCharacters(in: .whitespaces) ?? ""
-                            let found = await ContactSuggestionSource().search(token)
+                            let found = await ContactSuggestionSource().search(token, account: viewModel.accountKey)
                             if !Task.isCancelled {
                                 suggestions = found
                                 activeSuggestionField = kind

@@ -363,6 +363,13 @@ final class LinkVoIPManager: NSObject {
         }
         // 2. Aktiven Account registrieren (nur bei aktivem Link/Talk-Toggle).
         guard SouveraPushToggles.linkTalkEnabled(account: active) else { return }
+        // Churn-Schutz: bereits erfolgreich mit DEMSELben Token registriert?
+        // Dann keine erneute Server+Proxy-Registrierung (nur bei
+        // Zustandsänderung: Account neu, Token-Wechsel, Logout/Merker weg).
+        if UserDefaults.standard.string(forKey: Self.voipRegStateKey(active)) == pushTokenHash {
+            SouveraLog.write("PushVoip", "reconcile skipped for \(active): already registered (state unchanged)")
+            return
+        }
         guard let publicKeyData = NCPreferences().getPushNotificationPublicKey(account: active),
               let devicePublicKey = String(data: publicKeyData, encoding: .utf8) else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP: no device public key for \(activeTbl.urlBase); regular push must register first")
@@ -414,6 +421,8 @@ final class LinkVoIPManager: NSObject {
         if proxyOk {
             nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
             UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
+            // Churn-Merker: komplette Re-Registrierung nur bei Änderung.
+            UserDefaults.standard.set(pushTokenHash, forKey: Self.voipRegStateKey(active))
             SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
         } else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl)")
@@ -423,6 +432,7 @@ final class LinkVoIPManager: NSObject {
     }
 
     private static let voipTokenKey = "souvera_voip_token"
+    private static func voipRegStateKey(_ account: String) -> String { "souvera_voip_reg_state_" + account }
     private static func voipDeviceIdentifierKey(_ account: String) -> String { "souvera_voip_device_identifier_" + account }
     private static func voipDeviceSignatureKey(_ account: String) -> String { "souvera_voip_device_signature_" + account }
     private static func voipDevicePublicKeyKey(_ account: String) -> String { "souvera_voip_device_public_key_" + account }
@@ -431,6 +441,8 @@ final class LinkVoIPManager: NSObject {
     /// (Talk-Muster unsubscribeAccount) - keine toten Zeilen mehr.
     static func unregisterVoipPush(baseUrl: String, username: String, account: String) async {
         let defaults = UserDefaults.standard
+        // Churn-Merker ungültig machen (Re-Registrierung erforderlich).
+        defaults.removeObject(forKey: Self.voipRegStateKey(account))
         let identifier = defaults.string(forKey: voipDeviceIdentifierKey(account))
         let signature = defaults.string(forKey: voipDeviceSignatureKey(account))
         let publicKey = defaults.string(forKey: voipDevicePublicKeyKey(account))

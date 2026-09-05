@@ -158,6 +158,17 @@ struct NCSettingsView: View {
                 }
                 .pickerStyle(.segmented)
             })
+            // Mail-Darstellung (iPad: Fokus-Leser)
+            Section(header: Text(NSLocalizedString("_settings_mail_display_", comment: "")).font(.headline), content: {
+                Toggle(NSLocalizedString("_settings_mail_focus_reader_", comment: ""), isOn: Binding(
+                    get: { SouveraMailDisplaySettings.focusReaderEnabled(account: model.session.account) },
+                    set: { SouveraMailDisplaySettings.setFocusReader($0, account: model.session.account) }
+                ))
+            }, footer: {
+                Text(NSLocalizedString("_settings_mail_focus_reader_desc_", comment: ""))
+                    .font(.footnote)
+            })
+            .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
             // Sprache (In-App-Wechsel, wirkt nach Neustart)
             Section(header: Text(NSLocalizedString("_settings_language_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_language_", comment: ""), selection: Binding(

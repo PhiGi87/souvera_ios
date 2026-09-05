@@ -18,8 +18,16 @@ struct MigrationMultiDomains: View {
 
     var body: some View {
         ZStack {
-            Color(NCBrandColor.shared.customer)
-                .ignoresSafeArea()
+            // Souvera-Markenverlauf (dunkelblau, wie Login/Intro -
+            // SouveraAppearance.gradientLayer): Cyan -> Dunkelindigo.
+            LinearGradient(
+                colors: [
+                    Color(red: 0x2E / 255.0, green: 0x9B / 255.0, blue: 0xD8 / 255.0),
+                    Color(red: 0x2A / 255.0, green: 0x4F / 255.0, blue: 0x9F / 255.0)
+                ],
+                startPoint: .top, endPoint: .bottom
+            )
+            .ignoresSafeArea()
             VStack(spacing: 20) {
                 Spacer()
 

@@ -126,6 +126,8 @@ final class MailViewModel: ObservableObject {
     private var cacheAccountKey: String {
         mailAccount?.account ?? fallbackAccountKey
     }
+    /// Öffentlicher Account-Schlüssel (z. B. für den Empfänger-Verlauf).
+    var accountKey: String { cacheAccountKey }
     private var queryStates: [String: String] = [:]
     private let cacheBannerGate = SouveraCacheBannerGate()
     /// Signatur der Postfachliste (Redundanz-Guard gegen identische
@@ -2406,6 +2408,11 @@ final class MailViewModel: ObservableObject {
                 sendFeedback = MailSendFeedback(
                     success: true,
                     message: NSLocalizedString("_mail_sent_", comment: "")
+                )
+                // Empfänger in den pro-Account-Verlauf aufnehmen (Vorschläge).
+                UsedRecipientStore.record(
+                    account: cacheAccountKey,
+                    emails: outgoing.to + outgoing.cc + outgoing.bcc
                 )
                 composeContext = nil
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(

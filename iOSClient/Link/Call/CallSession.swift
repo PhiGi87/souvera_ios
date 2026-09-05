@@ -168,10 +168,11 @@ final class CallSession: NSObject, HpbSignalingListener {
         // the MCU ignore our publisher.
         await MainActor.run {
             let audio = self.webRtc.createLocalAudioTrack()
-            // "Stiller Anruf" startet lokal stumm (Talk-Standard).
-            audio.isEnabled = !self.silent
+            // "Stiller Anruf" betrifft NUR die Teilnehmer-Benachrichtigung
+            // (joinCall silent-Flag) - das Mikrofon ist immer aktiv.
+            audio.isEnabled = true
             self.localAudio = audio
-            CallDebugLog.log("CallSession", "audio track created, muted=\(self.silent)")
+            CallDebugLog.log("CallSession", "audio track created, muted=false")
             if self.withVideo && !forceAudioOnly {
                 self.createVideoTrackIfNeeded()
             }

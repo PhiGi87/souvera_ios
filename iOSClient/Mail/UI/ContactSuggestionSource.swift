@@ -19,13 +19,19 @@ final class ContactSuggestionSource {
     private let cardDav = CardDavContactSource()
     private let directory = NextcloudDirectorySource()
 
-    /// Debounced search used while typing a recipient. Instance users come
-    /// first, then the CardDAV address book, then device contacts.
-    func search(_ token: String, limit: Int = 6) async -> [RecipientSuggestion] {
+    /// Debounced search used while typing a recipient. Used recipients from
+    /// the per-account history come first, then instance users, the CardDAV
+    /// address book, and finally device contacts.
+    func search(_ token: String, limit: Int = 6, account: String = "") async -> [RecipientSuggestion] {
         let trimmed = token.trimmingCharacters(in: .whitespaces)
         guard trimmed.count >= 3 else { return [] }
 
-        var results = await directory.searchUsers(trimmed, limit: limit)
+        var used: [RecipientSuggestion] = UsedRecipientStore
+            .suggestions(account: account, token: trimmed, limit: limit)
+            .map { RecipientSuggestion(displayName: $0.displayName, email: $0.email) }
+
+        var results = used
+        results += await directory.searchUsers(trimmed, limit: limit)
         results += await cardDav.fetchAllCards(limit: 50).compactMap { card -> RecipientSuggestion? in
             let parsed = CardDavContactSource.parseVcard(card.vcard)
             guard let email = parsed.emails.first else { return nil }

@@ -91,6 +91,9 @@ class NCPushNotification {
 
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy registration OK at \(proxyServerUrl)")
         UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusNormal")
+        // Churn-Merker: komplette Re-Registrierung nur bei Zustandsänderung.
+        UserDefaults.standard.set(NCPreferences().deviceTokenPushNotification,
+                                  forKey: Self.pushRegStateKey(account))
         SouveraLog.write("Push", "proxy registration OK \(proxyServerUrl)")
 
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
@@ -122,8 +125,22 @@ class NCPushNotification {
         if unregisteredAny {
             try? await Task.sleep(for: .seconds(1))
         }
-        // 3. Aktiven Account registrieren.
+        // 3. Aktiven Account registrieren - aber NUR bei Zustandsänderung
+        //    (Account neu, APNs-Token gewechselt oder vorheriger Lauf
+        //    fehlgeschlagen). Sonst läuft bei jedem App-Start die komplette
+        //    Server+Proxy-Registrierung (Churn -> Stale-Zeilen-Gefahr).
+        let apnsToken = NCPreferences().deviceTokenPushNotification
+        if !apnsToken.isEmpty,
+           UserDefaults.standard.string(forKey: Self.pushRegStateKey(active)) == apnsToken {
+            SouveraLog.write("Push", "reconcile skipped for \(active): already registered (state unchanged)")
+            return
+        }
         await subscribingNextcloudServerPushNotification(account: activeTbl.account, urlBase: activeTbl.urlBase)
+    }
+
+    /// Merker "erfolgreich registriert": Account + gültiger APNs-Token.
+    private static func pushRegStateKey(_ account: String) -> String {
+        "souvera_push_reg_state_" + account
     }
 
     /// P68y: Abonniert Push am NC-Server und wiederholt bei -1000
@@ -172,6 +189,9 @@ class NCPushNotification {
 
     func unsubscribingNextcloudServerPushNotification(account: String, urlBase: String) async {
         let preferences = NCPreferences()
+        // Churn-Merker ungültig machen: nach Abmeldung muss der Account
+        // beim nächsten Mal vollständig neu registriert werden.
+        UserDefaults.standard.removeObject(forKey: Self.pushRegStateKey(account))
         guard let deviceIdentifier = preferences.getPushNotificationDeviceIdentifier(account: account),
               let signature = preferences.getPushNotificationDeviceIdentifierSignature(account: account),
               let subscribingPublicKey = preferences.getPushNotificationSubscribingPublicKey(account: account) else {
@@ -243,6 +263,10 @@ class NCPushNotification {
                                     SouveraLog.write("Push", "link push received (fg/bg) app=\(app) nid=\(nid ?? -1) - refreshing conversations")
                                     NotificationCenter.default.post(name: .linkConversationsReloadRequested, object: nil)
                                 }
+                                // Vordergrund: iOS spielt keinen System-Sound -
+                                // dezenter In-App-Hinweiston (.ambient, respektiert
+                                // den Klingelschalter).
+                                SouveraForegroundTone.shared.playIfForeground()
                             }
                         } else {
                             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Failed to convert JSON data dictionary.")

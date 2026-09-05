@@ -829,7 +829,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_link_start_conversation_"     = "Start conversation";
 "_link_no_conversations_"       = "No conversations yet";
 "_link_search_people_"          = "Search people";
-"_link_message_"                = "Message";"_push_event_title_"              = "Event: %@";
+"_link_message_"                = "Message";
+"_push_event_title_"              = "Event: %@";
 
 "_link_incoming_call_"          = "Incoming call";
 "_mail_"                        = "Mail";
@@ -838,9 +839,13 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_subject_"                = "Subject";
 "_mail_send_"                   = "Send";
 "_mail_no_subject_"             = "(no subject)";
-"_mail_yesterday_"              = "Yesterday";"_mail_deep_link_missing_"        = "Mail no longer exists";
+"_mail_yesterday_"              = "Yesterday";
+"_mail_deep_link_missing_"        = "Mail no longer exists";
 
-"_mail_credential_failed_"      = "Could not set up mail. Please try again.";"_mail_loading_"                 = "Loading mailbox…";"_mail_deep_link_failed_"          = "Could not load the mail";"_mail_fetching_"                  = "Fetching mail…";
+"_mail_credential_failed_"      = "Could not set up mail. Please try again.";
+"_mail_loading_"                 = "Loading mailbox…";
+"_mail_deep_link_failed_"          = "Could not load the mail";
+"_mail_fetching_"                  = "Fetching mail…";
 
 
 
@@ -885,7 +890,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_sending_"                 = "Sending email…";
 "_link_upload_failed_"            = "File upload failed. Please try again.";
 "_calendar_join_video_call_"      = "Join video call";
-"_settings_diagnostics_"          = "Diagnostics";"_settings_about_app_"            = "About the app";
+"_settings_diagnostics_"          = "Diagnostics";
+"_settings_about_app_"            = "About the app";
 
 "_settings_logs_"                 = "Share logs";
 "_settings_logs_confirm_title_"   = "Send logs to Host-On?";
@@ -996,7 +1002,17 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_shield_release_only_"         = "Deliver only";
 "_shield_release_whitelist_"    = "Deliver and add sender to whitelist";
 "_shield_released_whitelisted_" = "Delivered and sender added to the whitelist";
-"_link_video_call_"               = "Video call";"_link_scroll_bottom_"             = "Jump to newest messages";"_link_new_messages_"              = "New messages";"_link_share_message_"             = "Share…";"_link_react_message_"             = "React…";"_link_attach_photos_"             = "Photos";"_about_version_"                 = "Version %@ (%@)";"_about_based_on_"                = "This app is based on the Nextcloud iOS client and was modified by Host-On Service Provider GmbH. It is not an official Nextcloud GmbH application.";"_about_gpl_part_"                = "Parts of this application are licensed under the GNU General Public License Version 3 (GPLv3).";"_about_licenses_"                = "Open source licenses";"_about_source_"                  = "Source code";
+"_link_video_call_"               = "Video call";
+"_link_scroll_bottom_"             = "Jump to newest messages";
+"_link_new_messages_"              = "New messages";
+"_link_share_message_"             = "Share…";
+"_link_react_message_"             = "React…";
+"_link_attach_photos_"             = "Photos";
+"_about_version_"                 = "Version %@ (%@)";
+"_about_based_on_"                = "This app is based on the Nextcloud iOS client and was modified by Host-On Service Provider GmbH. It is not an official Nextcloud GmbH application.";
+"_about_gpl_part_"                = "Parts of this application are licensed under the GNU General Public License Version 3 (GPLv3).";
+"_about_licenses_"                = "Open source licenses";
+"_about_source_"                  = "Source code";
 
 
 
@@ -1007,7 +1023,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 
 
 
-"_link_decline_"                  = "Decline";"_link_call_minimize_"              = "Minimize";
+"_link_decline_"                  = "Decline";
+"_link_call_minimize_"              = "Minimize";
 
 "_link_accept_"                   = "Accept";
 "_qr_code_"                       = "QR code login";
@@ -1159,3 +1176,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_account_logout_"            = "Log out";
 "_account_logout_confirm_"    = "Do you want to log out of this account?";
 "_settings_per_account_"        = "Per account";
+"_settings_mail_display_" = "Mail display";
+"_settings_mail_focus_reader_" = "Focus reader (iPad)";
+"_settings_mail_focus_reader_desc_" = "Shows an opened email on the iPad as a centered card over a dimmed backdrop.";
+"_mail_select_folder_" = "Select folder";
+"_souvera_fg_tone_" = "Alert tone for new mail in foreground";

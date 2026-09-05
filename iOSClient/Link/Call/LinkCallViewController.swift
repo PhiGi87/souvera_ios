@@ -180,11 +180,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// dem Berechtigungs-Flow).
     private func applyMuteStateOnly() {
         videoButton?.setImage(UIImage(systemName: isVideoOn ? "video.fill" : "video.slash.fill"), for: .normal)
-        if silent {
-            isMuted = true
-            session?.setMuted(true)
-            muteButton?.setImage(UIImage(systemName: "mic.slash.fill"), for: .normal)
-        }
+        // "Stiller Anruf" (silent) wirkt nur auf die Teilnehmer-Benachrichtigung.
+        // Das Mikrofon ist beim Start immer aktiv - kein erzwungenes Mute.
     }
 
     private func showPermissionDeniedHint() {

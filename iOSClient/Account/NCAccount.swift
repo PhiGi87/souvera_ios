@@ -183,6 +183,7 @@ class NCAccount: NSObject {
         // Offline-Caches dieses Kontos löschen (Mail, Link, Kalender-Blobs).
         MailCache.removeAccount(account: account)
         LinkCache.removeAccount(account: account)
+        UsedRecipientStore.removeAccount(account: account)
         // Badge-Zähler dieses Kontos entfernen (Mehr-/App-Icon-Badge).
         await SouveraBadgeStore.shared.removeAccount(account: account)
         // Remove session in NextcloudKit
