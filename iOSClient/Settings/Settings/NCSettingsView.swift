@@ -159,11 +159,13 @@ struct NCSettingsView: View {
                 .pickerStyle(.segmented)
             })
             // Mail-Darstellung (iPad: Fokus-Leser)
-            Section(header: Text(NSLocalizedString("_settings_mail_display_", comment: "")).font(.headline), content: {
+            Section(content: {
                 Toggle(NSLocalizedString("_settings_mail_focus_reader_", comment: ""), isOn: Binding(
                     get: { SouveraMailDisplaySettings.focusReaderEnabled(account: model.session.account) },
                     set: { SouveraMailDisplaySettings.setFocusReader($0, account: model.session.account) }
                 ))
+            }, header: {
+                Text(NSLocalizedString("_settings_mail_display_", comment: "")).font(.headline)
             }, footer: {
                 Text(NSLocalizedString("_settings_mail_focus_reader_desc_", comment: ""))
                     .font(.footnote)
