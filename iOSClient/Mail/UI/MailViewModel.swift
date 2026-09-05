@@ -1054,6 +1054,10 @@ final class MailViewModel: ObservableObject {
         hasMoreMessages = false
         isLoadingMore = false
         prefetchGeneration += 1
+        // Overlay "Mail-Abruf läuft…" sofort zeigen, wenn dieser Ordner
+        // noch keinen Cache hat - auch wenn der Sync kurz in der
+        // In-Flight-Queue hängt (früher: Overlay fehl komplett).
+        isFetchingMail = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id)?.emails.isEmpty != false
         Task { await syncMessages() }
     }
 
@@ -1134,8 +1138,13 @@ final class MailViewModel: ObservableObject {
         mailboxSyncInFlight = true
         defer {
             mailboxSyncInFlight = false
-            if mailboxSyncQueued, listGeneration == generation {
+            if mailboxSyncQueued {
                 mailboxSyncQueued = false
+                // Unbedingt nachziehen - AUCH wenn sich die Generation
+                // geändert hat (Ordnerwechsel während des laufenden Syncs).
+                // Der alte Vergleich listGeneration == generation hat die
+                // vorgemerkte Sync-Auslösung verworfen -> die Liste blieb
+                // leer (kein Abruf, kein Overlay) bis zum Modulwechsel.
                 Task { [weak self] in await self?.refreshMessages() }
             }
         }

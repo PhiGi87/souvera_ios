@@ -1136,12 +1136,13 @@ struct LinkChatView: View {
                 // Ende), bevor die Liste sichtbar wird - kein sichtbares
                 // Scrollen beim Raumeintritt.
                 .defaultScrollAnchor(.bottom)
-                .overlay(alignment: .bottom) {
+                .overlay(alignment: .bottomTrailing) {
                     // "Zu den neuesten Nachrichten"-Button (Design-Pendant
                     // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
                     // Nachrichten hochgescrollt ist.
                     if let lastId = items.last?.id {
                         scrollBottomButton(proxy: proxy, lastId: lastId)
+                            .padding(.trailing, 16)
                             .padding(.bottom, 16)
                             .opacity(showScrollBottom ? 1 : 0)
                             .animation(.easeInOut(duration: 0.25), value: showScrollBottom)

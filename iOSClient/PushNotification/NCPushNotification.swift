@@ -81,7 +81,9 @@ class NCPushNotification {
                                                                  pushToken: normalToken,
                                                                  deviceIdentifier: deviceIdentifier,
                                                                  signature: signature,
-                                                                 publicKey: subscribingPublicKey)
+                                                                 publicKey: subscribingPublicKey,
+                                                                 account: account,
+                                                                 channel: "normal")
         guard proxyOk else {
             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy registration FAILED at \(proxyServerUrl)")
             UserDefaults.standard.set("failed proxy \(Date())", forKey: "SouveraPushRegStatusNormal")
@@ -196,6 +198,19 @@ class NCPushNotification {
               let signature = preferences.getPushNotificationDeviceIdentifierSignature(account: account),
               let subscribingPublicKey = preferences.getPushNotificationSubscribingPublicKey(account: account) else {
             nkLog(tag: self.global.logTagPN, emoji: .debug, message: "Push deregistration skipped for \(urlBase): no active push subscription found")
+            // Keine gespeicherte Subscription - trotzdem Vault-Einträge
+            // dieses Accounts räumen (z. B. nach DB-Reset/Reinstall), damit
+            // am Proxy keine Leichen des Geräts zurückbleiben.
+            let proxyServerUrl = NCBrandOptions.shared.pushNotificationServerProxy
+            for entry in SouveraPushCredentialVault.all() where entry.account == account {
+                _ = await SouveraPushRegistrar.unregisterAtProxy(
+                    proxyServerUrl: proxyServerUrl,
+                    deviceIdentifier: entry.deviceIdentifier,
+                    signature: entry.signature,
+                    publicKey: entry.publicKey,
+                    channel: entry.channel
+                )
+            }
             return
         }
 
@@ -234,8 +249,24 @@ class NCPushNotification {
 
         if responseProxy.error == .success {
             nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy deregistration OK at \(proxyServerUrl)")
+            SouveraPushCredentialVault.remove(deviceIdentifier: deviceIdentifier, channel: "normal")
         } else {
             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Push proxy deregistration FAILED at \(proxyServerUrl), status \(responseProxy.error.errorCode): \(responseProxy.error.errorDescription)")
+            // NCK-DELETE fehlgeschlagen: best-effort über den eigenen
+            // Registrar + historische Vault-Keys (dieselben Endpunkte),
+            // damit beim Logout keine stale Zeilen zurückbleiben.
+            _ = await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxyServerUrl,
+                                                             deviceIdentifier: deviceIdentifier,
+                                                             signature: signature,
+                                                             publicKey: subscribingPublicKey,
+                                                             channel: "normal")
+            for entry in SouveraPushCredentialVault.all() where entry.deviceIdentifier == deviceIdentifier {
+                _ = await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxyServerUrl,
+                                                                 deviceIdentifier: entry.deviceIdentifier,
+                                                                 signature: entry.signature,
+                                                                 publicKey: entry.publicKey,
+                                                                 channel: entry.channel)
+            }
         }
     }
 

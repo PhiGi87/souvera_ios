@@ -108,15 +108,18 @@ enum SouveraPushRegistrar {
 
     /// Meldet ein Gerät am Push-Proxy ab (DELETE /devices) - Talk-Muster
     /// (unsubscribeAccount), hält die Geräteliste sauber (keine toten
-    /// Token-Zeilen mehr).
+    /// Token-Zeilen mehr). Rückgabe: true bei 2xx; bei Erfolg wird der
+    /// Eintrag aus dem Credential-Vault entfernt.
+    @discardableResult
     static func unregisterAtProxy(proxyServerUrl: String,
                                   deviceIdentifier: String,
                                   signature: String,
-                                  publicKey: String) async {
+                                  publicKey: String,
+                                  channel: String = "") async -> Bool {
         let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(trimmed)/devices?format=json") else {
             SouveraLog.write("PushProxy", "unregister invalid proxy URL \(proxyServerUrl)")
-            return
+            return false
         }
         var req = URLRequest(url: url)
         req.httpMethod = "DELETE"
@@ -136,6 +139,34 @@ enum SouveraPushRegistrar {
         // deviceIdentifier (Hash) mitloggen, damit die Server-Admin-Seite
         // die ggf. stale Gerätezeile am Proxy eindeutig identifizieren kann.
         SouveraLog.write("PushProxy", "unregister \(trimmed) -> http \(status) deviceId=\(deviceIdentifier)")
+        let ok = (200..<300).contains(status)
+        if ok, !channel.isEmpty {
+            SouveraPushCredentialVault.remove(deviceIdentifier: deviceIdentifier, channel: channel)
+        }
+        return ok
+    }
+
+    /// 409-Selbstheilung: DELETE für jede historische Registrierung dieses
+    /// Geräts (Credential-Vault, überlebt Logout/Reinstall) mit DESSEN
+    /// eigenem Key - danach sind die stale Zeilen weg und der POST kann
+    /// beim Retry durchlaufen. Kein manueller Server-Cleanup mehr nötig.
+    private static func healProxyConflicts(proxyServerUrl: String) async {
+        let entries = SouveraPushCredentialVault.all()
+        guard !entries.isEmpty else {
+            SouveraLog.write("PushProxy", "409 self-heal: vault is empty - server-side cleanup still required")
+            return
+        }
+        SouveraLog.write("PushProxy", "409 self-heal: trying \(entries.count) stored registrations")
+        for entry in entries {
+            let ok = await unregisterAtProxy(proxyServerUrl: proxyServerUrl,
+                                             deviceIdentifier: entry.deviceIdentifier,
+                                             signature: entry.signature,
+                                             publicKey: entry.publicKey,
+                                             channel: entry.channel)
+            if ok {
+                SouveraLog.write("PushProxy", "409 self-heal: removed stale row deviceId=\(entry.deviceIdentifier) channel=\(entry.channel) account=\(entry.account)")
+            }
+        }
     }
 
     /// Registriert das Gerät direkt am Push-Proxy. Eigene Implementierung
@@ -143,16 +174,59 @@ enum SouveraPushRegistrar {
     /// LEEREM Body - Alamofire/NextcloudKit werten das als Fehler
     /// ("failed proxy 200") und das Gerät bleibt unregistriert. Hier zählt
     /// jeder 2xx-Status als Erfolg; der Body wird zu Diagnose-Zwecken
-    /// geloggt.
+    /// geloggt. Bei 409 (Konflikt mit einer Alt-Registrierung) wird der
+    /// Credential-Vault zur Selbstheilung genutzt und EINMAL neu versucht.
     static func registerAtProxy(proxyServerUrl: String,
                                 pushToken: String,
                                 deviceIdentifier: String,
                                 signature: String,
-                                publicKey: String) async -> Bool {
+                                publicKey: String,
+                                account: String = "",
+                                channel: String = "") async -> Bool {
+        let status = await postRegistration(proxyServerUrl: proxyServerUrl,
+                                            pushToken: pushToken,
+                                            deviceIdentifier: deviceIdentifier,
+                                            signature: signature,
+                                            publicKey: publicKey)
+        if (200..<300).contains(status) {
+            SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
+                                              signature: signature,
+                                              publicKey: publicKey,
+                                              account: account,
+                                              channel: channel)
+            return true
+        }
+        if status == 409 {
+            // 409-Selbstheilung: stale Zeilen mit ihren HISTORISCHEN Keys
+            // löschen (Vault) und einmal neu versuchen.
+            await healProxyConflicts(proxyServerUrl: proxyServerUrl)
+            let retryStatus = await postRegistration(proxyServerUrl: proxyServerUrl,
+                                                     pushToken: pushToken,
+                                                     deviceIdentifier: deviceIdentifier,
+                                                     signature: signature,
+                                                     publicKey: publicKey)
+            if (200..<300).contains(retryStatus) {
+                SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
+                                                  signature: signature,
+                                                  publicKey: publicKey,
+                                                  account: account,
+                                                  channel: channel)
+                return true
+            }
+        }
+        return false
+    }
+
+    /// Führt den POST aus, liefert den HTTP-Status zurück (-1 bei Fehler).
+    private static func postRegistration(proxyServerUrl: String,
+                                         pushToken: String,
+                                         deviceIdentifier: String,
+                                         signature: String,
+                                         publicKey: String) async -> Int {
         let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(trimmed)/devices?format=json") else {
             SouveraLog.write("PushProxy", "invalid proxy URL \(proxyServerUrl)")
-            return false
+            return -1
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
@@ -179,23 +253,17 @@ enum SouveraPushRegistrar {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             let body = String(data: data.prefix(400), encoding: .utf8) ?? ""
             SouveraLog.write("PushProxy", "register \(trimmed) -> http \(status) body=\(body)")
-            if (200..<300).contains(status) {
-                return true
-            }
             // 409 = Gerät/Token existiert am Proxy bereits unter einem ANDEREN
-            // Schlüssel (anderer Account oder Alt-Registrierung). Ein DELETE
-            // mit dem aktuellen (falschen) Schlüssel würde am Proxy mit 403
-            // scheitern und nur Churn erzeugen -> bewusst NICHT löschen.
-            // Die saubere Abmeldung übernimmt der Account-Wechsel-Flow
-            // (unregister des ALTEN Accounts mit DESSEN gespeichertem Key),
-            // bevor der neue Account registriert wird.
+            // Schlüssel (Alt-Registrierung dieses Geräts). Die äußere
+            // registerAtProxy-Logik heilt das über den Credential-Vault
+            // (DELETE mit dem historischen Key) und versucht den POST erneut.
             if status == 409 {
-                SouveraLog.write("PushProxy", "register \(trimmed) -> 409 conflict (device owned by another key); skipped destructive unregister; deviceId=\(deviceIdentifier)")
+                SouveraLog.write("PushProxy", "register \(trimmed) -> 409 conflict (device owned by another key); deviceId=\(deviceIdentifier)")
             }
-            return false
+            return status
         } catch {
             SouveraLog.write("PushProxy", "register \(trimmed) failed: \(error.localizedDescription)")
-            return false
+            return -1
         }
     }
 }

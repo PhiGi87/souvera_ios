@@ -41,6 +41,7 @@
 		563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14318B28514295131706E69F /* SouveraToneSynthesizer.swift */; };
 		AA01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift */; };
 		AA01B2C3D4E5F60718293A0003 /* SouveraForegroundTone.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01B2C3D4E5F60718293A0003 /* SouveraForegroundTone.swift */; };
+		AA01B2C3D4E5F60718293A0004 /* SouveraPushCredentialVault.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB01B2C3D4E5F60718293A0004 /* SouveraPushCredentialVault.swift */; };
 		8BBF0200451A7DAB1BEE4293 /* SouveraCalendarReminderSound.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46682AB7ED862DEA3B62CE4A /* SouveraCalendarReminderSound.swift */; };
 		FEB11DA1AAA34EC2F8C65DD7 /* JmapTypes.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */; };
 		FEB1B862BA9BE6EE5E0D652E /* JmapClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA1ADD802F125C3224605E0 /* JmapClient.swift */; };
@@ -1307,6 +1308,7 @@
 		14318B28514295131706E69F /* SouveraToneSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraToneSynthesizer.swift"; sourceTree = SOURCE_ROOT; };
 		BB01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraMailDisplaySettings.swift"; sourceTree = SOURCE_ROOT; };
 		BB01B2C3D4E5F60718293A0003 /* SouveraForegroundTone.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraForegroundTone.swift"; sourceTree = SOURCE_ROOT; };
+		BB01B2C3D4E5F60718293A0004 /* SouveraPushCredentialVault.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraPushCredentialVault.swift"; sourceTree = SOURCE_ROOT; };
 		46682AB7ED862DEA3B62CE4A /* SouveraCalendarReminderSound.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraCalendarReminderSound.swift"; sourceTree = SOURCE_ROOT; };
 		FEA11FCA1D3544B60B224CC8 /* JmapTypes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapTypes.swift"; sourceTree = SOURCE_ROOT; };
 		FEA1ADD802F125C3224605E0 /* JmapClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/JmapClient.swift"; sourceTree = SOURCE_ROOT; };
@@ -3324,6 +3326,7 @@
 				14318B28514295131706E69F /* SouveraToneSynthesizer.swift */,
 				BB01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift */,
 				BB01B2C3D4E5F60718293A0003 /* SouveraForegroundTone.swift */,
+				BB01B2C3D4E5F60718293A0004 /* SouveraPushCredentialVault.swift */,
 				46682AB7ED862DEA3B62CE4A /* SouveraCalendarReminderSound.swift */,
 				C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */,
 				D53F1C1AA50B4C3DA7DBC3E7 /* SouveraLog.swift */,
@@ -5075,6 +5078,7 @@
 				563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */,
 				AA01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift in Sources */,
 				AA01B2C3D4E5F60718293A0003 /* SouveraForegroundTone.swift in Sources */,
+				AA01B2C3D4E5F60718293A0004 /* SouveraPushCredentialVault.swift in Sources */,
 				72F4FE19C1A93FBA981ED1A0 /* SouveraVideoEncoderProbe.swift in Sources */,
 				15D5034C070F8E2AA4253A6A /* SouveraCenteredDialog.swift in Sources */,
 				A3D201096C4962E5A83184F6 /* SouveraPushToggles.swift in Sources */,

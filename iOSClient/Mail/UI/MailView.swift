@@ -11,8 +11,6 @@ import WebKit
 
 struct MailView: View {
     @StateObject private var viewModel = MailViewModel()
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
     @State private var showNewFolderSheet = false
@@ -22,20 +20,32 @@ struct MailView: View {
 
     var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(navigationTitle)
-                .navigationBarTitleDisplayMode(.inline)
-                .onChange(of: searchQuery) { _, newValue in
-                    scheduleSearch(newValue)
-                }
-                .onChange(of: viewModel.route) { _, newRoute in
-                    // Zurück aus einer Detailansicht, die aus der Suche
-                    // geöffnet wurde: Suchfeld + Ergebnisliste wieder zeigen.
-                    searchActive = (newRoute == .search)
-                }
-                .toolbar {
-                    toolbar
-                }
+            // Landscape-Erkennung über Geometrie (Breite > Höhe): funktioniert
+            // auf iPhone, iPad und Mac - Size-Classes sind unzuverlässig
+            // (iPad ist vertikal IMMER .regular; iPhone landscape sogar
+            // horizontal .compact). Bewusst GeometryReader statt
+            // onGeometryChange, damit auch iOS 17 abgedeckt ist.
+            GeometryReader { geo in
+                content
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .onAppear { updateLandscapeLayout(geo.size) }
+                    .onChange(of: geo.size) { _, newSize in
+                        updateLandscapeLayout(newSize)
+                    }
+            }
+            .navigationTitle(navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .onChange(of: searchQuery) { _, newValue in
+                scheduleSearch(newValue)
+            }
+            .onChange(of: viewModel.route) { _, newRoute in
+                // Zurück aus einer Detailansicht, die aus der Suche
+                // geöffnet wurde: Suchfeld + Ergebnisliste wieder zeigen.
+                searchActive = (newRoute == .search)
+            }
+            .toolbar {
+                toolbar
+            }
         }
         .confirmationDialog(
             NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
@@ -161,22 +171,27 @@ struct MailView: View {
         return false
     }
 
-    // MARK: - iPad Landscape (Ordnerspalte links + Liste rechts)
+    // MARK: - Landscape-Split (Ordnerspalte links + Liste rechts)
 
-    /// Split nur auf dem iPad im Landscape (regular horizontal + compact
-    /// vertical); Portrait und iPhone verhalten sich wie bisher.
-    private var isIpadLandscape: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
-            && horizontalSizeClass == .regular
-            && verticalSizeClass == .compact
+    /// Split bei Breite > Höhe - auf iPhone, iPad UND Mac (Katalyst).
+    /// Geometrie-basiert (siehe GeometryReader im body), live bei Rotation.
+    @State private var landscapeLayout = false
+
+    /// Fokus-Leser: nicht auf dem iPhone (dort bleibt das Detail als
+    /// Overlay über der Listenspalte), sonst bei aktivem Account-Setting.
+    private var focusReaderActive: Bool {
+        landscapeLayout
+            && UIDevice.current.userInterfaceIdiom != .phone
+            && SouveraMailDisplaySettings.focusReaderEnabled(
+                account: viewModel.accountKey
+            )
     }
 
-    /// Fokus-Leser: iPad-Setting, Detail als Karte über abgedunkeltem
-    /// Hintergrund (ganze Display-Breite).
-    private var focusReaderActive: Bool {
-        isIpadLandscape && SouveraMailDisplaySettings.focusReaderEnabled(
-            account: viewModel.accountKey
-        )
+    private func updateLandscapeLayout(_ size: CGSize) {
+        let isLandscape = size.width > size.height
+        guard isLandscape != landscapeLayout else { return }
+        landscapeLayout = isLandscape
+        SouveraLog.write("MailUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height)) focusReader=\(focusReaderActive)")
     }
 
     private func blacklistMessage(for messages: [MailMessage]) -> String {
@@ -194,7 +209,7 @@ struct MailView: View {
     private var toolbar: some ToolbarContent {
         // iPad-Split: kein Zurück nötig, solange kein Detail offen ist
         // (Ordnerwahl aktualisiert die Liste in place).
-        if !isFolders && !(isIpadLandscape && !viewModel.route.isDetail) {
+        if !isFolders && !(landscapeLayout && !viewModel.route.isDetail) {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: {
                     Image(systemName: "chevron.backward")
@@ -273,7 +288,7 @@ struct MailView: View {
                 }
             }
         }
-        if isFolders || isIpadLandscape {
+        if isFolders || landscapeLayout {
             ToolbarItem(placement: .topBarLeading) {
                 AutoRefreshRingView(viewModel: viewModel)
             }
@@ -292,8 +307,8 @@ struct MailView: View {
     private var content: some View {
         if searchActive {
             mailSearchField
-        } else if isIpadLandscape {
-            ipadSplitContent
+        } else if landscapeLayout {
+            landscapeSplitContent
         } else {
             switch viewModel.route {
             case .folders:
@@ -321,16 +336,17 @@ struct MailView: View {
         }
     }
 
-    /// iPad Landscape: Ordnerspalte (~1/3) links, Nachrichtenliste (~2/3)
+    /// Landscape (iPhone/iPad/Mac): Ordnerspalte (~1/3) links, Nachrichtenliste (~2/3)
     /// rechts. Die Ordnerauswahl aktualisiert die Liste in place (kein Push),
     /// die Detailansicht liegt als Overlay über der Liste - bzw. als
     /// Fokus-Leser-Karte über der GESAMTEN Breite.
     @ViewBuilder
-    private var ipadSplitContent: some View {
+    private var landscapeSplitContent: some View {
         GeometryReader { geo in
-            // ~1/3 für die Ordnerspalte, mit Minimum, damit sie auf
-            // kleineren iPads nicht zu schmal wird.
-            let folderWidth = max(260, geo.size.width / 3)
+            // ~1/3 für die Ordnerspalte: Minimum 260, auf dem schmaleren
+            // iPhone-Landscape maximal 320, damit die Liste nicht verdrängt
+            // wird.
+            let folderWidth = min(320, max(260, geo.size.width / 3))
             HStack(spacing: 0) {
                 MailFolderListView(viewModel: viewModel)
                     .frame(width: folderWidth)
@@ -573,7 +589,7 @@ private struct MailFolderListView: View {
         .listStyle(.insetGrouped)
         .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
         .refreshable { await viewModel.loadMailboxes() }
-        .overlay(alignment: .bottom) {
+        .overlay(alignment: .bottomTrailing) {
             let firstRowId = firstVisibleRowId(boxes)
             if let firstId = firstRowId {
                 Button {
@@ -589,6 +605,7 @@ private struct MailFolderListView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
+                .padding(.trailing, 16)
                 .padding(.bottom, 16)
                 .opacity(showScrollTop ? 1 : 0)
                 .animation(.easeInOut(duration: 0.25), value: showScrollTop)
@@ -1066,9 +1083,10 @@ private struct MailMessageListView: View {
             // content) - die Scrollposition bleibt dadurch automatisch
             // erhalten, ohne Anchor-Restore.
             .refreshable { await viewModel.refreshMessages() }
-            .overlay(alignment: .bottom) {
+            .overlay(alignment: .bottomTrailing) {
                 if let firstId = sorted.first?.id {
                     scrollTopButton(proxy: proxy, firstId: firstId)
+                        .padding(.trailing, 16)
                         .padding(.bottom, 84)
                         .opacity(showScrollTop ? 1 : 0)
                         .animation(.easeInOut(duration: 0.25), value: showScrollTop)

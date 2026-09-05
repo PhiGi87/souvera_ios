@@ -417,7 +417,9 @@ final class LinkVoIPManager: NSObject {
                                                                  pushToken: combinedPushToken,
                                                                  deviceIdentifier: deviceIdentifier,
                                                                  signature: signature,
-                                                                 publicKey: subscribingPublicKey)
+                                                                 publicKey: subscribingPublicKey,
+                                                                 account: active,
+                                                                 channel: "voip")
         if proxyOk {
             nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
             UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
@@ -448,10 +450,23 @@ final class LinkVoIPManager: NSObject {
         let publicKey = defaults.string(forKey: voipDevicePublicKeyKey(account))
         let proxy = NCBrandOptions.shared.pushNotificationServerProxy
         if let identifier, let signature, let publicKey, !proxy.isEmpty {
-            await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxy,
-                                                         deviceIdentifier: identifier,
-                                                         signature: signature,
-                                                         publicKey: publicKey)
+            let ok = await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxy,
+                                                                  deviceIdentifier: identifier,
+                                                                  signature: signature,
+                                                                  publicKey: publicKey,
+                                                                  channel: "voip")
+            if !ok {
+                // DELETE mit dem aktuellen Key fehlgeschlagen: Vault-Einträge
+                // dieses Geräts (historische Keys) ebenfalls versuchen - so
+                // verschwinden auch Alt-Zeilen beim Logout.
+                for entry in SouveraPushCredentialVault.all() where entry.deviceIdentifier == identifier {
+                    _ = await SouveraPushRegistrar.unregisterAtProxy(proxyServerUrl: proxy,
+                                                                     deviceIdentifier: entry.deviceIdentifier,
+                                                                     signature: entry.signature,
+                                                                     publicKey: entry.publicKey,
+                                                                     channel: entry.channel)
+                }
+            }
         }
         // NC-Zeile (Talk, Token Y) entfernen - best effort.
         let manager = SouveraMailCredentialManager()
