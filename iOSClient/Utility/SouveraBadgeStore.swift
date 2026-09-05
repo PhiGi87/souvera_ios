@@ -56,9 +56,7 @@ final class SouveraBadgeStore: ObservableObject {
     private func refreshBadgeSetting() {
         // Kein badgeSetting-Gate mehr: iOS respektiert den "Badges"-Schalter
         // des Nutzers (Einstellungen > Mitteilungen) bereits selbst und zeigt
-        // das Badge nur dann an. Die App setzt hier immer den Mail-Zähler;
-        // bei leerem Store wird bewusst NICHT auf 0 gesetzt (kein Flackern
-        // beim App-Start, bevor die Mail gezählt hat).
+        // das Badge nur dann an. Die App setzt hier immer den Mail-Zähler.
         if !self.mailUnread.isEmpty {
             self.applyAppIconBadge()
         }
@@ -125,14 +123,39 @@ final class SouveraBadgeStore: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
-            if accounts.isEmpty {
-                // Frische Installation / alle Konten abgemeldet: der alte
-                // Badge-Stand überlebt das App-Löschen im OS und würde sonst
-                // fälschlich weiter angezeigt -> explizit auf 0 setzen.
+            // Stale-Einträge entfernen: Konten, die nicht mehr in der DB
+            // sind (abgemeldet/gelöscht), dürfen Badge und Mehr-Zähler
+            // nicht weiter befüllen.
+            let known = Set(accounts.map { $0.account })
+            var pruned = false
+            for key in Set(self.mailUnread.keys).union(self.linkUnread.keys) where !known.contains(key) {
+                self.mailUnread.removeValue(forKey: key)
+                self.linkUnread.removeValue(forKey: key)
+                pruned = true
+            }
+            if pruned {
+                self.postTotalsChanged()
+            }
+            if accounts.isEmpty || self.mailUnread.isEmpty {
+                // Frische Installation / alle Konten abgemeldet / Kaltstart
+                // vor dem ersten Sync: der vom OS übernommene Badge-Stand
+                // (überlebt App-Updates!) muss auf 0 - sonst zeigt das Icon
+                // den Stand des Vorgänger-Kontos (Feedback 05.09.). Der
+                // Sync setzt sofort danach den echten Wert.
                 self.applyAppIconBadge(forceValue: 0)
             } else {
-                self.refreshBadgeSetting()
+                self.applyAppIconBadge()
             }
         }
+    }
+
+    /// Entfernt alle Zähler EINES Kontos (Abmelden/löschen) und
+    /// aktualisiert Badge + Mehr-Zähler.
+    func removeAccount(account: String) {
+        guard !account.isEmpty else { return }
+        mailUnread.removeValue(forKey: account)
+        linkUnread.removeValue(forKey: account)
+        applyAppIconBadge()
+        postTotalsChanged()
     }
 }

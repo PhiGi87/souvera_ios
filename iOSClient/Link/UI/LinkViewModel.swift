@@ -18,6 +18,9 @@ extension Notification.Name {
     /// Vordergrund-Auffrischung der Konversationsliste (LinkBadgeMonitor):
     /// List + Badge in einem loadConversations()-Durchlauf aktualisieren.
     static let linkConversationsRefreshRequested = Notification.Name("SouveraLinkConversationsRefreshRequested")
+    /// Push-getriggerter Reload (Talk-Push empfangen): entprelltes
+    /// loadConversations() - Neue Mails erscheinen ~1 s nach dem Senden.
+    static let linkConversationsReloadRequested = Notification.Name("SouveraLinkConversationsReloadRequested")
 }
 
 /// Loading/content/error state for a Link screen's data.
@@ -73,6 +76,9 @@ final class LinkViewModel: ObservableObject {
     private var accountChangeObserver: NSObjectProtocol?
     private var linkRoomsObserver: NSObjectProtocol?
     private var refreshObserver: NSObjectProtocol?
+    private var reloadObserver: NSObjectProtocol?
+    /// Debounce für push-getriggerte Reloads (Mindestabstand 2 s).
+    private var lastPushReload: Date?
     /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
     /// Laufende asynchrone Ladungen tragen ihre Generation und verwerfen
     /// veraltete Ergebnisse (sonst überschreibt ein alter Task die Liste
@@ -116,6 +122,20 @@ final class LinkViewModel: ObservableObject {
             guard let list = notification.object as? [LinkConversation] else { return }
             Task { @MainActor [weak self] in
                 self?.applyRefreshedConversations(list)
+            }
+        }
+        // Push-Trigger: Talk-Push empfangen -> entprellt die Liste frisch
+        // vom Server laden (Mindestabstand 2 s gegen Nachrichten-Bursts).
+        reloadObserver = NotificationCenter.default.addObserver(
+            forName: .linkConversationsReloadRequested, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if let last = self.lastPushReload, Date().timeIntervalSince(last) < 2 {
+                    return
+                }
+                self.lastPushReload = Date()
+                self.loadConversations()
             }
         }
         // KEIN .linkUnreadChanged-Observer hier: loadConversations() postet
@@ -1013,6 +1033,9 @@ final class LinkViewModel: ObservableObject {
         }
         if let refreshObserver {
             NotificationCenter.default.removeObserver(refreshObserver)
+        }
+        if let reloadObserver {
+            NotificationCenter.default.removeObserver(reloadObserver)
         }
         let client = signaling
         Task { @MainActor in

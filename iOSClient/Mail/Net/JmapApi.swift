@@ -150,16 +150,30 @@ final class JmapApi {
 
     // MARK: - Email/get
 
+    /// Schlankes Property-Set für Listen-Syncs: keine Body-Strukturen
+    /// (textBody/htmlBody/bodyValues) - die gehören mehrfach KB pro Mail
+    /// und machten den Erst-Sync langsam. Bodies lädt openMessage on
+    /// demand nach.
+    static let listSyncProperties: [String] = [
+        "id", "blobId", "threadId", "mailboxIds", "keywords", "size",
+        "receivedAt", "messageId", "from", "to", "cc", "replyTo",
+        "subject", "sentAt", "hasAttachment", "preview"
+    ]
+
     func getEmails(
         accountId: String,
         ids: [String],
-        bodyProperties: [String]? = nil
+        bodyProperties: [String]? = nil,
+        properties: [String]? = nil
     ) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]
         args["accountId"] = try resolveAccountArg(accountId)
         args["ids"] = ids
         if let props = bodyProperties {
             args["bodyProperties"] = props
+        }
+        if let props = properties {
+            args["properties"] = props
         }
 
         let resp = try await client.singleCall("Email/get", args: args)

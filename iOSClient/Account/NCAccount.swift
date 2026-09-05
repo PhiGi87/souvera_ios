@@ -150,6 +150,15 @@ class NCAccount: NSObject {
                 }
             }
             try? await FileProviderDomain().ensureDomainRemoved(userId: tblAccount.userId, urlBase: tblAccount.urlBase)
+
+            // App-Passwort X SERVERSEITIG revoken (vorher blieb pro Login
+            // eine Leiche in oc_autotoken zurück - Kernstück der
+            // Passwort-Hygiene). Best-effort: Bei Offline bleibt der
+            // Server-Orphan; NC invalidiert mit dem Token auch dessen
+            // Push-Zeile. Danach erst die lokalen Geheimnisse entfernen.
+            await Self.revokeAppPassword(baseUrl: tblAccount.urlBase,
+                                         username: tblAccount.user,
+                                         password: NCPreferences().getPassword(account: tblAccount.account))
         }
 
         // Remove al local files
@@ -174,6 +183,8 @@ class NCAccount: NSObject {
         // Offline-Caches dieses Kontos löschen (Mail, Link, Kalender-Blobs).
         MailCache.removeAccount(account: account)
         LinkCache.removeAccount(account: account)
+        // Badge-Zähler dieses Kontos entfernen (Mehr-/App-Icon-Badge).
+        await SouveraBadgeStore.shared.removeAccount(account: account)
         // Remove session in NextcloudKit
         NextcloudKit.shared.nkCommonInstance.nksessions.remove(account: account)
         // Remove session
@@ -185,6 +196,9 @@ class NCAccount: NSObject {
         NCPreferences().setPassword(account: account, password: nil)
         NCPreferences().clearAllKeysEndToEnd(account: account)
         NCPreferences().clearAllKeysPushNotification(account: account)
+        // Mail-Credential Y lokal entfernen (serverseitig ersetzt der
+        // nächste Mint dasselbe Passwort - gleiche Beschreibung pro Gerät).
+        SouveraMailCredentialManager().clear(account: account)
         // Remove Account Server in Error
         NCNetworking.shared.removeServerErrorAccount(account)
     }
@@ -195,6 +209,25 @@ class NCAccount: NSObject {
                 await deleteAccount(account)
             }
         }
+    }
+
+    /// Revoked das App-Passwort (X) SERVERSEITIG: ohne diesen Call blieb
+    /// pro Login eine Leiche in oc_authtoken zurück (nur lokal gelöscht).
+    /// NC invalidiert mit dem Token auch dessen Session/Push-Zeile.
+    /// Best-effort: Bei Offline bleibt der Server-Orphan (Admin-Cleanup).
+    static func revokeAppPassword(baseUrl: String, username: String, password: String) async {
+        guard !baseUrl.isEmpty, !username.isEmpty, !password.isEmpty else { return }
+        let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        guard let url = URL(string: "\(root)/ocs/v2.php/core/apppassword?format=json") else { return }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        let raw = "\(username):\(password)"
+        req.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+        req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+        req.setValue("application/json", forHTTPHeaderField: "Accept")
+        let result = try? await URLSession.shared.data(for: req)
+        let status = (result?.1 as? HTTPURLResponse)?.statusCode ?? -1
+        SouveraLog.write("Account", "app password revoked (server) -> http \(status)")
     }
 
     /// P68x: Setzt das Hauptfenster auf den Login-/Intro-Start-Screen zurück,

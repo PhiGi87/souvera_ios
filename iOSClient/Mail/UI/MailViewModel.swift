@@ -1188,23 +1188,45 @@ final class MailViewModel: ObservableObject {
                     var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
                     let refetch = Array(Set(added + dirty))
                     if !refetch.isEmpty {
-                        let fetched = try await api.getEmails(accountId: accId, ids: refetch)
+                        let fetched = try await api.getEmails(accountId: accId, ids: refetch, properties: JmapApi.listSyncProperties)
                         emails = mergeEmails(existing: emails, incoming: fetched)
                         dirtyFlagIds[cacheKey] = nil
                     }
                     let newState = changes.optString("newQueryState") ?? state
-                    guard generation == listGeneration else { return }
-                    queryStates[cacheKey] = newState
-                    // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
-                    // inkrementelle Sync (Snapshot von VOR der Löschung) die
-                    // gelöschten Mails in den Cache (Reappear-Muster).
-                    let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                    MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
-                    messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
-                    pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
-                    hasMoreMessages = pageState.hasMore
-                    JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
-                    return
+                    // Cross-Check: Stalwart (host-on) meldet bei queryChanges
+                    // mitunter State-Advances OHNE added-Einträge (Log 05.09.
+                    // 18:14: state swd0ac -> swh0ac, added leer) - neue Mails
+                    // blieben so dauerhaft unsichtbar. Gegenprobe über die
+                    // Ungelesen-IDs; Abweichung -> in den Voll-Refresh fallen.
+                    var fallThroughToFullRefresh = false
+                    if refetch.isEmpty {
+                        if let unreadResp = try? await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId, limit: 0, notKeyword: "$seen"),
+                           let serverUnread = (unreadResp["ids"] as? [String]) {
+                            let snapshotUnread = Set(emails.filter {
+                                ($0["keywords"] as? [String: Any])?["$seen"] as? Bool != true
+                            }.compactMap { $0.optString("id") })
+                            if Set(serverUnread) != snapshotUnread {
+                                JmapLog.write("sync \(mailbox.name): queryChanges empty but unread set differs (server \(serverUnread.count)/cache \(snapshotUnread.count)) - full refresh")
+                                fallThroughToFullRefresh = true
+                            }
+                        }
+                    }
+                    if !fallThroughToFullRefresh {
+                        guard generation == listGeneration else { return }
+                        queryStates[cacheKey] = newState
+                        // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
+                        // inkrementelle Sync (Snapshot von VOR der Löschung) die
+                        // gelöschten Mails in den Cache (Reappear-Muster).
+                        let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                        MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
+                        messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+                        pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
+                        hasMoreMessages = pageState.hasMore
+                        JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
+                        return
+                    }
+                    // fallThroughToFullRefresh: unten läuft der Voll-Refresh
+                    // (Snapshot bleibt als Basis erhalten).
                 } catch {
                     // Incremental path failed - fall through to a full refresh.
                 }
@@ -1238,7 +1260,11 @@ final class MailViewModel: ObservableObject {
             var lastId: String?
             var hasMore = false
             var state = ""
-            let maxPages = 3
+            // Erst-Sync (kein Cache): nur 1 Seite (100 Mails) - der Rest
+            // kommt über das Scroll-Nachladen. 3 Seiten mit voller
+            // Mail-Struktur machten den ersten Login sehr langsam.
+            // Folgesyncs behalten die 3-Seiten-Abdeckung (30-Tage-Fenster).
+            let maxPages = byId.isEmpty ? 1 : 3
             var oldestDate: Date?
             // Alle vom Server in den geladenen Seiten gelieferten IDs - Basis
             // für den Stale-Abgleich (im Web/anderen Client gelöschte Mails
@@ -1271,7 +1297,7 @@ final class MailViewModel: ObservableObject {
                         break
                     }
                     serverIds.formUnion(ids)
-                    page = try await api.getEmails(accountId: accId, ids: ids)
+                    page = try await api.getEmails(accountId: accId, ids: ids, properties: JmapApi.listSyncProperties)
                 } catch {
                     // Auth-Fehler NIE verschlucken: der äußere Catch stößt
                     // sonst nie die Credential-Recovery an.
@@ -1442,7 +1468,7 @@ final class MailViewModel: ObservableObject {
                     pageState = (lastId: lastId, hasMore: false)
                     return
                 }
-                let page = try await api.getEmails(accountId: accId, ids: ids)
+                let page = try await api.getEmails(accountId: accId, ids: ids, properties: JmapApi.listSyncProperties)
                 let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id)
                 var emails = snapshot?.emails ?? []
                 var known = Set(emails.compactMap { $0.optString("id") })
@@ -2326,7 +2352,7 @@ final class MailViewModel: ObservableObject {
                 searchResults = .success([])
                 return
             }
-            let list = try await api.getEmails(accountId: accId, ids: ids)
+            let list = try await api.getEmails(accountId: accId, ids: ids, properties: JmapApi.listSyncProperties)
             let mapped = list.map {
                 JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: "search", json: $0)
             }

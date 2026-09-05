@@ -111,6 +111,10 @@ final class CallSession: NSObject, HpbSignalingListener {
                 await api.leaveCall(token: token)
             }
         }
+        let ringback = SouveraRingbackPlayer.shared
+        Task { @MainActor in
+            ringback.stop()
+        }
     }
 
     func start() {
@@ -121,6 +125,8 @@ final class CallSession: NSObject, HpbSignalingListener {
             // playAndRecord-Session, sonst bleibt das Mikrofon stumm und der
             // Browser zeigt den Teilnehmer mit durchgestrichenem Mikrofon.
             Self.activateCallAudioSession()
+            // Warteton: sanfter Doppel-Chime, bis ein Teilnehmer beitritt.
+            Task { @MainActor in SouveraRingbackPlayer.shared.start() }
             await startMedia()
         }
     }
@@ -131,6 +137,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         Task {
             CallDebugLog.log("CallSession", "startAudioOnly token=\(token)")
             Self.activateCallAudioSession()
+            // Warteton: sanfter Doppel-Chime, bis ein Teilnehmer beitritt.
+            Task { @MainActor in SouveraRingbackPlayer.shared.start() }
             await startMedia(forceAudioOnly: true)
         }
     }
@@ -519,6 +527,10 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     func onParticipants(sessionIds: [String]) {
+        // Warteton stoppen, sobald ein anderer Teilnehmer im Call ist.
+        if sessionIds.contains(where: { $0 != ownSessionId && !$0.isEmpty }) {
+            Task { @MainActor in SouveraRingbackPlayer.shared.stop() }
+        }
         // Remote-Streams aufräumen, deren Session nicht mehr in der Liste
         // ist (Teilnehmer hat den Call verlassen). Das WebRTC-didRemove-
         // Delegat feuert im MCU-Betrieb unzuverlässig - ohne dieses Cleanup
@@ -768,6 +780,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         if endedOnce { return }
         endedOnce = true
         stopSpeakerPolling()
+        Task { @MainActor in SouveraRingbackPlayer.shared.stop() }
         CallDebugLog.log("CallSession", "hangup start")
         if let peer = peers[ownSessionId] {
             dumpOutboundStats(peer: peer, tag: "final")
@@ -932,6 +945,7 @@ final class CallSession: NSObject, HpbSignalingListener {
     }
 
     private func end() {
+        Task { @MainActor in SouveraRingbackPlayer.shared.stop() }
         callbacks?.onEnded()
         LinkVoIPManager.shared.callSessionDidEnd(self)
     }

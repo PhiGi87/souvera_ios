@@ -45,6 +45,7 @@ class NotificationService: UNNotificationServiceExtension {
             var raw = "keys=[\(userInfo.keys.map { String(describing: $0) }.sorted().joined(separator: ","))]"
             raw += " alertTitle=\((alertDict?["title"] as? String) ?? "")"
             raw += " alertBody=\((alertDict?["body"] as? String) ?? "")"
+            raw += " apsSound=\((alert?["sound"] as? String) ?? (alert?["sound"] != nil ? "<dict>" : "-"))"
             for key in ["emailId", "mailId", "objectId", "id", "nid", "type", "app"] {
                 if let value = userInfo[key] {
                     let text = String(describing: value).prefix(40)
@@ -100,6 +101,11 @@ class NotificationService: UNNotificationServiceExtension {
                                 if pushDefaults?.object(forKey: "souvera_push_link_talk_enabled_" + tableAccount.account) as? Bool == false {
                                     suppressed = true
                                     nkLog(tag: NCGlobal.shared.logTagPN, emoji: .info, message: "Talk push suppressed by user toggle")
+                                } else {
+                                    // App im Hintergrund: der Prozess sieht den
+                                    // Push nicht selbst - Flag für den nächsten
+                                    // Vordergrund (Liste/Badge auffrischen).
+                                    pushDefaults?.set(true, forKey: "souvera_link_refresh_needed")
                                 }
                             }
                             if suppressed {
@@ -174,6 +180,11 @@ class NotificationService: UNNotificationServiceExtension {
                                 }
                                 bestAttemptContent.title = title
                                 bestAttemptContent.body = body
+                                // Sound explizit setzen: Der Proxy-Payload
+                                // enthält keinen sound-Eintrag - ohne diesen
+                                // Wert bleibt die Benachrichtigung stumm
+                                // (Feedback 05.09.). Nur bei echtem Inhalt.
+                                bestAttemptContent.sound = UNNotificationSound.default
                                 if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                     json["account"] = tableAccount.account as AnyObject
                                     pref.set(json, forKey: "NOTIFICATION_DATA")

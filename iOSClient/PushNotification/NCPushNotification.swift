@@ -234,6 +234,15 @@ class NCPushNotification {
                                 removeNotificationWithNotificationId(nid, usingDecryptionKey: privateKey)
                             } else if let deleteAll, deleteAll {
                                 cleanAllNotifications()
+                            } else {
+                                // Talk-Push im laufenden Prozess empfangen:
+                                // Link-Übersicht + Badge sofort auffrischen
+                                // (Realtime ohne 20s-Poll-Wartezeit).
+                                let app = jsonObject["app"] as? String ?? ""
+                                if app == "spreed" || app == "talk" || app == "admin_notification_talk" {
+                                    SouveraLog.write("Push", "link push received (fg/bg) app=\(app) nid=\(nid ?? -1) - refreshing conversations")
+                                    NotificationCenter.default.post(name: .linkConversationsReloadRequested, object: nil)
+                                }
                             }
                         } else {
                             nkLog(tag: self.global.logTagPN, emoji: .error, message: "Failed to convert JSON data dictionary.")

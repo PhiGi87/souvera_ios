@@ -50,6 +50,82 @@ enum SouveraToneSynthesizer {
             }
         }
     }
+        ensureCallRingbackGenerated()
+
+    // MARK: - Call-Warteton (sanfter Doppel-Chime, loopbar)
+
+    static let callRingbackFileName = "souvera-call-ringback.wav"
+
+    static func callRingbackURL() -> URL? {
+        guard let dir = soundsDirectory() else { return nil }
+        return dir.appendingPathComponent(callRingbackFileName)
+    }
+
+    /// Erzeugt den Warteton bei Bedarf (einmalig pro Installation).
+    static func ensureCallRingbackGenerated() {
+        guard let url = callRingbackURL(),
+              !FileManager.default.fileExists(atPath: url.path) else { return }
+        if let data = synthesizeCallRingback() {
+            do {
+                try data.write(to: url, options: .atomic)
+                SouveraLog.write("ToneSynthesizer", "call ringback generated ok")
+            } catch {
+                SouveraLog.write("ToneSynthesizer", "call ringback write failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Sanfter Doppel-Chime (~3 s, loopbar): zwei weiche Strikes mit
+    /// Exponential-Decay, Grundlautstaerke dezent (~0.3) - Talk-artiger
+    /// Warteton fuer laufende Calls ohne Teilnehmer.
+    static func synthesizeCallRingback() -> Data? {
+        let sampleRate = 44100
+        let duration = 3.0
+        let frameCount = Int(Double(sampleRate) * duration)
+        var pcm = [Int16](repeating: 0, count: frameCount)
+
+        // Zwei Strikes (t=0 und t=1.2), je zwei Partialtoene mit Decay.
+        let strikes: [(start: Double, base: Double, overtone: Double)] = [
+            (0.0, 880, 1318.5),
+            (1.2, 784, 1174.7)
+        ]
+
+        for i in 0..<frameCount {
+            let t = Double(i) / Double(sampleRate)
+            var value = 0.0
+            for strike in strikes {
+                let dt = t - strike.start
+                if dt >= 0, dt < 1.1 {
+                    let attack = min(dt / 0.02, 1.0)   // weicher Anschlag
+                    let decay = exp(-3.2 * dt)
+                    value += 0.22 * attack * decay * sin(2 * .pi * strike.base * dt)
+                    value += 0.10 * attack * decay * sin(2 * .pi * strike.overtone * dt)
+                }
+            }
+            let clamped = max(-1.0, min(1.0, value))
+            pcm[i] = Int16(clamped * 32767.0)
+        }
+
+        let dataSize = frameCount * 2
+        var data = Data()
+        data.append(contentsOf: Array("RIFF".utf8))
+        data.append(uint32LE(UInt32(36 + dataSize)))
+        data.append(contentsOf: Array("WAVE".utf8))
+        data.append(contentsOf: Array("fmt ".utf8))
+        data.append(uint32LE(16))
+        data.append(uint16LE(1))          // PCM
+        data.append(uint16LE(1))          // mono
+        data.append(uint32LE(UInt32(sampleRate)))
+        data.append(uint32LE(UInt32(sampleRate * 2)))
+        data.append(uint16LE(2))
+        data.append(uint16LE(16))
+        data.append(contentsOf: Array("data".utf8))
+        data.append(uint32LE(UInt32(dataSize)))
+        for sample in pcm {
+            withUnsafeBytes(of: sample.littleEndian) { data.append(contentsOf: $0) }
+        }
+        return data
+    }
 
     // MARK: - Synthese (16-bit PCM, mono, 44.1 kHz, ~1,2 s)
 

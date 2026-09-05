@@ -114,23 +114,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         SouveraFdDiagnostics.startPeriodicLogging()
         // P66d: In der Extension gesammelte Mail-Push-Payloads aus der
         // App-Gruppe loggen (Diagnose der Server-Feldstruktur).
-        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
-           let payloadLog = groupDefaults.string(forKey: "souvera_mail_push_payload_log"),
-           !payloadLog.isEmpty {
-            for entry in payloadLog.split(separator: "|") where !entry.isEmpty {
-                SouveraLog.write("PushPayloadNSE", String(entry))
-            }
-            groupDefaults.removeObject(forKey: "souvera_mail_push_payload_log")
-        }
-        // P66d: Anreicherungs-Ergebnisse der Extension loggen.
-        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
-           let enrichLog = groupDefaults.string(forKey: "souvera_mail_push_enrich_log"),
-           !enrichLog.isEmpty {
-            for entry in enrichLog.split(separator: "|") where !entry.isEmpty {
-                SouveraLog.write("PushEnrich", String(entry))
-            }
-            groupDefaults.removeObject(forKey: "souvera_mail_push_enrich_log")
-        }
+        dumpNseLogs()
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
             // gesperrtem Gerät); die Call-UI übernimmt der zentrale
@@ -373,6 +357,39 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         SouveraBadgeStore.shared.refreshNow()
         Task { await SouveraBackgroundSync.shared.refreshMailBadge() }
         Task { await SouveraBackgroundSync.shared.refreshLinkBadges() }
+        // NSE-Protokolle (auch zwischen App-Starts gesammelte Pushes) im
+        // Vordergrund dumpen - sonst sind verspätete Pushes unsichtbar.
+        dumpNseLogs()
+        // Link-Refresh-Flag der NSE (App war im Hintergrund): Liste/Badge
+        // beim Vordergrund-Wechsel auffrischen.
+        if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
+           groupDefaults.bool(forKey: "souvera_link_refresh_needed") {
+            groupDefaults.set(false, forKey: "souvera_link_refresh_needed")
+            SouveraLog.write("Push", "link refresh needed (NSE flag) - reloading conversations")
+            NotificationCenter.default.post(name: .linkConversationsReloadRequested, object: nil)
+        }
+    }
+
+    /// NSE-Protokolle (Payloads + Anreicherungen) aus der App-Gruppe ins
+    /// App-Log schreiben. Beim Start UND bei jedem Vordergrund-Wechsel -
+    /// sonst bleiben zwischen zwei Starts empfangene Pushes unsichtbar
+    /// (u. a. verspätet zugestellte Push-Meldungen, Feedback 05.09.).
+    private func dumpNseLogs() {
+        guard let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) else { return }
+        if let payloadLog = groupDefaults.string(forKey: "souvera_mail_push_payload_log"),
+           !payloadLog.isEmpty {
+            for entry in payloadLog.split(separator: "|") where !entry.isEmpty {
+                SouveraLog.write("PushPayloadNSE", String(entry))
+            }
+            groupDefaults.removeObject(forKey: "souvera_mail_push_payload_log")
+        }
+        if let enrichLog = groupDefaults.string(forKey: "souvera_mail_push_enrich_log"),
+           !enrichLog.isEmpty {
+            for entry in enrichLog.split(separator: "|") where !entry.isEmpty {
+                SouveraLog.write("PushEnrich", String(entry))
+            }
+            groupDefaults.removeObject(forKey: "souvera_mail_push_enrich_log")
+        }
     }
 
     /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).
