@@ -115,7 +115,7 @@ class NCPushNotification {
         // Vault-Seeding: Registrierungen aus Builds OHNE Credential-Vault
         // nachtragen. Nur so kann die 409-Selbstheilung auch Alt-Zeilen
         // löschen (DELETE mit deren historischem Key).
-        seedVaultFromStoredCredentials()
+        Self.seedVaultFromStoredCredentials()
         let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
         // 1. Inaktive Accounts abmelden (nur wenn eine Registrierung existiert).
         var unregisteredAny = false

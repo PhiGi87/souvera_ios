@@ -1680,7 +1680,7 @@ final class MailViewModel: ObservableObject {
     /// (der Ring läuft sofort wieder von vorne).
     func manualRefresh() async {
         lastAutoRefresh = Date()
-        nextAutoRefreshAt = Date().addingTimeInterval(SouveraAutoRefresh.intervalSeconds)
+        nextAutoRefreshAt = Date().addingTimeInterval(TimeInterval(SouveraAutoRefresh.intervalSeconds))
         await refreshMessages()
     }
 
