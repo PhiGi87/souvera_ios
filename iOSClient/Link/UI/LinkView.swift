@@ -343,7 +343,14 @@ struct LinkView: View {
     }
 
     private var navigationTitle: String {
-        if case let .chat(_, title) = viewModel.route { return title }
+        if case let .chat(token, title) = viewModel.route {
+            // Echter Raumname, sobald der Raum geladen ist - der Titel aus
+            // Deep-Links ist das Push-Subject ("Gast 1 (Gast) in Test Termin").
+            if let room = viewModel.currentRoom, room.token == token, !room.displayName.isEmpty {
+                return room.displayName
+            }
+            return title
+        }
         return NSLocalizedString("_link_", comment: "")
     }
 

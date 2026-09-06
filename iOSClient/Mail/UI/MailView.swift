@@ -1834,9 +1834,13 @@ private func attachmentChip(_ att: AttachmentMeta) -> some View {
                     .frame(height: max(htmlHeight, 120))
             } else {
                 Text(SouveraLinkOpener.linkified(body.plainText ?? ""))
+                    .foregroundStyle(Color.black)
                     .textSelection(.enabled)
                     .souveraOpenURLAction()
+                    .padding(12)
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .padding(.vertical, 4)
             }
         }
@@ -1853,7 +1857,14 @@ private struct MailHtmlView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
-        webView.isOpaque = false
+        // Option 1 (Apple-Mail-Stil): Mail-Inhalte IMMER auf hellem Grund
+        // rendern - sonst sind schwarze Standard-Schriftfarben im
+        // Dunkel-Modus unsichtbar. Mails mit eigenen Inline-Farben gewinnen
+        // weiterhin (deren Styles überschreiben die Basis-Styles).
+        webView.overrideUserInterfaceStyle = .light
+        webView.isOpaque = true
+        webView.backgroundColor = .white
+        webView.scrollView.backgroundColor = .white
         webView.scrollView.isScrollEnabled = false
         webView.navigationDelegate = context.coordinator
         return webView
@@ -1862,7 +1873,7 @@ private struct MailHtmlView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         guard !context.coordinator.loaded else { return }
         context.coordinator.loaded = true
-        let wrapped = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px;margin:0'>\(html)</body></html>"
+        let wrapped = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px;margin:0;background:#ffffff;color:#000000'>\(html)</body></html>"
         webView.loadHTMLString(wrapped, baseURL: nil)
     }
 

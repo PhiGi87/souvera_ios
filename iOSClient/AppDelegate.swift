@@ -317,24 +317,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let activeAccount = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
         if !account.isEmpty, account != activeAccount {
             // Account-Wechsel, dann Ziel öffnen (Muster aus
-            // nextcloudPushNotificationAction).
-            if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }),
-               let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
-                Task { @MainActor in
-                    await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                        SouveraPushDeepLink.deliver(target)
+            // nextcloudPushNotificationAction). P-A0: Controller per Retry
+            // abwarten (Kaltstart).
+            if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }) {
+                acquireMainController(attempt: 0) { controller in
+                    Task { @MainActor in
+                        await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                            SouveraPushDeepLink.deliver(target)
+                        }
                     }
                 }
                 return
             }
         }
-        if let controller = SceneManager.shared.getControllers().first(where: { $0.account == activeAccount }) {
+        acquireMainController(attempt: 0) { controller in
             apply(controller: controller)
-        } else if let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
-            apply(controller: controller)
-        } else {
-            SouveraPushDeepLink.deliver(target)
         }
     }
 
@@ -560,6 +558,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         return nil
     }
 
+    /// P-A0: Hauptfenster-Controller abwarten - beim Kaltstart per Push-Tap
+    /// ist der rootViewController noch nicht als NCMainTabBarController
+    /// instanziiert ("notification account does not exist", Log 06.09.
+    /// 23:34). Kurzer Retry statt stiller Ablehnung.
+    private func acquireMainController(attempt: Int, ready: @escaping (NCMainTabBarController) -> Void) {
+        if let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
+            ready(controller)
+            return
+        }
+        if attempt < 3 {
+            SouveraLog.write("TapRoute", "main controller not ready, retry \(attempt + 1)/3")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+                self?.acquireMainController(attempt: attempt + 1, ready: ready)
+            }
+            return
+        }
+        SouveraLog.write("TapRoute", "main controller never became ready")
+    }
+
     func nextcloudPushNotificationAction(data: [String: AnyObject]) {
         let account = data["account"] as? String ?? "unavailable"
         let app = data["app"] as? String
@@ -611,12 +628,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         if let controller = SceneManager.shared.getControllers().first(where: { $0.account == account }) {
             SouveraLog.write("TapRoute", "open notification on already-active account \(account)")
             openNotification(controller: controller)
-        } else if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }),
-                  let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
+        } else if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }) {
             SouveraLog.write("TapRoute", "changing account to \(account) for notification routing")
-            Task { @MainActor in
-                await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
-                openNotification(controller: controller)
+            acquireMainController(attempt: 0) { controller in
+                Task { @MainActor in
+                    await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
+                    openNotification(controller: controller)
+                }
             }
         } else {
             SouveraLog.write("TapRoute", "notification account does not exist: \(account)")
