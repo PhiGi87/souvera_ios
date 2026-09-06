@@ -285,6 +285,28 @@ class NCNotification: UITableViewController, NCNotificationCellDelegate {
         let method = action["type"].stringValue
 
         if method == "WEB", var url = action["link"].url {
+            // P-D: Talk-"Chat anzeigen" in der APP öffnen statt im externen
+            // Browser: Raum-Token aus objectId bzw. Link-Pfad (/call/<token>)
+            // und über den bestehenden Deep-Link-Mechanismus routen (wechselt
+            // ggf. den Account und öffnet LinkChatView).
+            if notification.app == NCGlobal.shared.spreedName {
+                var roomToken = notification.objectId.split(separator: "/").first.map(String.init) ?? ""
+                if roomToken.isEmpty, let callIndex = url.pathComponents.firstIndex(of: "call"),
+                   callIndex + 1 < url.pathComponents.count {
+                    roomToken = url.pathComponents[callIndex + 1]
+                }
+                if !roomToken.isEmpty, let appDelegate = UIApplication.shared.delegate as? AppDelegate {
+                    SouveraLog.write("Notification", "chat anzeigen -> in-app room \(roomToken) account=\(session.account)")
+                    appDelegate.souveraOpenDeepLink(
+                        target: .room(token: roomToken,
+                                      title: notification.subject ?? "",
+                                      account: session.account),
+                        tabIndex: 2,
+                        account: session.account
+                    )
+                    return
+                }
+            }
             if notification.app == NCGlobal.shared.spreedName,
                let roomToken = notification.objectId.split(separator: "/").first,
                let talkUrl = URL(string: "nextcloudtalk://open-conversation?server=\(session.urlBase)&user=\(session.userId)&withRoomToken=\(roomToken)"),

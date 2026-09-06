@@ -243,10 +243,59 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                                 account: account)
         } else if identifier.hasPrefix("talk_"), let token = info["token"] as? String, !token.isEmpty {
             let account = info["account"] as? String ?? ""
+            SouveraLog.write("TapRoute", "local talk deep-link account=\(account) token=\(token)")
             souveraOpenDeepLink(target: .room(token: token, title: info["title"] as? String ?? "", account: account), tabIndex: 2,
                                 account: account)
+        } else if let rawSubject = info["subject"] as? String, !rawSubject.isEmpty {
+            // P-A: Tap auf eine Remote-Push mit verschlüsseltem subject.
+            // Die App dekodiert SELBST im Tap-Moment über alle Accounts -
+            // unabhängig vom NSE-Timing (NOTIFICATION_DATA kann beim frühen
+            // Tap fehlen oder veraltet sein -> Tap lief sonst ins Leere,
+            // Feedback 06.09.: "lande nicht im 1. Account/Chat").
+            SouveraLog.write("TapRoute", "remote push tapped (encrypted subject, len=\(rawSubject.count))")
+            var routed = false
+            if let matched = decryptPushForAccounts(rawSubject) {
+                var data = matched.data
+                data["account"] = matched.account as AnyObject
+                let app = data["app"] as? String ?? ""
+                let isDelete = (data["delete"] as? Bool) == true
+                let objectId = data["id"] as? String ?? data["objectId"] as? String ?? ""
+                SouveraLog.write("TapRoute", "decrypted via account=\(matched.account) app=\(app) id=\(objectId) delete=\(isDelete)")
+                if isDelete {
+                    // Nur die Meldung räumen - kein Navigationziel.
+                    let nid = data["nid"] as? Int
+                    if let nid {
+                        UNUserNotificationCenter.current().getDeliveredNotifications { requests in
+                            let stale = requests.filter { request in
+                                guard let subj = request.content.userInfo["subject"] as? String,
+                                      let dec = NCPushNotificationEncryption.shared().decryptPushNotification(subj, withDevicePrivateKey: NCPreferences().getPushNotificationPrivateKey(account: matched.account) ?? Data()),
+                                      let j = (try? JSONSerialization.jsonObject(with: Data(dec.utf8))) as? [String: Any],
+                                      (j["nid"] as? Int) == nid else { return false }
+                                return true
+                            }.map { $0.request.identifier }
+                            UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale)
+                        }
+                    }
+                } else {
+                    nextcloudPushNotificationAction(data: data)
+                    routed = true
+                }
+            } else {
+                SouveraLog.write("TapRoute", "no account key matched the encrypted subject")
+            }
+            if routed {
+                SouveraLog.write("TapRoute", "routed via in-app decrypt")
+            } else if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
+               let data = pref.object(forKey: "NOTIFICATION_DATA") as? [String: AnyObject] {
+                SouveraLog.write("TapRoute", "fallback NOTIFICATION_DATA app=\(data["app"] as? String ?? "-")")
+                nextcloudPushNotificationAction(data: data)
+                pref.set(nil, forKey: "NOTIFICATION_DATA")
+            } else {
+                SouveraLog.write("TapRoute", "no NOTIFICATION_DATA fallback available")
+            }
         } else if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup),
                   let data = pref.object(forKey: "NOTIFICATION_DATA") as? [String: AnyObject] {
+            SouveraLog.write("TapRoute", "NOTIFICATION_DATA branch app=\(data["app"] as? String ?? "-")")
             nextcloudPushNotificationAction(data: data)
             pref.set(nil, forKey: "NOTIFICATION_DATA")
         }
@@ -258,7 +307,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     /// (mit kurzem Verzug, damit die SwiftUI-Roots bereit sind). Ist ein
     /// Account angegeben und nicht aktiv, wird zuerst gewechselt
     /// (Multi-Account: Mail/Termin/Raum im richtigen Account öffnen).
-    private func souveraOpenDeepLink(target: SouveraPushDeepLink.Target, tabIndex: Int, account: String = "") {
+    func souveraOpenDeepLink(target: SouveraPushDeepLink.Target, tabIndex: Int, account: String = "") {
         func apply(controller: NCMainTabBarController) {
             controller.selectedIndex = tabIndex
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -496,6 +545,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
     }
 
+    /// P-A: Versucht das verschlüsselte Push-Subject mit dem Private-Key
+    /// JEDES Accounts zu dekodieren. Der erste Erfolg attributiert den
+    /// Account und liefert das Payload-JSON (app/id/subject/...).
+    private func decryptPushForAccounts(_ subject: String) -> (account: String, data: [String: AnyObject])? {
+        for tbl in NCManageDatabase.shared.getAllTableAccount() {
+            guard let key = NCPreferences().getPushNotificationPrivateKey(account: tbl.account),
+                  let decrypted = NCPushNotificationEncryption.shared().decryptPushNotification(subject, withDevicePrivateKey: key),
+                  let json = (try? JSONSerialization.jsonObject(with: Data(decrypted.utf8))) as? [String: AnyObject] else {
+                continue
+            }
+            return (tbl.account, json)
+        }
+        return nil
+    }
+
     func nextcloudPushNotificationAction(data: [String: AnyObject]) {
         let account = data["account"] as? String ?? "unavailable"
         let app = data["app"] as? String
@@ -514,7 +578,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             } else if app == "spreed" || app == "talk" {
                 // Push-Gruppe Link/Talk aus: nicht navigieren
                 // (Sicherheitsnetz parallel zur Server-Abmeldung).
-                guard SouveraPushToggles.linkTalkEnabled(account: account) else { return }
+                guard SouveraPushToggles.linkTalkEnabled(account: account) else {
+                    SouveraLog.write("TapRoute", "spreed room skipped: link/talk toggle off for \(account)")
+                    return
+                }
+                SouveraLog.write("TapRoute", "spreed room route: account=\(account) id=\(data["id"] as? String ?? "-")")
                 // Talk-Benachrichtigung (Chat/Call): Link-Tab + Raum öffnen.
                 controller.selectedIndex = 2
                 if let token = data["id"] as? String, !token.isEmpty {
@@ -541,14 +609,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
 
         if let controller = SceneManager.shared.getControllers().first(where: { $0.account == account }) {
+            SouveraLog.write("TapRoute", "open notification on already-active account \(account)")
             openNotification(controller: controller)
         } else if let tblAccount = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == account }),
                   let controller = UIApplication.shared.mainAppWindow?.rootViewController as? NCMainTabBarController {
+            SouveraLog.write("TapRoute", "changing account to \(account) for notification routing")
             Task { @MainActor in
                 await NCAccount().changeAccount(tblAccount.account, userProfile: nil, controller: controller)
                 openNotification(controller: controller)
             }
         } else {
+            SouveraLog.write("TapRoute", "notification account does not exist: \(account)")
             let message = String(
                 format: NSLocalizedString("account_does_not_exist", comment: ""),
                 account
