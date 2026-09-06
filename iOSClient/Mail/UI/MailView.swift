@@ -207,9 +207,10 @@ struct MailView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        // iPad-Split: kein Zurück nötig, solange kein Detail offen ist
-        // (Ordnerwahl aktualisiert die Liste in place).
-        if !isFolders && !(landscapeLayout && !viewModel.route.isDetail) {
+        // Landscape + Fokus-Leser-Karte: Zurück bleibt oben links in der
+        // System-Toolbar (über der Ordnerspalte). Klassisches Detail-Overlay:
+        // kein Toolbar-Zurück - der Pfeil sitzt dann über der Listen-Spalte.
+        if !isFolders && (!landscapeLayout || (focusReaderActive && viewModel.route.isDetail)) {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: {
                     Image(systemName: "chevron.backward")
@@ -288,7 +289,9 @@ struct MailView: View {
                 }
             }
         }
-        if isFolders || landscapeLayout {
+        // Landscape: Ring/Suche/Neuer Ordner liegen in der Kopfzeile der
+        // Ordnerspalte (sidebarContent) - nicht in der System-Toolbar.
+        if isFolders {
             ToolbarItem(placement: .topBarLeading) {
                 AutoRefreshRingView(viewModel: viewModel)
             }
@@ -347,8 +350,14 @@ struct MailView: View {
             // iPhone-Landscape maximal 320, damit die Liste nicht verdrängt
             // wird.
             let folderWidth = min(320, max(260, geo.size.width / 3))
+            let detailOpen = viewModel.route.isDetail
             HStack(spacing: 0) {
-                MailFolderListView(viewModel: viewModel, sidebarStyle: true)
+                MailFolderListView(viewModel: viewModel,
+                                   sidebarStyle: true,
+                                   showsHeaderControls: true,
+                                   headerControlsVisible: !(focusReaderActive && detailOpen),
+                                   onSearch: { searchActive = true },
+                                   onNewFolder: { showNewFolderSheet = true })
                     .frame(width: folderWidth)
                 Divider()
                 ZStack {
@@ -365,6 +374,29 @@ struct MailView: View {
                         MailMessageListView(viewModel: viewModel, toolbarActive: false)
                         if !focusReaderActive, let message = viewModel.route.detailMessage {
                             MailDetailView(viewModel: viewModel, message: message)
+                            // Klassisches Detail-Overlay: Zurück oben links
+                            // über der LISTEN-Spalte (nicht über der Ordner-
+                            // spalte; im Fokus-Leser bleibt der Pfeil in der
+                            // System-Toolbar).
+                            VStack {
+                                HStack {
+                                    Button {
+                                        viewModel.back()
+                                    } label: {
+                                        Image(systemName: "chevron.backward")
+                                            .font(.body.weight(.semibold))
+                                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                            .frame(width: 36, height: 36)
+                                            .background(.ultraThinMaterial, in: Circle())
+                                            .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
+                                    }
+                                    .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
+                                    Spacer()
+                                }
+                                .padding(.leading, 12)
+                                .padding(.top, 8)
+                                Spacer()
+                            }
                         }
                     }
                 }
@@ -394,6 +426,12 @@ struct MailView: View {
                 .frame(maxWidth: 1060, maxHeight: .infinity)
                 .background(Color(.systemBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                // Heller Kontrast-Rahmen: hebt die Karte im Dunkelmodus
+                // klar vom abgedunkelten Backdrop ab.
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .strokeBorder(Color(.systemGray3), lineWidth: 1)
+                )
                 .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 8)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 32)
@@ -517,6 +555,13 @@ private struct MailFolderListView: View {
     /// Landscape-Spalte: flacher "Dateien"-Sidebar-Stil statt
     /// insetGrouped-Karten (Look & Feel wie die iCloud-Drive-Sidebar).
     var sidebarStyle: Bool = false
+    /// Landscape: Ring/Suche/Neuer Ordner sitzen in einer Kopfzeile über
+    /// der Spalte (statt in der System-Toolbar).
+    var showsHeaderControls: Bool = false
+    /// Fokus-Leser-Karte offen -> Kopfzeilen-Steuerung komplett verstecken.
+    var headerControlsVisible: Bool = true
+    var onSearch: () -> Void = {}
+    var onNewFolder: () -> Void = {}
     @State private var showScrollTop = false
     @State private var renameTarget: Mailbox?
     @State private var renameText = ""
@@ -594,6 +639,30 @@ private struct MailFolderListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2, pinnedViews: []) {
+                    if showsHeaderControls, headerControlsVisible {
+                        HStack(spacing: 4) {
+                            Spacer()
+                            AutoRefreshRingView(viewModel: viewModel)
+                            Button {
+                                onSearch()
+                            } label: {
+                                Image(systemName: "magnifyingglass")
+                                    .frame(width: 32, height: 32)
+                            }
+                            .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                            Button {
+                                onNewFolder()
+                            } label: {
+                                Image(systemName: "folder.badge.plus")
+                                    .frame(width: 32, height: 32)
+                            }
+                            .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
+                        }
+                        .font(.body)
+                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .padding(.trailing, 6)
+                        .padding(.top, 2)
+                    }
                     ForEach(groups(boxes)) { group in
                         sidebarSectionHeader(group)
                         if !viewModel.collapsedGroupIds.contains(group.id) {

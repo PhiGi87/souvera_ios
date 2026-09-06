@@ -12,6 +12,9 @@ import PhotosUI
 struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @Environment(\.scenePhase) private var scenePhase
+    /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
+    /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
+    @State private var landscapeLayout = false
     @State private var callContext: CallContext?
     @State private var showCallBanner = false
     @State private var returnToCall = false
@@ -44,20 +47,33 @@ struct LinkView: View {
 
         var body: some View {
         NavigationStack {
-            content
-                .navigationTitle(navigationTitle)
-                .navigationBarTitleDisplayMode(.inline)
+            // Landscape-Erkennung über Geometrie (Breite > Höhe) - wie in
+            // MailView; Size-Classes sind auf iPad/iPhone unzuverlässig.
+            GeometryReader { geo in
+                content
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .onAppear { updateLandscapeLayout(geo.size) }
+                    .onChange(of: geo.size) { _, newSize in
+                        updateLandscapeLayout(newSize)
+                    }
+            }
+            .navigationTitle(navigationTitle)
+            .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     if case let .chat(token, title) = viewModel.route {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button {
-                                viewModel.back()
-                            } label: {
-                                Image(systemName: "chevron.backward")
-                                    .frame(width: 28, height: 28)
+                        // Landscape-Split: die Raumliste bleibt links sichtbar -
+                        // kein Zurück-Pfeil nötig.
+                        if !landscapeLayout {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button {
+                                    viewModel.back()
+                                } label: {
+                                    Image(systemName: "chevron.backward")
+                                        .frame(width: 28, height: 28)
+                                }
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                             }
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
                         }
                         ToolbarItem(placement: .topBarTrailing) {
                             Menu {
@@ -333,17 +349,63 @@ struct LinkView: View {
 
     @ViewBuilder
     private var content: some View {
-        switch viewModel.route {
-        case .home:
-            LinkConversationListView(
-                viewModel: viewModel,
-                searchActive: $searchActive,
-                searchQuery: $searchQuery
-            ) { room in
-                callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+        if landscapeLayout {
+            landscapeSplitContent
+        } else {
+            switch viewModel.route {
+            case .home:
+                LinkConversationListView(
+                    viewModel: viewModel,
+                    searchActive: $searchActive,
+                    searchQuery: $searchQuery
+                ) { room in
+                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+                }
+            case let .chat(token, title):
+                LinkChatView(viewModel: viewModel, token: token, title: title)
             }
-        case let .chat(token, title):
-            LinkChatView(viewModel: viewModel, token: token, title: title)
+        }
+    }
+
+    private func updateLandscapeLayout(_ size: CGSize) {
+        let isLandscape = size.width > size.height
+        guard isLandscape != landscapeLayout else { return }
+        landscapeLayout = isLandscape
+        SouveraLog.write("LinkUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height))")
+    }
+
+    /// Landscape-Split: Raum-Übersicht links (~1/3, max. 320 pt auf dem
+    /// iPhone), der gewählte Chat rechts. KEIN Fokus-Leser bei Link - die
+    /// rechte Spalte ist immer die klassische Chat-Ansicht (volle Höhe für
+    /// Eingabezeile/Tastatur).
+    private var landscapeSplitContent: some View {
+        GeometryReader { geo in
+            let roomWidth = min(320, max(260, geo.size.width / 3))
+            HStack(spacing: 0) {
+                LinkConversationListView(
+                    viewModel: viewModel,
+                    searchActive: $searchActive,
+                    searchQuery: $searchQuery
+                ) { room in
+                    callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
+                }
+                .frame(width: roomWidth)
+                Divider()
+                ZStack {
+                    if case let .chat(token, title) = viewModel.route {
+                        LinkChatView(viewModel: viewModel, token: token, title: title)
+                    } else {
+                        VStack(spacing: 10) {
+                            Image(systemName: "bubble.left.and.bubble.right")
+                                .font(.largeTitle)
+                                .foregroundStyle(.secondary)
+                            Text(NSLocalizedString("_link_select_room_", comment: ""))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
     }
 }

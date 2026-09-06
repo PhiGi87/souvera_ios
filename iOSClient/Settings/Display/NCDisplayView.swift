@@ -28,6 +28,8 @@ struct NCDisplayView: View {
                                 .fontWeight(.light)
                                 .frame(width: 50, height: 50)
                         }
+                        .opacity(model.appearanceAutomatic ? 0.35 : 1)
+                        .disabled(model.appearanceAutomatic)
                         .onTapGesture {
                             model.userInterfaceStyle(.light)
                         }
@@ -46,11 +48,16 @@ struct NCDisplayView: View {
                                 .fontWeight(.light)
                                 .frame(width: 50, height: 50)
                         }
+                        .opacity(model.appearanceAutomatic ? 0.35 : 1)
+                        .disabled(model.appearanceAutomatic)
                         .onTapGesture {
                             model.userInterfaceStyle(.dark)
                         }
                         Spacer()
                     }
+                    .accessibilityHint(model.appearanceAutomatic
+                                       ? NSLocalizedString("_use_system_style_", comment: "")
+                                       : "")
                     Divider()
                         .padding(EdgeInsets(top: 0, leading: 0, bottom: 0, trailing: -50))
 

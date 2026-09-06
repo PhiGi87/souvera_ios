@@ -158,19 +158,22 @@ struct NCSettingsView: View {
                 }
                 .pickerStyle(.segmented)
             })
-            // Mail-Darstellung (iPad: Fokus-Leser)
-            Section(content: {
-                Toggle(NSLocalizedString("_settings_mail_focus_reader_", comment: ""), isOn: Binding(
-                    get: { SouveraMailDisplaySettings.focusReaderEnabled(account: model.session.account) },
-                    set: { SouveraMailDisplaySettings.setFocusReader($0, account: model.session.account) }
-                ))
-            }, header: {
-                Text(NSLocalizedString("_settings_mail_display_", comment: "")).font(.headline)
-            }, footer: {
-                Text(NSLocalizedString("_settings_mail_focus_reader_desc_", comment: ""))
-                    .font(.footnote)
-            })
-            .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
+            // Mail-Darstellung (Fokus-Leser) - nur iPad/Mac; auf dem iPhone
+            // existiert die Option nicht.
+            if UIDevice.current.userInterfaceIdiom != .phone {
+                Section(content: {
+                    Toggle(NSLocalizedString("_settings_mail_focus_reader_", comment: ""), isOn: Binding(
+                        get: { SouveraMailDisplaySettings.focusReaderEnabled(account: model.session.account) },
+                        set: { SouveraMailDisplaySettings.setFocusReader($0, account: model.session.account) }
+                    ))
+                }, header: {
+                    Text(NSLocalizedString("_settings_mail_display_", comment: "")).font(.headline)
+                }, footer: {
+                    Text(NSLocalizedString("_settings_mail_focus_reader_desc_", comment: ""))
+                        .font(.footnote)
+                })
+                .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
+            }
             // Sprache (In-App-Wechsel, wirkt nach Neustart)
             Section(header: Text(NSLocalizedString("_settings_language_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_language_", comment: ""), selection: Binding(

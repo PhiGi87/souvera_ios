@@ -187,7 +187,8 @@ enum SouveraPushRegistrar {
                                             pushToken: pushToken,
                                             deviceIdentifier: deviceIdentifier,
                                             signature: signature,
-                                            publicKey: publicKey)
+                                            publicKey: publicKey,
+                                            cloudId: account)
         if (200..<300).contains(status) {
             SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
                                               signature: signature,
@@ -204,7 +205,8 @@ enum SouveraPushRegistrar {
                                                      pushToken: pushToken,
                                                      deviceIdentifier: deviceIdentifier,
                                                      signature: signature,
-                                                     publicKey: publicKey)
+                                                     publicKey: publicKey,
+                                                     cloudId: account)
             if (200..<300).contains(retryStatus) {
                 SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
                                                   signature: signature,
@@ -218,11 +220,16 @@ enum SouveraPushRegistrar {
     }
 
     /// Führt den POST aus, liefert den HTTP-Status zurück (-1 bei Fehler).
+    /// `cloudId` (die Account-Adresse) aktiviert die Server-Seiten-Selbst-
+    /// reinigung: besitzt derselbe pushToken bereits eine Zeile mit anderem
+    /// device_identifier, löscht der Proxy diese selbst und nimmt die neue
+    /// Registrierung an (200) - ohne cloudId antwortet er mit 409.
     private static func postRegistration(proxyServerUrl: String,
                                          pushToken: String,
                                          deviceIdentifier: String,
                                          signature: String,
-                                         publicKey: String) async -> Int {
+                                         publicKey: String,
+                                         cloudId: String) async -> Int {
         let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(trimmed)/devices?format=json") else {
             SouveraLog.write("PushProxy", "invalid proxy URL \(proxyServerUrl)")
@@ -243,9 +250,18 @@ enum SouveraPushRegistrar {
         // PublicKey) enthalten '+', '/', '=' - rohes '+' würde vom
         // Form-Parser als Leerzeichen interpretiert und die Signatur-
         // Prüfung am Proxy scheitert mit HTTP 400.
+        var params: [(String, String)] = [
+            ("pushToken", pushToken),
+            ("deviceIdentifier", deviceIdentifier),
+            ("deviceIdentifierSignature", signature),
+            ("userPublicKey", publicKey)
+        ]
+        if !cloudId.isEmpty {
+            params.append(("cloudId", cloudId))
+        }
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         let form = params
-            .map { "\($0.key)=\($0.value.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.value)" }
+            .map { "\($0.0)=\($0.1.addingPercentEncoding(withAllowedCharacters: allowed) ?? $0.1)" }
             .joined(separator: "&")
         req.httpBody = form.data(using: .utf8)
         do {
