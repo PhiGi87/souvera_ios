@@ -188,7 +188,8 @@ enum SouveraPushRegistrar {
                                             deviceIdentifier: deviceIdentifier,
                                             signature: signature,
                                             publicKey: publicKey,
-                                            cloudId: account)
+                                            cloudId: account,
+                                            channel: channel)
         if (200..<300).contains(status) {
             SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
                                               signature: signature,
@@ -206,7 +207,8 @@ enum SouveraPushRegistrar {
                                                      deviceIdentifier: deviceIdentifier,
                                                      signature: signature,
                                                      publicKey: publicKey,
-                                                     cloudId: account)
+                                                     cloudId: account,
+                                                     channel: channel)
             if (200..<300).contains(retryStatus) {
                 SouveraPushCredentialVault.record(deviceIdentifier: deviceIdentifier,
                                                   signature: signature,
@@ -229,7 +231,12 @@ enum SouveraPushRegistrar {
                                          deviceIdentifier: String,
                                          signature: String,
                                          publicKey: String,
-                                         cloudId: String) async -> Int {
+                                         cloudId: String,
+                                         channel: String = "") async -> Int {
+        // Diagnose: VOLLständiges (Identifier, Token, cloudId)-Paar loggen -
+        // zur Aufklärung der Kanal-Kollision (Normal-/Talk-Zeile).
+        let tokenShape = pushToken.contains(" ") ? "COMBINED" : "raw"
+        SouveraLog.write("PushProxy", "register payload: deviceId=\(deviceIdentifier) token=\(pushToken.prefix(10))… len=\(pushToken.count) [\(tokenShape)] cloudId=\(cloudId.isEmpty ? "-" : cloudId) channel=\(channel.isEmpty ? "?" : channel)")
         let trimmed = proxyServerUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(trimmed)/devices?format=json") else {
             SouveraLog.write("PushProxy", "invalid proxy URL \(proxyServerUrl)")

@@ -379,16 +379,10 @@ final class LinkVoIPManager: NSObject {
     private func reconcileVoipForActiveAccountLocked(proxyServerUrl: String, pushTokenHash: String, combinedPushToken: String) async {
         guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
         let active = activeTbl.account
-        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
-        // 1. Inaktive Accounts mit gespeicherter VoIP-Registrierung abmelden.
-        var unregisteredAny = false
-        for tbl in accounts where tbl.account != active {
-            if UserDefaults.standard.string(forKey: Self.voipDeviceIdentifierKey(tbl.account)) != nil {
-                await Self.unregisterVoipPush(baseUrl: tbl.urlBase, username: tbl.user, account: tbl.account)
-                unregisteredAny = true
-            }
-        }
-        // 2. Aktiven Account registrieren (nur bei aktivem Link/Talk-Toggle).
+        // MULTI-ACCOUNT: Inaktive Accounts werden NICHT mehr abgemeldet -
+        // der Proxy erlaubt mehrere Zeilen pro Push-Token. Beide Accounts
+        // behalten Call-Push dauerhaft.
+        // Aktiven Account registrieren (nur bei aktivem Link/Talk-Toggle).
         guard SouveraPushToggles.linkTalkEnabled(account: active) else { return }
         // Churn-Schutz: bereits erfolgreich mit DEMSELben Token registriert?
         // Dann keine erneute Server+Proxy-Registrierung (nur bei
@@ -410,11 +404,6 @@ final class LinkVoIPManager: NSObject {
               let devicePublicKey = String(data: publicKeyData, encoding: .utf8) else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP: no device public key for \(activeTbl.urlBase); regular push must register first")
             return
-        }
-        // Kurz warten, damit der Proxy das DELETE verarbeitet hat - sonst
-        // kollidiert der neue POST mit dem noch nicht entfernten Gerät.
-        if unregisteredAny {
-            try? await Task.sleep(for: .seconds(1))
         }
         nkLog(tag: global.logTagPN, emoji: .start, message: "Registering Link VoIP push for \(activeTbl.urlBase) via proxy \(proxyServerUrl)")
         // KANAL-TRENNUNG mit ZWEI Servertoken: Die Server-Tabelle dedupliziert
@@ -442,6 +431,15 @@ final class LinkVoIPManager: NSObject {
         }
         nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP Nextcloud registration OK for \(activeTbl.urlBase) (proxyServer=\(proxyServerUrl))")
         SouveraLog.write("PushVoip", "NC registration OK \(activeTbl.urlBase) (via mail credential)")
+        // KANAL-GUARD: Liefert der Server für den Talk-Kanal DENSELBEN
+        // deviceIdentifier wie der Normal-Kanal, würde der Proxy-POST die
+        // Normal-Zeile mit dem kombinierten Token überschreiben (Mail-Push
+        // tot). Dann Talk hier bewusst NICHT am Proxy registrieren.
+        if deviceIdentifier == NCPreferences().getPushNotificationDeviceIdentifier(account: active) {
+            SouveraLog.write("PushVoip", "TALK proxy registration ABORTED: server identifier COLLIDES with normal identifier (deviceId=\(deviceIdentifier)) - combined token would overwrite the normal row")
+            UserDefaults.standard.set("failed identifier collision \(Date())", forKey: "SouveraPushRegStatusVoip")
+            return
+        }
         // Für die Abmeldung beim Logout/Account-Wechsel die Gerätedaten pro
         // Account merken.
         UserDefaults.standard.set(deviceIdentifier, forKey: Self.voipDeviceIdentifierKey(active))
@@ -580,7 +578,7 @@ final class LinkVoIPManager: NSObject {
                     return retry
                 }
             }
-            SouveraLog.write("PushVoip", "NC registration via mail credential unavailable - falling back to NextcloudKit session")
+            SouveraLog.write("PushVoip", "NC registration via mail credential unavailable - falling back to NextcloudKit session (WARNUNG: nutzt Session X -> gleicher deviceIdentifier wie der Normal-Kanal, der Kollisions-Guard bricht den Proxy-POST ggf. ab)")
         }
         // Fallback: bisheriger Weg über die NextcloudKit-Session (X).
         let responsePN = await NextcloudKit.shared.subscribingPushNotificationAsync(serverUrl: baseUrl,

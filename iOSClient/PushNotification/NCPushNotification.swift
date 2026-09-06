@@ -76,7 +76,16 @@ class NCPushNotification {
         // kombiniertes Token) - das übernimmt LinkVoIPManager.
         // Registrierung tolerant: 2xx = Erfolg (der Proxy antwortet mit
         // leerem Body, was NextcloudKit als Fehler wertet).
+        // KANAL-GUARD: Die Normal-Zeile darf NIEMALS mit einem kombinierten
+        // Token ("raw voip") geschrieben werden - sonst ist der Mail-Kanal
+        // am APNs tot (Talk hätte die Zeile übernommen). Im Fehlerfall
+        // abbrechen und diagnostizieren statt die Zeile zu vergiften.
         let normalToken = preferences.deviceTokenPushNotification
+        if normalToken.contains(" ") {
+            SouveraLog.write("Push", "NORMAL registration ABORTED: deviceTokenPushNotification contains a COMBINED token (len=\(normalToken.count), prefix=\(normalToken.prefix(10))…)")
+            UserDefaults.standard.set("failed combined-token guard \(Date())", forKey: "SouveraPushRegStatusNormal")
+            return
+        }
         let proxyOk = await SouveraPushRegistrar.registerAtProxy(proxyServerUrl: proxyServerUrl,
                                                                  pushToken: normalToken,
                                                                  deviceIdentifier: deviceIdentifier,
@@ -184,25 +193,14 @@ class NCPushNotification {
         // nachtragen. Nur so kann die 409-Selbstheilung auch Alt-Zeilen
         // löschen (DELETE mit deren historischem Key).
         Self.seedVaultFromStoredCredentials()
-        let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
-        // 1. Inaktive Accounts abmelden (nur wenn eine Registrierung existiert).
-        var unregisteredAny = false
-        for tbl in accounts where tbl.account != active {
-            if NCPreferences().getPushNotificationDeviceIdentifier(account: tbl.account) != nil {
-                await unsubscribingNextcloudServerPushNotification(account: tbl.account, urlBase: tbl.urlBase)
-                unregisteredAny = true
-            }
-        }
-        // 2. Kurz warten, damit der Proxy das DELETE verarbeitet hat - sonst
-        //    kollidiert der neue POST mit dem noch nicht entfernten alten
-        //    Gerät (409).
-        if unregisteredAny {
-            try? await Task.sleep(for: .seconds(1))
-        }
-        // 3. Aktiven Account registrieren - aber NUR bei Zustandsänderung
-        //    (Account neu, APNs-Token gewechselt oder vorheriger Lauf
-        //    fehlgeschlagen). Sonst läuft bei jedem App-Start die komplette
-        //    Server+Proxy-Registrierung (Churn -> Stale-Zeilen-Gefahr).
+        // MULTI-ACCOUNT: Inaktive Accounts werden NICHT mehr abgemeldet -
+        // der Proxy erlaubt mehrere Zeilen pro Push-Token (cloudId-Cleanup
+        // wirkt nur noch auf denselben Account). Beide Accounts behalten
+        // Mail- und Talk-Push dauerhaft.
+        // Aktiven Account registrieren - aber NUR bei Zustandsänderung
+        // (Account neu, APNs-Token gewechselt oder vorheriger Lauf
+        // fehlgeschlagen). Sonst läuft bei jedem App-Start die komplette
+        // Server+Proxy-Registrierung (Churn -> Stale-Zeilen-Gefahr).
         let apnsToken = NCPreferences().deviceTokenPushNotification
         let regMarker = UserDefaults.standard.string(forKey: Self.pushRegStateKey(active))
         // Skip nur, wenn Token UND App-Build unverändert sind - nach einem
@@ -285,8 +283,14 @@ class NCPushNotification {
             if response.error.errorCode == 429 {
                 Self.markRegistrationThrottled(account)
             }
-            if response.error.errorCode == NSURLErrorBadURL, attempt < 2 {
-                try? await Task.sleep(for: .seconds(2))
+            // 5xx/Netz: kurz warten und erneut versuchen (bis zu 3 Anläufe) -
+            // Wartungsfenster/Drosselung sind meist transient.
+            let transient = response.error.errorCode == NSURLErrorBadURL
+                || (500...599).contains(response.error.errorCode)
+                || response.error.errorCode == -1009 // notConnected
+                || response.error.errorCode == -1001 // timedOut
+            if transient, attempt < 2 {
+                try? await Task.sleep(for: .seconds(3))
                 continue
             }
             return nil

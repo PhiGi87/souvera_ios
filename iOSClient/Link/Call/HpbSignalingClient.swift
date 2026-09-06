@@ -104,6 +104,8 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     func close() {
+        // P70: laufenden Throttle-Reconnect abbrechen (User hat aufgelegt).
+        reconnecting = false
         socket?.cancel(with: .normalClosure, reason: nil)
         socket = nil
     }
@@ -190,12 +192,22 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
                 self.receiveLoop()
             case .failure(let error):
                 CallDebugLog.log("HpbSignaling", "socket failure: \(error.localizedDescription)")
-                self.listener?.onClosed()
+                // P70: Waehrend eines intenierten Throttle-Reconnects den
+                // Call nicht abbrechen - der Reconnect baut neu auf.
+                if !self.reconnecting {
+                    self.listener?.onClosed()
+                } else {
+                    CallDebugLog.log("HpbSignaling", "socket closed by reconnect (call kept alive)")
+                }
             }
         }
     }
 
     private var roomJoinedNotified = false
+    /// P70: Einmal-Reconnect bei "throttled OCS response" vor dem Room-Join.
+    private var throttledReconnectAttempted = false
+    /// true, waehrend der intenierte Reconnect laeuft (onClosed unterdrueckt).
+    private var reconnecting = false
 
     private func handle(_ text: String) {
         guard let data = text.data(using: .utf8),
@@ -217,6 +229,23 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         case "error":
             // Fehler-Details loggen (MCU/HPB-Ablehnungen sind sonst unsichtbar).
             CallDebugLog.log("HpbSignaling", "recv error body: \(String(text.prefix(600)))")
+            // P70: "throttled OCS response" beim AUFBAU (vor dem Room-Join,
+            // z. B. wenn der NC-Server drosselt): EINMALIG automatisch neu
+            // verbinden, statt den Anruf sterben zu lassen. Nach dem
+            // Room-Join gibt es eine MCU-Session - dort kein Reconnect.
+            if text.contains("throttled OCS response"),
+               !roomJoinedNotified, !throttledReconnectAttempted {
+                throttledReconnectAttempted = true
+                reconnecting = true
+                CallDebugLog.log("HpbSignaling", "throttled during setup - reconnecting once in 3s")
+                socket?.cancel(with: .goingAway, reason: nil)
+                socket = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                    guard let self, self.reconnecting else { return }
+                    self.reconnecting = false
+                    self.connect()
+                }
+            }
         default: break
         }
     }

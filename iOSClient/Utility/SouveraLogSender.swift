@@ -80,10 +80,33 @@ enum SouveraLogSender {
 
     /// Sendet die Logs als JMAP-Mail an die feste Host-On-Adresse.
     static func sendLogs() async -> Result<String, Error> {
-        let manager = SouveraMailCredentialManager()
-        guard let account = await manager.ensureCombinedCredential() else {
-            return .failure(MailSendError.noClient)
+        // Log-Inhalt ZUERST einfrieren - ein Accountwechsel während des
+        // Versands darf den Inhalt niemals verändern/verlieren.
+        let logs = await Task.detached { combinedLog() }.value
+        // 2 Versuche: scheitert der Versand (z. B. weil während des
+        // Versands der Account gewechselt wurde), wird die Credential
+        // frisch aufgelöst und EINMAL wiederholt.
+        var lastError: Error = MailSendError.noClient
+        for attempt in 0..<2 {
+            if attempt > 0 {
+                try? await Task.sleep(for: .seconds(2))
+            }
+            let manager = SouveraMailCredentialManager()
+            guard let account = await manager.ensureCombinedCredential() else {
+                lastError = MailSendError.noClient
+                continue
+            }
+            do {
+                let recipient = try await send(logs: logs, account: account)
+                return .success(recipient)
+            } catch {
+                lastError = error
+            }
         }
+        return .failure(lastError)
+    }
+
+    private static func send(logs: String, account: MailAccount) async throws -> String {
         let mailLogin = account.saslUser
         let baseUrl = account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         let client = JmapClient(baseUrl: baseUrl, username: mailLogin, password: account.mailPassword)
@@ -93,12 +116,9 @@ enum SouveraLogSender {
             let session = try await client.refreshSession()
             let accId = session.primaryAccountId
             guard !accId.isEmpty else {
-                return .failure(MailSendError.noClient)
+                throw MailSendError.noClient
             }
 
-            // P68i: Log-Aufbereitung VOM MAIN THREAD (bis ~18 MB Lesen
-            // fror die UI beim Tippen ein) + auf die letzten 5 MB kürzen.
-            let logs = await Task.detached { combinedLog() }.value
             let data = Data(logs.utf8)
             let uploaded = try await client.uploadBlob(accountId: accId, data: data, contentType: "text/plain")
             let blobId = uploaded.blobId
@@ -141,7 +161,7 @@ enum SouveraLogSender {
             let created = draftResp["created"] as? [String: Any]
             let createdId = (created?["new"] as? [String: Any])?.optString("id") ?? ""
             guard !createdId.isEmpty else {
-                return .failure(MailSendError.smtp("Draft-Erstellung fehlgeschlagen"))
+                throw MailSendError.smtp("Draft-Erstellung fehlgeschlagen")
             }
             let identities = try await api.getIdentities(accountId: accId)
             let identityId = identities.first?.optString("id") ?? ""
@@ -156,10 +176,10 @@ enum SouveraLogSender {
                 _ = try? await api.moveEmails(accountId: accId, emailIds: [createdId], targetMailboxId: sentId, markRead: true)
             }
             SouveraLog.write("LogSender", "logs sent to \(recipient)")
-            return .success(recipient)
+            return recipient
         } catch {
             SouveraLog.write("LogSender", "send failed: \(error.localizedDescription)")
-            return .failure(error)
+            throw error
         }
     }
 
