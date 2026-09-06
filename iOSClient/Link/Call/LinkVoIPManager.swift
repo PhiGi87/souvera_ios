@@ -364,6 +364,19 @@ final class LinkVoIPManager: NSObject {
     /// aktiven - sonst kollidiert das gemeinsame kombinierte Token am Proxy
     /// (409) und Call-Push bleibt aus.
     private func reconcileVoipForActiveAccount(proxyServerUrl: String, pushTokenHash: String, combinedPushToken: String) async {
+        // In-Flight-Dedupe (PushKit feuert teils doppelt) + keine parallelen
+        // Läufe mit dem Normal-Kanal-Reconcile.
+        guard await NCPushNotification.shared.tryEnterVoipFlight() else {
+            SouveraLog.write("PushVoip", "reconcile skipped: already running")
+            return
+        }
+        await reconcileVoipForActiveAccountLocked(proxyServerUrl: proxyServerUrl,
+                                                  pushTokenHash: pushTokenHash,
+                                                  combinedPushToken: combinedPushToken)
+        await NCPushNotification.shared.exitVoipFlight()
+    }
+
+    private func reconcileVoipForActiveAccountLocked(proxyServerUrl: String, pushTokenHash: String, combinedPushToken: String) async {
         guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
         let active = activeTbl.account
         let accounts = await NCManageDatabase.shared.getAllTableAccountAsync()
@@ -386,6 +399,11 @@ final class LinkVoIPManager: NSObject {
         if UserDefaults.standard.string(forKey: Self.voipRegStateKey(active))
             == "\(pushTokenHash)|\(SouveraBuildInfo.buildNumber)" {
             SouveraLog.write("PushVoip", "reconcile skipped for \(active): already registered (state unchanged)")
+            return
+        }
+        // 429-Cooldown (gemeinsamer Merker mit dem Normal-Kanal).
+        if NCPushNotification.registrationThrottleActive(active) {
+            SouveraLog.write("PushVoip", "reconcile skipped for \(active): rate-limit cooldown active")
             return
         }
         guard let publicKeyData = NCPreferences().getPushNotificationPublicKey(account: active),
@@ -610,6 +628,10 @@ final class LinkVoIPManager: NSObject {
             let (data, response) = try await URLSession.shared.data(for: req)
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             SouveraLog.write("PushVoip", "NC talk-device registration http \(status)")
+            // 429 = NC-Server-Rate-Limit: gemeinsamen Cooldown setzen.
+            if status == 429 {
+                NCPushNotification.markRegistrationThrottled(account)
+            }
             guard (200..<300).contains(status),
                   let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                   let ocs = json["ocs"] as? [String: Any],

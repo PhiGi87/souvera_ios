@@ -102,6 +102,8 @@ class NCPushNotification {
         UserDefaults.standard.set(
             "\(NCPreferences().deviceTokenPushNotification)|\(SouveraBuildInfo.buildNumber)",
             forKey: Self.pushRegStateKey(account))
+        // Erfolgreiche Registrierung: 429-Cooldown aufheben.
+        UserDefaults.standard.removeObject(forKey: Self.throttledKey + account)
         SouveraLog.write("Push", "proxy registration OK \(proxyServerUrl)")
 
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
@@ -116,6 +118,66 @@ class NCPushNotification {
     /// Das verhindert die 409-Konflikte und verspätete/verlorene Pushs für
     /// den aktiven Account.
     func reconcilePushForActiveAccount() async {
+        // In-Flight-Dedupe: didRegisterForRemoteNotifications und
+        // changeAccount können fast gleichzeitig feuern - NUR EIN Durchlauf
+        // je Zeit (sonst doppelte NC-Subscriptions -> Rate-Limit-429).
+        guard await RegistrationFlight.shared.tryEnter("normal") else {
+            SouveraLog.write("Push", "reconcile skipped: already running")
+            return
+        }
+        await reconcilePushForActiveAccountLocked()
+        await RegistrationFlight.shared.exit("normal")
+    }
+
+    /// Serialisiert Reconcile-Läufe (normal/voip) app-weit.
+    private actor RegistrationFlight {
+        static let shared = RegistrationFlight()
+        private var running: Set<String> = []
+
+        func tryEnter(_ key: String) -> Bool {
+            guard !running.contains(key) else { return false }
+            running.insert(key)
+            return true
+        }
+
+        func exit(_ key: String) {
+            running.remove(key)
+        }
+    }
+
+    /// Flug-Guard für den VoIP-Reconcile (Aufruf aus LinkVoIPManager).
+    func tryEnterVoipFlight() async -> Bool {
+        await RegistrationFlight.shared.tryEnter("voip")
+    }
+
+    func exitVoipFlight() async {
+        await RegistrationFlight.shared.exit("voip")
+    }
+
+    // MARK: 429-Cooldown (NC-Server-Rate-Limit)
+
+    private static let throttledKey = "souvera_push_nc_429_"
+    /// Wartezeit nach einer 429-Ablehnung, bevor wieder registriert wird.
+    private static let throttleInterval: TimeInterval = 15 * 60
+
+    static func markRegistrationThrottled(_ account: String) {
+        UserDefaults.standard.set(Date().timeIntervalSince1970,
+                                  forKey: throttledKey + account)
+        SouveraLog.write("Push", "registration throttled for \(account): cooldown \(Int(throttleInterval / 60)) min")
+    }
+
+    static func registrationThrottleActive(_ account: String) -> Bool {
+        guard let last = UserDefaults.standard.object(forKey: throttledKey + account) as? TimeInterval else {
+            return false
+        }
+        let active = Date().timeIntervalSince1970 - last < throttleInterval
+        if !active {
+            UserDefaults.standard.removeObject(forKey: throttledKey + account)
+        }
+        return active
+    }
+
+    private func reconcilePushForActiveAccountLocked() async {
         guard let activeTbl = await NCManageDatabase.shared.getActiveTableAccountAsync() else { return }
         let active = activeTbl.account
         // Vault-Seeding: Registrierungen aus Builds OHNE Credential-Vault
@@ -149,6 +211,12 @@ class NCPushNotification {
         if !apnsToken.isEmpty,
            regMarker == "\(apnsToken)|\(SouveraBuildInfo.buildNumber)" {
             SouveraLog.write("Push", "reconcile skipped for \(active): already registered (state unchanged)")
+            return
+        }
+        // 429-Cooldown: nach einer Rate-Limit-Ablehnung erst wieder
+        // registrieren, wenn das Fenster verstrichen ist.
+        if Self.registrationThrottleActive(active) {
+            SouveraLog.write("Push", "reconcile skipped for \(active): rate-limit cooldown active")
             return
         }
         await subscribingNextcloudServerPushNotification(account: activeTbl.account, urlBase: activeTbl.urlBase)
@@ -211,6 +279,12 @@ class NCPushNotification {
             }
 
             SouveraLog.write("Push", "NC registration attempt \(attempt + 1) failed \(serverUrl) status \(response.error.errorCode): \(response.error.errorDescription)")
+            // 429 = NC-Server-Rate-Limit: Cooldown-Merker setzen, damit
+            // folgende Starts nicht weiter in das Limit laufen (sonst
+            // bleibt Push dauerhaft tot).
+            if response.error.errorCode == 429 {
+                Self.markRegistrationThrottled(account)
+            }
             if response.error.errorCode == NSURLErrorBadURL, attempt < 2 {
                 try? await Task.sleep(for: .seconds(2))
                 continue
