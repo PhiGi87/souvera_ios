@@ -554,6 +554,7 @@ final class LinkVoIPManager: NSObject {
         var mailAccount = await manager.ensureCombinedCredential()
         if let mailAccount {
             let attempt = await registerTalkDeviceOcs(
+                account: account,
                 baseUrl: baseUrl,
                 username: username,
                 ncPassword: mailAccount.mailPassword,
@@ -567,6 +568,7 @@ final class LinkVoIPManager: NSObject {
             SouveraLog.write("PushVoip", "NC registration with mail credential failed - validating/renewing")
             if let renewed = await manager.renewCredential(), renewed.mailPassword != mailAccount.mailPassword {
                 if let retry = await registerTalkDeviceOcs(
+                    account: account,
                     baseUrl: baseUrl,
                     username: username,
                     ncPassword: renewed.mailPassword,
@@ -594,6 +596,7 @@ final class LinkVoIPManager: NSObject {
     /// Eigener OCS-POST `ocs/v2.php/apps/notifications/api/v2/push` mit
     /// Talk-User-Agent und der übergebenen NC-Credential (Y).
     private static func registerTalkDeviceOcs(
+        account: String,
         baseUrl: String,
         username: String,
         ncPassword: String,
