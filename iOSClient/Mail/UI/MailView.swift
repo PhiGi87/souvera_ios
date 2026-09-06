@@ -207,10 +207,10 @@ struct MailView: View {
 
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        // Landscape + Fokus-Leser-Karte: Zurück bleibt oben links in der
-        // System-Toolbar (über der Ordnerspalte). Klassisches Detail-Overlay:
-        // kein Toolbar-Zurück - der Pfeil sitzt dann über der Listen-Spalte.
-        if !isFolders && (!landscapeLayout || (focusReaderActive && viewModel.route.isDetail)) {
+        // Alte Button-Struktur (wie vor dem 06.09.): Zurück in der
+        // System-Toolbar oben links - im Landscape nur bei offenem Detail,
+        // im Portrait wie immer bei Nicht-Ordner-Ansichten.
+        if !isFolders && !(landscapeLayout && !viewModel.route.isDetail) {
             ToolbarItem(placement: .topBarLeading) {
                 Button { viewModel.back() } label: {
                     Image(systemName: "chevron.backward")
@@ -371,29 +371,6 @@ struct MailView: View {
                         MailMessageListView(viewModel: viewModel, toolbarActive: false)
                         if !focusReaderActive, let message = viewModel.route.detailMessage {
                             MailDetailView(viewModel: viewModel, message: message)
-                            // Klassisches Detail-Overlay: Zurück oben links
-                            // über der LISTEN-Spalte (nicht über der Ordner-
-                            // spalte; im Fokus-Leser bleibt der Pfeil in der
-                            // System-Toolbar).
-                            VStack {
-                                HStack {
-                                    Button {
-                                        viewModel.back()
-                                    } label: {
-                                        Image(systemName: "chevron.backward")
-                                            .font(.body.weight(.semibold))
-                                            .foregroundStyle(Color(NCBrandColor.shared.customer))
-                                            .frame(width: 36, height: 36)
-                                            .background(.ultraThinMaterial, in: Circle())
-                                            .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
-                                    }
-                                    .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
-                                    Spacer()
-                                }
-                                .padding(.leading, 12)
-                                .padding(.top, 8)
-                                Spacer()
-                            }
                         }
                     }
                 }
