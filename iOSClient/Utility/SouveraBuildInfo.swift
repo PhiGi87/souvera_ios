@@ -238,13 +238,6 @@ enum SouveraPushRegistrar {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        // Felder exakt wie der Nextcloud-Standard (Vertrag zum Proxy).
-        let params = [
-            "pushToken": pushToken,
-            "deviceIdentifier": deviceIdentifier,
-            "deviceIdentifierSignature": signature,
-            "userPublicKey": publicKey
-        ]
         // Form-Werte korrekt kodieren (wie Alamofire URLEncoding): nur
         // Alphanumerics + "-._~" erlauben. Base64-Felder (Signatur,
         // PublicKey) enthalten '+', '/', '=' - rohes '+' würde vom
