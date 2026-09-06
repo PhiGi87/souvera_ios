@@ -59,3 +59,6 @@ Package.resolved
 
 *.generated.swift
 /.env-vars
+
+## Local agent secrets (SSH keys etc.) - never commit
+.opencode/
