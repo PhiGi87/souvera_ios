@@ -267,7 +267,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                     if let nid {
                         UNUserNotificationCenter.current().getDeliveredNotifications { requests in
                             let stale = requests.filter { request in
-                                guard let subj = request.content.userInfo["subject"] as? String,
+                                guard let subj = request.request.content.userInfo["subject"] as? String,
                                       let dec = NCPushNotificationEncryption.shared().decryptPushNotification(subj, withDevicePrivateKey: NCPreferences().getPushNotificationPrivateKey(account: matched.account) ?? Data()),
                                       let j = (try? JSONSerialization.jsonObject(with: Data(dec.utf8))) as? [String: Any],
                                       (j["nid"] as? Int) == nid else { return false }
