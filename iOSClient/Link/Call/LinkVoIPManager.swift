@@ -380,7 +380,11 @@ final class LinkVoIPManager: NSObject {
         // Churn-Schutz: bereits erfolgreich mit DEMSELben Token registriert?
         // Dann keine erneute Server+Proxy-Registrierung (nur bei
         // Zustandsänderung: Account neu, Token-Wechsel, Logout/Merker weg).
-        if UserDefaults.standard.string(forKey: Self.voipRegStateKey(active)) == pushTokenHash {
+        // Skip nur bei unverändertem Token UND unverändertem App-Build -
+        // nach einem Update einmal vollständig neu registrieren (heilt
+        // ggf. serverseitig gelöschte Gerätezeilen).
+        if UserDefaults.standard.string(forKey: Self.voipRegStateKey(active))
+            == "\(pushTokenHash)|\(SouveraBuildInfo.buildNumber)" {
             SouveraLog.write("PushVoip", "reconcile skipped for \(active): already registered (state unchanged)")
             return
         }
@@ -438,7 +442,8 @@ final class LinkVoIPManager: NSObject {
             nkLog(tag: global.logTagPN, emoji: .success, message: "Link VoIP proxy registration OK at \(proxyServerUrl)")
             UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusVoip")
             // Churn-Merker: komplette Re-Registrierung nur bei Änderung.
-            UserDefaults.standard.set(pushTokenHash, forKey: Self.voipRegStateKey(active))
+            UserDefaults.standard.set("\(pushTokenHash)|\(SouveraBuildInfo.buildNumber)",
+                                     forKey: Self.voipRegStateKey(active))
             SouveraLog.write("PushVoip", "proxy registration OK \(proxyServerUrl)")
         } else {
             nkLog(tag: global.logTagPN, emoji: .error, message: "Link VoIP proxy registration FAILED at \(proxyServerUrl)")

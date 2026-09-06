@@ -120,6 +120,18 @@ struct SouveraCalendarView: View {
                     }
                 }
                 ToolbarItem(placement: .topBarLeading) {
+                    // "Heute": springt in ALLEN Ansichten (Tag/3 Tage/Monat)
+                    // auf den aktuellen Tag zurück.
+                    Button {
+                        selectedDay = Date()
+                        viewModel.visibleMonth = Date()
+                    } label: {
+                        Text(NSLocalizedString("_calendar_today_", comment: ""))
+                            .font(.subheadline)
+                    }
+                    .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
+                }
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         searchActive = true
                     } label: {

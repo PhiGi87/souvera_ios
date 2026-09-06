@@ -29,7 +29,11 @@ struct NCDisplayView: View {
                                 .frame(width: 50, height: 50)
                         }
                         .opacity(model.appearanceAutomatic ? 0.35 : 1)
+                        // disabled() blockt onTapGesture hier nicht
+                        // zuverlaessig - allowsHitTesting erzwingt die
+                        // Sperre bei "Systemstil uebernehmen".
                         .disabled(model.appearanceAutomatic)
+                        .allowsHitTesting(!model.appearanceAutomatic)
                         .onTapGesture {
                             model.userInterfaceStyle(.light)
                         }
@@ -50,6 +54,7 @@ struct NCDisplayView: View {
                         }
                         .opacity(model.appearanceAutomatic ? 0.35 : 1)
                         .disabled(model.appearanceAutomatic)
+                        .allowsHitTesting(!model.appearanceAutomatic)
                         .onTapGesture {
                             model.userInterfaceStyle(.dark)
                         }

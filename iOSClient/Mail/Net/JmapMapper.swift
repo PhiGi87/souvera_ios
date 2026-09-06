@@ -60,6 +60,7 @@ enum JmapMapper {
 
         let toList = json["to"] as? [Any] ?? []
         let ccList = json["cc"] as? [Any] ?? []
+        let bccList = json["bcc"] as? [Any] ?? []
         let hasAtt = json.optBool("hasAttachment") || ((json["attachments"] as? [Any])?.count ?? 0) > 0
         let keywords = json["keywords"] as? [String: Any]
 
@@ -68,6 +69,7 @@ enum JmapMapper {
 
         let toAddressStr = toList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
         let ccAddressStr = ccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
+        let bccAddressStr = bccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
 
         return MailMessage(
             id: "\(mailboxId)|\(json.optString("id") ?? "")",
@@ -81,6 +83,7 @@ enum JmapMapper {
             fromDisplayName: fromName,
             toAddresses: toAddressStr,
             ccAddresses: ccAddressStr,
+            bccAddresses: bccAddressStr,
             dateSent: parseJmapDate(json.optString("receivedAt")),
             isRead: isRead,
             isFlagged: isFlagged,

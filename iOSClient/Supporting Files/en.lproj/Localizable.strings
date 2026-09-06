@@ -1183,3 +1183,6 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_souvera_fg_tone_" = "Alert tone for new mail in foreground";
 "_mail_refresh_now_" = "Refresh now";
 _link_select_room_ = "Select room";
+"_mail_copy_address_" = "Copy address";
+"_mail_address_copied_" = "Address copied";
+"_calendar_today_" = "Today";

@@ -289,11 +289,14 @@ struct MailView: View {
                 }
             }
         }
-        // Landscape: Ring/Suche/Neuer Ordner liegen in der Kopfzeile der
-        // Ordnerspalte (sidebarContent) - nicht in der System-Toolbar.
-        if isFolders {
-            ToolbarItem(placement: .topBarLeading) {
-                AutoRefreshRingView(viewModel: viewModel)
+        // Landscape: Ring/Suche/Neuer Ordner in der System-Toolbar (gleiche
+        // Ebene wie bisher). Bei offener Fokus-Leser-Karte wird der Ring
+        // ausgeblendet (die Karte dimmt den Inhalt, der Zurück-Pfeil bleibt).
+        if isFolders || landscapeLayout {
+            if !(focusReaderActive && viewModel.route.isDetail) {
+                ToolbarItem(placement: .topBarLeading) {
+                    AutoRefreshRingView(viewModel: viewModel)
+                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button { searchActive = true } label: { Image(systemName: "magnifyingglass") }
@@ -350,14 +353,8 @@ struct MailView: View {
             // iPhone-Landscape maximal 320, damit die Liste nicht verdrängt
             // wird.
             let folderWidth = min(320, max(260, geo.size.width / 3))
-            let detailOpen = viewModel.route.isDetail
             HStack(spacing: 0) {
-                MailFolderListView(viewModel: viewModel,
-                                   sidebarStyle: true,
-                                   showsHeaderControls: true,
-                                   headerControlsVisible: !(focusReaderActive && detailOpen),
-                                   onSearch: { searchActive = true },
-                                   onNewFolder: { showNewFolderSheet = true })
+                MailFolderListView(viewModel: viewModel, sidebarStyle: true)
                     .frame(width: folderWidth)
                 Divider()
                 ZStack {
@@ -555,13 +552,6 @@ private struct MailFolderListView: View {
     /// Landscape-Spalte: flacher "Dateien"-Sidebar-Stil statt
     /// insetGrouped-Karten (Look & Feel wie die iCloud-Drive-Sidebar).
     var sidebarStyle: Bool = false
-    /// Landscape: Ring/Suche/Neuer Ordner sitzen in einer Kopfzeile über
-    /// der Spalte (statt in der System-Toolbar).
-    var showsHeaderControls: Bool = false
-    /// Fokus-Leser-Karte offen -> Kopfzeilen-Steuerung komplett verstecken.
-    var headerControlsVisible: Bool = true
-    var onSearch: () -> Void = {}
-    var onNewFolder: () -> Void = {}
     @State private var showScrollTop = false
     @State private var renameTarget: Mailbox?
     @State private var renameText = ""
@@ -639,30 +629,6 @@ private struct MailFolderListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2, pinnedViews: []) {
-                    if showsHeaderControls, headerControlsVisible {
-                        HStack(spacing: 4) {
-                            Spacer()
-                            AutoRefreshRingView(viewModel: viewModel)
-                            Button {
-                                onSearch()
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                                    .frame(width: 32, height: 32)
-                            }
-                            .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                            Button {
-                                onNewFolder()
-                            } label: {
-                                Image(systemName: "folder.badge.plus")
-                                    .frame(width: 32, height: 32)
-                            }
-                            .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
-                        }
-                        .font(.body)
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
-                        .padding(.trailing, 6)
-                        .padding(.top, 2)
-                    }
                     ForEach(groups(boxes)) { group in
                         sidebarSectionHeader(group)
                         if !viewModel.collapsedGroupIds.contains(group.id) {
@@ -1653,6 +1619,7 @@ private struct MailDetailView: View {
     @State private var downloadingIds: Set<String> = []
     @State private var moveTarget: ([MailMessage], [Mailbox])?
     @State private var htmlHeight: CGFloat = 120
+    @State private var showFromAddress = false
 
     var body: some View {
         ScrollView {
@@ -1693,26 +1660,30 @@ private struct MailDetailView: View {
                 .font(.title3).fontWeight(.semibold)
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
+                    // Absender: Long-Press öffnet ein Popup mit der
+                    // E-Mail-Adresse (klein) und explizitem Kopieren.
                     Text(message.displayFrom).fontWeight(.medium)
-                        .contextMenu {
-                            Button {
-                                // P65: Absender(-Adresse) kopieren.
+                        .onLongPressGesture { showFromAddress = true }
+                        .alert(message.displayFrom, isPresented: $showFromAddress) {
+                            Button(NSLocalizedString("_mail_copy_address_", comment: "")) {
                                 UIPasteboard.general.string = message.fromAddress
                                 SouveraToastCenter.shared.show(
                                     SouveraToast(
-                                        message: NSLocalizedString("_mail_sender_copied_", comment: ""),
+                                        message: NSLocalizedString("_mail_address_copied_", comment: ""),
                                         style: .neutral
                                     )
                                 )
-                            } label: {
-                                Label(NSLocalizedString("_mail_sender_copied_", comment: ""), systemImage: "doc.on.doc")
                             }
+                            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+                        } message: {
+                            Text(message.fromAddress)
                         }
                     Text(MailDateFormatter.detailLabel(for: message.dateSent)).font(.caption).foregroundStyle(.secondary)
-                    if !message.toAddresses.isEmpty {
-                        Text("\(NSLocalizedString("_mail_to_", comment: "")): \(message.toAddresses)")
-                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                    }
+                    // ALLE Empfänger sichtbar - To, Cc und Bcc (sofern
+                    // vorhanden), jede Adresse als Chip mit eigenem Popup.
+                    recipientsRow(NSLocalizedString("_mail_to_", comment: ""), message.toAddresses)
+                    recipientsRow(NSLocalizedString("_mail_cc_", comment: ""), message.ccAddresses)
+                    recipientsRow(NSLocalizedString("_mail_bcc_", comment: ""), message.bccAddresses)
                 }
                 Spacer()
             }
@@ -1728,7 +1699,110 @@ private struct MailDetailView: View {
         }
     }
 
-    private func attachmentChip(_ att: AttachmentMeta) -> some View {
+    /// Empfänger-Zeile ("An:"/"Cc:"/"Bcc:") - alle Adressen sichtbar und
+    /// umbruchfähig, jede Adresse ein Chip mit eigenem Kopier-Popup.
+    @ViewBuilder
+    private func recipientsRow(_ label: String, _ addresses: String) -> some View {
+        if !addresses.trimmingCharacters(in: .whitespaces).isEmpty {
+            HStack(alignment: .top, spacing: 6) {
+                Text(label)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                FlowLayout(spacing: 5) {
+                    ForEach(addresses.commaSeparated(), id: \.self) { address in
+                        AddressChip(display: address)
+                    }
+                }
+            }
+        }
+    }
+
+/// Eine Empfänger-/Absender-Adresse: Long-Press öffnet ein Popup mit der
+/// E-Mail-Adresse (klein) und explizitem "Adresse kopieren".
+private struct AddressChip: View {
+    let display: String
+    @State private var showAddress = false
+
+    /// "Name <a@b.c>" -> "a@b.c", sonst der String selbst.
+    private var email: String {
+        if let start = display.lastIndex(of: "<"),
+           let end = display.firstIndex(of: ">"),
+           start < end {
+            return String(display[display.index(after: start)..<end])
+        }
+        return display
+    }
+
+    private var displayName: String {
+        if display.contains("<"), let lt = display.firstIndex(of: "<") {
+            let name = String(display[..<lt]).trimmingCharacters(in: .whitespaces)
+            if !name.isEmpty { return name }
+        }
+        return display
+    }
+
+    var body: some View {
+        Text(displayName)
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .onLongPressGesture { showAddress = true }
+            .alert(displayName, isPresented: $showAddress) {
+                Button(NSLocalizedString("_mail_copy_address_", comment: "")) {
+                    UIPasteboard.general.string = email
+                    SouveraToastCenter.shared.show(
+                        SouveraToast(
+                            message: NSLocalizedString("_mail_address_copied_", comment: ""),
+                            style: .neutral
+                        )
+                    )
+                }
+                Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+            } message: {
+                Text(email)
+            }
+    }
+}
+
+/// Minimaler Flow-Layout-Wrapper: bricht Chips am rechten Rand um.
+private struct FlowLayout: Layout {
+    var spacing: CGFloat = 5
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let maxWidth = proposal.width ?? .infinity
+        var x: CGFloat = 0, y: CGFloat = 0, rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+        return CGSize(width: proposal.width ?? x, height: y + rowHeight)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var rowHeight: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX, x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += rowHeight + spacing
+                rowHeight = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            rowHeight = max(rowHeight, size.height)
+        }
+    }
+}
+
+private func attachmentChip(_ att: AttachmentMeta) -> some View {
         Button {
             Task {
                 downloadingIds.insert(att.id)

@@ -94,6 +94,7 @@ struct MailMessage: Identifiable {
     let fromDisplayName: String?
     let toAddresses: String
     let ccAddresses: String
+    let bccAddresses: String
     let dateSent: Date
     var isRead: Bool
     var isFlagged: Bool

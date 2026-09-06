@@ -94,8 +94,14 @@ class NCPushNotification {
         nkLog(tag: self.global.logTagPN, emoji: .success, message: "Push proxy registration OK at \(proxyServerUrl)")
         UserDefaults.standard.set("ok \(Date())", forKey: "SouveraPushRegStatusNormal")
         // Churn-Merker: komplette Re-Registrierung nur bei Zustandsänderung.
-        UserDefaults.standard.set(NCPreferences().deviceTokenPushNotification,
-                                  forKey: Self.pushRegStateKey(account))
+        // Merker = "<apnsToken>|<build>": nach jedem APP-UPDATE läuft EINMAL
+        // die vollständige Registrierung - der NC-Server kann Gerätezeilen
+        // zwischendurch löschen ("unknown by the push server"); ohne die
+        // Build-Prüfung bliebe die Lücke unbemerkt ( iPad: Mail-Push tot,
+        // Talk lebendig).
+        UserDefaults.standard.set(
+            "\(NCPreferences().deviceTokenPushNotification)|\(SouveraBuildInfo.buildNumber)",
+            forKey: Self.pushRegStateKey(account))
         SouveraLog.write("Push", "proxy registration OK \(proxyServerUrl)")
 
         preferences.setPushNotificationDeviceIdentifier(account: account, deviceIdentifier: deviceIdentifier)
@@ -136,8 +142,12 @@ class NCPushNotification {
         //    fehlgeschlagen). Sonst läuft bei jedem App-Start die komplette
         //    Server+Proxy-Registrierung (Churn -> Stale-Zeilen-Gefahr).
         let apnsToken = NCPreferences().deviceTokenPushNotification
+        let regMarker = UserDefaults.standard.string(forKey: Self.pushRegStateKey(active))
+        // Skip nur, wenn Token UND App-Build unverändert sind - nach einem
+        // Update wird einmal vollständig neu registriert (heilt vom Server
+        // gelöschte Gerätezeilen).
         if !apnsToken.isEmpty,
-           UserDefaults.standard.string(forKey: Self.pushRegStateKey(active)) == apnsToken {
+           regMarker == "\(apnsToken)|\(SouveraBuildInfo.buildNumber)" {
             SouveraLog.write("Push", "reconcile skipped for \(active): already registered (state unchanged)")
             return
         }
