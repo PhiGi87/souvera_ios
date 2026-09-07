@@ -1233,22 +1233,21 @@ struct LinkChatView: View {
                     showScrollBottom = false
                     entryPositioningUntil = Date().addingTimeInterval(3)
                     lastVisibleMessageId = items.last?.id
+                    // F1: Retry-Loop auch beim Raumwechsel neu starten.
+                    startEntryPositioning(proxy: proxy, items: items)
                 }
-                // Position-vor-Sichtbarkeit: EINMALIG unsichtbar an die
+                // Position-vor-Sichtbarkeit: solange unsichtbar an die
                 // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
-                // springen, danach einblenden. Die Boundary kann erst nach
-                // dem Cache-Publish eintreffen - onChange positioniert
-                // daher solange nach, bis eingeblendet wird. Kein
-                // scrollPosition-Modifier: der hatte den Bottom-Anchor
-                // neutralisiert.
+                // springen, BIS das Ziel erreicht ist (F1: verifizierender
+                // Retry-Loop - ein einmaliges scrollTo bleibt in langen
+                // Lazy-Listen gern auf halbem Weg stecken). Erst dann
+                // einblenden. Kein scrollPosition-Modifier: der hatte den
+                // Bottom-Anchor neutralisiert.
                 .opacity(chatPositioned ? 1 : 0)
                 .onAppear {
                     entryPositioningUntil = Date().addingTimeInterval(3)
                     lastVisibleMessageId = items.last?.id
-                    positionChat(proxy: proxy, items: items)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                        chatPositioned = true
-                    }
+                    startEntryPositioning(proxy: proxy, items: items)
                 }
                 // P68n: Nachpositionieren solange das Fenster läuft (die
                 // Server-Liste/Boundary kommt oft erst 1-3 s nach dem
@@ -1278,8 +1277,7 @@ struct LinkChatView: View {
     }
 
     /// Dezente Trennlinie "Neue Nachrichten" (Talk-Standard).
-    private var unreadSeparatorRow: some View {
-        HStack(spacing: 10) {
+    private var unreadSeparatorRow: some View {        HStack(spacing: 10) {
             Rectangle()
                 .fill(Color(.separator))
                 .frame(height: 1)
@@ -1329,6 +1327,28 @@ struct LinkChatView: View {
 
     /// Setzt die Eintrittsposition: mit Ungelesenen an die Trennlinie
     /// (oben), sonst an die neueste Nachricht (unten).
+    /// F1: Verifizierender Eintritts-Loop - positioniert wiederholt (alle
+    /// 0,2 s, bis zu 8 Versuche), bis das Ziel sitzt (F2: End-Kontrolle
+    /// über den Bottom-Observer bzw. Ende der Versuche), und blendet die
+    /// Liste erst danach ein. Ein einmaliges scrollTo bleibt in langen
+    /// Lazy-Listen gern auf halbem Weg stecken.
+    private func startEntryPositioning(proxy: ScrollViewProxy, items: [LinkChatMessage], attempt: Int = 0) {
+        guard !chatPositioned else { return }
+        positionChat(proxy: proxy, items: items)
+        // F2: "am Ende"-Frühausstieg erst nach einigen Versuchen - der
+        // Observer-Wert ist unmittelbar nach dem ersten scrollTo noch
+        // veraltet (showScrollBottom startet mit false).
+        let isAtBottomTarget = viewModel.unreadBoundary == nil && !showScrollBottom
+        if (isAtBottomTarget && attempt >= 4) || attempt >= 8 {
+            chatPositioned = true
+            return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
+            guard !chatPositioned else { return }
+            startEntryPositioning(proxy: proxy, items: items, attempt: attempt + 1)
+        }
+    }
+
     private func positionChat(proxy: ScrollViewProxy, items: [LinkChatMessage]) {
         if let boundary = viewModel.unreadBoundary {
             // Zur TRENNLINIE springen (anchor .top): die Linie sitzt oben,

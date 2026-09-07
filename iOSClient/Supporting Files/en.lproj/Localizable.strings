@@ -1186,3 +1186,4 @@ _link_select_room_ = "Select room";
 "_mail_copy_address_" = "Copy address";
 "_mail_address_copied_" = "Address copied";
 "_calendar_today_" = "Today";
+_mail_sort_flagged_ = "Flagged first";

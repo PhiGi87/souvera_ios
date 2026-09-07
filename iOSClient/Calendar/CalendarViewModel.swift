@@ -85,7 +85,9 @@ final class CalendarViewModel: ObservableObject {
         autoRefreshTask?.cancel()
         autoRefreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                // R2: 1-s-Prüfrhythmus (wie Mail) - kurze Intervalle
+                // (15/30 s) werden exakt eingehalten.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
                 guard let self else { return }
                 guard let interval = SouveraAutoRefresh.interval else { continue }

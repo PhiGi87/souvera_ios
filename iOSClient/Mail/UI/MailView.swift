@@ -368,7 +368,9 @@ struct MailView: View {
                                 .foregroundStyle(.secondary)
                         }
                     } else {
-                        MailMessageListView(viewModel: viewModel, toolbarActive: false)
+                        // M2: gleiche Toolbar-Regel wie Portrait - "..."-Menü
+                        // + Verfassen sichtbar, solange kein Detail offen ist.
+                        MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
                         if !focusReaderActive, let message = viewModel.route.detailMessage {
                             MailDetailView(viewModel: viewModel, message: message)
                         }
@@ -464,6 +466,11 @@ struct MailView: View {
                                 MailRow(message: message)
                             }
                             .buttonStyle(.plain)
+                            .contextMenu {
+                                Button(role: .destructive) { viewModel.delete([message]) } label: {
+                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                }
+                            }
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) { viewModel.delete([message]) } label: {
                                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
@@ -1352,6 +1359,12 @@ private struct MailMessageListView: View {
                     blacklistTarget = [message]
                 } label: {
                     Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
+                }
+                // M1: Löschen auch per langem Druck (Lücke zum Swipe).
+                Button(role: .destructive) {
+                    viewModel.delete([message])
+                } label: {
+                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                 }
             }
             .swipeActions(edge: .trailing) {
@@ -2338,8 +2351,8 @@ struct AutoRefreshRingView: View {
     @ObservedObject var viewModel: MailViewModel
 
     var body: some View {
-        // Antippbar: manueller Voll-Refresh; während des Abrufs läuft ein
-        // Spinner statt des Countdown-Rings.
+        // Antippbar: manueller Voll-Refresh - auch bei "Aus" (R3): dann
+        // erscheint ein statischer Refresh-Pfeil statt des Countdown-Rings.
         Button {
             Task { await viewModel.manualRefresh() }
         } label: {
@@ -2347,25 +2360,29 @@ struct AutoRefreshRingView: View {
                 if viewModel.isFetchingMail {
                     ProgressView()
                         .frame(width: 18, height: 18)
-                } else {
+                } else if let interval = SouveraAutoRefresh.interval, interval > 0,
+                          viewModel.nextAutoRefreshAt != nil {
                     TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        if let nextAt = viewModel.nextAutoRefreshAt,
-                           let interval = SouveraAutoRefresh.interval, interval > 0 {
-                            let remaining = max(0, nextAt.timeIntervalSinceNow)
-                            let progress = remaining / interval
-                            ZStack {
-                                Circle()
-                                    .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
-                                Circle()
-                                    .trim(from: 0, to: min(1, progress))
-                                    .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                                    .rotationEffect(.degrees(-90))
-                                    .animation(.linear(duration: 1), value: progress)
-                            }
-                            .frame(width: 18, height: 18)
-                            .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
+                        let remaining = max(0, (viewModel.nextAutoRefreshAt ?? .now).timeIntervalSinceNow)
+                        let progress = min(1, remaining / interval)
+                        ZStack {
+                            Circle()
+                                .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
+                            Circle()
+                                .trim(from: 0, to: min(1, progress))
+                                .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .rotationEffect(.degrees(-90))
+                                .animation(.linear(duration: 1), value: progress)
                         }
+                        .frame(width: 18, height: 18)
+                        .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
                     }
+                } else {
+                    // "Aus" (R3): manueller Refresh-Button bleibt sichtbar.
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .frame(width: 18, height: 18)
                 }
             }
             .frame(width: 44, height: 44, alignment: .center)

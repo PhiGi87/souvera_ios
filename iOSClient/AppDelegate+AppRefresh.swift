@@ -21,7 +21,10 @@ extension AppDelegate {
         }
 
         let request = BGAppRefreshTaskRequest(identifier: global.refreshTask)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: interval)
+        // R4: Die kurzen Foreground-Intervalle (15/30/60 s) steuern nur den
+        // Vordergrund - der OS-Hintergrund-Task bleibt sinnvoll getaktet
+        // (mind. 15 Minuten; das OS drosselt ohnehin).
+        request.earliestBeginDate = Date(timeIntervalSinceNow: max(TimeInterval(SouveraAutoRefresh.intervalSeconds), 900))
 
         do {
             try BGTaskScheduler.shared.submit(request)

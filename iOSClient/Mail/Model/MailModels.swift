@@ -14,6 +14,7 @@ enum MailSortOrder: String, CaseIterable, Identifiable {
     case dateDesc
     case dateAsc
     case unreadFirst
+    case flaggedFirst
 
     var id: String { rawValue }
 
@@ -22,6 +23,7 @@ enum MailSortOrder: String, CaseIterable, Identifiable {
         case .dateDesc: return "_mail_sort_date_desc_"
         case .dateAsc: return "_mail_sort_date_asc_"
         case .unreadFirst: return "_mail_sort_unread_"
+        case .flaggedFirst: return "_mail_sort_flagged_"
         }
     }
 }

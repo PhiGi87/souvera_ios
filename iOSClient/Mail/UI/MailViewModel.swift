@@ -322,6 +322,12 @@ final class MailViewModel: ObservableObject {
                 if $0.isRead != $1.isRead { return !$0.isRead }
                 return $0.dateSent > $1.dateSent
             }
+        case .flaggedFirst:
+            // M3: markierte Mails zuerst, danach Datum absteigend.
+            return list.sorted {
+                if $0.isFlagged != $1.isFlagged { return $0.isFlagged }
+                return $0.dateSent > $1.dateSent
+            }
         }
     }
 
