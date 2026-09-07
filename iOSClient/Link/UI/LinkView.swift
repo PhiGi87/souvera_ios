@@ -946,10 +946,10 @@ struct LinkChatView: View {
     @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
-    /// C2: Deterministische Scroll-Position (iOS 17 scrollPosition) - der
-    /// List-scrollTo war bei langen Verläufen unzuverlässig.
-    @State private var chatScrollId: Int64?
-    @State private var chatScrollAnchor: UnitPoint = .bottom
+    /// C2/A: Scroll-Steuerung über den Director - auf iOS 18+ deterministisch
+    /// über die ScrollPosition-Struct-API, auf iOS 17 über das ID-Binding
+    /// (Fallback). Der List-scrollTo war bei langen Verläufen unzuverlässig.
+    @StateObject private var chatScrollDirector = ChatScrollDirector()
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
     /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
@@ -1201,7 +1201,9 @@ struct LinkChatView: View {
                     }
                     .scrollTargetLayout()
                 }
-                .scrollPosition(id: $chatScrollId, anchor: chatScrollAnchor)
+                .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
+                                                   legacyId: $chatScrollId,
+                                                   legacyAnchor: $chatScrollAnchor))
                 // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
                 // das Nachladen älterer Nachrichten oben reißt die
                 // Leseposition nicht mit. Die EINTRITTSPOSITION setzt
@@ -1384,17 +1386,20 @@ struct LinkChatView: View {
     }
 
     private func positionChat(items: [LinkChatMessage]) {
-        // C2: Deterministisch über scrollPosition(id:anchor:) statt
-        // proxy.scrollTo (List-scrollTo landete bei langen Verläufen
-        // auf halbem Weg - unverlässliche Zeilenhöhen-Schätzungen).
+        // A: Deterministisch über die ScrollPosition-Struct-API (iOS 18+) -
+        // das List-scrollTo/ID-Binding landete bei langen Verläufen auf
+        // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
+        // bleiben für den iOS-17-Fallback synchron.
         if let boundary = viewModel.unreadBoundary {
+            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: -boundary, anchor: .top)))
             chatScrollAnchor = .top
             chatScrollId = -boundary
             SouveraLog.write("LinkChat", "positionChat target=separator(-\(boundary)) anchor=top")
         } else if let lastId = items.last?.id {
+            chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
             chatScrollAnchor = .bottom
             chatScrollId = lastId
-            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom")
+            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom edge")
         }
     }
 
@@ -2367,4 +2372,95 @@ struct SouveraShareSheet: UIViewControllerRepresentable {
     }
 
     func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+
+// MARK: - Chat-Scroll-Steuerung (A: ScrollPosition-Struct-API)
+
+/// Ziel eines Chat-Scrolls. `stamp` (neue UUID je Request) stellt sicher,
+/// dass auch IDENTISCHE Ziele den onChange-Pfad des Modifiers erneut
+/// auslösen (Retry-Loop setzt das Ziel mehrfach).
+/// Ziel eines Chat-Scrolls. Der `stamp` (neue UUID je Request) stellt
+/// sicher, dass auch IDENTISCHE Ziele den onChange-Pfad des Modifiers
+/// erneut auslösen (der Retry-Loop setzt das Ziel mehrfach).
+struct ChatScrollTarget: Equatable {
+    enum Kind: Equatable {
+        case edge(UnitPoint)                    // .bottom -> neueste Nachricht
+        case row(id: Int64, anchor: UnitPoint)  // Trennlinie / konkrete Zeile
+    }
+
+    let kind: Kind
+    let stamp: UUID
+
+    init(kind: Kind) {
+        self.kind = kind
+        self.stamp = UUID()
+    }
+
+    static func == (lhs: ChatScrollTarget, rhs: ChatScrollTarget) -> Bool {
+        lhs.stamp == rhs.stamp
+    }
+}
+
+/// Vermittelt Scroll-Requests vom ViewModel-Pfad an den attachierten
+/// Modifier. Enthält keine iOS-18-Typen -> auf iOS 17 ladbar.
+final class ChatScrollDirector: ObservableObject {
+    @Published var target: ChatScrollTarget?
+
+    func request(_ target: ChatScrollTarget) {
+        self.target = target
+    }
+}
+
+/// Hängt die Scroll-Position-Steuerung an: iOS 18+ nutzt die
+/// ScrollPosition-Struct-API (deterministisch, auch bei nachwachsendem
+/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback.
+struct ChatScrollAttachModifier: ViewModifier {
+    let director: ChatScrollDirector
+    @Binding var legacyId: Int64?
+    @Binding var legacyAnchor: UnitPoint
+
+    func body(content: Content) -> some View {
+        if #available(iOS 18.0, *) {
+            content.modifier(ChatScrollModernAttach(director: director))
+        } else {
+            content.modifier(ChatScrollLegacyAttach(legacyId: $legacyId, legacyAnchor: $legacyAnchor))
+        }
+    }
+}
+
+private struct ChatScrollLegacyAttach: ViewModifier {
+    @Binding var legacyId: Int64?
+    @Binding var legacyAnchor: UnitPoint
+
+    func body(content: Content) -> some View {
+        content.scrollPosition(id: $legacyId, anchor: legacyAnchor)
+    }
+}
+
+@available(iOS 18.0, *)
+private struct ChatScrollModernAttach: ViewModifier {
+    let director: ChatScrollDirector
+    @State private var position = ScrollPosition()
+
+    func body(content: Content) -> some View {
+        content
+            .scrollPosition($position)
+            .onChange(of: director.target) { _, target in
+                apply(target)
+            }
+            .task(id: director.target?.stamp) {
+                apply(director.target)
+            }
+    }
+
+    private func apply(_ target: ChatScrollTarget?) {
+        guard let target else { return }
+        switch target.kind {
+        case .edge(let anchor):
+            position.scrollTo(edge: anchor == .top ? .top : .bottom)
+        case .row(let id, let anchor):
+            position.scrollTo(id: id, anchor: anchor)
+        }
+    }
 }

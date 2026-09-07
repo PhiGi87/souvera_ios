@@ -125,6 +125,8 @@ struct SouveraCalendarView: View {
                     Button {
                         selectedDay = Date()
                         viewModel.visibleMonth = Date()
+                        // B3: Tag/3-Tage zur Jetzt-Linie springen lassen.
+                        scrollToNowTrigger += 1
                     } label: {
                         Text(NSLocalizedString("_calendar_today_", comment: ""))
                             .font(.subheadline)
@@ -688,9 +690,22 @@ private struct TimelineDayView: View {
     }
 
     private func scrollToNow(_ proxy: ScrollViewProxy) {
-        let currentHour = Calendar.current.component(.hour, from: Date())
-        if Calendar.current.isDateInToday(day) {
-            proxy.scrollTo("hour_\(currentHour)", anchor: .top)
+        scrollToNowWithRetry(proxy, attempt: 0)
+    }
+
+    /// B1/B2: minutengenaue Landung auf der roten Jetzt-Linie (Anker =
+    /// Minutenbruchteil der Stundenzeile) + Retry gegen das Layout-Timing.
+    private func scrollToNowWithRetry(_ proxy: ScrollViewProxy, attempt: Int) {
+        guard Calendar.current.isDateInToday(day) else { return }
+        let now = Date()
+        let currentHour = Calendar.current.component(.hour, from: now)
+        let minutes = Calendar.current.component(.minute, from: now)
+        let anchor = UnitPoint(x: 0.5, y: Double(minutes) / 60.0)
+        proxy.scrollTo("hour_\(currentHour)", anchor: anchor)
+        if attempt < 3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
+                scrollToNowWithRetry(proxy, attempt: attempt + 1)
+            }
         }
     }
 
@@ -1099,9 +1114,21 @@ private struct ThreeDayTimelineView: View {
     }
 
     private func scrollToNow(_ proxy: ScrollViewProxy) {
-        let currentHour = Calendar.current.component(.hour, from: Date())
-        if days.contains(where: { Calendar.current.isDateInToday($0) }) {
-            proxy.scrollTo("hour_\(currentHour)", anchor: .top)
+        scrollToNowWithRetry(proxy, attempt: 0)
+    }
+
+    /// B1/B2: minutengenaue Landung auf der roten Jetzt-Linie + Retry.
+    private func scrollToNowWithRetry(_ proxy: ScrollViewProxy, attempt: Int) {
+        guard days.contains(where: { Calendar.current.isDateInToday($0) }) else { return }
+        let now = Date()
+        let currentHour = Calendar.current.component(.hour, from: now)
+        let minutes = Calendar.current.component(.minute, from: now)
+        let anchor = UnitPoint(x: 0.5, y: Double(minutes) / 60.0)
+        proxy.scrollTo("hour_\(currentHour)", anchor: anchor)
+        if attempt < 3 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [self] in
+                scrollToNowWithRetry(proxy, attempt: attempt + 1)
+            }
         }
     }
 }
