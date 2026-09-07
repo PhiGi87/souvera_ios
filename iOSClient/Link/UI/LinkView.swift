@@ -950,6 +950,11 @@ struct LinkChatView: View {
     /// List-scrollTo war bei langen Verläufen unzuverlässig.
     @State private var chatScrollId: Int64?
     @State private var chatScrollAnchor: UnitPoint = .bottom
+    /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
+    /// inkrementiert und invalidiert damit alle Loops des alten Raums
+    /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
+    /// Scroll-Ziel, 7450 <-> 7616 im 100-ms-Takt).
+    @State private var positioningGeneration = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1228,12 +1233,13 @@ struct LinkChatView: View {
                     }
                 })
                 .onChange(of: token) { _, _ in
+                    // P1: Alter Loop invalidieren, neuer Loop für den Raum.
+                    positioningGeneration += 1
                     chatPositioned = false
                     showScrollBottom = false
-                    entryPositioningUntil = Date().addingTimeInterval(3)
+                    entryPositioningUntil = Date().addingTimeInterval(10)
                     lastVisibleMessageId = items.last?.id
-                    // F1: Retry-Loop auch beim Raumwechsel neu starten.
-                    startEntryPositioning(items: items)
+                    startEntryPositioning()
                 }
                 // Position-vor-Sichtbarkeit: solange unsichtbar an die
                 // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
@@ -1244,16 +1250,24 @@ struct LinkChatView: View {
                 // Bottom-Anchor neutralisiert.
                 .opacity(chatPositioned ? 1 : 0)
                 .onAppear {
-                    entryPositioningUntil = Date().addingTimeInterval(3)
+                    entryPositioningUntil = Date().addingTimeInterval(10)
                     lastVisibleMessageId = items.last?.id
-                    startEntryPositioning(items: items)
+                    startEntryPositioning()
                 }
                 // P68n: Nachpositionieren solange das Fenster läuft (die
                 // Server-Liste/Boundary kommt oft erst 1-3 s nach dem
                 // Eintritt) - ohne Animation, vor/nach dem Einblenden.
                 .onChange(of: viewModel.unreadBoundary) { _, _ in
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(items: items)
+                    positionChat(items: currentChatItems)
+                }
+                // P3: Verlaufs-Nachladen (Prepend) verschiebt den sichtbaren
+                // Bereich - bei JEDER Inhaltsänderung im Eintrittsfenster
+                // zur Zielposition nachführen (auch wenn die letzte ID
+                // gleich bleibt).
+                .onChange(of: currentChatItems.count) { _, _ in
+                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
+                    positionChat(items: currentChatItems)
                 }
                 .onChange(of: items.last?.id) { _, newLastId in
                     // P68n: Nach dem Senden ans Ende springen (eigene
@@ -1270,7 +1284,7 @@ struct LinkChatView: View {
                     // Verspätete Listen-Updates im Eintrittsfenster
                     // nachpositionieren.
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(items: items)
+                    positionChat(items: currentChatItems)
                 }
             }
         }
@@ -1329,21 +1343,44 @@ struct LinkChatView: View {
     /// über den Bottom-Observer bzw. Ende der Versuche), und blendet die
     /// Liste erst danach ein. Ein einmaliges scrollTo bleibt in langen
     /// Lazy-Listen gern auf halbem Weg stecken.
-    private func startEntryPositioning(items: [LinkChatMessage], attempt: Int = 0) {
-        guard !chatPositioned else { return }
+    private func startEntryPositioning(attempt: Int = 0) {
+        let generation = positioningGeneration
+        guard !chatPositioned, generation == positioningGeneration else { return }
+        // P2: Items JEDEN Versuch frisch aus dem ViewModel lesen - die beim
+        // Start gecapturten gehören ggf. zum alten Raum oder zum alten
+        // Verlaufstand.
+        let items = currentChatItems
         positionChat(items: items)
+        // P3: Historie-Nachladen abwarten - solange ältere Seiten laufen,
+        // wird weiter nachgeführt (Prepend verschiebt sonst den sichtbaren
+        // Bereich weg von der Zielposition).
+        let historyDone = !viewModel.hasMoreHistory
         // F2: "am Ende"-Frühausstieg erst nach einigen Versuchen - der
         // Observer-Wert ist unmittelbar nach dem ersten scrollTo noch
         // veraltet (showScrollBottom startet mit false).
         let isAtBottomTarget = viewModel.unreadBoundary == nil && !showScrollBottom
-        if (isAtBottomTarget && attempt >= 4) || attempt >= 8 {
+        if (historyDone && isAtBottomTarget && attempt >= 4)
+            || (historyDone && attempt >= 10)
+            || attempt >= 50 {
             chatPositioned = true
+            SouveraLog.write("LinkChat", "entry positioning settled (gen=\(generation) attempt=\(attempt))")
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
-            guard !chatPositioned else { return }
-            startEntryPositioning(items: items, attempt: attempt + 1)
+            guard !chatPositioned, generation == positioningGeneration else {
+                if generation != positioningGeneration {
+                    SouveraLog.write("LinkChat", "entry positioning loop invalidated (stale generation \(generation))")
+                }
+                return
+            }
+            startEntryPositioning(attempt: attempt + 1)
         }
+    }
+
+    /// Aktuelle Nachrichtenliste des offenen Raums (frisch pro Versuch).
+    private var currentChatItems: [LinkChatMessage] {
+        if case let .success(items) = viewModel.messages { return items }
+        return []
     }
 
     private func positionChat(items: [LinkChatMessage]) {
