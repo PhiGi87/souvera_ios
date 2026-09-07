@@ -946,6 +946,10 @@ struct LinkChatView: View {
     @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
+    /// C2: Deterministische Scroll-Position (iOS 17 scrollPosition) - der
+    /// List-scrollTo war bei langen Verläufen unzuverlässig.
+    @State private var chatScrollId: Int64?
+    @State private var chatScrollAnchor: UnitPoint = .bottom
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1099,9 +1103,6 @@ struct LinkChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
     }
 
     private func dayLabel(for timestamp: TimeInterval) -> String {
@@ -1126,8 +1127,8 @@ struct LinkChatView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
-            ScrollViewReader { proxy in
-                List {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     // Sentinel oben: lädt ältere Nachrichten nach, falls der
                     // Historie-Loop noch nicht fertig ist (kein Paging-UI).
                     if viewModel.hasMoreHistory {
@@ -1136,7 +1137,7 @@ struct LinkChatView: View {
                             ProgressView()
                             Spacer()
                         }
-                        .listRowSeparator(.hidden)
+                        .padding(.vertical, 8)
                         .onAppear { viewModel.loadEarlierHistory() }
                     }
                     ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
@@ -1160,9 +1161,8 @@ struct LinkChatView: View {
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
                                 .id(message.id)
-                                .listRowSeparator(.hidden)
-                                .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
-                                .listRowBackground(Color.clear)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 2)
                         } else {
                             LinkMessageRow(
                                 viewModel: viewModel,
@@ -1190,14 +1190,13 @@ struct LinkChatView: View {
                                 onShare: { target in prepareShare(for: target) }
                             )
                             .id(message.id)
-                            .listRowSeparator(.hidden)
-                            .listRowInsets(EdgeInsets(top: 3, leading: 12, bottom: 3, trailing: 12))
-                            .listRowBackground(Color.clear)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 3)
                         }
                     }
+                    .scrollTargetLayout()
                 }
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
+                .scrollPosition(id: $chatScrollId, anchor: chatScrollAnchor)
                 // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
                 // das Nachladen älterer Nachrichten oben reißt die
                 // Leseposition nicht mit. Die EINTRITTSPOSITION setzt
@@ -1210,7 +1209,7 @@ struct LinkChatView: View {
                     // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
                     // Nachrichten hochgescrollt ist.
                     if let lastId = items.last?.id {
-                        scrollBottomButton(proxy: proxy, lastId: lastId)
+                        scrollBottomButton(lastId: lastId)
                             .padding(.trailing, 16)
                             .padding(.bottom, 16)
                             .opacity(showScrollBottom ? 1 : 0)
@@ -1234,7 +1233,7 @@ struct LinkChatView: View {
                     entryPositioningUntil = Date().addingTimeInterval(3)
                     lastVisibleMessageId = items.last?.id
                     // F1: Retry-Loop auch beim Raumwechsel neu starten.
-                    startEntryPositioning(proxy: proxy, items: items)
+                    startEntryPositioning(items: items)
                 }
                 // Position-vor-Sichtbarkeit: solange unsichtbar an die
                 // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
@@ -1247,14 +1246,14 @@ struct LinkChatView: View {
                 .onAppear {
                     entryPositioningUntil = Date().addingTimeInterval(3)
                     lastVisibleMessageId = items.last?.id
-                    startEntryPositioning(proxy: proxy, items: items)
+                    startEntryPositioning(items: items)
                 }
                 // P68n: Nachpositionieren solange das Fenster läuft (die
                 // Server-Liste/Boundary kommt oft erst 1-3 s nach dem
                 // Eintritt) - ohne Animation, vor/nach dem Einblenden.
                 .onChange(of: viewModel.unreadBoundary) { _, _ in
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(proxy: proxy, items: items)
+                    positionChat(items: items)
                 }
                 .onChange(of: items.last?.id) { _, newLastId in
                     // P68n: Nach dem Senden ans Ende springen (eigene
@@ -1263,14 +1262,15 @@ struct LinkChatView: View {
                        let newLastId,
                        newLastId != lastVisibleMessageId {
                         scrollToNewestPending = false
-                        withAnimation { proxy.scrollTo(newLastId, anchor: .bottom) }
+                        chatScrollAnchor = .bottom
+                        chatScrollId = newLastId
                         viewModel.noteScrolledToNewest()
                     }
                     lastVisibleMessageId = newLastId
                     // Verspätete Listen-Updates im Eintrittsfenster
                     // nachpositionieren.
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(proxy: proxy, items: items)
+                    positionChat(items: items)
                 }
             }
         }
@@ -1290,9 +1290,6 @@ struct LinkChatView: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .listRowSeparator(.hidden)
-        .listRowInsets(EdgeInsets())
-        .listRowBackground(Color.clear)
     }
 
     /// Fotos aus dem System-Picker übernehmen und in den Chat hochladen
@@ -1332,9 +1329,9 @@ struct LinkChatView: View {
     /// über den Bottom-Observer bzw. Ende der Versuche), und blendet die
     /// Liste erst danach ein. Ein einmaliges scrollTo bleibt in langen
     /// Lazy-Listen gern auf halbem Weg stecken.
-    private func startEntryPositioning(proxy: ScrollViewProxy, items: [LinkChatMessage], attempt: Int = 0) {
+    private func startEntryPositioning(items: [LinkChatMessage], attempt: Int = 0) {
         guard !chatPositioned else { return }
-        positionChat(proxy: proxy, items: items)
+        positionChat(items: items)
         // F2: "am Ende"-Frühausstieg erst nach einigen Versuchen - der
         // Observer-Wert ist unmittelbar nach dem ersten scrollTo noch
         // veraltet (showScrollBottom startet mit false).
@@ -1345,25 +1342,31 @@ struct LinkChatView: View {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
             guard !chatPositioned else { return }
-            startEntryPositioning(proxy: proxy, items: items, attempt: attempt + 1)
+            startEntryPositioning(items: items, attempt: attempt + 1)
         }
     }
 
-    private func positionChat(proxy: ScrollViewProxy, items: [LinkChatMessage]) {
+    private func positionChat(items: [LinkChatMessage]) {
+        // C2: Deterministisch über scrollPosition(id:anchor:) statt
+        // proxy.scrollTo (List-scrollTo landete bei langen Verläufen
+        // auf halbem Weg - unverlässliche Zeilenhöhen-Schätzungen).
         if let boundary = viewModel.unreadBoundary {
-            // Zur TRENNLINIE springen (anchor .top): die Linie sitzt oben,
-            // die erste ungelesene Nachricht direkt darunter.
-            proxy.scrollTo(-boundary, anchor: .top)
+            chatScrollAnchor = .top
+            chatScrollId = -boundary
+            SouveraLog.write("LinkChat", "positionChat target=separator(-\(boundary)) anchor=top")
         } else if let lastId = items.last?.id {
-            proxy.scrollTo(lastId, anchor: .bottom)
+            chatScrollAnchor = .bottom
+            chatScrollId = lastId
+            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom")
         }
     }
 
     /// "Runter zu den neuesten Nachrichten": identisches Design wie der
     /// Mail-Up-Pfeil (Kreis, Material, Schatten), Icon arrow.down.
-    private func scrollBottomButton(proxy: ScrollViewProxy, lastId: Int64) -> some View {
+    private func scrollBottomButton(lastId: Int64) -> some View {
         Button {
-            withAnimation { proxy.scrollTo(lastId, anchor: .bottom) }
+            chatScrollAnchor = .bottom
+            chatScrollId = lastId
         } label: {
             Image(systemName: "arrow.down")
                 .font(.system(size: 17, weight: .semibold))
