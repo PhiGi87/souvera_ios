@@ -950,6 +950,9 @@ struct LinkChatView: View {
     /// über die ScrollPosition-Struct-API, auf iOS 17 über das ID-Binding
     /// (Fallback). Der List-scrollTo war bei langen Verläufen unzuverlässig.
     @StateObject private var chatScrollDirector = ChatScrollDirector()
+    /// iOS-17-Fallback-Zustände (vom Director mitgepflegt).
+    @State private var chatScrollId: Int64?
+    @State private var chatScrollAnchor: UnitPoint = .bottom
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
     /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
