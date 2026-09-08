@@ -1175,63 +1175,11 @@ struct LinkChatView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                     }
-                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
-                        // Tageswechsel-Trennlinie (P68j): vor der ersten
-                        // Nachricht eines neuen Kalendertags.
-                        if showsDaySeparator(index: index, message: message) {
-                            daySeparatorRow(for: message.timestamp)
-                                .id(ChatScrollIds.day(message.id))
-                        }
-                        // "Neue Nachrichten"-Trennlinie vor der ersten
-                        // ungelesenen Nachricht (Talk-Standard).
-                        if !viewModel.hideUnreadSeparator,
-                           viewModel.unreadBoundary == message.id {
-                            unreadSeparatorRow
-                                // F1: Eigene, EINDEUTIGE Scroll-IDs je Zeile -
-                                // die Tages-Trennlinien hatten keine ID und
-                                // kollidierten im scrollTargetLayout mit den
-                                // Nachrichten-IDs -> scrollPosition landete
-                                // an "beliebigen" Datumslinien.
-                                .id(ChatScrollIds.unread(message.id))
-                        }
-                        if message.isSystemMessage {
-                            LinkSystemMessageRow(message: message)
-                                .id(ChatScrollIds.message(message.id))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 2)
-                        } else {
-                            LinkMessageRow(
-                                viewModel: viewModel,
-                                message: message,
-                                isOwn: message.actorId == viewModel.currentUserId,
-                                showTime: showsTime(index: index, message: message, items: items),
-                                showsAvatar: showsAvatar(index: index, message: message, items: items),
-                                onStartEdit: { editingMessage = message; draft = message.message },
-                                onFileTap: { info in
-                                    // Datei im Dateien-Modul anzeigen (Ordner
-                                    // des Talk-Uploads statt lokaler Vorschau).
-                                    viewModel.openFileInFiles(info)
-                                },
-                                onImageTap: { target in
-                                    fullscreenImageMessage = target
-                                },
-                                onPdfTap: { target in
-                                    if let url = viewModel.chatPdfCache[target.id] {
-                                        pdfPreviewURL = url
-                                    }
-                                },
-                                onStartReply: { replyingTo = message },
-                                onStartForward: { forwardTarget = message },
-                                onLongPress: { target in reactionTarget = target },
-                                onShare: { target in prepareShare(for: target) }
-                            )
-                            .id(ChatScrollIds.message(message.id))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 3)
-                        }
+                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) {
+                        chatRow(index: index, message: message, items: items)
                     }
-                    .scrollTargetLayout()
                 }
+                .scrollTargetLayout()
                 .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
                                                    legacyId: $chatScrollId,
                                                    legacyAnchor: $chatScrollAnchor))
@@ -1441,6 +1389,67 @@ struct LinkChatView: View {
             chatScrollAnchor = .bottom
             chatScrollId = ChatScrollIds.message(lastId)
             SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom edge")
+        }
+    }
+
+
+    /// F1/P-B: Eine Chat-Zeile inkl. Tages-/Ungelesen-Trennlinien und
+    /// eindeutigen Scroll-IDs — ausgelagert, damit der messageList-Ausdruck
+    /// für den Type-Checker handhabbar bleibt.
+    @ViewBuilder
+    private func chatRow(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> some View {
+        // Tageswechsel-Trennlinie (P68j): vor der ersten Nachricht eines
+        // neuen Kalendertags.
+                        if showsDaySeparator(index: index, message: message) {
+                            daySeparatorRow(for: message.timestamp)
+                                .id(ChatScrollIds.day(message.id))
+                        }
+                        // "Neue Nachrichten"-Trennlinie vor der ersten
+                        // ungelesenen Nachricht (Talk-Standard).
+                        if !viewModel.hideUnreadSeparator,
+                           viewModel.unreadBoundary == message.id {
+                            unreadSeparatorRow
+                                // F1: Eigene, EINDEUTIGE Scroll-IDs je Zeile -
+                                // die Tages-Trennlinien hatten keine ID und
+                                // kollidierten im scrollTargetLayout mit den
+                                // Nachrichten-IDs -> scrollPosition landete
+                                // an "beliebigen" Datumslinien.
+                                .id(ChatScrollIds.unread(message.id))
+                        }
+                        if message.isSystemMessage {
+                            LinkSystemMessageRow(message: message)
+                                .id(ChatScrollIds.message(message.id))
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 2)
+                        } else {
+                            LinkMessageRow(
+                                viewModel: viewModel,
+                                message: message,
+                                isOwn: message.actorId == viewModel.currentUserId,
+                                showTime: showsTime(index: index, message: message, items: items),
+                                showsAvatar: showsAvatar(index: index, message: message, items: items),
+                                onStartEdit: { editingMessage = message; draft = message.message },
+                                onFileTap: { info in
+                                    // Datei im Dateien-Modul anzeigen (Ordner
+                                    // des Talk-Uploads statt lokaler Vorschau).
+                                    viewModel.openFileInFiles(info)
+                                },
+                                onImageTap: { target in
+                                    fullscreenImageMessage = target
+                                },
+                                onPdfTap: { target in
+                                    if let url = viewModel.chatPdfCache[target.id] {
+                                        pdfPreviewURL = url
+                                    }
+                                },
+                                onStartReply: { replyingTo = message },
+                                onStartForward: { forwardTarget = message },
+                                onLongPress: { target in reactionTarget = target },
+                                onShare: { target in prepareShare(for: target) }
+                            )
+                            .id(ChatScrollIds.message(message.id))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 3)
         }
     }
 
