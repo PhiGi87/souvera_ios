@@ -1175,7 +1175,7 @@ struct LinkChatView: View {
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
                     }
-                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) {
+                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
                         chatRow(index: index, message: message, items: items)
                     }
                 }
@@ -2435,8 +2435,8 @@ struct SouveraShareSheet: UIViewControllerRepresentable {
 /// erneut auslösen (der Retry-Loop setzt das Ziel mehrfach).
 struct ChatScrollTarget: Equatable {
     enum Kind: Equatable {
-        case edge(UnitPoint)                    // .bottom -> neueste Nachricht
-        case row(id: Int64, anchor: UnitPoint)  // Trennlinie / konkrete Zeile
+        case edge(UnitPoint)                       // .bottom -> neueste Nachricht
+        case row(id: String, anchor: UnitPoint)    // Trennlinie / konkrete Zeile
     }
 
     let kind: Kind
