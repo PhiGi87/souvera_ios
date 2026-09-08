@@ -708,8 +708,10 @@ final class LinkViewModel: ObservableObject {
             // Hochscrollen (+7 Tage/Schritt).
             self.windowLoadDone = true
             self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
-            // Ältere Seiten existieren nur, wenn die erste Seite voll war.
-            self.hasMoreHistory = ordered.count >= 100
+            // P-A (geschärft): KEIN Nachrichtenanzahl-Filter - optimistisch
+            // true; der stille Fenster-Load korrigiert über reachedStart
+            // (false nur am echten Gesprächsanfang).
+            self.hasMoreHistory = true
             self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             await self.pollNewMessages(token: token)
         }

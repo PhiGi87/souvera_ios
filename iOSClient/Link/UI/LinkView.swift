@@ -953,6 +953,9 @@ struct LinkChatView: View {
     /// iOS-17-Fallback-Zustände (vom Director mitgepflegt).
     @State private var chatScrollId: String?
     @State private var chatScrollAnchor: UnitPoint = .bottom
+    /// P-B: Echte Distanz zum Listenende (gemessen via Scroll-Geometrie) -
+    /// Grundlage für Settle, Klemme und Runter-Button.
+    @State private var chatBottomDistance: CGFloat = .infinity
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
     /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
@@ -1142,7 +1145,7 @@ struct LinkChatView: View {
                     // "Anfang der Unterhaltung" am Schluss. Das Nachladen
                     // triggert automatisch beim Erreichen der Zeile.
                     if viewModel.hasMoreHistory {
-                        HStack(spacing: 8) {
+                        historyHintBubble {
                             // F2: Nachladen erst, wenn die Eintritts-
                             // positionierung sitzt (kein 99->298-Rennen).
                             if !chatPositioned {
@@ -1157,10 +1160,6 @@ struct LinkChatView: View {
                                 Text(NSLocalizedString("_link_older_hint_", comment: ""))
                             }
                         }
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 10)
                         .id(ChatScrollIds.sentinel)
                         .onAppear {
                             // F2: erst nach sitzender Eintrittsposition.
@@ -1169,11 +1168,9 @@ struct LinkChatView: View {
                             }
                         }
                     } else if !items.isEmpty {
-                        Text(NSLocalizedString("_link_history_start_", comment: ""))
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 10)
+                        historyHintBubble {
+                            Text(NSLocalizedString("_link_history_start_", comment: ""))
+                        }
                     }
                     ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
                         chatRow(index: index, message: message, items: items)
@@ -1202,7 +1199,11 @@ struct LinkChatView: View {
                             .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
                     }
                 }
-                .modifier(SouveraScrollBottomObserver { visible in
+                .modifier(SouveraScrollBottomObserver { distance in
+                    // P-B: Echte Distanz zum Listenende messen (Grundlage für
+                    // Settle, Klemme und Runter-Button).
+                    chatBottomDistance = distance
+                    let visible = distance > 120
                     if visible != showScrollBottom {
                         withAnimation(.easeInOut(duration: 0.25)) {
                             showScrollBottom = visible
@@ -1240,7 +1241,7 @@ struct LinkChatView: View {
                 // Eintritt) - ohne Animation, vor/nach dem Einblenden.
                 .onChange(of: viewModel.unreadBoundary) { _, _ in
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(items: currentChatItems)
+                    positionChat()
                 }
                 // P-D: Scroll-up-Batch fertig -> auf die zuvor älteste
                 // Nachricht re-anchoren (Leseposition erhalten).
@@ -1261,12 +1262,13 @@ struct LinkChatView: View {
                 .onChange(of: currentChatItems.count) { _, _ in
                     // P2: Still nachgefüllter Verlauf (oben) verschiebt den
                     // sichtbaren Bereich nicht - am Ende stehend wird nach
-                    // jedem Einfügen ans (neue) Ende geklemmt.
-                    if !showScrollBottom, chatPositioned {
+                    // jedem Einfügen ans (neue) Ende geklemmt (echte
+                    // Messung, nicht der Init-Wert showScrollBottom).
+                    if chatPositioned, chatBottomDistance <= 80 {
                         chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
                     }
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(items: currentChatItems)
+                    positionChat()
                 }
                 .onChange(of: items.last?.id) { _, newLastId in
                     // P68n: Nach dem Senden ans Ende springen (eigene
@@ -1283,10 +1285,28 @@ struct LinkChatView: View {
                     // Verspätete Listen-Updates im Eintrittsfenster
                     // nachpositionieren.
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat(items: currentChatItems)
+                    positionChat()
                 }
             }
         }
+    }
+
+    /// P-C: Dezente ovale Hinweis-Bubble (klart abgesetzt von den
+    /// Nachrichten-Bubbles: kleiner, zentriert, neutrales Grau).
+    private func historyHintBubble<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                content()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color(.systemGray4).opacity(0.7), in: Capsule())
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 
     /// Dezente Trennlinie "Neue Nachrichten" (Talk-Standard).
@@ -1345,11 +1365,9 @@ struct LinkChatView: View {
     private func startEntryPositioning(attempt: Int = 0) {
         let generation = positioningGeneration
         guard !chatPositioned, generation == positioningGeneration else { return }
-        // P2: Items JEDEN Versuch frisch aus dem ViewModel lesen - die beim
-        // Start gecapturten gehören ggf. zum alten Raum oder zum alten
-        // Verlaufstand.
-        let items = currentChatItems
-        positionChat(items: items)
+        // P2: Items JEDEN Versuch frisch aus dem ViewModel lesen (die
+        // Zielableitung nutzt visibleItems).
+        positionChat()
         // P3: Historie-Nachladen abwarten - solange ältere Seiten laufen,
         // wird weiter nachgeführt (Prepend verschiebt sonst den sichtbaren
         // Bereich weg von der Zielposition).
@@ -1357,10 +1375,14 @@ struct LinkChatView: View {
         // gilt die Position als gesetzt ("am Ende"-Frühausstieg erst nach
         // einigen Versuchen - der Observer-Wert ist unmittelbar nach dem
         // ersten Scroll noch veraltet).
+        // P-B: Das Fenster-Laden (7-Tage/Scroll-up) muss fertig sein UND die
+        // Endposition muss REAL gemessen sein (bottomDistance <= 80) - ein
+        // fehlgeschlagener Scroll setzt den Loop nicht vorzeitig auf
+        // "settled" (das war die Ursache der Landung oben im Verlauf).
         let historyDone = viewModel.windowLoadDone
-        let isAtBottomTarget = viewModel.unreadBoundary == nil && !showScrollBottom
+        let isAtBottomTarget = viewModel.unreadBoundary == nil && chatBottomDistance <= 80
         if (historyDone && isAtBottomTarget && attempt >= 4)
-            || (historyDone && attempt >= 10)
+            || (historyDone && attempt >= 12)
             || attempt >= 50 {
             chatPositioned = true
             SouveraLog.write("LinkChat", "entry positioning settled (gen=\(generation) attempt=\(attempt))")
@@ -1385,7 +1407,11 @@ struct LinkChatView: View {
         return []
     }
 
-    private func positionChat(items: [LinkChatMessage]) {
+    private func positionChat() {
+        // F1-Nachtrag: Ziel immer aus den GERENDERTEN Zeilen ableiten -
+        // eine als gelöscht gefilterte letzte Nachricht wäre sonst ein
+        // Ziel, das im Layout nicht existiert (scrollTo tut dann nichts).
+        let targetItems = visibleItems
         // A: Deterministisch über die ScrollPosition-Struct-API (iOS 18+) -
         // das List-scrollTo/ID-Binding landete bei langen Verläufen auf
         // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
@@ -1395,7 +1421,7 @@ struct LinkChatView: View {
             chatScrollAnchor = .top
             chatScrollId = ChatScrollIds.unread(boundary)
             SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=top")
-        } else if let lastId = items.last?.id {
+        } else if let lastId = targetItems.last?.id {
             chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
             chatScrollAnchor = .bottom
             chatScrollId = ChatScrollIds.message(lastId)
