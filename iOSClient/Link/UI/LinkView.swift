@@ -951,7 +951,7 @@ struct LinkChatView: View {
     /// (Fallback). Der List-scrollTo war bei langen Verläufen unzuverlässig.
     @StateObject private var chatScrollDirector = ChatScrollDirector()
     /// iOS-17-Fallback-Zustände (vom Director mitgepflegt).
-    @State private var chatScrollId: Int64?
+    @State private var chatScrollId: String?
     @State private var chatScrollAnchor: UnitPoint = .bottom
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
@@ -1143,6 +1143,11 @@ struct LinkChatView: View {
                     // triggert automatisch beim Erreichen der Zeile.
                     if viewModel.hasMoreHistory {
                         HStack(spacing: 8) {
+                            // F2: Nachladen erst, wenn die Eintritts-
+                            // positionierung sitzt (kein 99->298-Rennen).
+                            if !chatPositioned {
+                                ProgressView()
+                            }
                             if viewModel.isLoadingOlder {
                                 ProgressView()
                                 Text(NSLocalizedString("_link_older_loading_", comment: ""))
@@ -1156,7 +1161,13 @@ struct LinkChatView: View {
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 10)
-                        .onAppear { viewModel.loadEarlierHistory() }
+                        .id(ChatScrollIds.sentinel)
+                        .onAppear {
+                            // F2: erst nach sitzender Eintrittsposition.
+                            if chatPositioned {
+                                viewModel.loadEarlierHistory()
+                            }
+                        }
                     } else if !items.isEmpty {
                         Text(NSLocalizedString("_link_history_start_", comment: ""))
                             .font(.caption2)
@@ -1169,22 +1180,23 @@ struct LinkChatView: View {
                         // Nachricht eines neuen Kalendertags.
                         if showsDaySeparator(index: index, message: message) {
                             daySeparatorRow(for: message.timestamp)
+                                .id(ChatScrollIds.day(message.id))
                         }
                         // "Neue Nachrichten"-Trennlinie vor der ersten
                         // ungelesenen Nachricht (Talk-Standard).
                         if !viewModel.hideUnreadSeparator,
                            viewModel.unreadBoundary == message.id {
                             unreadSeparatorRow
-                                // Eigene Scroll-ID (negativ, kollidiert
-                                // nicht mit Nachrichten-IDs): positionChat
-                                // springt zur LINIE, damit sie oben sitzt
-                                // und die erste ungelesene Nachricht
-                                // darunter sichtbar ist.
-                                .id(-(message.id))
+                                // F1: Eigene, EINDEUTIGE Scroll-IDs je Zeile -
+                                // die Tages-Trennlinien hatten keine ID und
+                                // kollidierten im scrollTargetLayout mit den
+                                // Nachrichten-IDs -> scrollPosition landete
+                                // an "beliebigen" Datumslinien.
+                                .id(ChatScrollIds.unread(message.id))
                         }
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
-                                .id(message.id)
+                                .id(ChatScrollIds.message(message.id))
                                 .padding(.horizontal, 12)
                                 .padding(.vertical, 2)
                         } else {
@@ -1213,7 +1225,7 @@ struct LinkChatView: View {
                                 onLongPress: { target in reactionTarget = target },
                                 onShare: { target in prepareShare(for: target) }
                             )
-                            .id(message.id)
+                            .id(ChatScrollIds.message(message.id))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 3)
                         }
@@ -1282,6 +1294,15 @@ struct LinkChatView: View {
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat(items: currentChatItems)
                 }
+                // P-D: Scroll-up-Batch fertig -> auf die zuvor älteste
+                // Nachricht re-anchoren (Leseposition erhalten).
+                .onChange(of: viewModel.reanchorToMessageId) { _, anchorId in
+                    guard let anchorId else { return }
+                    chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(anchorId), anchor: .top)))
+                    chatScrollAnchor = .top
+                    chatScrollId = ChatScrollIds.message(anchorId)
+                    SouveraLog.write("LinkChat", "re-anchor after history prepend: \(anchorId)")
+                }
                 // P3: Verlaufs-Nachladen (Prepend) verschiebt den sichtbaren
                 // Bereich - bei JEDER Inhaltsänderung im Eintrittsfenster
                 // zur Zielposition nachführen (auch wenn die letzte ID
@@ -1298,7 +1319,7 @@ struct LinkChatView: View {
                        newLastId != lastVisibleMessageId {
                         scrollToNewestPending = false
                         chatScrollAnchor = .bottom
-                        chatScrollId = newLastId
+                        chatScrollId = ChatScrollIds.message(newLastId)
                         viewModel.noteScrolledToNewest()
                     }
                     lastVisibleMessageId = newLastId
@@ -1411,14 +1432,14 @@ struct LinkChatView: View {
         // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
         // bleiben für den iOS-17-Fallback synchron.
         if let boundary = viewModel.unreadBoundary {
-            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: -boundary, anchor: .top)))
+            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .top)))
             chatScrollAnchor = .top
-            chatScrollId = -boundary
-            SouveraLog.write("LinkChat", "positionChat target=separator(-\(boundary)) anchor=top")
+            chatScrollId = ChatScrollIds.unread(boundary)
+            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=top")
         } else if let lastId = items.last?.id {
             chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
             chatScrollAnchor = .bottom
-            chatScrollId = lastId
+            chatScrollId = ChatScrollIds.message(lastId)
             SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom edge")
         }
     }
@@ -1428,7 +1449,7 @@ struct LinkChatView: View {
     private func scrollBottomButton(lastId: Int64) -> some View {
         Button {
             chatScrollAnchor = .bottom
-            chatScrollId = lastId
+            chatScrollId = ChatScrollIds.message(lastId)
         } label: {
             Image(systemName: "arrow.down")
                 .font(.system(size: 17, weight: .semibold))
@@ -2450,7 +2471,7 @@ struct ChatScrollAttachModifier: ViewModifier {
 }
 
 private struct ChatScrollLegacyAttach: ViewModifier {
-    @Binding var legacyId: Int64?
+    @Binding var legacyId: String?
     @Binding var legacyAnchor: UnitPoint
 
     func body(content: Content) -> some View {
@@ -2483,4 +2504,19 @@ private struct ChatScrollModernAttach: ViewModifier {
             position.scrollTo(id: id, anchor: anchor)
         }
     }
+}
+
+
+// MARK: - F1: Eindeutige Scroll-Ziel-IDs je Chat-Zeile
+//
+// Die bedingten Geschwister-Zeilen (Tages-Trennlinie OHNE eigene ID,
+// Ungelesen-Linie, Nachricht) hatten im scrollTargetLayout ambige/
+// kollidierende Ziel-Identitäten -> scrollPosition landete an
+// "beliebigen" Datumslinien. Jede Zeile bekommt jetzt eine eindeutige
+// String-ID.
+enum ChatScrollIds {
+    static func message(_ id: Int64) -> String { "m_\(id)" }
+    static func day(_ id: Int64) -> String { "d_\(id)" }
+    static func unread(_ id: Int64) -> String { "u_\(id)" }
+    static let sentinel = "history_sentinel"
 }
