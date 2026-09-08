@@ -700,13 +700,16 @@ final class LinkViewModel: ObservableObject {
             let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
             let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
             self.updateUnreadBoundary(roomLastRead: effectiveLastRead, roomUnread: effectiveUnread)
-            // P-A: Verlauf als 7-Tage-Fenster laden (Lücken-Regel: lagen im
-            // Fenster keine Nachrichten, läuft das Laden bis zur letzten
-            // Nachricht vor der Lücke bzw. zum Gesprächsanfang). Ältere
-            // Tage kommen per Hochscrollen (+7 Tage/Schritt) nach.
-            self.windowLoadDone = false
+            // P1: Entry OHNE Verlaufs-Nachladen - die erste Seite (neueste
+            // Nachrichten) reicht, die Positionierung sitzt sofort exakt am
+            // Ende. Das 7-Tage-Fenster füllt sich danach still oben
+            // (completeHistoryWindow, ohne Re-Anchor/Viewport-Verschiebung,
+            // solange der Nutzer am Ende steht); ältere Tage per
+            // Hochscrollen (+7 Tage/Schritt).
+            self.windowLoadDone = true
             self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
-            await self.loadHistoryWindow(token: token, cutoff: self.historyWindowStart, reanchorOnFinish: false)
+            // Ältere Seiten existieren nur, wenn die erste Seite voll war.
+            self.hasMoreHistory = ordered.count >= 100
             self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             await self.pollNewMessages(token: token)
         }
@@ -756,8 +759,8 @@ final class LinkViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
     }
 
-    /// P-A: Lädt den Verlauf rückwärts in 100er-Seiten, bis die älteste
-    /// geladene Nachricht das Fenster-Ende (cutoff) unterschreitet — die
+    /// P-A: Lädt den Verlauf rückwärts in 100er-Seiten bis die älteste
+    /// geladene Nachricht das Zeitfenster (cutoff) unterschreitet — die
     /// Lücken-Regel: lagen vor der Grenze keine Nachrichten, läuft das
     /// Laden bis zur letzten Nachricht vor der Lücke bzw. zum
     /// Gesprächsanfang weiter.
@@ -816,18 +819,38 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
-    /// P-A: Scroll-up-Batch: +7 Tage älter laden (Sentinel/Top-Bereich).
-    func loadEarlierHistory() {
-        guard let api, case let .chat(token, _) = route,
-              hasMoreHistory, windowLoadDone, !isLoadingOlder else { return }
-        isLoadingOlder = true
-        windowLoadDone = false
-        Task {
-            let cutoff = historyWindowStart - 7 * 86400
-            await loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: true)
-            self.isLoadingOlder = false
+    /// P2: 7-Tage-Fenster STILL vervollständigen (nach sitzender
+    /// Eintrittspositionierung). Ohne Re-Anchor — die Ansicht klemmt sich
+    /// selbst ans Ende, solange der Nutzer unten steht.
+    func completeHistoryWindowInBackground() {
+        guard case let .chat(token, _) = route,
+              windowLoadDone,
+              hasMoreHistory,
+              !historyCompletionRunning,
+              !isLoadingOlder else { return }
+        historyCompletionRunning = true
+        Task { [weak self] in
+            let cutoff = self?.historyWindowStart ?? 0
+            await self?.loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: false)
+            self?.historyCompletionRunning = false
         }
     }
+
+    /// P-A: Scroll-up-Batch: +7 Tage älter laden (Hinweiszeile oben).
+    func loadEarlierHistory() {
+        guard let api, case let .chat(token, _) = route,
+              hasMoreHistory, windowLoadDone,
+              !isLoadingOlder, !historyCompletionRunning else { return }
+        isLoadingOlder = true
+        windowLoadDone = false
+        Task { [weak self] in
+            let cutoff = (self?.historyWindowStart ?? 0) - 7 * 86400
+            await self?.loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: true)
+            self?.isLoadingOlder = false
+        }
+    }
+
+    private var historyCompletionRunning = false
 
     private func pollNewMessages(token: String) async {
         guard let api else { return }

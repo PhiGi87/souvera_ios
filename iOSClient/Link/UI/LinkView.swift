@@ -1245,7 +1245,10 @@ struct LinkChatView: View {
                 // P-D: Scroll-up-Batch fertig -> auf die zuvor älteste
                 // Nachricht re-anchoren (Leseposition erhalten).
                 .onChange(of: viewModel.reanchorToMessageId) { _, anchorId in
-                    guard let anchorId else { return }
+                    // P4: Re-Anchor nur nach sitzender Eintrittsposition -
+                    // während des Eintritts würde er die Positionierung
+                    // nach oben zurren (Log 08.09. 19:09).
+                    guard let anchorId, chatPositioned else { return }
                     chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(anchorId), anchor: .top)))
                     chatScrollAnchor = .top
                     chatScrollId = ChatScrollIds.message(anchorId)
@@ -1256,6 +1259,12 @@ struct LinkChatView: View {
                 // zur Zielposition nachführen (auch wenn die letzte ID
                 // gleich bleibt).
                 .onChange(of: currentChatItems.count) { _, _ in
+                    // P2: Still nachgefüllter Verlauf (oben) verschiebt den
+                    // sichtbaren Bereich nicht - am Ende stehend wird nach
+                    // jedem Einfügen ans (neue) Ende geklemmt.
+                    if !showScrollBottom, chatPositioned {
+                        chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
+                    }
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat(items: currentChatItems)
                 }
@@ -1355,6 +1364,8 @@ struct LinkChatView: View {
             || attempt >= 50 {
             chatPositioned = true
             SouveraLog.write("LinkChat", "entry positioning settled (gen=\(generation) attempt=\(attempt))")
+            // P2: Position sitzt -> das 7-Tage-Fenster still vervollständigen.
+            viewModel.completeHistoryWindowInBackground()
             return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
