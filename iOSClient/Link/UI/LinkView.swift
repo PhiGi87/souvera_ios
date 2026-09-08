@@ -956,6 +956,17 @@ struct LinkChatView: View {
     /// P-B: Echte Distanz zum Listenende (gemessen via Scroll-Geometrie) -
     /// Grundlage für Settle, Klemme und Runter-Button.
     @State private var chatBottomDistance: CGFloat = .infinity
+    /// Universelle Ende-Erkennung (Ende-Probe-Zeile, alle OS-Versionen):
+    /// onScrollGeometryChange liefert keinen Initial-Callback und bleibt
+    /// deshalb beim Eintritt gern stumm (Log 08.09.: Settle attempt=4 vs.
+    /// attempt=12 auf demselben Gerät) - die Probe verifiziert das Listen-
+    /// Ende zuverlässig auch ohne vorherige Geometrie-Änderung.
+    @State private var chatEndVisible = false
+    /// Eintritts-Verifikation mit Ungelesenen: die "Neue Nachrichten"-
+    /// Trennlinie ist materialisiert (Zielzeile erreicht). Ohne diesen
+    /// Nachweis lief der Settle für Ungelesen-Räume immer in den
+    /// 12-Versuche-Fallback (2,4 s unsichtbar).
+    @State private var unreadBoundarySeen = false
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
     /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
@@ -1140,14 +1151,13 @@ struct LinkChatView: View {
         case let .success(items):
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // P-C: Dezente Nachlade-/Ende-Hinweise am oberen Ende:
-                    // Spinner während des Ladens, Hinweis "weiter scrollen",
-                    // "Anfang der Unterhaltung" am Schluss. Das Nachladen
-                    // triggert automatisch beim Erreichen der Zeile.
+                    // Dezente Nachlade-/Ende-Hinweise am oberen Ende:
+                    // Spinner während des Ladens, Hinweis "nach unten
+                    // ziehen", "Anfang der Unterhaltung" am Schluss. Das
+                    // Nachladen löst NICHT mehr das Erreichen der Zeile aus,
+                    // sondern die Pull-Geste (.refreshable, Run-Feedback).
                     if viewModel.hasMoreHistory {
                         historyHintBubble {
-                            // F2: Nachladen erst, wenn die Eintritts-
-                            // positionierung sitzt (kein 99->298-Rennen).
                             if !chatPositioned {
                                 ProgressView()
                             }
@@ -1155,18 +1165,12 @@ struct LinkChatView: View {
                                 ProgressView()
                                 Text(NSLocalizedString("_link_older_loading_", comment: ""))
                             } else {
-                                Image(systemName: "chevron.up")
+                                Image(systemName: "chevron.down")
                                     .font(.caption2.weight(.semibold))
                                 Text(NSLocalizedString("_link_older_hint_", comment: ""))
                             }
                         }
                         .id(ChatScrollIds.sentinel)
-                        .onAppear {
-                            // F2: erst nach sitzender Eintrittsposition.
-                            if chatPositioned {
-                                viewModel.loadEarlierHistory()
-                            }
-                        }
                     } else if !items.isEmpty {
                         historyHintBubble {
                             Text(NSLocalizedString("_link_history_start_", comment: ""))
@@ -1175,6 +1179,16 @@ struct LinkChatView: View {
                     ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
                         chatRow(index: index, message: message, items: items)
                     }
+                    // Universelle Ende-Probe (alle OS-Versionen): materialisiert
+                    // erst, wenn die Liste tatsächlich am unteren Rand ist -
+                    // verifiziert den Eintritts-Scroll unabhängig von der
+                    // Geometrie (onScrollGeometryChange liefert KEINEN
+                    // Initial-Callback und bleibt sonst gern aus).
+                    Color.clear
+                        .frame(height: 1)
+                        .id(ChatScrollIds.endProbe)
+                        .onAppear { updateChatEndVisibility(true) }
+                        .onDisappear { updateChatEndVisibility(false) }
                 }
                 .scrollTargetLayout()
                 .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
@@ -1187,18 +1201,6 @@ struct LinkChatView: View {
                 // Ende), bevor die Liste sichtbar wird - kein sichtbares
                 // Scrollen beim Raumeintritt.
                 .defaultScrollAnchor(.bottom)
-                .overlay(alignment: .bottom) {
-                    // "Zu den neuesten Nachrichten"-Button (P-D: mittig am
-                    // unteren Ende, optisch identisch zum Mail-Up-Pfeil):
-                    // fade-in nur, wenn man zu älteren Nachrichten
-                    // hochgescrollt ist.
-                    if let lastId = items.last?.id {
-                        scrollBottomButton(lastId: lastId)
-                            .padding(.bottom, 16)
-                            .opacity(showScrollBottom ? 1 : 0)
-                            .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
-                    }
-                }
                 .modifier(SouveraScrollBottomObserver { distance in
                     // P-B: Echte Distanz zum Listenende messen (Grundlage für
                     // Settle, Klemme und Runter-Button).
@@ -1219,6 +1221,8 @@ struct LinkChatView: View {
                     positioningGeneration += 1
                     chatPositioned = false
                     showScrollBottom = false
+                    chatEndVisible = false
+                    unreadBoundarySeen = false
                     entryPositioningUntil = Date().addingTimeInterval(10)
                     lastVisibleMessageId = items.last?.id
                     startEntryPositioning()
@@ -1262,9 +1266,9 @@ struct LinkChatView: View {
                 .onChange(of: currentChatItems.count) { _, _ in
                     // P2: Still nachgefüllter Verlauf (oben) verschiebt den
                     // sichtbaren Bereich nicht - am Ende stehend wird nach
-                    // jedem Einfügen ans (neue) Ende geklemmt (echte
-                    // Messung, nicht der Init-Wert showScrollBottom).
-                    if chatPositioned, chatBottomDistance <= 80 {
+                    // jedem Einfügen ans (neue) Ende geklemmt (Ende-Probe
+                    // bzw. echte Messung, nicht der Init-Wert showScrollBottom).
+                    if chatPositioned, chatEndVisible || chatBottomDistance <= 80 {
                         chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
                     }
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
@@ -1288,11 +1292,28 @@ struct LinkChatView: View {
                     positionChat()
                 }
             }
+            // Pull-Geste statt Sentinel-Auto-Load (Run-Feedback Punkt 3):
+            // erst das zusätzliche Nach-unten-Ziehen am geladenen Anfang
+            // lädt die nächste ältere Seite (Ladekreis wie in Mail/Raumliste).
+            .refreshable { await viewModel.loadEarlierHistory() }
+            // "Zu den neuesten Nachrichten"-Button: am VIEWPORT gebunden
+            // (vorher am Scroll-Inhalt -> bei Hochscrollen unterhalb des
+            // sichtbaren Bereichs und damit nie sichtbar), mittig unten,
+            // optisch identisch zum Mail-Up-Pfeil.
+            .overlay(alignment: .bottom) {
+                if let lastId = items.last?.id {
+                    scrollBottomButton(lastId: lastId)
+                        .padding(.bottom, 16)
+                        .opacity(showScrollBottom ? 1 : 0)
+                        .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
+                }
+            }
         }
     }
 
-    /// P-C: Dezente ovale Hinweis-Bubble (klart abgesetzt von den
-    /// Nachrichten-Bubbles: kleiner, zentriert, neutrales Grau).
+    /// Dezente ovale Hinweis-Bubble: MITTIG (Spacer beidseitig - vorher
+    /// rightbundig, obwohl "zentriert" dokumentiert) mit hellem
+    /// Souvera-Blau-Hintergrund statt neutralem Grau (Run-Feedback).
     private func historyHintBubble<Content: View>(@ViewBuilder content: () -> Content) -> some View {
         HStack {
             Spacer()
@@ -1303,7 +1324,8 @@ struct LinkChatView: View {
             .foregroundStyle(.secondary)
             .padding(.horizontal, 14)
             .padding(.vertical, 7)
-            .background(Color(.systemGray4).opacity(0.7), in: Capsule())
+            .background(Color(NCBrandColor.shared.customer).opacity(0.12), in: Capsule())
+            Spacer()
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 6)
@@ -1380,8 +1402,12 @@ struct LinkChatView: View {
         // fehlgeschlagener Scroll setzt den Loop nicht vorzeitig auf
         // "settled" (das war die Ursache der Landung oben im Verlauf).
         let historyDone = viewModel.windowLoadDone
-        let isAtBottomTarget = viewModel.unreadBoundary == nil && chatBottomDistance <= 80
-        if (historyDone && isAtBottomTarget && attempt >= 4)
+        // Ende-Verifikation: Ende-Probe (immer) ODER echte Geometrie-
+        // Messung (iOS 18+, sofern sie feuert); mit Ungelesenen die
+        // materialisierte Trennlinie.
+        let isAtBottomTarget = viewModel.unreadBoundary == nil && (chatEndVisible || chatBottomDistance <= 80)
+        let isAtBoundaryTarget = viewModel.unreadBoundary != nil && unreadBoundarySeen
+        if (historyDone && (isAtBottomTarget || isAtBoundaryTarget) && attempt >= 4)
             || (historyDone && attempt >= 12)
             || attempt >= 50 {
             chatPositioned = true
@@ -1452,6 +1478,7 @@ struct LinkChatView: View {
                                 // Nachrichten-IDs -> scrollPosition landete
                                 // an "beliebigen" Datumslinien.
                                 .id(ChatScrollIds.unread(message.id))
+                                .onAppear { unreadBoundarySeen = true }
                         }
                         if message.isSystemMessage {
                             LinkSystemMessageRow(message: message)
@@ -1492,10 +1519,18 @@ struct LinkChatView: View {
 
     /// "Runter zu den neuesten Nachrichten": identisches Design wie der
     /// Mail-Up-Pfeil (Kreis, Material, Schatten), Icon arrow.down.
+    /// Sprung über den ChatScrollDirector (auf iOS 18+ sind die Legacy-
+    /// Bindings nicht attachiert - der frühere reine Binding-Tap war
+    /// dort ein No-op).
     private func scrollBottomButton(lastId: Int64) -> some View {
         Button {
+            chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
             chatScrollAnchor = .bottom
             chatScrollId = ChatScrollIds.message(lastId)
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showScrollBottom = false
+            }
+            viewModel.noteScrolledToNewest()
         } label: {
             Image(systemName: "arrow.down")
                 .font(.system(size: 17, weight: .semibold))
@@ -1507,6 +1542,24 @@ struct LinkChatView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
+    }
+
+    /// Meldet die Ende-Probe-Sichtbarkeit (letzte Zeile materialisiert).
+    /// iOS 17: ersetzt die fehlende Geometrie-Messung komplett (Distanz
+    /// heuristisch setzen). iOS 18+: Geometrie bleibt für die Distanz
+    /// maßgeblich, die Probe liefert zusätzlich den verlässlichen
+    /// At-End-Nachweis für Settle, Klemme und Read-Marker.
+    private func updateChatEndVisibility(_ visible: Bool) {
+        chatEndVisible = visible
+        if #available(iOS 18.0, *) {
+            // Geometrie-Observer liefert Distanz + Read-Marker weiter.
+        } else {
+            // iOS 17: keine Geometrie - die Probe ersetzt die Messung.
+            chatBottomDistance = visible ? 0 : 400
+            if visible {
+                viewModel.noteScrolledToNewest()
+            }
+        }
     }
 
     /// Beobachtet den Abstand zum unteren Listenende (iOS 18+): meldet
@@ -2567,4 +2620,5 @@ enum ChatScrollIds {
     static func day(_ id: Int64) -> String { "d_\(id)" }
     static func unread(_ id: Int64) -> String { "u_\(id)" }
     static let sentinel = "history_sentinel"
+    static let endProbe = "chat_end_probe"
 }

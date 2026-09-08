@@ -1188,5 +1188,5 @@ _link_select_room_ = "Select room";
 "_calendar_today_" = "Today";
 _mail_sort_flagged_ = "Flagged first";
 "_link_older_loading_" = "Loading older messages …";
-"_link_older_hint_" = "Keep scrolling for older messages";
+"_link_older_hint_" = "Pull down to load older messages";
 "_link_history_start_" = "Start of conversation";
