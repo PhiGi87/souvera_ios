@@ -2467,7 +2467,7 @@ final class ChatScrollDirector: ObservableObject {
 /// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback.
 struct ChatScrollAttachModifier: ViewModifier {
     let director: ChatScrollDirector
-    @Binding var legacyId: Int64?
+    @Binding var legacyId: String?
     @Binding var legacyAnchor: UnitPoint
 
     func body(content: Content) -> some View {
