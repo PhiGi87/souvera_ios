@@ -1514,7 +1514,9 @@ struct LinkChatView: View {
     /// entfernt ist (Button "runter" wird eingeblendet). Unter iOS 18:
     /// kein Callback.
     private struct SouveraScrollBottomObserver: ViewModifier {
-        let onChange: (Bool) -> Void
+        /// P-B: liefert die ECHTE Distanz zum Listenende (px) - nicht nur
+        /// einen Schwellwert-Bool.
+        let onChange: (CGFloat) -> Void
 
         func body(content: Content) -> some View {
             if #available(iOS 18.0, *) {
@@ -1524,7 +1526,7 @@ struct LinkChatView: View {
                     let bottomDistance = geometry.contentSize.height
                         - geometry.contentInsets.bottom
                         - (geometry.contentOffset.y + geometry.containerSize.height)
-                    onChange(bottomDistance > 120)
+                    onChange(bottomDistance)
                 }
             } else {
                 content
