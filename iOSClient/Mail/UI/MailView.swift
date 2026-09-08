@@ -628,7 +628,7 @@ private struct MailFolderListView: View {
                 .padding(.bottom, 24)
             }
             .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 if let firstId = firstVisibleRowId(boxes) {
                     Button {
                         withAnimation { proxy.scrollTo(firstId, anchor: .top) }
@@ -643,7 +643,6 @@ private struct MailFolderListView: View {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-                    .padding(.trailing, 16)
                     .padding(.bottom, 16)
                     .opacity(showScrollTop ? 1 : 0)
                     .animation(.easeInOut(duration: 0.25), value: showScrollTop)
@@ -776,7 +775,7 @@ private struct MailFolderListView: View {
         .listStyle(.insetGrouped)
         .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
         .refreshable { await viewModel.loadMailboxes() }
-        .overlay(alignment: .bottomTrailing) {
+        .overlay(alignment: .bottom) {
             let firstRowId = firstVisibleRowId(boxes)
             if let firstId = firstRowId {
                 Button {
@@ -792,7 +791,6 @@ private struct MailFolderListView: View {
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(NSLocalizedString("_mail_scroll_top_", comment: ""))
-                .padding(.trailing, 16)
                 .padding(.bottom, 16)
                 .opacity(showScrollTop ? 1 : 0)
                 .animation(.easeInOut(duration: 0.25), value: showScrollTop)
@@ -1230,10 +1228,9 @@ private struct MailMessageListView: View {
             // content) - die Scrollposition bleibt dadurch automatisch
             // erhalten, ohne Anchor-Restore.
             .refreshable { await viewModel.refreshMessages() }
-            .overlay(alignment: .bottomTrailing) {
+            .overlay(alignment: .bottom) {
                 if let firstId = sorted.first?.id {
                     scrollTopButton(proxy: proxy, firstId: firstId)
-                        .padding(.trailing, 16)
                         .padding(.bottom, 84)
                         .opacity(showScrollTop ? 1 : 0)
                         .animation(.easeInOut(duration: 0.25), value: showScrollTop)

@@ -1137,16 +1137,32 @@ struct LinkChatView: View {
         case let .success(items):
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Sentinel oben: lädt ältere Nachrichten nach, falls der
-                    // Historie-Loop noch nicht fertig ist (kein Paging-UI).
+                    // P-C: Dezente Nachlade-/Ende-Hinweise am oberen Ende:
+                    // Spinner während des Ladens, Hinweis "weiter scrollen",
+                    // "Anfang der Unterhaltung" am Schluss. Das Nachladen
+                    // triggert automatisch beim Erreichen der Zeile.
                     if viewModel.hasMoreHistory {
-                        HStack {
-                            Spacer()
-                            ProgressView()
-                            Spacer()
+                        HStack(spacing: 8) {
+                            if viewModel.isLoadingOlder {
+                                ProgressView()
+                                Text(NSLocalizedString("_link_older_loading_", comment: ""))
+                            } else {
+                                Image(systemName: "chevron.up")
+                                    .font(.caption2.weight(.semibold))
+                                Text(NSLocalizedString("_link_older_hint_", comment: ""))
+                            }
                         }
-                        .padding(.vertical, 8)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
                         .onAppear { viewModel.loadEarlierHistory() }
+                    } else if !items.isEmpty {
+                        Text(NSLocalizedString("_link_history_start_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
                     }
                     ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
                         // Tageswechsel-Trennlinie (P68j): vor der ersten
@@ -1214,13 +1230,13 @@ struct LinkChatView: View {
                 // Ende), bevor die Liste sichtbar wird - kein sichtbares
                 // Scrollen beim Raumeintritt.
                 .defaultScrollAnchor(.bottom)
-                .overlay(alignment: .bottomTrailing) {
-                    // "Zu den neuesten Nachrichten"-Button (Design-Pendant
-                    // zum Mail-Up-Pfeil): fade-in nur, wenn man zu älteren
-                    // Nachrichten hochgescrollt ist.
+                .overlay(alignment: .bottom) {
+                    // "Zu den neuesten Nachrichten"-Button (P-D: mittig am
+                    // unteren Ende, optisch identisch zum Mail-Up-Pfeil):
+                    // fade-in nur, wenn man zu älteren Nachrichten
+                    // hochgescrollt ist.
                     if let lastId = items.last?.id {
                         scrollBottomButton(lastId: lastId)
-                            .padding(.trailing, 16)
                             .padding(.bottom, 16)
                             .opacity(showScrollBottom ? 1 : 0)
                             .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
@@ -1359,10 +1375,11 @@ struct LinkChatView: View {
         // P3: Historie-Nachladen abwarten - solange ältere Seiten laufen,
         // wird weiter nachgeführt (Prepend verschiebt sonst den sichtbaren
         // Bereich weg von der Zielposition).
-        let historyDone = !viewModel.hasMoreHistory
-        // F2: "am Ende"-Frühausstieg erst nach einigen Versuchen - der
-        // Observer-Wert ist unmittelbar nach dem ersten scrollTo noch
-        // veraltet (showScrollBottom startet mit false).
+        // P-B: Das Fenster-Laden (7-Tage/Scroll-up) muss fertig sein, dann
+        // gilt die Position als gesetzt ("am Ende"-Frühausstieg erst nach
+        // einigen Versuchen - der Observer-Wert ist unmittelbar nach dem
+        // ersten Scroll noch veraltet).
+        let historyDone = viewModel.windowLoadDone
         let isAtBottomTarget = viewModel.unreadBoundary == nil && !showScrollBottom
         if (historyDone && isAtBottomTarget && attempt >= 4)
             || (historyDone && attempt >= 10)

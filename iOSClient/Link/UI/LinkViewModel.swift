@@ -59,7 +59,19 @@ final class LinkViewModel: ObservableObject {
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
     /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
+    /// P-A: Noch ältere Tage existieren (Nachlade-Hinweis + Sentinel).
     @Published var hasMoreHistory = false
+    /// P-A: Die Fenster-Ladung (Eintritt/Scroll-up) ist fertig - die
+    /// Chat-Eintritts-Positionierung wartet darauf.
+    @Published private(set) var windowLoadDone = false
+    /// P-A: Bis zu diesem Zeitpunkt ist der Verlauf abgedeckt (oldest
+    /// loaded oder letzte Fenstergrenze).
+    private var historyWindowStart: TimeInterval = 0
+    /// P-D: Nach einem Prepend (Scroll-up-Batch) hierhin re-anchoren,
+    /// damit die Leseposition erhalten bleibt.
+    @Published var reanchorToMessageId: Int64?
+    /// Läuft gerade eine Scroll-up-Batch?
+    @Published private(set) var isLoadingOlder = false
     /// Erste ungelesene Nachricht (id > lastReadMessage) - Basis für die
     /// "Neue Nachrichten"-Trennlinie und die Eintrittsposition.
     @Published private(set) var unreadBoundary: Int64?
@@ -688,13 +700,14 @@ final class LinkViewModel: ObservableObject {
             let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
             let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
             self.updateUnreadBoundary(roomLastRead: effectiveLastRead, roomUnread: effectiveUnread)
-            // Verlauf beim Eintritt NUR bei ungelesenen Nachrichten komplett
-            // nachladen (sonst läuft das Netz unsichtbar im Hintergrund und
-            // ältere Seiten kommen per Scroll nach).
-            if roomUnread > 0 {
-                await self.loadFullHistory(token: token)
-                self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
-            }
+            // P-A: Verlauf als 7-Tage-Fenster laden (Lücken-Regel: lagen im
+            // Fenster keine Nachrichten, läuft das Laden bis zur letzten
+            // Nachricht vor der Lücke bzw. zum Gesprächsanfang). Ältere
+            // Tage kommen per Hochscrollen (+7 Tage/Schritt) nach.
+            self.windowLoadDone = false
+            self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
+            await self.loadHistoryWindow(token: token, cutoff: self.historyWindowStart, reanchorOnFinish: false)
+            self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             await self.pollNewMessages(token: token)
         }
     }
@@ -743,10 +756,12 @@ final class LinkViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
     }
 
-    /// Lädt den kompletten Chat-Verlauf (Seite für Seite nach oben älter),
-    /// bis eine Seite unvollständig ist. Die Liste wächst dabei inkrementell;
-    /// die Scrollposition bleibt unten. Kein Zeitlimit.
-    private func loadFullHistory(token: String) async {
+    /// P-A: Lädt den Verlauf rückwärts in 100er-Seiten, bis die älteste
+    /// geladene Nachricht das Fenster-Ende (cutoff) unterschreitet — die
+    /// Lücken-Regel: lagen vor der Grenze keine Nachrichten, läuft das
+    /// Laden bis zur letzten Nachricht vor der Lücke bzw. zum
+    /// Gesprächsanfang weiter.
+    private func loadHistoryWindow(token: String, cutoff: TimeInterval, reanchorOnFinish: Bool) async {
         guard let api else { return }
         var all: [LinkChatMessage]
         if case let .success(current) = messages {
@@ -756,37 +771,61 @@ final class LinkViewModel: ObservableObject {
         }
         var known = Set(all.map(\.id))
         var anchor = all.map(\.id).min() ?? 0
-        hasMoreHistory = anchor > 0
+        guard anchor > 0 else {
+            hasMoreHistory = false
+            windowLoadDone = true
+            return
+        }
+        var oldestLoaded = all.map(\.timestamp).min() ?? Date.distantFuture.timeIntervalSince1970
+        let previousOldestId = anchor
+        var reachedStart = false
+        var addedAbove = false
         var pages = 0
-        while anchor > 0, pages < 200, !Task.isCancelled {
+        while oldestLoaded > cutoff, anchor > 0, pages < 200, !Task.isCancelled {
             let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
-            if older.isEmpty { break }
+            if older.isEmpty {
+                reachedStart = true
+                break
+            }
             let fresh = older.filter { known.insert($0.id).inserted && !$0.isReactionEvent }
             let newAnchor = older.map(\.id).min() ?? anchor
             guard newAnchor < anchor else { break }
             anchor = newAnchor
             if !fresh.isEmpty {
                 all.append(contentsOf: fresh)
+                addedAbove = true
+                oldestLoaded = min(oldestLoaded, fresh.map(\.timestamp).min() ?? oldestLoaded)
                 if !Task.isCancelled {
                     self.messages = .success(all.sorted { $0.id < $1.id })
                 }
             }
-            if older.count < 100 { break }
+            if older.count < 100 {
+                reachedStart = true
+                break
+            }
             pages += 1
         }
-        hasMoreHistory = false
-        if !Task.isCancelled, case let .success(list) = messages {
-            self.messages = .success(list.sorted { $0.id < $1.id })
+        hasMoreHistory = !reachedStart && anchor > 0
+        historyWindowStart = min(cutoff, oldestLoaded)
+        windowLoadDone = true
+        CallDebugLog.log("LinkViewModel", "history window loaded for \(token): total=\(all.count) oldest=\(Int(oldestLoaded)) moreOlder=\(hasMoreHistory)")
+        // P-D: Nach einem Scroll-up-Prepend auf die zuvor älteste geladene
+        // Nachricht re-anchoren - die Leseposition bleibt erhalten.
+        if reanchorOnFinish, addedAbove {
+            self.reanchorToMessageId = previousOldestId
         }
-        CallDebugLog.log("LinkViewModel", "full history loaded for \(token): \(all.count) messages")
     }
 
-    /// Nachladen älterer Nachrichten beim Scrollen nach oben (Sicherheitsnetz,
-    /// falls der Historie-Loop unterbrochen wurde).
+    /// P-A: Scroll-up-Batch: +7 Tage älter laden (Sentinel/Top-Bereich).
     func loadEarlierHistory() {
-        guard let api, case let .chat(token, _) = route, hasMoreHistory else { return }
+        guard let api, case let .chat(token, _) = route,
+              hasMoreHistory, windowLoadDone, !isLoadingOlder else { return }
+        isLoadingOlder = true
+        windowLoadDone = false
         Task {
-            await loadFullHistory(token: token)
+            let cutoff = historyWindowStart - 7 * 86400
+            await loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: true)
+            self.isLoadingOlder = false
         }
     }
 
