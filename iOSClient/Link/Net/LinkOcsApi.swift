@@ -95,18 +95,25 @@ actor LinkOcsApi {
     /// initial history fetch `lastKnownId` is 0 and MUST be omitted — sending `lastKnownMessageId=0`
     /// with lookIntoFuture=0 means "messages older than 0" and returns nothing. The long-poll always
     /// sends it (0 = from the beginning).
-    func getMessages(token: String, lastKnownId: Int64, future: Bool, timeoutSeconds: Int, saveCache: Bool = true) async -> [LinkChatMessage] {
+    /// Liefert `nil` bei Transport-/HTTP-/Decode-Fehler (inkl. Cancellation) - NUR `[]` bedeutet
+    /// "erfolgreiche Antwort ohne Nachrichten". Die Unterscheidung ist entscheidend: Der
+    /// Verlaufs-Loop darf einen FEHLER nicht als "Gesprächsanfang" missdeuten (Log 09.09.).
+    func getMessages(token: String, lastKnownId: Int64, future: Bool, timeoutSeconds: Int, saveCache: Bool = true) async -> [LinkChatMessage]? {
         let includeLastKnown = future || lastKnownId > 0
         let lastKnownParam = includeLastKnown ? "&lastKnownMessageId=\(lastKnownId)" : ""
         let url = "\(base)/api/v1/chat/\(token)?lookIntoFuture=\(future ? 1 : 0)" +
             "\(lastKnownParam)&timeout=\(timeoutSeconds)&limit=\(Self.pageLimit)&setReadMarker=1"
-        guard let body = await get(url, longPoll: future) else { return [] }
+        guard let body = await get(url, longPoll: future) else {
+            CallDebugLog.log("OcsApi", "chat getMessages token=\(token) lastKnown=\(lastKnownId) future=\(future) -> FAILED (nil)")
+            return nil
+        }
         if !future, saveCache {
             // Nur die NEUESTE Seite cachen - der Historie-Loop würde sonst
             // mit jeder älteren Seite den Cache überschreiben.
             LinkCache.saveMessages(token: token, raw: Data(body.utf8))
         }
         let messages: [LinkChatMessage] = decodeList(body)
+        CallDebugLog.log("OcsApi", "chat getMessages token=\(token) lastKnown=\(lastKnownId) future=\(future) -> \(messages.count) messages")
         // Truncation-Diagnose (Feedback 05.09. "Nachrichten nur mit ..."):
         // Der Renderer kürzt nicht - vom Server mit "…" gekürzt gelieferte
         // Texte sichtbar machen (unterscheidet "Server liefert gekürzt"

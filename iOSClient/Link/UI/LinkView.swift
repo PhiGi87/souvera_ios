@@ -956,6 +956,9 @@ struct LinkChatView: View {
     /// P-B: Echte Distanz zum Listenende (gemessen via Scroll-Geometrie) -
     /// Grundlage für Settle, Klemme und Runter-Button.
     @State private var chatBottomDistance: CGFloat = .infinity
+    /// Debounce für den manuellen Pull-Trigger (Overscroll feuert
+    /// kontinuierlich während der Geste).
+    @State private var pullTriggeredAt = Date.distantPast
     /// Universelle Ende-Erkennung (Ende-Probe-Zeile, alle OS-Versionen):
     /// onScrollGeometryChange liefert keinen Initial-Callback und bleibt
     /// deshalb beim Eintritt gern stumm (Log 08.09.: Settle attempt=4 vs.
@@ -1154,22 +1157,31 @@ struct LinkChatView: View {
                     // Dezente Nachlade-/Ende-Hinweise am oberen Ende:
                     // Spinner während des Ladens, Hinweis "nach unten
                     // ziehen", "Anfang der Unterhaltung" am Schluss. Das
-                    // Nachladen löst NICHT mehr das Erreichen der Zeile aus,
-                    // sondern die Pull-Geste (.refreshable, Run-Feedback).
+                    // Nachladen startet über den MANUELLEN Pull-Trigger
+                    // (Overscroll-Erkennung bzw. Antippen) - bewusst OHNE
+                    // .refreshable: das UIRefreshControl greift ins
+                    // Scrollverhalten der ScrollView ein (Landung oben,
+                    // Log 09.09.) und sein Task kann die Verlaufs-Anfrage
+                    // abbrechen (falscher "Gesprächsanfang").
                     if viewModel.hasMoreHistory {
-                        historyHintBubble {
-                            if !chatPositioned {
-                                ProgressView()
-                            }
-                            if viewModel.isLoadingOlder {
-                                ProgressView()
-                                Text(NSLocalizedString("_link_older_loading_", comment: ""))
-                            } else {
-                                Image(systemName: "chevron.down")
-                                    .font(.caption2.weight(.semibold))
-                                Text(NSLocalizedString("_link_older_hint_", comment: ""))
+                        Button {
+                            triggerHistoryPull()
+                        } label: {
+                            historyHintBubble {
+                                if !chatPositioned || viewModel.isLoadingOlder {
+                                    ProgressView()
+                                }
+                                if viewModel.isLoadingOlder {
+                                    Text(NSLocalizedString("_link_older_loading_", comment: ""))
+                                } else {
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption2.weight(.semibold))
+                                    Text(NSLocalizedString("_link_older_hint_", comment: ""))
+                                }
                             }
                         }
+                        .buttonStyle(.plain)
+                        .disabled(!chatPositioned)
                         .id(ChatScrollIds.sentinel)
                     } else if !items.isEmpty {
                         historyHintBubble {
@@ -1193,7 +1205,14 @@ struct LinkChatView: View {
                 .scrollTargetLayout()
                 .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
                                                    legacyId: $chatScrollId,
-                                                   legacyAnchor: $chatScrollAnchor))
+                                                   legacyAnchor: $chatScrollAnchor,
+                                                   initialRowId: items.last.map { ChatScrollIds.message($0.id) }))
+                // Frischer Scroll-State je Raum: die Teilbaum-Identität
+                // (inkl. ScrollPosition-State des Attach-Modifiers) wird bei
+                // jedem Raumwechsel neu erzeugt - keine Alt-Positionen. Das
+                // .id() liegt NACH dem Attach-Modifier, damit dessen State
+                // mit zurückgesetzt wird.
+                .id("chatroom-\(token)")
                 // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
                 // das Nachladen älterer Nachrichten oben reißt die
                 // Leseposition nicht mit. Die EINTRITTSPOSITION setzt
@@ -1268,8 +1287,9 @@ struct LinkChatView: View {
                     // sichtbaren Bereich nicht - am Ende stehend wird nach
                     // jedem Einfügen ans (neue) Ende geklemmt (Ende-Probe
                     // bzw. echte Messung, nicht der Init-Wert showScrollBottom).
-                    if chatPositioned, chatEndVisible || chatBottomDistance <= 80 {
-                        chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
+                    if chatPositioned, chatEndVisible || chatBottomDistance <= 80,
+                       let lastId = currentChatItems.last?.id {
+                        chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
                     }
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat()
@@ -1291,11 +1311,14 @@ struct LinkChatView: View {
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat()
                 }
+                // Manueller Pull-Trigger (statt .refreshable): Overscroll
+                // am Listenanfang >= 64 px startet das Verlaufs-Nachladen
+                // in einem EIGENEN Task - nicht abbruchgefährdet durch die
+                // Refreshable-Task-Lifetime.
+                .modifier(SouveraScrollTopObserver { overscroll in
+                    handleTopOverscroll(overscroll)
+                })
             }
-            // Pull-Geste statt Sentinel-Auto-Load (Run-Feedback Punkt 3):
-            // erst das zusätzliche Nach-unten-Ziehen am geladenen Anfang
-            // lädt die nächste ältere Seite (Ladekreis wie in Mail/Raumliste).
-            .refreshable { await viewModel.loadEarlierHistory() }
             // "Zu den neuesten Nachrichten"-Button: am VIEWPORT gebunden
             // (vorher am Scroll-Inhalt -> bei Hochscrollen unterhalb des
             // sichtbaren Bereichs und damit nie sichtbar), mittig unten,
@@ -1448,10 +1471,15 @@ struct LinkChatView: View {
             chatScrollId = ChatScrollIds.unread(boundary)
             SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=top")
         } else if let lastId = targetItems.last?.id {
-            chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
+            // Zeilen-basiertes Bottom-Ziel statt .edge(.bottom): Edge-Scrolls
+            // materialisieren im LazyVStack nicht zuverlässig (Log 09.09.:
+            // 14 Edge-Versuche, kein Erreichen des Endes) - die zeilen-
+            // basierte Variante ist über die Re-Anchor-Logs als robust
+            // belegt.
+            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
             chatScrollAnchor = .bottom
             chatScrollId = ChatScrollIds.message(lastId)
-            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom edge")
+            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom row")
         }
     }
 
@@ -1524,7 +1552,10 @@ struct LinkChatView: View {
     /// dort ein No-op).
     private func scrollBottomButton(lastId: Int64) -> some View {
         Button {
-            chatScrollDirector.request(ChatScrollTarget(kind: .edge(.bottom)))
+            if let lastId = currentChatItems.last?.id {
+                // Zeilen-basiert (siehe positionChat) statt .edge(.bottom).
+                chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
+            }
             chatScrollAnchor = .bottom
             chatScrollId = ChatScrollIds.message(lastId)
             withAnimation(.easeInOut(duration: 0.25)) {
@@ -1542,6 +1573,26 @@ struct LinkChatView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
+    }
+
+    /// Manueller Pull-Trigger: Overscroll am Listenanfang (Geometrie) bzw.
+    /// Antippen der Hinweis-Bubble starten das Nachladen in einem eigenen
+    /// Task - nicht abbruchgefährdet wie der Refreshable-Task (Log 09.09.:
+    /// Verlaufs-Fetch lieferte nichts, "Anfang der Unterhaltung" fälschlich).
+    private func handleTopOverscroll(_ overscroll: CGFloat) {
+        guard chatPositioned, overscroll < -64 else { return }
+        triggerHistoryPull()
+    }
+
+    private func triggerHistoryPull() {
+        guard chatPositioned,
+              viewModel.hasMoreHistory,
+              !viewModel.isLoadingOlder else { return }
+        let now = Date()
+        guard now.timeIntervalSince(pullTriggeredAt) > 1.5 else { return }
+        pullTriggeredAt = now
+        SouveraLog.write("LinkChat", "history pull triggered (manual gesture)")
+        Task { await viewModel.loadEarlierHistory() }
     }
 
     /// Meldet die Ende-Probe-Sichtbarkeit (letzte Zeile materialisiert).
@@ -1580,6 +1631,26 @@ struct LinkChatView: View {
                         - geometry.contentInsets.bottom
                         - (geometry.contentOffset.y + geometry.containerSize.height)
                     onChange(bottomDistance)
+                }
+            } else {
+                content
+            }
+        }
+    }
+
+    /// Beobachtet den Overscroll am LISTENANFANG (iOS 18+): meldet negative
+    /// Werte, solange der Nutzer über den oberen Rand hinaus zieht - Basis
+    /// des manuellen Pull-Triggers. Unter iOS 18: kein Callback (die
+    /// Hinweis-Bubble ist dort antippbar).
+    private struct SouveraScrollTopObserver: ViewModifier {
+        let onChange: (CGFloat) -> Void
+
+        func body(content: Content) -> some View {
+            if #available(iOS 18.0, *) {
+                content.onScrollGeometryChange(for: CGFloat.self) { geometry in
+                    geometry.contentOffset.y - geometry.contentInsets.top
+                } action: { _, overscroll in
+                    onChange(overscroll)
                 }
             } else {
                 content
@@ -2556,15 +2627,19 @@ final class ChatScrollDirector: ObservableObject {
 
 /// Hängt die Scroll-Position-Steuerung an: iOS 18+ nutzt die
 /// ScrollPosition-Struct-API (deterministisch, auch bei nachwachsendem
-/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback.
+/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback. `initialRowId` setzt
+/// die INITIALPOSITION deterministisch auf die neueste Zeile
+/// (ScrollPosition(id:anchor:)) - kein Scroll-Versuch nötig; der Teilbaum
+/// wird je Raum über .id() neu erzeugt, damit der Initialwert greift.
 struct ChatScrollAttachModifier: ViewModifier {
     let director: ChatScrollDirector
     @Binding var legacyId: String?
     @Binding var legacyAnchor: UnitPoint
+    var initialRowId: String? = nil
 
     func body(content: Content) -> some View {
         if #available(iOS 18.0, *) {
-            content.modifier(ChatScrollModernAttach(director: director))
+            content.modifier(ChatScrollModernAttach(director: director, initialRowId: initialRowId))
         } else {
             content.modifier(ChatScrollLegacyAttach(legacyId: $legacyId, legacyAnchor: $legacyAnchor))
         }
@@ -2583,7 +2658,12 @@ private struct ChatScrollLegacyAttach: ViewModifier {
 @available(iOS 18.0, *)
 private struct ChatScrollModernAttach: ViewModifier {
     let director: ChatScrollDirector
-    @State private var position = ScrollPosition()
+    @State private var position: ScrollPosition
+
+    init(director: ChatScrollDirector, initialRowId: String?) {
+        self.director = director
+        _position = State(initialValue: initialRowId.map { ScrollPosition(id: $0, anchor: .bottom) } ?? ScrollPosition())
+    }
 
     func body(content: Content) -> some View {
         content

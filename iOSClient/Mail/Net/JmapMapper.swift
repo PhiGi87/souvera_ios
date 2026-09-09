@@ -96,15 +96,29 @@ enum JmapMapper {
     }
 
     static func mapBody(json: [String: Any]) -> MessageBody {
-        let attachments = (json["attachments"] as? [[String: Any]])?.map { att in
-            AttachmentMeta(
+        // Inline-Parts (disposition == "inline" oder Content-ID) gehören zum
+        // HTML-Body und zählen NICHT als Anhänge (Run-Fix: Webmail 1 Anhang,
+        // App 3 - die Inline-Bilder wurden als "attachment" gelistet).
+        var attachments: [AttachmentMeta] = []
+        var inlineParts: [AttachmentMeta] = []
+        for att in (json["attachments"] as? [[String: Any]]) ?? [] {
+            let cid = att.optString("cid")
+            let disposition = att.optString("disposition")?.lowercased()
+            let meta = AttachmentMeta(
                 name: att.optString("name") ?? att.optString("partId") ?? "attachment",
                 sizeBytes: att.optInt64("size"),
                 mimeType: att.optString("type") ?? "application/octet-stream",
                 blobId: att.optString("blobId"),
-                partId: att.optString("partId")
+                partId: att.optString("partId"),
+                contentId: cid,
+                isInline: disposition == "inline" || (cid?.isEmpty == false)
             )
-        } ?? []
+            if meta.isInline {
+                inlineParts.append(meta)
+            } else {
+                attachments.append(meta)
+            }
+        }
 
         var plainText: String?
         var html: String?
@@ -132,7 +146,7 @@ enum JmapMapper {
         // the text/html blobs via their blobIds (mirrors the Android client).
         // Never surface the raw blobId as text.
 
-        return MessageBody(plainText: plainText, html: html, attachments: attachments)
+        return MessageBody(plainText: plainText, html: html, attachments: attachments, inlineParts: inlineParts)
     }
 
     static func resolveMailboxKind(role: String?, name: String, path: String) -> MailboxKind {

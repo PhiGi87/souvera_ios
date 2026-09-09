@@ -127,6 +127,10 @@ struct MessageBody {
     let plainText: String?
     let html: String?
     let attachments: [AttachmentMeta]
+    /// Eingebettete Teile (Content-Disposition: inline / Content-ID) - sie
+    /// gehören zum HTML-Body (cid:-Referenzen) und zählen NICHT als Anhänge
+    /// (Run-Fix: Webmail zeigte 1 Anhang, die App fälschlich 3).
+    var inlineParts: [AttachmentMeta] = []
 }
 
 struct AttachmentMeta: Identifiable, Hashable {
@@ -136,6 +140,10 @@ struct AttachmentMeta: Identifiable, Hashable {
     let mimeType: String
     let blobId: String?
     let partId: String?
+    /// Content-ID des Parts (JMAP `cid`, z. B. "cid:logo@host") - kenn-
+    /// zeichnet eingebettete Bilder im HTML-Body.
+    var contentId: String? = nil
+    var isInline: Bool = false
 }
 
 struct OutgoingMessage {

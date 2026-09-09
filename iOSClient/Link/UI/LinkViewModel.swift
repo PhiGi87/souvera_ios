@@ -677,10 +677,11 @@ final class LinkViewModel: ObservableObject {
                 self.messages = .success(ordered)
                 self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             }
-            var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0)
+            var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
             guard gen == self.generation else { return }
             if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
-                // Server nicht erreichbar: letzte bekannte Nachrichten zeigen.
+                // Server nicht erreichbar (FEHLER oder leer): letzte
+                // bekannte Nachrichten zeigen.
                 history = cached
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 cacheBannerActive = cacheBannerGate.shouldTrigger()
@@ -798,8 +799,23 @@ final class LinkViewModel: ObservableObject {
         var effectiveCutoff = cutoff
         while !Task.isCancelled {
             while oldestLoaded > effectiveCutoff, anchor > 0, pages < 200, !Task.isCancelled {
-                let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+                var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+                if older == nil, !Task.isCancelled {
+                    // FEHLER (Transport/HTTP/Decode) - NICHT als
+                    // Gesprächsanfang missdeuten: 1 Retry, danach Abbruch
+                    // mit unverändertem hasMoreHistory (Log 09.09.:
+                    // leerer Fetch markierte fälschlich das Fenster-Ende).
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                    guard !Task.isCancelled else { return }
+                    older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+                }
+                guard let older else {
+                    CallDebugLog.log("LinkViewModel", "history fetch FAILED for \(token) anchor=\(anchor) - aborting window load (moreOlder stays \(hasMoreHistory))")
+                    windowLoadDone = true
+                    return
+                }
                 if older.isEmpty {
+                    // Echte, erfolgreiche Leerantwort = Gesprächsanfang.
                     reachedStart = true
                     break
                 }
@@ -867,8 +883,11 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
-    /// P-A: Pull-Batch: +7 Tage älter laden (Hinweiszeile oben). ASYNCHRON -
-    /// der `.refreshable`-Ladekreis bleibt sichtbar, bis das Fenster steht.
+    /// P-A: Pull-Batch: +7 Tage älter laden. ASYNCHRON - der manuelle
+    /// Pull-Trigger (Overscroll/Antippen der Hinweis-Bubble) startet einen
+    /// eigenen Task, der nicht von der Refreshable-Lifetime abgebrochen
+    /// werden kann; der Ladezustand (isLoadingOlder) bleibt bis zum
+    /// Fenster-Stand sichtbar.
     func loadEarlierHistory() async {
         guard let api, case let .chat(token, _) = route,
               hasMoreHistory, windowLoadDone,
@@ -885,7 +904,7 @@ final class LinkViewModel: ObservableObject {
     private func pollNewMessages(token: String) async {
         guard let api else { return }
         while !Task.isCancelled, case let .chat(currentToken, _) = route, currentToken == token {
-            let fresh = await api.getMessages(token: token, lastKnownId: lastMessageId, future: true, timeoutSeconds: pollTimeout)
+            let fresh = await api.getMessages(token: token, lastKnownId: lastMessageId, future: true, timeoutSeconds: pollTimeout) ?? []
             if Task.isCancelled { return }
             if !fresh.isEmpty {
                 lastMessageId = fresh.map(\.id).max() ?? lastMessageId

@@ -164,7 +164,8 @@ final class JmapApi {
         accountId: String,
         ids: [String],
         bodyProperties: [String]? = nil,
-        properties: [String]? = nil
+        properties: [String]? = nil,
+        fetchAllBodyValues: Bool = false
     ) async throws -> [[String: Any]] {
         var args: [String: Any] = [:]
         args["accountId"] = try resolveAccountArg(accountId)
@@ -174,6 +175,12 @@ final class JmapApi {
         }
         if let props = properties {
             args["properties"] = props
+        }
+        // Run-Fix "leerer Mail-Body": Ohne dieses Flag liefern Server das
+        // bodyValues-Feld LEER (Log 08.09.: keys=...,bodyValues,... aber
+        // plain=false html=false) - der Body blieb unwiederbringlich leer.
+        if fetchAllBodyValues {
+            args["fetchAllBodyValues"] = true
         }
 
         let resp = try await client.singleCall("Email/get", args: args)

@@ -1840,8 +1840,14 @@ private func attachmentChip(_ att: AttachmentMeta) -> some View {
             if let html = body.html, !html.isEmpty {
                 // Self-sizing web view: the content flows directly below the
                 // header (same margins, one scrollable column).
-                MailHtmlView(html: html, height: $htmlHeight)
-                    .frame(height: max(htmlHeight, 120))
+                MailHtmlView(
+                    html: html,
+                    height: $htmlHeight,
+                    inlineProvider: { cid in
+                        await viewModel.inlineImageData(cid, accountId: message.accountId)
+                    }
+                )
+                .frame(height: max(htmlHeight, 120))
             } else {
                 Text(SouveraLinkOpener.linkified(body.plainText ?? ""))
                     .foregroundStyle(Color.black)
@@ -1859,14 +1865,38 @@ private func attachmentChip(_ att: AttachmentMeta) -> some View {
 
 /// Renders an HTML email body in a self-sizing WKWebView (its scroll view is
 /// disabled; the surrounding ScrollView scrolls everything as one column).
+/// Run-Fix "eingebettete Bilder": registriert einen WKURLSchemeHandler für
+/// `souvera-cid://`, schreibt `cid:`-Referenzen um, verfolgt die Höhe per
+/// JS-ResizeObserver nach (Bilder ändern die Höhe nach dem didFinish) und
+/// lädt bei HTML-Wechsel neu (Mailwechsel in recycelten Views).
 private struct MailHtmlView: UIViewRepresentable {
     let html: String
     @Binding var height: CGFloat
+    var inlineProvider: ((String) async -> (data: Data, mimeType: String)?)? = nil
+
+    static let schemeName = "souvera-cid"
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
+        let configuration = WKWebViewConfiguration()
+        if let inlineProvider {
+            configuration.setURLSchemeHandler(
+                MailInlineImageSchemeHandler { cid in
+                    await inlineProvider(cid)
+                },
+                forURLScheme: Self.schemeName
+            )
+        }
+        let userController = WKUserContentController()
+        userController.add(context.coordinator, name: "souveraHeight")
+        userController.addUserScript(WKUserScript(
+            source: Self.heightReporterJavaScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true
+        ))
+        configuration.userContentController = userController
+        let webView = WKWebView(frame: .zero, configuration: configuration)
         // Option 1 (Apple-Mail-Stil): Mail-Inhalte IMMER auf hellem Grund
         // rendern - sonst sind schwarze Standard-Schriftfarben im
         // Dunkel-Modus unsichtbar. Mails mit eigenen Inline-Farben gewinnen
@@ -1881,15 +1911,70 @@ private struct MailHtmlView: UIViewRepresentable {
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
-        guard !context.coordinator.loaded else { return }
-        context.coordinator.loaded = true
-        let wrapped = "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px;margin:0;background:#ffffff;color:#000000'>\(html)</body></html>"
-        webView.loadHTMLString(wrapped, baseURL: nil)
+        guard context.coordinator.lastHtml != html else { return }
+        context.coordinator.lastHtml = html
+        webView.loadHTMLString(Self.wrapped(Self.rewriteInlineReferences(html)), baseURL: nil)
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    // MARK: - HTML-Aufbereitung
+
+    static func wrapped(_ bodyHtml: String) -> String {
+        "<html><head><meta name='viewport' content='width=device-width, initial-scale=1'></head><body style='font-family:-apple-system;font-size:15px;margin:0;background:#ffffff;color:#000000'>\(bodyHtml)</body></html>"
+    }
+
+    private static let cidSrcRegex = try! NSRegularExpression(pattern: "(src\\s*=\\s*([\"']))cid:([^\"']+)", options: [.caseInsensitive])
+    private static let cidCssUrlRegex = try! NSRegularExpression(pattern: "url\\(\\s*([\"']?)cid:([^)\"']+)([\"']?)\\s*\\)", options: [.caseInsensitive])
+
+    /// Ersetzt `cid:`-Referenzen (img src und CSS url()) durch
+    /// `souvera-cid://inline/<percent-encoded>` - aufgelöst vom
+    /// MailInlineImageSchemeHandler.
+    static func rewriteInlineReferences(_ html: String) -> String {
+        var out = html
+        for regex in [cidSrcRegex, cidCssUrlRegex] {
+            let ns = out as NSString
+            let result = NSMutableString()
+            var previous = 0
+            for match in regex.matches(in: out, range: NSRange(location: 0, length: ns.length)) {
+                result.append(ns.substring(with: NSRange(location: previous, length: match.range.location - previous)))
+                let head = ns.substring(with: match.range(at: 1))
+                let cid = ns.substring(with: match.range(at: 2))
+                let tail = ns.substring(with: match.range(at: 3))
+                let encoded = cid.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? cid
+                let isCss = regex === cidCssUrlRegex
+                if isCss {
+                    result.append("url(\(head)souvera-cid://inline/\(encoded)\(tail))")
+                } else {
+                    result.append("\(head)souvera-cid://inline/\(encoded)\(tail)")
+                }
+                previous = match.range.upperBound
+            }
+            result.append(ns.substring(from: previous))
+            out = result as String
+        }
+        return out
+    }
+
+    /// Meldet die Dokumenthöhe an die App - mehrfach (Load, ResizeObserver,
+    /// Delays), da nachgeladene Inline-Bilder die Höhe nach dem didFinish
+    /// erst richtig setzen.
+    static let heightReporterJavaScript = """
+    (function() {
+        var post = function() {
+            try { window.webkit.messageHandlers.souveraHeight.postMessage(document.documentElement.scrollHeight); } catch (e) {}
+        };
+        window.addEventListener('load', post);
+        document.addEventListener('DOMContentLoaded', post);
+        if (window.ResizeObserver) {
+            try { new ResizeObserver(post).observe(document.body); } catch (e) {}
+        }
+        setTimeout(post, 200);
+        setTimeout(post, 1000);
+    })();
+    """
+
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         private let parent: MailHtmlView
-        var loaded = false
+        var lastHtml: String?
 
         init(_ parent: MailHtmlView) {
             self.parent = parent
@@ -1901,6 +1986,13 @@ private struct MailHtmlView: UIViewRepresentable {
                 DispatchQueue.main.async {
                     self.parent.height = CGFloat(value.doubleValue)
                 }
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard message.name == "souveraHeight", let value = message.body as? NSNumber else { return }
+            DispatchQueue.main.async {
+                self.parent.height = CGFloat(value.doubleValue)
             }
         }
 

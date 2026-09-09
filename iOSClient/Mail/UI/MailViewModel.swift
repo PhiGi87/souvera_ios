@@ -1861,23 +1861,33 @@ final class MailViewModel: ObservableObject {
         }
         var mapped = JmapMapper.mapBody(json: json)
         let accId = message.accountId
-        JmapLog.write("openMessage \(message.emailId): keys=\(json.keys.sorted().joined(separator: ",")) plain=\(mapped.plainText != nil) html=\(mapped.html != nil)")
+        JmapLog.write("openMessage \(message.emailId): keys=\(json.keys.sorted().joined(separator: ",")) bodyValuesCount=\((json["bodyValues"] as? [String: Any])?.count ?? -1) plain=\(mapped.plainText != nil) html=\(mapped.html != nil) attachments=\(mapped.attachments.count) inline=\(mapped.inlineParts.count)")
         if mapped.plainText == nil, let textPart = (json["textBody"] as? [[String: Any]])?.first,
            let blobId = textPart.optString("blobId"), !blobId.isEmpty {
-            mapped = MessageBody(
-                plainText: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
-                html: mapped.html,
-                attachments: mapped.attachments
-            )
+            do {
+                mapped = MessageBody(
+                    plainText: try await downloadTextBlob(accountId: accId, blobId: blobId),
+                    html: mapped.html,
+                    attachments: mapped.attachments,
+                    inlineParts: mapped.inlineParts
+                )
+            } catch {
+                JmapLog.write("openMessage \(message.emailId): text blob download failed: \(error)")
+            }
         }
         if mapped.html == nil, let htmlPart = (json["htmlBody"] as? [[String: Any]])?.first,
            htmlPart.optString("type") == "text/html",
            let blobId = htmlPart.optString("blobId"), !blobId.isEmpty {
-            mapped = MessageBody(
-                plainText: mapped.plainText,
-                html: (try? await downloadTextBlob(accountId: accId, blobId: blobId)) ?? nil,
-                attachments: mapped.attachments
-            )
+            do {
+                mapped = MessageBody(
+                    plainText: mapped.plainText,
+                    html: try await downloadTextBlob(accountId: accId, blobId: blobId),
+                    attachments: mapped.attachments,
+                    inlineParts: mapped.inlineParts
+                )
+            } catch {
+                JmapLog.write("openMessage \(message.emailId): html blob download failed: \(error)")
+            }
         }
         // Gesendete Mails haben oft NUR einen text/plain-Part (der dann auch
         // als htmlBody auftaucht) - der darf nicht als HTML gerendert werden,
@@ -1895,7 +1905,8 @@ final class MailViewModel: ObservableObject {
                     mapped = MessageBody(
                         plainText: retried.plainText,
                         html: retried.html,
-                        attachments: retried.attachments
+                        attachments: retried.attachments,
+                        inlineParts: retried.inlineParts
                     )
                 }
             }
@@ -1907,14 +1918,18 @@ final class MailViewModel: ObservableObject {
     /// Fetches the full Email/get JSON for a message (Android-parity body
     /// properties). With `withBodyProperties` false the default property set
     /// is used (fallback when the trimmed set yields no body).
+    /// `fetchAllBodyValues` ist PFLICHT, damit der Server bodyValues überhaupt
+    /// füllt (Run-Fix "leerer Mail-Body").
     private func fetchMessageJson(_ message: MailMessage, withBodyProperties: Bool = true) async -> [String: Any]? {
         guard let api = jmapApi,
               let client = jmapClient,
               let session = try? await client.refreshSession()
         else { return nil }
         let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
-        let bodyProperties: [String]? = withBodyProperties ? ["partId", "blobId", "size", "type", "name"] : nil
-        guard let list = try? await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties) else {
+        let bodyProperties: [String]? = withBodyProperties
+            ? ["partId", "blobId", "size", "type", "name", "disposition", "cid"]
+            : nil
+        guard let list = try? await api.getEmails(accountId: accId, ids: [message.emailId], bodyProperties: bodyProperties, fetchAllBodyValues: true) else {
             return nil
         }
         return list.first
@@ -2389,6 +2404,28 @@ final class MailViewModel: ObservableObject {
     }
 
     // MARK: - Attachments
+
+    /// Lädt einen eingebetteten Blob zu einer Content-ID (Run-Fix "eingebettete
+    /// Bilder"): Provider für den `souvera-cid://` Scheme-Handler des
+    /// MailHtmlView. Die Content-ID wird auf beiden Seiten normalisiert
+    /// ("cid:foo@bar", "<foo@bar>", "foo@bar" -> identisch).
+    func inlineImageData(_ rawContentId: String, accountId: String) async -> (data: Data, mimeType: String)? {
+        guard useJmap, let client = jmapClient else { return nil }
+        guard case let .success(body) = body else { return nil }
+        let cid = MailInlineImageSchemeHandler.normalizedContentId(rawContentId)
+        guard let part = body.inlineParts.first(where: {
+            $0.contentId.map(MailInlineImageSchemeHandler.normalizedContentId) == cid
+        }) else {
+            return nil
+        }
+        let accId = accountId.isEmpty
+            ? ((try? await client.refreshSession())?.primaryAccountId ?? "")
+            : accountId
+        guard !accId.isEmpty, let blobId = part.blobId, !blobId.isEmpty else { return nil }
+        guard let data = try? await client.downloadBlob(accountId: accId, blobId: blobId, mimeType: part.mimeType),
+              !data.isEmpty else { return nil }
+        return (data, part.mimeType)
+    }
 
     /// Downloads an attachment blob into the app cache and returns the file
     /// URL for preview (QuickLook), sharing or forwarding.

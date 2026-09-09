@@ -198,12 +198,15 @@ enum MailIMAPResponseParser {
     }
 
     /// Simple multipart MIME parser: walks parts separated by the boundary and extracts
-    /// the first text/plain or text/html body.
+    /// the first text/plain or text/html body. Inline-Teile (Content-Disposition:
+    /// inline / Content-ID) zählen NICHT als Anhänge - ihre Inhalte werden als
+    /// data:-URI in den HTML-Body eingebettet (Run-Fix "eingebettete Bilder").
     private static func parseMultipart(_ body: String, boundary: String) -> MessageBody {
         let parts = body.components(separatedBy: "--\(boundary)")
         var plainText: String?
         var htmlText: String?
         var attachments: [AttachmentMeta] = []
+        var inlineImages: [(cid: String, mime: String, data: Data)] = []
 
         for part in parts {
             guard let bodyStart = part.range(of: "\r\n\r\n") ?? part.range(of: "\n\n") else { continue }
@@ -221,11 +224,61 @@ enum MailIMAPResponseParser {
             } else if lowerHeaders.contains("application/") || lowerHeaders.contains("image/") || lowerHeaders.contains("audio/") {
                 let name = extractParameter(headers, named: "name") ?? "attachment"
                 let mimeType = extractContentType(headers)
-                attachments.append(AttachmentMeta(name: name, sizeBytes: Int64(content.count), mimeType: mimeType, blobId: nil, partId: String(attachments.count)))
+                let isInline = lowerHeaders.contains("content-id:")
+                    || (lowerHeaders.contains("content-disposition") && lowerHeaders.contains("inline"))
+                if isInline, let cid = extractHeaderValue(headers, named: "content-id"),
+                   let data = decodeAttachmentData(headers: headers, content: content), !data.isEmpty {
+                    inlineImages.append((cid: cid, mime: mimeType, data: data))
+                    // Inline-Teile gehören zum Body - nicht als Anhang listen.
+                } else {
+                    attachments.append(AttachmentMeta(name: name, sizeBytes: Int64(content.count), mimeType: mimeType, blobId: nil, partId: String(attachments.count)))
+                }
             }
         }
 
+        if let html = htmlText, !inlineImages.isEmpty {
+            htmlText = embedInlineImages(in: html, inline: inlineImages)
+        }
+
         return MessageBody(plainText: plainText ?? (htmlText == nil ? nil : ""), html: htmlText, attachments: attachments)
+    }
+
+    /// Bettet Inline-Bilder als data:-URI in den HTML-Body ein (ersetzt
+    /// `cid:<Content-ID>`-Referenzen).
+    private static func embedInlineImages(in html: String, inline: [(cid: String, mime: String, data: Data)]) -> String {
+        var out = html
+        for part in inline {
+            var cid = part.cid.trimmingCharacters(in: .whitespaces)
+            if cid.hasPrefix("<"), cid.hasSuffix(">"), cid.count >= 2 {
+                cid = String(cid.dropFirst().dropLast())
+            }
+            guard !cid.isEmpty else { continue }
+            let uri = "data:\(part.mime);base64,\(part.data.base64EncodedString())"
+            out = out.replacingOccurrences(of: "cid:\(cid)", with: uri)
+        }
+        return out
+    }
+
+    private static func extractHeaderValue(_ headers: String, named: String) -> String? {
+        for line in headers.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+            if line.lowercased().hasPrefix("\(named):") {
+                return line.split(separator: ":", maxSplits: 1).last.map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                }
+            }
+        }
+        return nil
+    }
+
+    private static func decodeAttachmentData(headers: String, content: String) -> Data? {
+        let lower = headers.lowercased()
+        if lower.contains("base64") {
+            let cleaned = content
+                .replacingOccurrences(of: "\r", with: "")
+                .replacingOccurrences(of: "\n", with: "")
+            return Data(base64Encoded: cleaned)
+        }
+        return content.data(using: .utf8)
     }
 
     private static func decodeContent(headers: String, content: String) -> String {
