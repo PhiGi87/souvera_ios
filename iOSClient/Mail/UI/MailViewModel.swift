@@ -58,6 +58,9 @@ final class MailViewModel: ObservableObject {
     /// direkt dieser Ordner statt der Ordnerliste angezeigt. PRO ACCOUNT
     /// (kein Vermischen zwischen Accounts).
     private static let lastMailboxKey = "souvera_mail_last_mailbox_id_"
+    /// Caps für data:-URI-Einbettung (Run-Fix "eingebettete Bilder").
+    private static let inlinePartByteCap = 3 * 1024 * 1024
+    private static let inlineTotalByteCap = 12 * 1024 * 1024
     static func lastMailboxId(account: String) -> String? {
         let key = lastMailboxKey + account
         if UserDefaults.standard.string(forKey: key) == nil {
@@ -1911,8 +1914,72 @@ final class MailViewModel: ObservableObject {
                 }
             }
         }
+        // Run-Fix "eingebettete Bilder" (finale Lösung): die Inline-Blobs
+        // werden VOR dem Rendern geladen und als data:-URI direkt ins HTML
+        // eingebettet (dieselbe bewährte Methode wie im IMAP-Pfad) - kein
+        // WKWebView-Custom-Scheme mehr nötig. Der registrierte
+        // souvera-cid://-Handler bleibt als Sicherheitsnetz für übergroße/
+        // fehlende Parts.
+        if !mapped.inlineParts.isEmpty, mapped.html != nil {
+            let startedAt = Date()
+            let embeddedHtml = await embedInlineImages(
+                html: mapped.html ?? "",
+                parts: mapped.inlineParts,
+                accountId: accId,
+                emailId: message.emailId
+            )
+            if embeddedHtml != mapped.html {
+                mapped = MessageBody(
+                    plainText: mapped.plainText,
+                    html: embeddedHtml,
+                    attachments: mapped.attachments,
+                    inlineParts: mapped.inlineParts
+                )
+            }
+            JmapLog.write("openMessage \(message.emailId): inline images embedded in \(Int(Date().timeIntervalSince(startedAt) * 1000)) ms")
+        }
         MailCache.saveBody(account: accountName, emailId: message.emailId, body: mapped)
         body = .success(mapped)
+    }
+
+    /// Bettet Inline-Bild-Blobs als data:-URIs in das HTML ein (ersetzt
+    /// `cid:`-Referenzen). Caps: 3 MB je Bild, 12 MB gesamt - darüber
+    /// bleibt die cid:-Referenz stehen (Fallback über den Scheme-Handler).
+    private func embedInlineImages(html: String, parts: [AttachmentMeta], accountId: String, emailId: String) async -> String {
+        guard let client = jmapClient else { return html }
+        let accId = accountId.isEmpty
+            ? ((try? await client.refreshSession())?.primaryAccountId ?? "")
+            : accountId
+        guard !accId.isEmpty else { return html }
+        var out = html
+        var totalBytes = 0
+        for part in parts {
+            guard totalBytes < Self.inlineTotalByteCap else {
+                JmapLog.write("inline \(part.name): skipped (total cap \(Self.inlineTotalByteCap) reached)")
+                continue
+            }
+            guard let cid = part.contentId else { continue }
+            guard let blobId = part.blobId, !blobId.isEmpty else { continue }
+            do {
+                let data = try await client.downloadBlob(accountId: accId, blobId: blobId, mimeType: part.mimeType)
+                guard !data.isEmpty else { continue }
+                guard data.count <= Self.inlinePartByteCap else {
+                    JmapLog.write("inline \(part.name): skipped (\(data.count) bytes > \(Self.inlinePartByteCap))")
+                    continue
+                }
+                var normalized = MailInlineImageSchemeHandler.normalizedContentId(cid)
+                if normalized.hasPrefix("<"), normalized.hasSuffix(">"), normalized.count >= 2 {
+                    normalized = String(normalized.dropFirst().dropLast())
+                }
+                guard !normalized.isEmpty else { continue }
+                let uri = "data:\(part.mimeType);base64,\(data.base64EncodedString())"
+                out = out.replacingOccurrences(of: "cid:\(normalized)", with: uri)
+                totalBytes += data.count
+            } catch {
+                JmapLog.write("inline \(part.name): download failed: \(error)")
+            }
+        }
+        return out
     }
 
     /// Fetches the full Email/get JSON for a message (Android-parity body

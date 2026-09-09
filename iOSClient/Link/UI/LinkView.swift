@@ -956,9 +956,9 @@ struct LinkChatView: View {
     /// P-B: Echte Distanz zum Listenende (gemessen via Scroll-Geometrie) -
     /// Grundlage für Settle, Klemme und Runter-Button.
     @State private var chatBottomDistance: CGFloat = .infinity
-    /// Debounce für den manuellen Pull-Trigger (Overscroll feuert
-    /// kontinuierlich während der Geste).
-    @State private var pullTriggeredAt = Date.distantPast
+    /// Pull-Trigger (talk-ios-Muster: JEDER Overscroll am Listenanfang,
+    /// geregelt über das isLoadingOlder-Flag statt einer Zeit-Debounce).
+    @State private var lastPullLogAt = Date.distantPast
     /// Universelle Ende-Erkennung (Ende-Probe-Zeile, alle OS-Versionen):
     /// onScrollGeometryChange liefert keinen Initial-Callback und bleibt
     /// deshalb beim Eintritt gern stumm (Log 08.09.: Settle attempt=4 vs.
@@ -970,6 +970,22 @@ struct LinkChatView: View {
     /// Nachweis lief der Settle für Ungelesen-Räume immer in den
     /// 12-Versuche-Fallback (2,4 s unsichtbar).
     @State private var unreadBoundarySeen = false
+    /// Native Eintritts-Positionierung (Run 09.09.): Solange das
+    /// scrollPosition-Binding angehängt ist, überstimmt es laut Doku den
+    /// defaultScrollAnchor - auf iOS 26 landete der Eintritt dadurch IMMER
+    /// oben (14 Edge- UND 14 Row-Versuche ohne Wirkung). Das Binding wird
+    /// daher erst NACH dem Settle angehängt; während des Eintritts
+    /// positioniert defaultScrollAnchor(.bottom) nativ (initial unten +
+    /// Bottom-Halt bei Inhaltsänderung, Apple-Doku). Mit Ungelesenen ist
+    /// das Binding ab Start aktiv: das Separator-Ziel liegt dank
+    /// Render-Fenster am Fensteranfang (Near-Jump, materialisiert).
+    @State private var chatScrollControlActive = false
+    /// Render-Fenster: zusätzlich gerenderte Zeilen oberhalb der
+    /// Basisgröße (40). Wächst beim Scrollen an den Fensteranfang
+    /// (progressives Hochscrollen im geladenen Bestand).
+    @State private var renderedBackExtra = 0
+    /// Basisgröße des Render-Fensters (Zeilen ab Ende).
+    private static let renderedBaseSize = 40
     /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
     /// inkrementiert und invalidiert damit alle Loops des alten Raums
     /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
@@ -994,8 +1010,13 @@ struct LinkChatView: View {
         .overlay {
             if let target = reactionTarget {
                 EmojiReactionOverlay(
+                    ownReaction: target.reactionsSelf.first,
                     onPick: { emoji in
-                        viewModel.toggleReaction(message: target, emoji: emoji)
+                        viewModel.setReaction(message: target, emoji: emoji)
+                        reactionTarget = nil
+                    },
+                    onRemove: {
+                        viewModel.removeOwnReaction(message: target)
                         reactionTarget = nil
                     },
                     onCancel: { reactionTarget = nil }
@@ -1188,8 +1209,16 @@ struct LinkChatView: View {
                             Text(NSLocalizedString("_link_history_start_", comment: ""))
                         }
                     }
-                    ForEach(Array(visibleItems.enumerated()), id: \.element.id) { index, message in
+                    ForEach(Array(renderedWindow.enumerated()), id: \.element.id) { index, message in
                         chatRow(index: index, message: message, items: items)
+                            // Render-Fenster-Erweiterung: erscheint die erste
+                            // gerenderte Zeile, wächst das Fenster nach oben
+                            // (progressives Hochscrollen im geladenen
+                            // Bestand); die Leseposition bleibt über den
+                            // bewährten Near-Jump-Re-Anchor erhalten.
+                            .onAppear {
+                                extendRenderWindowIfNeeded(previousFirstId: message.id, index: index)
+                            }
                     }
                     // Universelle Ende-Probe (alle OS-Versionen): materialisiert
                     // erst, wenn die Liste tatsächlich am unteren Rand ist -
@@ -1206,7 +1235,7 @@ struct LinkChatView: View {
                 .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
                                                    legacyId: $chatScrollId,
                                                    legacyAnchor: $chatScrollAnchor,
-                                                   initialRowId: items.last.map { ChatScrollIds.message($0.id) }))
+                                                   controlActive: chatScrollControlActive))
                 // Frischer Scroll-State je Raum: die Teilbaum-Identität
                 // (inkl. ScrollPosition-State des Attach-Modifiers) wird bei
                 // jedem Raumwechsel neu erzeugt - keine Alt-Positionen. Das
@@ -1215,10 +1244,12 @@ struct LinkChatView: View {
                 .id("chatroom-\(token)")
                 // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
                 // das Nachladen älterer Nachrichten oben reißt die
-                // Leseposition nicht mit. Die EINTRITTSPOSITION setzt
-                // scrollPosition(id:) deterministisch (Trennlinie bzw.
-                // Ende), bevor die Liste sichtbar wird - kein sichtbares
-                // Scrollen beim Raumeintritt.
+                // Leseposition nicht mit. Der EINTRITT positioniert NATIV
+                // über defaultScrollAnchor(.bottom) (initial unten + Bottom-
+                // Halt bei Inhaltsänderung, Apple-Doku) - das Binding ist
+                // erst nach dem Settle aktiv. Mit Ungelesenen zielt
+                // positionChat auf die Trennlinie (im Render-Fenster = Near-
+                // Jump).
                 .defaultScrollAnchor(.bottom)
                 .modifier(SouveraScrollBottomObserver { distance in
                     // P-B: Echte Distanz zum Listenende messen (Grundlage für
@@ -1242,6 +1273,12 @@ struct LinkChatView: View {
                     showScrollBottom = false
                     chatEndVisible = false
                     unreadBoundarySeen = false
+                    renderedBackExtra = 0
+                    // Mit Ungelesenen ist das Binding ab Start aktiv: das
+                    // Separator-Ziel liegt im Render-Fenster am Anfang
+                    // (Near-Jump). Ohne Ungelesenen positioniert
+                    // defaultScrollAnchor(.bottom) nativ bis zum Settle.
+                    chatScrollControlActive = viewModel.unreadBoundary != nil
                     entryPositioningUntil = Date().addingTimeInterval(10)
                     lastVisibleMessageId = items.last?.id
                     startEntryPositioning()
@@ -1311,11 +1348,15 @@ struct LinkChatView: View {
                     guard Date() < entryPositioningUntil || !chatPositioned else { return }
                     positionChat()
                 }
-                // Manueller Pull-Trigger (statt .refreshable): Overscroll
-                // am Listenanfang >= 64 px startet das Verlaufs-Nachladen
-                // in einem EIGENEN Task - nicht abbruchgefährdet durch die
-                // Refreshable-Task-Lifetime.
+                // Manueller Pull-Trigger (talk-ios-Muster, JEDER Overscroll):
+                // kontinuierliche Geometrie (iOS 18+) ...
                 .modifier(SouveraScrollTopObserver { overscroll in
+                    handleTopOverscroll(overscroll)
+                })
+                // ... plus Geste-Ende-Erkennung via ScrollPhase (Apple-Doku:
+                // context.geometry beim Phasenwechsel) als zweite,
+                // verlässliche Auslösebahn.
+                .modifier(SouveraScrollPhaseObserver { overscroll in
                     handleTopOverscroll(overscroll)
                 })
             }
@@ -1434,6 +1475,10 @@ struct LinkChatView: View {
             || (historyDone && attempt >= 12)
             || attempt >= 50 {
             chatPositioned = true
+            // Native Eintrittsposition sitzt -> Scroll-Kontrolle (Binding)
+            // aktivieren; der Attach-Task übernimmt das letzte Ziel
+            // (Bottom bzw. Trennlinie) und hält es sitzend.
+            chatScrollControlActive = true
             SouveraLog.write("LinkChat", "entry positioning settled (gen=\(generation) attempt=\(attempt))")
             // P2: Position sitzt -> das 7-Tage-Fenster still vervollständigen.
             viewModel.completeHistoryWindowInBackground()
@@ -1466,10 +1511,13 @@ struct LinkChatView: View {
         // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
         // bleiben für den iOS-17-Fallback synchron.
         if let boundary = viewModel.unreadBoundary {
-            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .top)))
+            // .middle wie im talk-ios-Original (Trennlinie mittig sichtbar,
+            // Kontext davor); dank Render-Fenster ein materialisierter
+            // Near-Jump.
+            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .middle)))
             chatScrollAnchor = .top
             chatScrollId = ChatScrollIds.unread(boundary)
-            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=top")
+            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=middle")
         } else if let lastId = targetItems.last?.id {
             // Zeilen-basiertes Bottom-Ziel statt .edge(.bottom): Edge-Scrolls
             // materialisieren im LazyVStack nicht zuverlässig (Log 09.09.:
@@ -1575,24 +1623,63 @@ struct LinkChatView: View {
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
     }
 
-    /// Manueller Pull-Trigger: Overscroll am Listenanfang (Geometrie) bzw.
-    /// Antippen der Hinweis-Bubble starten das Nachladen in einem eigenen
-    /// Task - nicht abbruchgefährdet wie der Refreshable-Task (Log 09.09.:
-    /// Verlaufs-Fetch lieferte nichts, "Anfang der Unterhaltung" fälschlich).
+    /// Manueller Pull-Trigger (talk-ios-Muster): JEDER Overscroll am
+    /// Listenanfang startet das Nachladen; das Flaggen-Gate
+    /// (isLoadingOlder/hasMoreHistory) verhindert Doppel-Feuer - talk-ios
+    /// nutzt dasselbe Muster (scrollViewDidScroll + retrievingHistory-Flag).
     private func handleTopOverscroll(_ overscroll: CGFloat) {
-        guard chatPositioned, overscroll < -64 else { return }
+        guard chatPositioned, overscroll < 0 else { return }
         triggerHistoryPull()
     }
 
     private func triggerHistoryPull() {
-        guard chatPositioned,
-              viewModel.hasMoreHistory,
-              !viewModel.isLoadingOlder else { return }
+        guard chatPositioned else { return }
+        guard viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
+        // Log-Drossel: max. 1 Eintrag je Sekunde (der Geometrie-Pfad feuert
+        // kontinuierlich während der Geste).
         let now = Date()
-        guard now.timeIntervalSince(pullTriggeredAt) > 1.5 else { return }
-        pullTriggeredAt = now
-        SouveraLog.write("LinkChat", "history pull triggered (manual gesture)")
+        if now.timeIntervalSince(lastPullLogAt) > 1 {
+            lastPullLogAt = now
+            SouveraLog.write("LinkChat", "history pull triggered (overscroll gesture)")
+        }
         Task { await viewModel.loadEarlierHistory() }
+    }
+
+    /// Render-Fenster: nur die letzten `renderedBaseSize + renderedBackExtra`
+    /// Zeilen rendern (mit Ungelesenen: ab Trennlinie - 2, damit das
+    /// Separator-Ziel immer im Fenster liegt und der Sprung dorthin ein
+    /// materialisierter Near-Jump bleibt). Es wird IMMER bis zum Listenende
+    /// gerendert - neue Nachrichten sind damit ohne Sonderbehandlung sichtbar.
+    private var renderedWindow: [LinkChatMessage] {
+        let all = visibleItems
+        guard !all.isEmpty else { return [] }
+        var startIndex = max(0, all.count - Self.renderedBaseSize)
+        if let boundary = viewModel.unreadBoundary,
+           let boundaryIndex = all.firstIndex(where: { $0.id == boundary }) {
+            startIndex = min(startIndex, max(0, boundaryIndex - 2))
+        }
+        startIndex = max(0, startIndex - renderedBackExtra)
+        return Array(all[startIndex...])
+    }
+
+    private var renderedWindowStartIndex: Int? {
+        let window = renderedWindow
+        guard let first = window.first, let index = visibleItems.firstIndex(where: { $0.id == first.id }) else { return nil }
+        return index
+    }
+
+    private func extendRenderWindowIfNeeded(previousFirstId: Int64, index: Int) {
+        guard index == renderedWindowStartIndex,
+              let windowStart = renderedWindowStartIndex,
+              windowStart > 0 else { return }
+        renderedBackExtra += Self.renderedBaseSize
+        // Leseposition halten: die bisher erste Zeile rutscht durch das
+        // Voranstellen ans Ende des neuen Fensters - Near-Jump darauf
+        // (identisch zum bewährten Verlaufs-Re-Anchor).
+        chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(previousFirstId), anchor: .top)))
+        chatScrollAnchor = .top
+        chatScrollId = ChatScrollIds.message(previousFirstId)
+        SouveraLog.write("LinkChat", "render window extended to start=\(max(0, windowStart - Self.renderedBaseSize)) (anchor \(previousFirstId))")
     }
 
     /// Meldet die Ende-Probe-Sichtbarkeit (letzte Zeile materialisiert).
@@ -1651,6 +1738,29 @@ struct LinkChatView: View {
                     geometry.contentOffset.y - geometry.contentInsets.top
                 } action: { _, overscroll in
                     onChange(overscroll)
+                }
+            } else {
+                content
+            }
+        }
+    }
+
+    /// Geste-Ende-Erkennung (iOS 18+, Apple-Doku: `onScrollPhaseChange`
+    /// liefert `context.geometry` beim Phasenwechsel): meldet den Overscroll
+    /// beim Übergang von .interacting zu .decelerating/.idle - zweite,
+    /// verlässliche Auslösebahn für den Pull-Trigger.
+    private struct SouveraScrollPhaseObserver: ViewModifier {
+        let onChange: (CGFloat) -> Void
+
+        func body(content: Content) -> some View {
+            if #available(iOS 18.0, *) {
+                content.onScrollPhaseChange { oldPhase, newPhase, context in
+                    guard oldPhase == .interacting,
+                          newPhase == .decelerating || newPhase == .idle else { return }
+                    let overscroll = context.geometry.contentOffset.y - context.geometry.contentInsets.top
+                    if overscroll < 0 {
+                        onChange(overscroll)
+                    }
                 }
             } else {
                 content
@@ -1885,22 +1995,26 @@ private struct LinkMessageRow: View {
     }
 
     /// Emoji-Reaktions-Pills, halb überlappend am unteren Bubble-Rand.
+    /// Run-Vorgabe: eigene Reaktion = oranger Hintergrund + Ring als
+    /// Eigen-Kennung, fremde Reaktionen = blauer Hintergrund (Brand-Tint,
+    /// AA-sicher mit weißer Schrift).
     @ViewBuilder
     private func reactionPills(message: LinkChatMessage) -> some View {
         HStack(spacing: 4) {
             ForEach(message.reactions.sorted(by: { $0.key < $1.key }), id: \.key) { emoji, count in
+                let isOwn = message.reactionsSelf.contains(emoji)
                 Text("\(emoji) \(count)")
                     .font(.caption2)
-                    .foregroundStyle(message.reactionsSelf.contains(emoji) ? .white : .primary)
+                    .foregroundStyle(.white)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
-                        Capsule().fill(message.reactionsSelf.contains(emoji)
+                        Capsule().fill(isOwn
                             ? Color.orange.opacity(0.95)
-                            : Color(.secondarySystemBackground))
+                            : Color(NCBrandColor.shared.customer))
                     )
                     .overlay(
-                        Capsule().stroke(message.reactionsSelf.contains(emoji) ? Color.orange : .clear, lineWidth: 1)
+                        Capsule().stroke(isOwn ? Color.white.opacity(0.85) : .clear, lineWidth: 1)
                     )
             }
         }
@@ -2033,6 +2147,19 @@ private struct LinkMessageRow: View {
                         onLongPress(message)
                     } label: {
                         Label(NSLocalizedString("_link_react_message_", comment: ""), systemImage: "face.smiling")
+                    }
+                    if let ownReaction = message.reactionsSelf.first {
+                        // Run-Vorgabe E2: eigene Reaktion auch aus dem
+                        // Kontextmenü entfernen (destruktive Rolle,
+                        // Apple-Doku ButtonRole.destructive).
+                        Button(role: .destructive) {
+                            viewModel.removeOwnReaction(message: message)
+                        } label: {
+                            Label(
+                                String(format: NSLocalizedString("_link_reaction_remove_", comment: ""), ownReaction),
+                                systemImage: "trash"
+                            )
+                        }
                     }
                 }
             }
@@ -2519,8 +2646,13 @@ struct CallStartOverlay: View {
 }
 
 /// Emoji-Auswahl für Reaktionen (langes Drücken auf eine Nachricht).
+/// Run-Vorgaben: max. eine eigene Reaktion (bestehende wird beim Wählen
+/// eines anderen Emojis überschrieben) und die Option, die eigene Reaktion
+/// wieder zu entfernen (destruktive Rolle, Apple-Doku ButtonRole).
 struct EmojiReactionOverlay: View {
+    var ownReaction: String? = nil
     let onPick: (String) -> Void
+    var onRemove: () -> Void = {}
     let onCancel: () -> Void
 
     private let emojis = ["👍", "❤️", "😂", "🎉", "😮", "😢", "🙏", "🔥"]
@@ -2530,11 +2662,24 @@ struct EmojiReactionOverlay: View {
             Color.black.opacity(0.35)
                 .ignoresSafeArea()
                 .onTapGesture { onCancel() }
-            // Passt die Reihe -> einzeilig, sonst automatisch 2 Reihen à 4
-            // (kompakt, läuft nie über den Bildschirmrand).
-            ViewThatFits(in: .horizontal) {
-                emojiRow(Array(emojis))
-                compactGrid
+            VStack(spacing: 10) {
+                // Passt die Reihe -> einzeilig, sonst automatisch 2 Reihen à 4
+                // (kompakt, läuft nie über den Bildschirmrand).
+                ViewThatFits(in: .horizontal) {
+                    emojiRow(Array(emojis))
+                    compactGrid
+                }
+                if let ownReaction {
+                    Button(role: .destructive) {
+                        onRemove()
+                    } label: {
+                        Label(
+                            String(format: NSLocalizedString("_link_reaction_remove_", comment: ""), ownReaction),
+                            systemImage: "trash"
+                        )
+                        .font(.subheadline.weight(.medium))
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -2551,6 +2696,12 @@ struct EmojiReactionOverlay: View {
                 .font(.system(size: 22))
                 .frame(width: 36, height: 36)
                 .background(Circle().fill(Color(.secondarySystemBackground)))
+                .overlay {
+                    if emoji == ownReaction {
+                        // Eigene Reaktion: Ring als Kennung.
+                        Circle().stroke(Color(NCBrandColor.shared.customer), lineWidth: 2.5)
+                    }
+                }
         }
     }
 
@@ -2627,19 +2778,24 @@ final class ChatScrollDirector: ObservableObject {
 
 /// Hängt die Scroll-Position-Steuerung an: iOS 18+ nutzt die
 /// ScrollPosition-Struct-API (deterministisch, auch bei nachwachsendem
-/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback. `initialRowId` setzt
-/// die INITIALPOSITION deterministisch auf die neueste Zeile
-/// (ScrollPosition(id:anchor:)) - kein Scroll-Versuch nötig; der Teilbaum
-/// wird je Raum über .id() neu erzeugt, damit der Initialwert greift.
+/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback.
+/// `controlActive == false` hängt GAR KEIN Binding an: Während des
+/// Eintritts positioniert dann defaultScrollAnchor(.bottom) nativ
+/// (Apple-Doku: initial unten + Verhalten bei Inhaltsänderung) - ein
+/// angehängtes Binding überstimmt diesen Mechanismus auf iOS 26 (Log
+/// 09.09.: Landung immer oben). Nach dem Settle wird aktiviert; der
+/// Attach-Task wendet das letzte Director-Ziel an (Re-Assert).
 struct ChatScrollAttachModifier: ViewModifier {
     let director: ChatScrollDirector
     @Binding var legacyId: String?
     @Binding var legacyAnchor: UnitPoint
-    var initialRowId: String? = nil
+    var controlActive: Bool = true
 
     func body(content: Content) -> some View {
-        if #available(iOS 18.0, *) {
-            content.modifier(ChatScrollModernAttach(director: director, initialRowId: initialRowId))
+        if !controlActive {
+            content
+        } else if #available(iOS 18.0, *) {
+            content.modifier(ChatScrollModernAttach(director: director))
         } else {
             content.modifier(ChatScrollLegacyAttach(legacyId: $legacyId, legacyAnchor: $legacyAnchor))
         }
@@ -2658,12 +2814,7 @@ private struct ChatScrollLegacyAttach: ViewModifier {
 @available(iOS 18.0, *)
 private struct ChatScrollModernAttach: ViewModifier {
     let director: ChatScrollDirector
-    @State private var position: ScrollPosition
-
-    init(director: ChatScrollDirector, initialRowId: String?) {
-        self.director = director
-        _position = State(initialValue: initialRowId.map { ScrollPosition(id: $0, anchor: .bottom) } ?? ScrollPosition())
-    }
+    @State private var position = ScrollPosition()
 
     func body(content: Content) -> some View {
         content

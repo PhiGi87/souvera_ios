@@ -409,42 +409,66 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
-    /// Toggelt eine Emoji-Reaktion (optimistisch lokal, Server bestätigt).
-    func toggleReaction(message: LinkChatMessage, emoji: String) {
+    /// Setzt DIE eine Reaktion des Users (Run-Vorgabe: maximal eine eigene
+    /// Reaktion je Nachricht): eine bestehende eigene Reaktion wird
+    /// überschrieben; dieselbe Reaktion bleibt unverändert (Entfernen
+    /// ausschließlich über removeOwnReaction). Optimistisch lokal, Server
+    /// bestätigt; bei Fehlschlag Rollback + Reload.
+    func setReaction(message: LinkChatMessage, emoji: String) {
         guard let api, case let .chat(token, _) = route else { return }
-        let removing = message.reactionsSelf.contains(emoji)
-        // Optimistisches Update der lokalen Nachricht.
-        applyReactionLocally(messageId: message.id, emoji: emoji, removing: removing)
+        let previous = message.reactionsSelf.first
+        guard previous != emoji else { return }
+        applyReactionReplace(messageId: message.id, from: previous, to: emoji)
         Task {
-            let ok = removing
-                ? await api.removeReaction(token: token, messageId: message.id, emoji: emoji)
-                : await api.addReaction(token: token, messageId: message.id, emoji: emoji)
+            var ok = true
+            if let previous {
+                ok = await api.removeReaction(token: token, messageId: message.id, emoji: previous)
+            }
+            if ok {
+                ok = await api.addReaction(token: token, messageId: message.id, emoji: emoji)
+            }
             if !ok {
                 // Rollback + Reload zur Konsistenz.
-                applyReactionLocally(messageId: message.id, emoji: emoji, removing: !removing)
+                applyReactionReplace(messageId: message.id, from: emoji, to: previous)
                 reloadMessages(token: token)
             }
         }
     }
 
-    private func applyReactionLocally(messageId: Int64, emoji: String, removing: Bool) {
+    /// Entfernt die eigene Reaktion einer Nachricht (Popup-Option,
+    /// Run-Vorgabe E2).
+    func removeOwnReaction(message: LinkChatMessage) {
+        guard let api, case let .chat(token, _) = route else { return }
+        guard let previous = message.reactionsSelf.first else { return }
+        applyReactionReplace(messageId: message.id, from: previous, to: nil)
+        Task {
+            if !(await api.removeReaction(token: token, messageId: message.id, emoji: previous)) {
+                applyReactionReplace(messageId: message.id, from: nil, to: previous)
+                reloadMessages(token: token)
+            }
+        }
+    }
+
+    /// Lokaler Replace: `from`-Emoji (Count −1, aus reactionsSelf raus) und
+    /// `to`-Emoji (Count +1, einziger Eintrag in reactionsSelf). `nil` =
+    /// nichts hinzufügen (Entfernen).
+    private func applyReactionReplace(messageId: Int64, from: String?, to: String?) {
         guard case var .success(list) = messages else { return }
         guard let index = list.firstIndex(where: { $0.id == messageId }) else { return }
         var message = list[index]
-        let currentCount = message.reactions[emoji] ?? 0
-        if removing {
-            let newCount = max(0, currentCount - 1)
+        if let from {
+            let current = message.reactions[from] ?? 0
+            let newCount = max(0, current - 1)
             if newCount > 0 {
-                message.reactions[emoji] = newCount
+                message.reactions[from] = newCount
             } else {
-                message.reactions.removeValue(forKey: emoji)
+                message.reactions.removeValue(forKey: from)
             }
-            message.reactionsSelf.removeAll { $0 == emoji }
-        } else {
-            message.reactions[emoji] = currentCount + 1
-            if !message.reactionsSelf.contains(emoji) {
-                message.reactionsSelf.append(emoji)
-            }
+            message.reactionsSelf.removeAll { $0 == from }
+        }
+        if let to {
+            message.reactions[to] = (message.reactions[to] ?? 0) + 1
+            message.reactionsSelf = [to]
         }
         list[index] = message
         messages = .success(list)
@@ -676,6 +700,13 @@ final class LinkViewModel: ObservableObject {
                 self.lastMessageId = ordered.last?.id ?? 0
                 self.messages = .success(ordered)
                 self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+                // Run-Fix "Ladezeit": Mit Cache SOFORT positionieren und
+                // einblenden (Liste <0,5 s sichtbar) - der Live-Fetch
+                // ersetzt den Stand danach im Hintergrund (Klemm-Logik
+                // hält das Ende).
+                self.windowLoadDone = true
+                self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
+                self.hasMoreHistory = true
             }
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
             guard gen == self.generation else { return }
