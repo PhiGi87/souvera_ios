@@ -1511,13 +1511,13 @@ struct LinkChatView: View {
         // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
         // bleiben für den iOS-17-Fallback synchron.
         if let boundary = viewModel.unreadBoundary {
-            // .middle wie im talk-ios-Original (Trennlinie mittig sichtbar,
-            // Kontext davor); dank Render-Fenster ein materialisierter
-            // Near-Jump.
-            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .middle)))
-            chatScrollAnchor = .top
+            // .center = Zeile mittig im Viewport (talk-ios scrollToRow(.middle)):
+            // Trennlinie mittig sichtbar mit Kontext davor; dank Render-Fenster
+            // ein materialisierter Near-Jump.
+            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .center)))
+            chatScrollAnchor = .center
             chatScrollId = ChatScrollIds.unread(boundary)
-            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=middle")
+            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=center")
         } else if let lastId = targetItems.last?.id {
             // Zeilen-basiertes Bottom-Ziel statt .edge(.bottom): Edge-Scrolls
             // materialisieren im LazyVStack nicht zuverlässig (Log 09.09.:
