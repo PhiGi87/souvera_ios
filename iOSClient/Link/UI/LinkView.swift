@@ -952,15 +952,6 @@ struct LinkChatView: View {
     /// Echte Distanz zum Listenende (aus scrollViewDidScroll) - Grundlage
     /// für Klemme und Down-Pfeil.
     @State private var chatBottomDistance: CGFloat = .infinity
-    /// Render-Fenster: zusätzlich gerenderte Zeilen oberhalb der
-    /// Basisgröße (40). Wächst beim Scrollen an den Fensteranfang
-    /// (progressives Hochscrollen im geladenen Bestand).
-    @State private var renderedBackExtra = 0
-    /// Basisgröße des Render-Fensters (Zeilen ab Ende).
-    private static let renderedBaseSize = 40
-    /// Gate: Fenster-Erweiterung läuft gerade (talk-ios retrievingHistory-
-    /// Muster gegen Rückkopplung mit scrollViewDidScroll).
-    @State private var windowExtensionInFlight = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1095,6 +1086,13 @@ struct LinkChatView: View {
         return items.filter { $0.systemMessage != "message_deleted" }
     }
 
+    /// Kompletter Verlauf als UIKit-Liste-Items (globaler Index = Listen-
+    /// position - der Render-Fenster-Mechanismus ist mit der Vollverlauf-
+    /// Vereinfachung entfallen).
+    private var chatListItems: [LinkChatListItem] {
+        visibleItems.enumerated().map { LinkChatListItem(globalIndex: $0.offset, message: $0.element) }
+    }
+
     private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
         guard index > 0 else { return true }
         let previous = visibleItems[index - 1]
@@ -1145,21 +1143,14 @@ struct LinkChatView: View {
         case let .success(items):
             LinkChatListView(
                 controller: chatListController,
-                items: renderedWindow,
+                items: chatListItems,
                 roomToken: token,
                 unreadBoundary: viewModel.unreadBoundary,
-                canLoadOlder: viewModel.hasMoreHistory && !viewModel.isLoadingOlder,
-                canExtendWindow: (renderedWindowStartIndex ?? 0) > 0 && !viewModel.isLoadingOlder,
+                isLoadingHistory: viewModel.isLoadingHistory,
                 isPositioned: chatPositioned,
                 rowProvider: { globalIndex in
                     guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
                     return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
-                },
-                onPullToRefresh: {
-                    triggerHistoryPull()
-                },
-                onWindowExtend: { previousFirstId in
-                    extendRenderWindow(previousFirstId: previousFirstId)
                 },
                 onDistanceChanged: { distance in
                     handleBottomDistance(distance)
@@ -1174,31 +1165,18 @@ struct LinkChatView: View {
                 }
             )
             .opacity(chatPositioned ? 1 : 0)
-            // Hinweis-/Lade-Bubble am OBEREN VERLAUFSENDE (Run-Korrektur:
-            // keine fixierte Kopfzeile mehr - sie gehört in den Scroll-
-            // Inhalt und ist nur sichtbar, wenn der Nutzer ganz oben ist,
-            // wie vor der UIKit-Umstellung). Zustände: Spinner beim
-            // Nachladen, Pull-Hinweis wenn älterer Verlauf existiert
-            // (antippbar), "Anfang der Unterhaltung" am Verlaufsanfang.
+            // Hinweis-/Lade-Bubble am OBEREN VERLAUFSENDE (nur sichtbar,
+            // wenn der Nutzer ganz oben ist): Spinner während der
+            // Vollverlauf lädt, "Anfang der Unterhaltung" am Verlaufsanfang.
+            // (Ein Pull-Hinweis entfällt: Der Verlauf lädt komplett vor.)
             .overlay(alignment: .top) {
                 if chatPositioned, chatAtTop {
-                    if viewModel.isLoadingOlder {
+                    if viewModel.isLoadingHistory {
                         historyHintBubble {
                             ProgressView()
                             Text(NSLocalizedString("_link_older_loading_", comment: ""))
                         }
-                    } else if viewModel.hasMoreHistory {
-                        Button {
-                            triggerHistoryPull()
-                        } label: {
-                            historyHintBubble {
-                                Image(systemName: "chevron.down")
-                                    .font(.caption2.weight(.semibold))
-                                Text(NSLocalizedString("_link_older_hint_", comment: ""))
-                            }
-                        }
-                        .buttonStyle(.plain)
-                    } else if !items.isEmpty {
+                    } else if !viewModel.hasMoreHistory, !items.isEmpty {
                         historyHintBubble {
                             Text(NSLocalizedString("_link_history_start_", comment: ""))
                         }
@@ -1211,8 +1189,6 @@ struct LinkChatView: View {
                     chatPositioned = false
                     showScrollBottom = false
                     chatBottomDistance = .infinity
-                    renderedBackExtra = 0
-                    windowExtensionInFlight = false
                     lastVisibleMessageId = items.last?.id
                 }
                 // Verspätete Trennlinie (Room-Objekt/Boundary kommt nach dem
@@ -1322,12 +1298,12 @@ struct LinkChatView: View {
     }
 
     /// UIKit-Liste hat den Eintritts-Scroll gesetzt (talk-ios: reloadData +
-    /// imperative scrollToRow) -> Liste einblenden und 7-Tage-Fenster still
-    /// vervollständigen.
+    /// imperative scrollToRow) -> Liste einblenden und den KOMPLETTEN
+    /// Verlauf im Hintergrund nachladen (Run-Vereinfachung 10.09.).
     private func onEntrySettled() {
         chatPositioned = true
         SouveraLog.write("LinkChat", "entry settled (UIKit)")
-        viewModel.completeHistoryWindowInBackground()
+        viewModel.loadFullHistoryInBackground()
     }
 
     /// Distanz zum Listenende (aus scrollViewDidScroll): steuert den
@@ -1344,29 +1320,6 @@ struct LinkChatView: View {
             viewModel.noteScrolledToNewest()
         }
     }
-
-    /// Render-Fenster-Erweiterung: +40 Zeilen oben nachladen. Die
-    /// Leseposition erhält der Controller über die contentSize-Delta-
-    /// Technik (kein scrollToItem-Kampf mit dem ziehenden Finger). Das
-    /// Flug-Gate verhindert Doppelfeuer, bevor die neuen Zeilen im
-    /// nächsten SwiftUI-Update gelandet sind.
-    private func extendRenderWindow(previousFirstId: Int64) {
-        guard !windowExtensionInFlight, (renderedWindowStartIndex ?? 0) > 0 else { return }
-        windowExtensionInFlight = true
-        renderedBackExtra += Self.renderedBaseSize
-        SouveraLog.write("LinkChat", "render window extended (+\(Self.renderedBaseSize), anchor \(previousFirstId))")
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            windowExtensionInFlight = false
-        }
-    }
-
-    /// Pull-Trigger (talk-ios-Muster): Flaggen-Gate, kein Zeit-Debounce.
-    private func triggerHistoryPull() {
-        guard chatPositioned, viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
-        Task { await viewModel.loadEarlierHistory() }
-    }
-
 
     /// F1: Eine Chat-Zeile inkl. Tages-/Ungelesen-Trennlinien — ausgelagert,
     /// damit der Zellen-Content für den Type-Checker handhabbar bleibt.
@@ -1440,31 +1393,6 @@ struct LinkChatView: View {
         }
         .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
-    }
-
-    /// Render-Fenster: nur die letzten `renderedBaseSize + renderedBackExtra`
-    /// Zeilen rendern (mit Ungelesenen: ab Trennlinie - 2, damit das
-    /// Separator-Ziel immer im Fenster liegt). Die Items tragen ihren
-    /// GLOBALEN Index in `visibleItems` - die Tages-/Zeit-/Avatar-Logik
-    /// vergleicht damit korrekt über Fenster- und Raumgrenzen hinweg
-    /// (Fix der Doppel-Trennlinien: der frühere lokale Fenster-Index
-    /// produzierte falsche Paarvergleiche). Es wird IMMER bis zum
-    /// Listenende gerendert - neue Nachrichten sind ohne Sonderbehandlung
-    /// sichtbar.
-    private var renderedWindow: [LinkChatListItem] {
-        let all = visibleItems
-        guard !all.isEmpty else { return [] }
-        var startIndex = max(0, all.count - Self.renderedBaseSize)
-        if let boundary = viewModel.unreadBoundary,
-           let boundaryIndex = all.firstIndex(where: { $0.id == boundary }) {
-            startIndex = min(startIndex, max(0, boundaryIndex - 2))
-        }
-        startIndex = max(0, startIndex - renderedBackExtra)
-        return (startIndex..<all.count).map { LinkChatListItem(globalIndex: $0, message: all[$0]) }
-    }
-
-    private var renderedWindowStartIndex: Int? {
-        renderedWindow.first?.globalIndex
     }
 
 /// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start

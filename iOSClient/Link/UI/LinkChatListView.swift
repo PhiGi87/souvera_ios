@@ -43,11 +43,8 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     // MARK: - Vom SwiftUI-Host gesetzte Eingänge (je Update)
 
     private(set) var items: [LinkChatListItem] = []
-    private var canLoadOlder = false
-    private var canExtendWindow = false
+    private var isLoadingHistory = false
     private var rowProvider: ((Int) -> AnyView)?
-    private var onPullToRefresh: (() -> Void)?
-    private var onWindowExtend: ((_ previousFirstId: Int64) -> Void)?
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
     private var onTopAreaChanged: ((_ isAtTop: Bool) -> Void)?
     private var onEntrySettled: (() -> Void)?
@@ -59,7 +56,6 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var lastRoomToken: String?
     private var pendingEntryBoundary: Int64?
     private var didInitialEntry = false
-    private var isExtendingWindow = false
 
     // Eintritts-Stabilisierung
     private var isEntryStabilizing = false
@@ -68,27 +64,23 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var stableSizeCount = 0
     private var entryTimeoutTask: Task<Void, Never>?
 
-    // Pull/Prepend: Edge-Trigger + Offset-Delta-Erhaltung
-    // (Run 10.09.-Fix "Zucken": Der Pull war level-getriggert - der
-    // Self-Sizing-Drift hielt den Offset unter 0 und kettenreiche
-    // Nachlade-Pulls mit Re-Anchor-Kämpfen waren die Folge. Jetzt feuert
-    // der Pull nur beim Übergang in den Overscroll (Re-Arm bei >= 0), und
-    // Voranstellen erhält die Leseposition über die contentSize-Delta-
-    // Technik statt über scrollToItem-Kämpfe mit dem ziehenden Finger.)
-    private var wasOverscrolled = false
-    private var pendingPrependOldHeight: CGFloat?
+    // History-Load-Guardian (Run-Vereinfachung 10.09.): Während der
+    // Vollverlauf im Hintergrund lädt, wächst der Inhalt nach OBEN. Der
+    // Guardian verschiebt contentOffset um die exakte Höhendifferenz -
+    // die sichtbaren Zeilen bleiben pixelgenau auf dem Schirm. Abbruch,
+    // sobald der Nutzer selbst greift (isTracking) - dann hat er die
+    // Kontrolle (talk-ios shouldScrollOnNewMessages-Gedanke).
+    private var userTookControl = false
+    private var lastGuardedHeight: CGFloat = -1
 
     // MARK: - Update vom SwiftUI-Host
 
     func update(items: [LinkChatListItem],
                 roomToken: String,
                 unreadBoundary: Int64?,
-                canLoadOlder: Bool,
-                canExtendWindow: Bool,
+                isLoadingHistory: Bool,
                 isPositioned: Bool,
                 rowProvider: @escaping (Int) -> AnyView,
-                onPullToRefresh: @escaping () -> Void,
-                onWindowExtend: @escaping (Int64) -> Void,
                 onDistanceChanged: @escaping (CGFloat) -> Void,
                 onTopAreaChanged: @escaping (Bool) -> Void,
                 onEntrySettled: @escaping () -> Void) {
@@ -96,16 +88,12 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         if roomChanged {
             lastRoomToken = roomToken
             didInitialEntry = false
-            isExtendingWindow = false
             pendingEntryBoundary = unreadBoundary
-            wasOverscrolled = false
+            userTookControl = false
         }
         self.items = items
-        self.canLoadOlder = canLoadOlder && isPositioned
-        self.canExtendWindow = canExtendWindow && isPositioned
+        self.isLoadingHistory = isLoadingHistory
         self.rowProvider = rowProvider
-        self.onPullToRefresh = onPullToRefresh
-        self.onWindowExtend = onWindowExtend
         self.onDistanceChanged = onDistanceChanged
         self.onTopAreaChanged = onTopAreaChanged
         self.onEntrySettled = onEntrySettled
@@ -117,23 +105,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let newIds = items.map(\.id)
         if newIds != lastReloadedIds {
             lastReloadedIds = newIds
-            // Offset-Delta-Erhaltung (klassische UIKit-Prepend-Technik):
-            // Wurde ein Voranstellen (Pull/Fenster-Erweiterung) angestoßen,
-            // verschiebt der neue Inhalt die bisher sichtbaren Zeilen um
-            // die Differenz der Inhaltshöhen - contentOffset exakt
-            // nachführen. Deterministisch, ohne Höhen zu schätzen und ohne
-            // den ziehenden Finger zu bekämpfen.
-            let oldHeight = collectionView.contentSize.height
-            let isPrepend = pendingPrependOldHeight != nil
-            pendingPrependOldHeight = nil
             collectionView.reloadData()
-            if isPrepend {
-                collectionView.layoutIfNeeded()
-                let delta = collectionView.contentSize.height - oldHeight
-                if delta > 0 {
-                    collectionView.contentOffset.y += delta
-                }
-            }
             if !didInitialEntry, !items.isEmpty {
                 didInitialEntry = true
                 DispatchQueue.main.async { [weak self] in
@@ -189,10 +161,12 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         onEntrySettled?()
     }
 
-    /// KVO auf contentSize (dokumentiert): Selbst-Sizing-Höhen ändern die
-    /// Inhaltsgöße nach dem ersten Layout - Eintritts-Ziel und frischer
-    /// Re-Anchor werden solange erneut angefahren, bis sich die Größe
-    /// stabilisiert hat.
+    /// KVO auf contentSize (dokumentiert): Zwei Aufgaben -
+    /// 1. Eintritts-Stabilisierung: Ziel erneut anfahren, bis die Höhe
+    ///    stabil ist.
+    /// 2. History-Load-Guardian: während der Vollverlauf nachlädt, die
+    ///    sichtbaren Zeilen per Offset-Delta an Ort und Stelle halten
+    ///    (bis der Nutzer selbst greift).
     private func handleContentSizeChanged() {
         guard let collectionView else { return }
         let height = collectionView.contentSize.height
@@ -216,7 +190,17 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
             if stableSizeCount >= 2 {
                 finishEntryStabilization(reason: "stable")
             }
+            return
         }
+
+        // History-Load-Guardian: Inhalt wächst nach oben -> Offset um die
+        // Differenz nachführen, solange der Nutzer die Kontrolle nicht
+        // übernommen hat. (Die geladenen Zeilen stehen danach exakt dort,
+        // wo sie vor dem Nachladen waren.)
+        if isLoadingHistory, !userTookControl, height > lastGuardedHeight, lastGuardedHeight > 0 {
+            collectionView.contentOffset.y += (height - lastGuardedHeight)
+        }
+        lastGuardedHeight = height
     }
 
     func scrollToBottom(animated: Bool) {
@@ -224,11 +208,6 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let indexPath = IndexPath(item: items.count - 1, section: 0)
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
-    }
-
-    /// Abschluss der Fenster-Erweiterung (Gate gegen Rückkopplung).
-    func endWindowExtension() {
-        isExtendingWindow = false
     }
 
     /// Nachziehender Eintritts-Scroll (verspätete Ungelesen-Trennlinie).
@@ -255,7 +234,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         return cell
     }
 
-    // MARK: - UIScrollViewDelegate (talk-ios-Muster)
+    // MARK: - UIScrollViewDelegate
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         let distance = scrollView.contentSize.height
@@ -264,51 +243,13 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         onDistanceChanged?(distance)
         onTopAreaChanged?(scrollView.contentOffset.y <= 2)
 
-        let overscroll = scrollView.contentOffset.y - scrollView.adjustedContentInset.top
-        // Nur echte Nutzer-Gesten lösen Pull/Fenster-Erweiterung aus -
-        // programmatische Scrolls (Eintritts-Stabilisierung, Re-Anchor)
-        // dürfen die Mechanik nicht "geisterhaft" auslösen (Log 10.09.).
-        let userScrolling = scrollView.isTracking || scrollView.isDecelerating
-        guard userScrolling else { return }
-
-        // Verlaufs-Pull: EDGE-getriggert (Run-Fix "Zucken") - feuert nur
-        // beim Übergang in den Overscroll, Re-Arm erst bei Rückkehr >= 0.
-        // Ein level-getriggerter Pull hat den Self-Sizing-Drift in eine
-        // Kettennachladefalle verwandelt (Log 10.09. 14:21-14:22: fünf
-        // Pulls, komplette Historie in 25 s). Merken der Inhaltshöhe für
-        // die Offset-Delta-Erhaltung des Voranstellens.
-        if overscroll < 0 {
-            if !wasOverscrolled, canLoadOlder {
-                wasOverscrolled = true
-                pendingPrependOldHeight = scrollView.contentSize.height
-                let now = Date()
-                if now.timeIntervalSince(lastPullLogAt) > 1 {
-                    lastPullLogAt = now
-                    SouveraLog.write("LinkChat", "history pull triggered (overscroll edge, \(Int(overscroll))px)")
-                }
-                onPullToRefresh?()
-            }
-        } else {
-            wasOverscrolled = false
-        }
-
-        // Render-Fenster-Erweiterung: ebenfalls edge-getriggert, nur wenn
-        // KEIN Server-Pull läuft (doppelseitiges Voranstellen sonst) und
-        // überhaupt Zeilen oberhalb gerendert werden können.
-        if scrollView.contentOffset.y <= 4,
-           overscroll >= 0,
-           !wasOverscrolled,
-           canExtendWindow,
-           !isExtendingWindow,
-           let first = items.first {
-            isExtendingWindow = true
-            pendingPrependOldHeight = scrollView.contentSize.height
-            SouveraLog.write("LinkChat", "render window extension requested (firstId=\(first.message.id))")
-            onWindowExtend?(first.message.id)
+        // Sobald der Nutzer selbst in die Liste greift, übernimmt er die
+        // Kontrolle - der History-Load-Guardian stellt das Nachführen ein.
+        if scrollView.isTracking, !userTookControl {
+            userTookControl = true
+            SouveraLog.write("LinkChat", "user took scroll control (history load guardian off)")
         }
     }
-
-    private var lastPullLogAt = Date.distantPast
 
     // MARK: - SwiftUI-Anbindung
 
@@ -327,7 +268,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         self.collectionView = collectionView
         // KVO auf contentSize (dokumentiertes NSKeyValueObserving) - Kern
-        // der Eintritts-Stabilisierung und Re-Anchor-Nachführung.
+        // der Eintritts-Stabilisierung und des History-Load-Guardians.
         contentSizeObservation = collectionView.observe(\UICollectionView.contentSize, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in
                 self?.handleContentSizeChanged()
@@ -343,12 +284,9 @@ struct LinkChatListView: UIViewRepresentable {
     let items: [LinkChatListItem]
     let roomToken: String
     let unreadBoundary: Int64?
-    let canLoadOlder: Bool
-    let canExtendWindow: Bool
+    let isLoadingHistory: Bool
     let isPositioned: Bool
     let rowProvider: (Int) -> AnyView
-    let onPullToRefresh: () -> Void
-    let onWindowExtend: (Int64) -> Void
     let onDistanceChanged: (CGFloat) -> Void
     let onTopAreaChanged: (Bool) -> Void
     let onEntrySettled: () -> Void
@@ -362,12 +300,9 @@ struct LinkChatListView: UIViewRepresentable {
             items: items,
             roomToken: roomToken,
             unreadBoundary: unreadBoundary,
-            canLoadOlder: canLoadOlder,
-            canExtendWindow: canExtendWindow,
+            isLoadingHistory: isLoadingHistory,
             isPositioned: isPositioned,
             rowProvider: rowProvider,
-            onPullToRefresh: onPullToRefresh,
-            onWindowExtend: onWindowExtend,
             onDistanceChanged: onDistanceChanged,
             onTopAreaChanged: onTopAreaChanged,
             onEntrySettled: onEntrySettled

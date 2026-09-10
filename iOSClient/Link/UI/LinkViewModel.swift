@@ -58,20 +58,17 @@ final class LinkViewModel: ObservableObject {
     @Published var chatPdfCache: [Int64: URL] = [:]
     /// Offline-Hinweis (Server nicht erreichbar - Cache-Stand wird gezeigt).
     @Published var offlineNotice: String?
-    /// Gibt es ältere Nachrichten im Verlauf (Scroll-Nachladen oben)?
-    /// P-A: Noch ältere Tage existieren (Nachlade-Hinweis + Sentinel).
-    @Published var hasMoreHistory = false
-    /// P-A: Die Fenster-Ladung (Eintritt/Scroll-up) ist fertig - die
-    /// Chat-Eintritts-Positionierung wartet darauf.
+    /// "Anfang der Unterhaltung" erreicht (kein älterer Verlauf mehr)?
+    /// Run-Vereinfachung 10.09.: Der VERLAUF WIRD KOMPLETT geladen - der
+    /// 7-Tage-/Min-10-Fenstermechanismus (Pull, Render-Fenster, Re-Anchor)
+    /// ist entfallen, weil inkrementelles Nachladen mit SwiftUI-self-
+    /// sizing-Zellen keine ruhige Scroll-Erfahrung liefert (Log 10.09.).
+    @Published private(set) var hasMoreHistory = false
+    /// Der komplette Verlauf lädt gerade im Hintergrund (Bubble-Spinner).
+    @Published private(set) var isLoadingHistory = false
+    /// Die erste Seite (bzw. der Cache) ist da - die Eintritts-
+    /// positionierung darf setzen (Listenstart sichtbar).
     @Published private(set) var windowLoadDone = false
-    /// P-A: Bis zu diesem Zeitpunkt ist der Verlauf abgedeckt (oldest
-    /// loaded oder letzte Fenstergrenze).
-    private var historyWindowStart: TimeInterval = 0
-    /// P-D: Nach einem Prepend (Scroll-up-Batch) hierhin re-anchoren,
-    /// damit die Leseposition erhalten bleibt.
-    @Published var reanchorToMessageId: Int64?
-    /// Läuft gerade eine Scroll-up-Batch?
-    @Published private(set) var isLoadingOlder = false
     /// Erste ungelesene Nachricht (id > lastReadMessage) - Basis für die
     /// "Neue Nachrichten"-Trennlinie und die Eintrittsposition.
     @Published private(set) var unreadBoundary: Int64?
@@ -705,8 +702,6 @@ final class LinkViewModel: ObservableObject {
                 // ersetzt den Stand danach im Hintergrund (Klemm-Logik
                 // hält das Ende).
                 self.windowLoadDone = true
-                self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
-                self.hasMoreHistory = true
             }
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
             guard gen == self.generation else { return }
@@ -732,17 +727,10 @@ final class LinkViewModel: ObservableObject {
             let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
             let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
             self.updateUnreadBoundary(roomLastRead: effectiveLastRead, roomUnread: effectiveUnread)
-            // P1: Entry OHNE Verlaufs-Nachladen - die erste Seite (neueste
-            // Nachrichten) reicht, die Positionierung sitzt sofort exakt am
-            // Ende. Das 7-Tage-Fenster füllt sich danach still oben
-            // (completeHistoryWindow, ohne Re-Anchor/Viewport-Verschiebung,
-            // solange der Nutzer am Ende steht); ältere Tage per
-            // Hochscrollen (+7 Tage/Schritt).
+            // Run-Vereinfachung 10.09.: Erste Seite reicht für den Eintritt -
+            // der KOMPLETTE Verlauf lädt danach im Hintergrund (Vollverlauf
+            // statt 7-Tage-Fenster).
             self.windowLoadDone = true
-            self.historyWindowStart = Date().addingTimeInterval(-7 * 86400).timeIntervalSince1970
-            // P-A (geschärft): KEIN Nachrichtenanzahl-Filter - optimistisch
-            // true; der stille Fenster-Load korrigiert über reachedStart
-            // (false nur am echten Gesprächsanfang).
             self.hasMoreHistory = true
             self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             await self.pollNewMessages(token: token)
@@ -793,25 +781,17 @@ final class LinkViewModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: workItem)
     }
 
-    /// Run-Vorgabe: Mindestanzahl Meldungen im Verlaufs-Fenster (Nachrichten
-    /// INKL. Systemmeldungen, ohne Reaktions-Events). Ist das 7-Tage-Fenster
-    /// dünner, wird in GANZEN Tagen rückwärts erweitert, bis die Mindest-
-    /// menge steht oder der Gesprächsanfang erreicht ist.
-    private static let minHistoryWindowMessages = 10
-
-    /// P-A: Lädt den Verlauf rückwärts in 100er-Seiten bis die älteste
-    /// geladene Nachricht die Fenster-Grenze (cutoff) unterschreitet.
-    /// Fenster-Regeln (Run 08.09.):
-    /// - Das Fenster endet EXAKT an der Grenze (Seiten-Overshoot wird
-    ///   getrimmt; er kommt beim nächsten Pull erneut und landet dann
-    ///   innerhalb des erweiterten Fensters - keine Lücke).
-    /// - Liegen weniger als `minHistoryWindowMessages` Meldungen im
-    ///   Fenster, wird die Grenze in ganzen Tagen (-86400 s) erweitert,
-    ///   bis die Mindestmenge steht oder der Gesprächsanfang kommt.
-    private func loadHistoryWindow(token: String, cutoff: TimeInterval, reanchorOnFinish: Bool) async {
+    /// Run-Vereinfachung 10.09.: Lädt den KOMPLETTEN Verlauf rückwärts in
+    /// 100er-Seiten bis zum Gesprächsanfang. Der frühere 7-Tage-/Min-10-
+    /// Fenstermechanismus (Pull, Render-Fenster, Re-Anchor) ist entfallen -
+    /// inkrementelles Nachladen mit SwiftUI-self-sizing-Zellen lieferte
+    /// keine ruhige Scroll-Erfahrung (Log 10.09.: Ketten-Pulls, Zucken).
+    /// Fehlerhafte Fetches (nil) werden 1x wiederholt und brechen dann ab,
+    /// OHNE den Gesprächsanfang zu markieren.
+    private func loadFullHistory(token: String) async {
         guard let api else { return }
         guard case let .success(current) = messages, !current.isEmpty else {
-            windowLoadDone = true
+            hasMoreHistory = false
             return
         }
         var all = current
@@ -819,118 +799,61 @@ final class LinkViewModel: ObservableObject {
         var anchor = all.map(\.id).min() ?? 0
         guard anchor > 0 else {
             hasMoreHistory = false
-            windowLoadDone = true
             return
         }
-        let previousOldestId = anchor
+        isLoadingHistory = true
+        defer { isLoadingHistory = false }
         var oldestLoaded = all.map(\.timestamp).min() ?? Date.distantFuture.timeIntervalSince1970
         var reachedStart = false
-        var addedAbove = false
         var pages = 0
-        var effectiveCutoff = cutoff
-        while !Task.isCancelled {
-            while oldestLoaded > effectiveCutoff, anchor > 0, pages < 200, !Task.isCancelled {
-                var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
-                if older == nil, !Task.isCancelled {
-                    // FEHLER (Transport/HTTP/Decode) - NICHT als
-                    // Gesprächsanfang missdeuten: 1 Retry, danach Abbruch
-                    // mit unverändertem hasMoreHistory (Log 09.09.:
-                    // leerer Fetch markierte fälschlich das Fenster-Ende).
-                    try? await Task.sleep(nanoseconds: 500_000_000)
-                    guard !Task.isCancelled else { return }
-                    older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
-                }
-                guard let older else {
-                    CallDebugLog.log("LinkViewModel", "history fetch FAILED for \(token) anchor=\(anchor) - aborting window load (moreOlder stays \(hasMoreHistory))")
-                    windowLoadDone = true
-                    return
-                }
-                if older.isEmpty {
-                    // Echte, erfolgreiche Leerantwort = Gesprächsanfang.
-                    reachedStart = true
-                    break
-                }
-                let fresh = older.filter { known.insert($0.id).inserted && !$0.isReactionEvent }
-                let newAnchor = older.map(\.id).min() ?? anchor
-                guard newAnchor < anchor else { break }
-                anchor = newAnchor
-                if !fresh.isEmpty {
-                    all.append(contentsOf: fresh)
-                    addedAbove = true
-                    oldestLoaded = min(oldestLoaded, fresh.map(\.timestamp).min() ?? oldestLoaded)
-                    if !Task.isCancelled {
-                        self.messages = .success(all.sorted { $0.id < $1.id })
-                    }
-                }
-                if older.count < 100 {
-                    reachedStart = true
-                    break
-                }
-                pages += 1
+        while !Task.isCancelled, pages < 500 {
+            var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+            if older == nil, !Task.isCancelled {
+                // FEHLER (Transport/HTTP/Decode) - NICHT als
+                // Gesprächsanfang missdeuten: 1 Retry, danach Abbruch mit
+                // unverändertem hasMoreHistory.
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+                older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
             }
-            // Min-10-Regel: zu dünnes Fenster in ganzen Tagen erweitern.
-            let insideCount = all.filter { $0.timestamp >= effectiveCutoff && !$0.isReactionEvent }.count
-            if reachedStart || insideCount >= Self.minHistoryWindowMessages { break }
-            effectiveCutoff -= 86400
-        }
-        // Fenster EXAKT an der Grenze halten: ältere Seiten-Overshoots
-        // entfernen (der nächste Pull holt sie über den ältesten behaltenen
-        // Anchor erneut - nichts geht verloren). Ausnahme: Ist der
-        // Gesprächsanfang erreicht, bleibt alles geladen (ein Trim wäre
-        // ohne späteren Pull unumkehrbar).
-        if !reachedStart, !Task.isCancelled {
-            let trimmed = all.filter { $0.timestamp >= effectiveCutoff }
-            if trimmed.count != all.count {
-                all = trimmed
-                known = Set(all.map(\.id))
-                self.messages = .success(all.sorted { $0.id < $1.id })
+            guard let older else {
+                CallDebugLog.log("LinkViewModel", "full-history fetch FAILED for \(token) anchor=\(anchor) - aborting (moreOlder stays \(hasMoreHistory))")
+                return
             }
+            if older.isEmpty {
+                // Echte, erfolgreiche Leerantwort = Gesprächsanfang.
+                reachedStart = true
+                break
+            }
+            let fresh = older.filter { known.insert($0.id).inserted && !$0.isReactionEvent }
+            let newAnchor = older.map(\.id).min() ?? anchor
+            guard newAnchor < anchor else { break }
+            anchor = newAnchor
+            if !fresh.isEmpty {
+                all.append(contentsOf: fresh)
+                oldestLoaded = min(oldestLoaded, fresh.map(\.timestamp).min() ?? oldestLoaded)
+                if !Task.isCancelled {
+                    self.messages = .success(all.sorted { $0.id < $1.id })
+                }
+            }
+            if older.count < 100 {
+                reachedStart = true
+                break
+            }
+            pages += 1
         }
         hasMoreHistory = !reachedStart && anchor > 0
-        historyWindowStart = reachedStart ? min(effectiveCutoff, oldestLoaded) : effectiveCutoff
-        windowLoadDone = true
-        CallDebugLog.log("LinkViewModel", "history window loaded for \(token): total=\(all.count) oldest=\(Int(oldestLoaded)) cutoff=\(Int(effectiveCutoff)) moreOlder=\(hasMoreHistory)")
-        // P-D: Nach einem Scroll-up-Prepend auf die zuvor älteste geladene
-        // Nachricht re-anchoren - die Leseposition bleibt erhalten.
-        if reanchorOnFinish, addedAbove {
-            self.reanchorToMessageId = previousOldestId
-        }
+        CallDebugLog.log("LinkViewModel", "full history loaded for \(token): total=\(all.count) oldest=\(Int(oldestLoaded)) reachedStart=\(reachedStart)")
     }
 
-    /// P2: 7-Tage-Fenster STILL vervollständigen (nach sitzender
-    /// Eintrittspositionierung). Ohne Re-Anchor — die Ansicht klemmt sich
-    /// selbst ans Ende, solange der Nutzer unten steht.
-    func completeHistoryWindowInBackground() {
-        guard case let .chat(token, _) = route,
-              windowLoadDone,
-              hasMoreHistory,
-              !historyCompletionRunning,
-              !isLoadingOlder else { return }
-        historyCompletionRunning = true
+    /// Startet den Vollverlauf-Load im Hintergrund (nach sitzender
+    /// Eintrittspositionierung, Run-Vereinfachung 10.09.).
+    func loadFullHistoryInBackground() {
+        guard case let .chat(token, _) = route, hasMoreHistory, !isLoadingHistory else { return }
         Task { [weak self] in
-            let cutoff = self?.historyWindowStart ?? 0
-            await self?.loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: false)
-            self?.historyCompletionRunning = false
+            await self?.loadFullHistory(token: token)
         }
     }
-
-    /// P-A: Pull-Batch: +7 Tage älter laden. ASYNCHRON - der manuelle
-    /// Pull-Trigger (Overscroll/Antippen der Hinweis-Bubble) startet einen
-    /// eigenen Task, der nicht von der Refreshable-Lifetime abgebrochen
-    /// werden kann; der Ladezustand (isLoadingOlder) bleibt bis zum
-    /// Fenster-Stand sichtbar.
-    func loadEarlierHistory() async {
-        guard let api, case let .chat(token, _) = route,
-              hasMoreHistory, windowLoadDone,
-              !isLoadingOlder, !historyCompletionRunning else { return }
-        isLoadingOlder = true
-        windowLoadDone = false
-        let cutoff = historyWindowStart - 7 * 86400
-        await loadHistoryWindow(token: token, cutoff: cutoff, reanchorOnFinish: true)
-        isLoadingOlder = false
-    }
-
-    private var historyCompletionRunning = false
 
     private func pollNewMessages(token: String) async {
         guard let api else { return }
