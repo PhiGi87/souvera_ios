@@ -919,10 +919,6 @@ struct LinkChatView: View {
     @State private var fullscreenImageMessage: LinkChatMessage?
     /// P68o: PDF-Datei für den QuickLook-Vollbild-Viewer.
     @State private var pdfPreviewURL: URL?
-    /// P68n: Nachpositionier-Fenster beim Raumeintritt (3 s) - die
-    /// Server-Liste/Boundary kann verspätet eintreffen; solange wird
-    /// unsichtbar nachpositioniert (kein sichtbares Scrollen).
-    @State private var entryPositioningUntil = Date.distantPast
     /// P68n: Nach dem Senden ans Listenende springen.
     @State private var scrollToNewestPending = false
     @State private var lastVisibleMessageId: Int64?
@@ -942,55 +938,25 @@ struct LinkChatView: View {
     @State private var backDragOffset: CGFloat = 0
     /// Chat-Eintritt: Die Liste wird unsichtbar an die Trennlinie bzw.
     /// ans Ende positioniert, bevor sie eingeblendet wird (kein
-    /// sichtbarer Sprung).
+    /// sichtbarer Sprung). Mit der UIKit-Liste ist der Eintritts-Scroll
+    /// deterministisch (ein Frame statt Retry-Loop).
     @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
-    /// C2/A: Scroll-Steuerung über den Director - auf iOS 18+ deterministisch
-    /// über die ScrollPosition-Struct-API, auf iOS 17 über das ID-Binding
-    /// (Fallback). Der List-scrollTo war bei langen Verläufen unzuverlässig.
-    @StateObject private var chatScrollDirector = ChatScrollDirector()
-    /// iOS-17-Fallback-Zustände (vom Director mitgepflegt).
-    @State private var chatScrollId: String?
-    @State private var chatScrollAnchor: UnitPoint = .bottom
-    /// P-B: Echte Distanz zum Listenende (gemessen via Scroll-Geometrie) -
-    /// Grundlage für Settle, Klemme und Runter-Button.
+    /// UIKit-Chat-Liste: Scroll-Kommandos + Delegates (talk-ios-Muster).
+    @StateObject private var chatListController = LinkChatListController()
+    /// Echte Distanz zum Listenende (aus scrollViewDidScroll) - Grundlage
+    /// für Klemme und Down-Pfeil.
     @State private var chatBottomDistance: CGFloat = .infinity
-    /// Pull-Trigger (talk-ios-Muster: JEDER Overscroll am Listenanfang,
-    /// geregelt über das isLoadingOlder-Flag statt einer Zeit-Debounce).
-    @State private var lastPullLogAt = Date.distantPast
-    /// Universelle Ende-Erkennung (Ende-Probe-Zeile, alle OS-Versionen):
-    /// onScrollGeometryChange liefert keinen Initial-Callback und bleibt
-    /// deshalb beim Eintritt gern stumm (Log 08.09.: Settle attempt=4 vs.
-    /// attempt=12 auf demselben Gerät) - die Probe verifiziert das Listen-
-    /// Ende zuverlässig auch ohne vorherige Geometrie-Änderung.
-    @State private var chatEndVisible = false
-    /// Eintritts-Verifikation mit Ungelesenen: die "Neue Nachrichten"-
-    /// Trennlinie ist materialisiert (Zielzeile erreicht). Ohne diesen
-    /// Nachweis lief der Settle für Ungelesen-Räume immer in den
-    /// 12-Versuche-Fallback (2,4 s unsichtbar).
-    @State private var unreadBoundarySeen = false
-    /// Native Eintritts-Positionierung (Run 09.09.): Solange das
-    /// scrollPosition-Binding angehängt ist, überstimmt es laut Doku den
-    /// defaultScrollAnchor - auf iOS 26 landete der Eintritt dadurch IMMER
-    /// oben (14 Edge- UND 14 Row-Versuche ohne Wirkung). Das Binding wird
-    /// daher erst NACH dem Settle angehängt; während des Eintritts
-    /// positioniert defaultScrollAnchor(.bottom) nativ (initial unten +
-    /// Bottom-Halt bei Inhaltsänderung, Apple-Doku). Mit Ungelesenen ist
-    /// das Binding ab Start aktiv: das Separator-Ziel liegt dank
-    /// Render-Fenster am Fensteranfang (Near-Jump, materialisiert).
-    @State private var chatScrollControlActive = false
     /// Render-Fenster: zusätzlich gerenderte Zeilen oberhalb der
     /// Basisgröße (40). Wächst beim Scrollen an den Fensteranfang
     /// (progressives Hochscrollen im geladenen Bestand).
     @State private var renderedBackExtra = 0
     /// Basisgröße des Render-Fensters (Zeilen ab Ende).
     private static let renderedBaseSize = 40
-    /// P1: Generation des Eintritts-Positionierungs-Loops - ein Raumwechsel
-    /// inkrementiert und invalidiert damit alle Loops des alten Raums
-    /// (Log-Beweis 07.09.: alte und neue Loops kämpften um das
-    /// Scroll-Ziel, 7450 <-> 7616 im 100-ms-Takt).
-    @State private var positioningGeneration = 0
+    /// Gate: Fenster-Erweiterung läuft gerade (talk-ios retrievingHistory-
+    /// Muster gegen Rückkopplung mit scrollViewDidScroll).
+    @State private var windowExtensionInFlight = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -1173,203 +1139,107 @@ struct LinkChatView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // Dezente Nachlade-/Ende-Hinweise am oberen Ende:
-                    // Spinner während des Ladens, Hinweis "nach unten
-                    // ziehen", "Anfang der Unterhaltung" am Schluss. Das
-                    // Nachladen startet über den MANUELLEN Pull-Trigger
-                    // (Overscroll-Erkennung bzw. Antippen) - bewusst OHNE
-                    // .refreshable: das UIRefreshControl greift ins
-                    // Scrollverhalten der ScrollView ein (Landung oben,
-                    // Log 09.09.) und sein Task kann die Verlaufs-Anfrage
-                    // abbrechen (falscher "Gesprächsanfang").
-                    if viewModel.hasMoreHistory {
-                        Button {
-                            triggerHistoryPull()
-                        } label: {
-                            historyHintBubble {
-                                if !chatPositioned || viewModel.isLoadingOlder {
-                                    ProgressView()
-                                }
-                                if viewModel.isLoadingOlder {
-                                    Text(NSLocalizedString("_link_older_loading_", comment: ""))
-                                } else {
-                                    Image(systemName: "chevron.down")
-                                        .font(.caption2.weight(.semibold))
-                                    Text(NSLocalizedString("_link_older_hint_", comment: ""))
-                                }
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(!chatPositioned)
-                        .id(ChatScrollIds.sentinel)
-                    } else if !items.isEmpty {
+            VStack(spacing: 0) {
+                // Hinweis-/Lade-Kopfzeile (talk-ios tableHeader-Parität):
+                // Spinner beim Nachladen, Pull-Hinweis wenn älterer Verlauf
+                // existiert. "Anfang der Unterhaltung" entspricht dem
+                // Zustand hasMoreHistory == false (keine Dauerleiste).
+                if viewModel.hasMoreHistory || viewModel.isLoadingOlder {
+                    Button {
+                        triggerHistoryPull()
+                    } label: {
                         historyHintBubble {
-                            Text(NSLocalizedString("_link_history_start_", comment: ""))
-                        }
-                    }
-                    ForEach(Array(renderedWindow.enumerated()), id: \.element.id) { index, message in
-                        chatRow(index: index, message: message, items: items)
-                            // Render-Fenster-Erweiterung: erscheint die erste
-                            // gerenderte Zeile, wächst das Fenster nach oben
-                            // (progressives Hochscrollen im geladenen
-                            // Bestand); die Leseposition bleibt über den
-                            // bewährten Near-Jump-Re-Anchor erhalten.
-                            .onAppear {
-                                extendRenderWindowIfNeeded(previousFirstId: message.id, index: index)
+                            if !chatPositioned || viewModel.isLoadingOlder {
+                                ProgressView()
                             }
-                    }
-                    // Universelle Ende-Probe (alle OS-Versionen): materialisiert
-                    // erst, wenn die Liste tatsächlich am unteren Rand ist -
-                    // verifiziert den Eintritts-Scroll unabhängig von der
-                    // Geometrie (onScrollGeometryChange liefert KEINEN
-                    // Initial-Callback und bleibt sonst gern aus).
-                    Color.clear
-                        .frame(height: 1)
-                        .id(ChatScrollIds.endProbe)
-                        .onAppear { updateChatEndVisibility(true) }
-                        .onDisappear { updateChatEndVisibility(false) }
-                }
-                .scrollTargetLayout()
-                .modifier(ChatScrollAttachModifier(director: chatScrollDirector,
-                                                   legacyId: $chatScrollId,
-                                                   legacyAnchor: $chatScrollAnchor,
-                                                   controlActive: chatScrollControlActive))
-                // Frischer Scroll-State je Raum: die Teilbaum-Identität
-                // (inkl. ScrollPosition-State des Attach-Modifiers) wird bei
-                // jedem Raumwechsel neu erzeugt - keine Alt-Positionen. Das
-                // .id() liegt NACH dem Attach-Modifier, damit dessen State
-                // mit zurückgesetzt wird.
-                .id("chatroom-\(token)")
-                // Chat-Standard: Liste bleibt bei neuen Nachrichten unten;
-                // das Nachladen älterer Nachrichten oben reißt die
-                // Leseposition nicht mit. Der EINTRITT positioniert NATIV
-                // über defaultScrollAnchor(.bottom) (initial unten + Bottom-
-                // Halt bei Inhaltsänderung, Apple-Doku) - das Binding ist
-                // erst nach dem Settle aktiv. Mit Ungelesenen zielt
-                // positionChat auf die Trennlinie (im Render-Fenster = Near-
-                // Jump).
-                .defaultScrollAnchor(.bottom)
-                .modifier(SouveraScrollBottomObserver { distance in
-                    // P-B: Echte Distanz zum Listenende messen (Grundlage für
-                    // Settle, Klemme und Runter-Button).
-                    chatBottomDistance = distance
-                    let visible = distance > 120
-                    if visible != showScrollBottom {
-                        withAnimation(.easeInOut(duration: 0.25)) {
-                            showScrollBottom = visible
+                            if viewModel.isLoadingOlder {
+                                Text(NSLocalizedString("_link_older_loading_", comment: ""))
+                            } else {
+                                Image(systemName: "chevron.down")
+                                    .font(.caption2.weight(.semibold))
+                                Text(NSLocalizedString("_link_older_hint_", comment: ""))
+                            }
                         }
                     }
-                    // Am Ende angekommen: Trennlinie ausblenden + Read-Marker.
-                    if !visible {
-                        viewModel.noteScrolledToNewest()
+                    .buttonStyle(.plain)
+                    .disabled(!chatPositioned)
+                }
+                LinkChatListView(
+                    controller: chatListController,
+                    items: renderedWindow,
+                    roomToken: token,
+                    unreadBoundary: viewModel.unreadBoundary,
+                    canLoadOlder: viewModel.hasMoreHistory && !viewModel.isLoadingOlder,
+                    canExtendWindow: (renderedWindowStartIndex ?? 0) > 0,
+                    isPositioned: chatPositioned,
+                    rowProvider: { globalIndex in
+                        guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
+                        return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
+                    },
+                    onPullToRefresh: {
+                        triggerHistoryPull()
+                    },
+                    onWindowExtend: { previousFirstId in
+                        extendRenderWindow(previousFirstId: previousFirstId)
+                    },
+                    onDistanceChanged: { distance in
+                        handleBottomDistance(distance)
+                    },
+                    onEntrySettled: {
+                        onEntrySettled()
                     }
-                })
+                )
+                .opacity(chatPositioned ? 1 : 0)
+                // Raumwechsel: Zustände zurücksetzen (die Liste resetiert
+                // ihren Eintritts-Scroll selbst über roomToken).
                 .onChange(of: token) { _, _ in
-                    // P1: Alter Loop invalidieren, neuer Loop für den Raum.
-                    positioningGeneration += 1
                     chatPositioned = false
                     showScrollBottom = false
-                    chatEndVisible = false
-                    unreadBoundarySeen = false
+                    chatBottomDistance = .infinity
                     renderedBackExtra = 0
-                    // Mit Ungelesenen ist das Binding ab Start aktiv: das
-                    // Separator-Ziel liegt im Render-Fenster am Anfang
-                    // (Near-Jump). Ohne Ungelesenen positioniert
-                    // defaultScrollAnchor(.bottom) nativ bis zum Settle.
-                    chatScrollControlActive = viewModel.unreadBoundary != nil
-                    entryPositioningUntil = Date().addingTimeInterval(10)
+                    windowExtensionInFlight = false
                     lastVisibleMessageId = items.last?.id
-                    startEntryPositioning()
                 }
-                // Position-vor-Sichtbarkeit: solange unsichtbar an die
-                // Trennlinie (ungelesen) bzw. ans Ende (keine Ungelesenen)
-                // springen, BIS das Ziel erreicht ist (F1: verifizierender
-                // Retry-Loop - ein einmaliges scrollTo bleibt in langen
-                // Lazy-Listen gern auf halbem Weg stecken). Erst dann
-                // einblenden. Kein scrollPosition-Modifier: der hatte den
-                // Bottom-Anchor neutralisiert.
-                .opacity(chatPositioned ? 1 : 0)
-                .onAppear {
-                    entryPositioningUntil = Date().addingTimeInterval(10)
-                    lastVisibleMessageId = items.last?.id
-                    startEntryPositioning()
+                // Verspätete Trennlinie (Room-Objekt/Boundary kommt nach dem
+                // Cache-first): Eintritts-Scroll auf den Separator nachziehen.
+                .onChange(of: viewModel.unreadBoundary) { _, boundary in
+                    guard !chatPositioned, let boundary else { return }
+                    chatListController.requestEntry(boundary: boundary)
                 }
-                // P68n: Nachpositionieren solange das Fenster läuft (die
-                // Server-Liste/Boundary kommt oft erst 1-3 s nach dem
-                // Eintritt) - ohne Animation, vor/nach dem Einblenden.
-                .onChange(of: viewModel.unreadBoundary) { _, _ in
-                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat()
-                }
-                // P-D: Scroll-up-Batch fertig -> auf die zuvor älteste
-                // Nachricht re-anchoren (Leseposition erhalten).
+                // Verlaufs-Prepend fertig -> auf die zuvor älteste Nachricht
+                // re-anchoren (Leseposition erhalten, talk-ios-Muster).
                 .onChange(of: viewModel.reanchorToMessageId) { _, anchorId in
-                    // P4: Re-Anchor nur nach sitzender Eintrittsposition -
-                    // während des Eintritts würde er die Positionierung
-                    // nach oben zurren (Log 08.09. 19:09).
                     guard let anchorId, chatPositioned else { return }
-                    chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(anchorId), anchor: .top)))
-                    chatScrollAnchor = .top
-                    chatScrollId = ChatScrollIds.message(anchorId)
+                    chatListController.reanchor(id: anchorId)
                     SouveraLog.write("LinkChat", "re-anchor after history prepend: \(anchorId)")
                 }
-                // P3: Verlaufs-Nachladen (Prepend) verschiebt den sichtbaren
-                // Bereich - bei JEDER Inhaltsänderung im Eintrittsfenster
-                // zur Zielposition nachführen (auch wenn die letzte ID
-                // gleich bleibt).
-                .onChange(of: currentChatItems.count) { _, _ in
-                    // P2: Still nachgefüllter Verlauf (oben) verschiebt den
-                    // sichtbaren Bereich nicht - am Ende stehend wird nach
-                    // jedem Einfügen ans (neue) Ende geklemmt (Ende-Probe
-                    // bzw. echte Messung, nicht der Init-Wert showScrollBottom).
-                    if chatPositioned, chatEndVisible || chatBottomDistance <= 80,
-                       let lastId = currentChatItems.last?.id {
-                        chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
-                    }
-                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat()
-                }
                 .onChange(of: items.last?.id) { _, newLastId in
-                    // P68n: Nach dem Senden ans Ende springen (eigene
-                    // Nachricht immer sichtbar).
+                    // Neue Nachricht: wenn am Ende stehend, ans neue Ende
+                    // klemmen (talk-ios shouldScrollOnNewMessages, 80 px);
+                    // nach dem Senden (scrollToNewestPending) immer.
                     if scrollToNewestPending,
                        let newLastId,
                        newLastId != lastVisibleMessageId {
                         scrollToNewestPending = false
-                        chatScrollAnchor = .bottom
-                        chatScrollId = ChatScrollIds.message(newLastId)
+                        chatListController.scrollToBottom(animated: false)
                         viewModel.noteScrolledToNewest()
+                    } else if chatPositioned,
+                              newLastId != nil,
+                              newLastId != lastVisibleMessageId,
+                              chatBottomDistance <= 80 {
+                        chatListController.scrollToBottom(animated: false)
                     }
                     lastVisibleMessageId = newLastId
-                    // Verspätete Listen-Updates im Eintrittsfenster
-                    // nachpositionieren.
-                    guard Date() < entryPositioningUntil || !chatPositioned else { return }
-                    positionChat()
                 }
-                // Manueller Pull-Trigger (talk-ios-Muster, JEDER Overscroll):
-                // kontinuierliche Geometrie (iOS 18+) ...
-                .modifier(SouveraScrollTopObserver { overscroll in
-                    handleTopOverscroll(overscroll)
-                })
-                // ... plus Geste-Ende-Erkennung via ScrollPhase (Apple-Doku:
-                // context.geometry beim Phasenwechsel) als zweite,
-                // verlässliche Auslösebahn.
-                .modifier(SouveraScrollPhaseObserver { overscroll in
-                    handleTopOverscroll(overscroll)
-                })
-            }
-            // "Zu den neuesten Nachrichten"-Button: am VIEWPORT gebunden
-            // (vorher am Scroll-Inhalt -> bei Hochscrollen unterhalb des
-            // sichtbaren Bereichs und damit nie sichtbar), mittig unten,
-            // optisch identisch zum Mail-Up-Pfeil.
-            .overlay(alignment: .bottom) {
-                if let lastId = items.last?.id {
-                    scrollBottomButton(lastId: lastId)
-                        .padding(.bottom, 16)
-                        .opacity(showScrollBottom ? 1 : 0)
-                        .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
+                // "Zu den neuesten Nachrichten"-Button: am VIEWPORT gebunden,
+                // mittig unten, optisch identisch zum Mail-Up-Pfeil.
+                .overlay(alignment: .bottom) {
+                    if let lastId = items.last?.id {
+                        scrollBottomButton(lastId: lastId)
+                            .padding(.bottom, 16)
+                            .opacity(showScrollBottom ? 1 : 0)
+                            .animation(.easeInOut(duration: 0.25), value: showScrollBottom)
+                    }
                 }
             }
         }
@@ -1441,127 +1311,76 @@ struct LinkChatView: View {
         }
     }
 
-    /// Setzt die Eintrittsposition: mit Ungelesenen an die Trennlinie
-    /// (oben), sonst an die neueste Nachricht (unten).
-    /// F1: Verifizierender Eintritts-Loop - positioniert wiederholt (alle
-    /// 0,2 s, bis zu 8 Versuche), bis das Ziel sitzt (F2: End-Kontrolle
-    /// über den Bottom-Observer bzw. Ende der Versuche), und blendet die
-    /// Liste erst danach ein. Ein einmaliges scrollTo bleibt in langen
-    /// Lazy-Listen gern auf halbem Weg stecken.
-    private func startEntryPositioning(attempt: Int = 0) {
-        let generation = positioningGeneration
-        guard !chatPositioned, generation == positioningGeneration else { return }
-        // P2: Items JEDEN Versuch frisch aus dem ViewModel lesen (die
-        // Zielableitung nutzt visibleItems).
-        positionChat()
-        // P3: Historie-Nachladen abwarten - solange ältere Seiten laufen,
-        // wird weiter nachgeführt (Prepend verschiebt sonst den sichtbaren
-        // Bereich weg von der Zielposition).
-        // P-B: Das Fenster-Laden (7-Tage/Scroll-up) muss fertig sein, dann
-        // gilt die Position als gesetzt ("am Ende"-Frühausstieg erst nach
-        // einigen Versuchen - der Observer-Wert ist unmittelbar nach dem
-        // ersten Scroll noch veraltet).
-        // P-B: Das Fenster-Laden (7-Tage/Scroll-up) muss fertig sein UND die
-        // Endposition muss REAL gemessen sein (bottomDistance <= 80) - ein
-        // fehlgeschlagener Scroll setzt den Loop nicht vorzeitig auf
-        // "settled" (das war die Ursache der Landung oben im Verlauf).
-        let historyDone = viewModel.windowLoadDone
-        // Ende-Verifikation: Ende-Probe (immer) ODER echte Geometrie-
-        // Messung (iOS 18+, sofern sie feuert); mit Ungelesenen die
-        // materialisierte Trennlinie.
-        let isAtBottomTarget = viewModel.unreadBoundary == nil && (chatEndVisible || chatBottomDistance <= 80)
-        let isAtBoundaryTarget = viewModel.unreadBoundary != nil && unreadBoundarySeen
-        if (historyDone && (isAtBottomTarget || isAtBoundaryTarget) && attempt >= 4)
-            || (historyDone && attempt >= 12)
-            || attempt >= 50 {
-            chatPositioned = true
-            // Native Eintrittsposition sitzt -> Scroll-Kontrolle (Binding)
-            // aktivieren; der Attach-Task übernimmt das letzte Ziel
-            // (Bottom bzw. Trennlinie) und hält es sitzend.
-            chatScrollControlActive = true
-            SouveraLog.write("LinkChat", "entry positioning settled (gen=\(generation) attempt=\(attempt))")
-            // P2: Position sitzt -> das 7-Tage-Fenster still vervollständigen.
-            viewModel.completeHistoryWindowInBackground()
-            return
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [self] in
-            guard !chatPositioned, generation == positioningGeneration else {
-                if generation != positioningGeneration {
-                    SouveraLog.write("LinkChat", "entry positioning loop invalidated (stale generation \(generation))")
-                }
-                return
+    /// UIKit-Liste hat den Eintritts-Scroll gesetzt (talk-ios: reloadData +
+    /// imperative scrollToRow) -> Liste einblenden und 7-Tage-Fenster still
+    /// vervollständigen.
+    private func onEntrySettled() {
+        chatPositioned = true
+        SouveraLog.write("LinkChat", "entry settled (UIKit)")
+        viewModel.completeHistoryWindowInBackground()
+    }
+
+    /// Distanz zum Listenende (aus scrollViewDidScroll): steuert den
+    /// Down-Pfeil, den Read-Marker und die Klemm-Logik.
+    private func handleBottomDistance(_ distance: CGFloat) {
+        chatBottomDistance = distance
+        let visible = distance > 120
+        if visible != showScrollBottom {
+            withAnimation(.easeInOut(duration: 0.25)) {
+                showScrollBottom = visible
             }
-            startEntryPositioning(attempt: attempt + 1)
+        }
+        if !visible {
+            viewModel.noteScrolledToNewest()
         }
     }
 
-    /// Aktuelle Nachrichtenliste des offenen Raums (frisch pro Versuch).
-    private var currentChatItems: [LinkChatMessage] {
-        if case let .success(items) = viewModel.messages { return items }
-        return []
-    }
-
-    private func positionChat() {
-        // F1-Nachtrag: Ziel immer aus den GERENDERTEN Zeilen ableiten -
-        // eine als gelöscht gefilterte letzte Nachricht wäre sonst ein
-        // Ziel, das im Layout nicht existiert (scrollTo tut dann nichts).
-        let targetItems = visibleItems
-        // A: Deterministisch über die ScrollPosition-Struct-API (iOS 18+) -
-        // das List-scrollTo/ID-Binding landete bei langen Verläufen auf
-        // halbem Weg (unverlässliche Zeilenhöhen-Schätzungen). Legacy-States
-        // bleiben für den iOS-17-Fallback synchron.
-        if let boundary = viewModel.unreadBoundary {
-            // .center = Zeile mittig im Viewport (talk-ios scrollToRow(.middle)):
-            // Trennlinie mittig sichtbar mit Kontext davor; dank Render-Fenster
-            // ein materialisierter Near-Jump.
-            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.unread(boundary), anchor: .center)))
-            chatScrollAnchor = .center
-            chatScrollId = ChatScrollIds.unread(boundary)
-            SouveraLog.write("LinkChat", "positionChat target=unread separator (\(boundary)) anchor=center")
-        } else if let lastId = targetItems.last?.id {
-            // Zeilen-basiertes Bottom-Ziel statt .edge(.bottom): Edge-Scrolls
-            // materialisieren im LazyVStack nicht zuverlässig (Log 09.09.:
-            // 14 Edge-Versuche, kein Erreichen des Endes) - die zeilen-
-            // basierte Variante ist über die Re-Anchor-Logs als robust
-            // belegt.
-            chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
-            chatScrollAnchor = .bottom
-            chatScrollId = ChatScrollIds.message(lastId)
-            SouveraLog.write("LinkChat", "positionChat target=last(\(lastId)) anchor=bottom row")
+    /// Render-Fenster-Erweiterung (talk-ios-Muster): +40 Zeilen oben
+    /// nachladen; die Leseposition bleibt über scrollToItem(previousFirst,
+    /// .top) erhalten (UIKit: Offset-Erhalt deterministisch). Gate
+    /// isExtendingWindow gegen Rückkopplung mit scrollViewDidScroll.
+    private func extendRenderWindow(previousFirstId: Int64) {
+        guard !windowExtensionInFlight, (renderedWindowStartIndex ?? 0) > 0 else { return }
+        windowExtensionInFlight = true
+        renderedBackExtra += Self.renderedBaseSize
+        SouveraLog.write("LinkChat", "render window extended (+\(Self.renderedBaseSize), anchor \(previousFirstId))")
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            chatListController.reanchor(id: previousFirstId)
+            chatListController.endWindowExtension()
+            windowExtensionInFlight = false
         }
     }
 
+    /// Pull-Trigger (talk-ios-Muster): Flaggen-Gate, kein Zeit-Debounce.
+    private func triggerHistoryPull() {
+        guard chatPositioned, viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
+        Task { await viewModel.loadEarlierHistory() }
+    }
 
-    /// F1/P-B: Eine Chat-Zeile inkl. Tages-/Ungelesen-Trennlinien und
-    /// eindeutigen Scroll-IDs — ausgelagert, damit der messageList-Ausdruck
-    /// für den Type-Checker handhabbar bleibt.
+
+    /// F1: Eine Chat-Zeile inkl. Tages-/Ungelesen-Trennlinien — ausgelagert,
+    /// damit der Zellen-Content für den Type-Checker handhabbar bleibt.
+    /// (Scroll-IDs entfallen: die UIKit-Liste adressiert Zellen über
+    /// IndexPath, nicht über SwiftUI-IDs.)
     @ViewBuilder
     private func chatRow(index: Int, message: LinkChatMessage, items: [LinkChatMessage]) -> some View {
         // Tageswechsel-Trennlinie (P68j): vor der ersten Nachricht eines
         // neuen Kalendertags.
-                        if showsDaySeparator(index: index, message: message) {
-                            daySeparatorRow(for: message.timestamp)
-                                .id(ChatScrollIds.day(message.id))
-                        }
-                        // "Neue Nachrichten"-Trennlinie vor der ersten
-                        // ungelesenen Nachricht (Talk-Standard).
-                        if !viewModel.hideUnreadSeparator,
-                           viewModel.unreadBoundary == message.id {
-                            unreadSeparatorRow
-                                // F1: Eigene, EINDEUTIGE Scroll-IDs je Zeile -
-                                // die Tages-Trennlinien hatten keine ID und
-                                // kollidierten im scrollTargetLayout mit den
-                                // Nachrichten-IDs -> scrollPosition landete
-                                // an "beliebigen" Datumslinien.
-                                .id(ChatScrollIds.unread(message.id))
-                                .onAppear { unreadBoundarySeen = true }
-                        }
-                        if message.isSystemMessage {
-                            LinkSystemMessageRow(message: message)
-                                .id(ChatScrollIds.message(message.id))
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 2)
-                        } else {
+        if showsDaySeparator(index: index, message: message) {
+            daySeparatorRow(for: message.timestamp)
+        }
+        // "Neue Nachrichten"-Trennlinie vor der ersten ungelesenen
+        // Nachricht (Talk-Standard).
+        if !viewModel.hideUnreadSeparator,
+           viewModel.unreadBoundary == message.id {
+            unreadSeparatorRow
+        }
+        if message.isSystemMessage {
+            LinkSystemMessageRow(message: message)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 2)
+        } else {
                             LinkMessageRow(
                                 viewModel: viewModel,
                                 message: message,
@@ -1587,7 +1406,6 @@ struct LinkChatView: View {
                                 onLongPress: { target in reactionTarget = target },
                                 onShare: { target in prepareShare(for: target) }
                             )
-                            .id(ChatScrollIds.message(message.id))
                             .padding(.horizontal, 12)
                             .padding(.vertical, 3)
         }
@@ -1595,17 +1413,9 @@ struct LinkChatView: View {
 
     /// "Runter zu den neuesten Nachrichten": identisches Design wie der
     /// Mail-Up-Pfeil (Kreis, Material, Schatten), Icon arrow.down.
-    /// Sprung über den ChatScrollDirector (auf iOS 18+ sind die Legacy-
-    /// Bindings nicht attachiert - der frühere reine Binding-Tap war
-    /// dort ein No-op).
     private func scrollBottomButton(lastId: Int64) -> some View {
         Button {
-            if let lastId = currentChatItems.last?.id {
-                // Zeilen-basiert (siehe positionChat) statt .edge(.bottom).
-                chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(lastId), anchor: .bottom)))
-            }
-            chatScrollAnchor = .bottom
-            chatScrollId = ChatScrollIds.message(lastId)
+            chatListController.scrollToBottom(animated: true)
             withAnimation(.easeInOut(duration: 0.25)) {
                 showScrollBottom = false
             }
@@ -1623,34 +1433,22 @@ struct LinkChatView: View {
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
     }
 
-    /// Manueller Pull-Trigger (talk-ios-Muster): JEDER Overscroll am
-    /// Listenanfang startet das Nachladen; das Flaggen-Gate
-    /// (isLoadingOlder/hasMoreHistory) verhindert Doppel-Feuer - talk-ios
-    /// nutzt dasselbe Muster (scrollViewDidScroll + retrievingHistory-Flag).
-    private func handleTopOverscroll(_ overscroll: CGFloat) {
-        guard chatPositioned, overscroll < 0 else { return }
-        triggerHistoryPull()
-    }
-
+    /// Pull-Trigger (talk-ios-Muster): Flaggen-Gate, kein Zeit-Debounce.
     private func triggerHistoryPull() {
-        guard chatPositioned else { return }
-        guard viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
-        // Log-Drossel: max. 1 Eintrag je Sekunde (der Geometrie-Pfad feuert
-        // kontinuierlich während der Geste).
-        let now = Date()
-        if now.timeIntervalSince(lastPullLogAt) > 1 {
-            lastPullLogAt = now
-            SouveraLog.write("LinkChat", "history pull triggered (overscroll gesture)")
-        }
+        guard chatPositioned, viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
         Task { await viewModel.loadEarlierHistory() }
     }
 
     /// Render-Fenster: nur die letzten `renderedBaseSize + renderedBackExtra`
     /// Zeilen rendern (mit Ungelesenen: ab Trennlinie - 2, damit das
-    /// Separator-Ziel immer im Fenster liegt und der Sprung dorthin ein
-    /// materialisierter Near-Jump bleibt). Es wird IMMER bis zum Listenende
-    /// gerendert - neue Nachrichten sind damit ohne Sonderbehandlung sichtbar.
-    private var renderedWindow: [LinkChatMessage] {
+    /// Separator-Ziel immer im Fenster liegt). Die Items tragen ihren
+    /// GLOBALEN Index in `visibleItems` - die Tages-/Zeit-/Avatar-Logik
+    /// vergleicht damit korrekt über Fenster- und Raumgrenzen hinweg
+    /// (Fix der Doppel-Trennlinien: der frühere lokale Fenster-Index
+    /// produzierte falsche Paarvergleiche). Es wird IMMER bis zum
+    /// Listenende gerendert - neue Nachrichten sind ohne Sonderbehandlung
+    /// sichtbar.
+    private var renderedWindow: [LinkChatListItem] {
         let all = visibleItems
         guard !all.isEmpty else { return [] }
         var startIndex = max(0, all.count - Self.renderedBaseSize)
@@ -1659,113 +1457,11 @@ struct LinkChatView: View {
             startIndex = min(startIndex, max(0, boundaryIndex - 2))
         }
         startIndex = max(0, startIndex - renderedBackExtra)
-        return Array(all[startIndex...])
+        return (startIndex..<all.count).map { LinkChatListItem(globalIndex: $0, message: all[$0]) }
     }
 
     private var renderedWindowStartIndex: Int? {
-        let window = renderedWindow
-        guard let first = window.first, let index = visibleItems.firstIndex(where: { $0.id == first.id }) else { return nil }
-        return index
-    }
-
-    private func extendRenderWindowIfNeeded(previousFirstId: Int64, index: Int) {
-        guard index == renderedWindowStartIndex,
-              let windowStart = renderedWindowStartIndex,
-              windowStart > 0 else { return }
-        renderedBackExtra += Self.renderedBaseSize
-        // Leseposition halten: die bisher erste Zeile rutscht durch das
-        // Voranstellen ans Ende des neuen Fensters - Near-Jump darauf
-        // (identisch zum bewährten Verlaufs-Re-Anchor).
-        chatScrollDirector.request(ChatScrollTarget(kind: .row(id: ChatScrollIds.message(previousFirstId), anchor: .top)))
-        chatScrollAnchor = .top
-        chatScrollId = ChatScrollIds.message(previousFirstId)
-        SouveraLog.write("LinkChat", "render window extended to start=\(max(0, windowStart - Self.renderedBaseSize)) (anchor \(previousFirstId))")
-    }
-
-    /// Meldet die Ende-Probe-Sichtbarkeit (letzte Zeile materialisiert).
-    /// iOS 17: ersetzt die fehlende Geometrie-Messung komplett (Distanz
-    /// heuristisch setzen). iOS 18+: Geometrie bleibt für die Distanz
-    /// maßgeblich, die Probe liefert zusätzlich den verlässlichen
-    /// At-End-Nachweis für Settle, Klemme und Read-Marker.
-    private func updateChatEndVisibility(_ visible: Bool) {
-        chatEndVisible = visible
-        if #available(iOS 18.0, *) {
-            // Geometrie-Observer liefert Distanz + Read-Marker weiter.
-        } else {
-            // iOS 17: keine Geometrie - die Probe ersetzt die Messung.
-            chatBottomDistance = visible ? 0 : 400
-            if visible {
-                viewModel.noteScrolledToNewest()
-            }
-        }
-    }
-
-    /// Beobachtet den Abstand zum unteren Listenende (iOS 18+): meldet
-    /// `true`, sobald man mehr als 120 px von den neuesten Nachrichten
-    /// entfernt ist (Button "runter" wird eingeblendet). Unter iOS 18:
-    /// kein Callback.
-    private struct SouveraScrollBottomObserver: ViewModifier {
-        /// P-B: liefert die ECHTE Distanz zum Listenende (px) - nicht nur
-        /// einen Schwellwert-Bool.
-        let onChange: (CGFloat) -> Void
-
-        func body(content: Content) -> some View {
-            if #available(iOS 18.0, *) {
-                content.onScrollGeometryChange(for: ScrollGeometry.self) { geometry in
-                    geometry
-                } action: { _, geometry in
-                    let bottomDistance = geometry.contentSize.height
-                        - geometry.contentInsets.bottom
-                        - (geometry.contentOffset.y + geometry.containerSize.height)
-                    onChange(bottomDistance)
-                }
-            } else {
-                content
-            }
-        }
-    }
-
-    /// Beobachtet den Overscroll am LISTENANFANG (iOS 18+): meldet negative
-    /// Werte, solange der Nutzer über den oberen Rand hinaus zieht - Basis
-    /// des manuellen Pull-Triggers. Unter iOS 18: kein Callback (die
-    /// Hinweis-Bubble ist dort antippbar).
-    private struct SouveraScrollTopObserver: ViewModifier {
-        let onChange: (CGFloat) -> Void
-
-        func body(content: Content) -> some View {
-            if #available(iOS 18.0, *) {
-                content.onScrollGeometryChange(for: CGFloat.self) { geometry in
-                    geometry.contentOffset.y - geometry.contentInsets.top
-                } action: { _, overscroll in
-                    onChange(overscroll)
-                }
-            } else {
-                content
-            }
-        }
-    }
-
-    /// Geste-Ende-Erkennung (iOS 18+, Apple-Doku: `onScrollPhaseChange`
-    /// liefert `context.geometry` beim Phasenwechsel): meldet den Overscroll
-    /// beim Übergang von .interacting zu .decelerating/.idle - zweite,
-    /// verlässliche Auslösebahn für den Pull-Trigger.
-    private struct SouveraScrollPhaseObserver: ViewModifier {
-        let onChange: (CGFloat) -> Void
-
-        func body(content: Content) -> some View {
-            if #available(iOS 18.0, *) {
-                content.onScrollPhaseChange { oldPhase, newPhase, context in
-                    guard oldPhase == .interacting,
-                          newPhase == .decelerating || newPhase == .idle else { return }
-                    let overscroll = context.geometry.contentOffset.y - context.geometry.contentInsets.top
-                    if overscroll < 0 {
-                        onChange(overscroll)
-                    }
-                }
-            } else {
-                content
-            }
-        }
+        renderedWindow.first?.globalIndex
     }
 
 /// Zeitstempel minutengenau gruppieren: bei Minutenwechsel UND am Start
@@ -2741,115 +2437,4 @@ struct SouveraShareSheet: UIViewControllerRepresentable {
 
 // MARK: - Chat-Scroll-Steuerung (A: ScrollPosition-Struct-API)
 
-/// Ziel eines Chat-Scrolls. `stamp` (neue UUID je Request) stellt sicher,
-/// dass auch IDENTISCHE Ziele den onChange-Pfad des Modifiers erneut
-/// auslösen (Retry-Loop setzt das Ziel mehrfach).
-/// Ziel eines Chat-Scrolls. Der `stamp` (neue UUID je Request) stellt
-/// sicher, dass auch IDENTISCHE Ziele den onChange-Pfad des Modifiers
-/// erneut auslösen (der Retry-Loop setzt das Ziel mehrfach).
-struct ChatScrollTarget: Equatable {
-    enum Kind: Equatable {
-        case edge(UnitPoint)                       // .bottom -> neueste Nachricht
-        case row(id: String, anchor: UnitPoint)    // Trennlinie / konkrete Zeile
-    }
 
-    let kind: Kind
-    let stamp: UUID
-
-    init(kind: Kind) {
-        self.kind = kind
-        self.stamp = UUID()
-    }
-
-    static func == (lhs: ChatScrollTarget, rhs: ChatScrollTarget) -> Bool {
-        lhs.stamp == rhs.stamp
-    }
-}
-
-/// Vermittelt Scroll-Requests vom ViewModel-Pfad an den attachierten
-/// Modifier. Enthält keine iOS-18-Typen -> auf iOS 17 ladbar.
-final class ChatScrollDirector: ObservableObject {
-    @Published var target: ChatScrollTarget?
-
-    func request(_ target: ChatScrollTarget) {
-        self.target = target
-    }
-}
-
-/// Hängt die Scroll-Position-Steuerung an: iOS 18+ nutzt die
-/// ScrollPosition-Struct-API (deterministisch, auch bei nachwachsendem
-/// Lazy-Inhalt), iOS 17 das ID-Binding als Fallback.
-/// `controlActive == false` hängt GAR KEIN Binding an: Während des
-/// Eintritts positioniert dann defaultScrollAnchor(.bottom) nativ
-/// (Apple-Doku: initial unten + Verhalten bei Inhaltsänderung) - ein
-/// angehängtes Binding überstimmt diesen Mechanismus auf iOS 26 (Log
-/// 09.09.: Landung immer oben). Nach dem Settle wird aktiviert; der
-/// Attach-Task wendet das letzte Director-Ziel an (Re-Assert).
-struct ChatScrollAttachModifier: ViewModifier {
-    let director: ChatScrollDirector
-    @Binding var legacyId: String?
-    @Binding var legacyAnchor: UnitPoint
-    var controlActive: Bool = true
-
-    func body(content: Content) -> some View {
-        if !controlActive {
-            content
-        } else if #available(iOS 18.0, *) {
-            content.modifier(ChatScrollModernAttach(director: director))
-        } else {
-            content.modifier(ChatScrollLegacyAttach(legacyId: $legacyId, legacyAnchor: $legacyAnchor))
-        }
-    }
-}
-
-private struct ChatScrollLegacyAttach: ViewModifier {
-    @Binding var legacyId: String?
-    @Binding var legacyAnchor: UnitPoint
-
-    func body(content: Content) -> some View {
-        content.scrollPosition(id: $legacyId, anchor: legacyAnchor)
-    }
-}
-
-@available(iOS 18.0, *)
-private struct ChatScrollModernAttach: ViewModifier {
-    let director: ChatScrollDirector
-    @State private var position = ScrollPosition()
-
-    func body(content: Content) -> some View {
-        content
-            .scrollPosition($position)
-            .onChange(of: director.target) { _, target in
-                apply(target)
-            }
-            .task(id: director.target?.stamp) {
-                apply(director.target)
-            }
-    }
-
-    private func apply(_ target: ChatScrollTarget?) {
-        guard let target else { return }
-        switch target.kind {
-        case .edge(let anchor):
-            position.scrollTo(edge: anchor == .top ? .top : .bottom)
-        case .row(let id, let anchor):
-            position.scrollTo(id: id, anchor: anchor)
-        }
-    }
-}
-
-
-// MARK: - F1: Eindeutige Scroll-Ziel-IDs je Chat-Zeile
-//
-// Die bedingten Geschwister-Zeilen (Tages-Trennlinie OHNE eigene ID,
-// Ungelesen-Linie, Nachricht) hatten im scrollTargetLayout ambige/
-// kollidierende Ziel-Identitäten -> scrollPosition landete an
-// "beliebigen" Datumslinien. Jede Zeile bekommt jetzt eine eindeutige
-// String-ID.
-enum ChatScrollIds {
-    static func message(_ id: Int64) -> String { "m_\(id)" }
-    static func day(_ id: Int64) -> String { "d_\(id)" }
-    static func unread(_ id: Int64) -> String { "u_\(id)" }
-    static let sentinel = "history_sentinel"
-    static let endProbe = "chat_end_probe"
-}

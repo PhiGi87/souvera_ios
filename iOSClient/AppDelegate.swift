@@ -32,6 +32,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     var pushSubscriptionTask: Task<Void, Never>?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        // Realm-Warm-up als ALLERERSTER Schritt (Run-Fix 0xdead10cc): Der
+        // erste DB-Open inkl. Schema-Migration läuft asynchron auf der
+        // realmQueue, bevor irgendein Main-Thread-Aufruf synchron darauf
+        // blockiert (Crash 10.09.: 2,2 s Launch-Blockade -> Watchdog-Kill).
+        NCManageDatabase.shared.core.warmUpRealmAsync()
         if isUiTestingEnabled {
             Task {
                 await NCAccount().deleteAllAccounts()

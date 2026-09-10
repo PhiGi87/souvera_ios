@@ -21,6 +21,29 @@ final class NCManageDatabaseCore {
     }
 
     //
+    // WARM-UP (Run-Fix 0xdead10cc)
+    //
+
+    /// Öffnet die Realm-DB asynchron auf der realmQueue, BEVOR Main-Thread-
+    /// Aufrufe synchron darauf zugreifen. Der erste Open (inkl. Schema-
+    /// Migration, Crash-Report 10.09.: 2,2 s Blockade im Launch-Pfad ->
+    /// RunningBoard-Watchdog-Kill 0xdead10cc) läuft damit off-main; die
+    /// späteren synchronen Aufrufe von Main treffen einen bereits offenen
+    /// RealmCoordinator und kehren sofort zurück.
+    func warmUpRealmAsync() {
+        realmQueue.async(qos: .userInitiated) {
+            autoreleasepool {
+                do {
+                    _ = try Realm()
+                    nkLog(tag: NCGlobal.shared.logTagDatabase, emoji: .info, message: "Realm warm-up completed on realmQueue")
+                } catch {
+                    nkLog(tag: NCGlobal.shared.logTagDatabase, emoji: .error, message: "Realm warm-up error: \(error)")
+                }
+            }
+        }
+    }
+
+    //
     // MANUAL MIGRATIONS (custom logic required)
     //
     func migrationSchema(_ migration: Migration, _ oldSchemaVersion: UInt64) {
