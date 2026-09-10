@@ -685,6 +685,14 @@ final class LinkViewModel: ObservableObject {
         unreadBoundary = nil
         hideUnreadSeparator = false
         connectSignaling(token: token)
+        // Run-Fix "Vollverlauf lädt nicht": hasMoreHistory FRÜH auf true -
+        // der Eintritts-Settle (Cache-first) kann FEUERN, bevor der Live-
+        // Fetch am Ende der Funktion den Wert setzt; loadFullHistory-
+        // Background hat dann abgelehnt und nie wieder einen Versuch
+        // gestartet (Log 10.09. 18:30: kein full-history-Eintrag, Verlauf
+        // eingefroren am 31.08.). loadFullHistory korrigiert über
+        // reachedStart.
+        hasMoreHistory = true
         guard let api else { return }
         let gen = generation
         pollTask = Task {

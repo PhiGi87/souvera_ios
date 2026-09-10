@@ -597,8 +597,21 @@ final class MailViewModel: ObservableObject {
     /// Sofortiger Badge-Zähler (persönlicher Posteingang).
     @Published private(set) var personalInboxUnread: Int = 0
 
-    private func postUnreadBadge(_ count: Int) {
-        personalInboxUnread = max(0, count)
+    /// `derived = true` für NICHT-autoritative Quellen (abgeleitete
+    /// Postfachlisten-Summen, Cache-Fallback): Diese dürfen eine 0 NICHT
+    /// posten, solange der Store für den Account einen echten Zähler
+    /// führt - sonst flattert der Tab-Badge auf 0 und zurück (Log
+    /// 10./11.09.: "tab badge set -> 0" gefolgt von 47-65 innerhalb 1 s).
+    /// Optimistische lokale Aktionen (gelesen/ungelesen, Löschen) und die
+    /// autoritative Email/query-Zählung posten echte 0en weiterhin.
+    private func postUnreadBadge(_ count: Int, derived: Bool = false) {
+        let clamped = max(0, count)
+        if derived, clamped == 0,
+           SouveraBadgeStore.shared.unreadMail(account: mailAccount?.account ?? "") > 0 {
+            JmapLog.write("Mail unread badge -> skip derived 0 (store holds a real count)")
+            return
+        }
+        personalInboxUnread = clamped
         JmapLog.write("Mail unread badge -> \(personalInboxUnread)")
         // Per-Account-Badge (der Tab-Badge folgt dem AKTIVEN Account; das
         // System-Badge korrigiert der Background-Sync als Summe).
@@ -646,12 +659,14 @@ final class MailViewModel: ObservableObject {
         // wird daher verworfen, solange der Store für diesen Account
         // einen echten Zähler führt - die autoritative Email/query-
         // Zählung (refreshUnreadBadge) postet echte 0en weiterhin direkt.
+        // (Zusätzlich greift das zentrale derived-Zero-Gate in
+        // postUnreadBadge.)
         if count == 0,
            SouveraBadgeStore.shared.unreadMail(account: mailAccount?.account ?? "") > 0 {
             JmapLog.write("Mail unread badge -> skip derived 0 (store holds a real count)")
             return
         }
-        postUnreadBadge(count)
+        postUnreadBadge(count, derived: true)
     }
 
     private func loadMailboxesImap(autoOpenInbox: Bool) async {
@@ -1127,7 +1142,7 @@ final class MailViewModel: ObservableObject {
         // (erster Aufruf nach Login).
         let accountName = cacheAccountKey
         if case .loading = messages,
-           let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+           let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
             guard generation == listGeneration else { return }
             // P62f: Cache-first-Publish filtern (optimistisch entfernte Mails
             // dürfen nicht wieder auftauchen).
@@ -1213,7 +1228,7 @@ final class MailViewModel: ObservableObject {
             //    query state and a cached snapshot are known.
             if !forceFullRefresh,
                let state = queryStates[cacheKey],
-               let snapshot = MailCache.loadMessages(account: accountName, mailboxId: cacheKey) {
+               let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
                 do {
                     let changes = try await api.queryEmailChanges(accountId: accId, sinceState: state, inMailboxId: jmapMailboxId)
                     let removed = Set((changes["removed"] as? [String]) ?? [])
@@ -1263,7 +1278,7 @@ final class MailViewModel: ObservableObject {
                         // inkrementelle Sync (Snapshot von VOR der Löschung) die
                         // gelöschten Mails in den Cache (Reappear-Muster).
                         let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                        MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
+                        MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                         messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                         pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                         hasMoreMessages = pageState.hasMore
@@ -1287,7 +1302,7 @@ final class MailViewModel: ObservableObject {
             // Scroll geladene ältere Mails bleiben erhalten, frische Seiten
             // überschreiben überlappende Einträge.
             var byId: [String: [String: Any]] = [:]
-            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: cacheKey) {
+            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
                 for email in snapshot.emails {
                     if let id = email.optString("id") { byId[id] = email }
                 }
@@ -1354,10 +1369,8 @@ final class MailViewModel: ObservableObject {
                     if byId.isEmpty { throw error }
                     break
                 }
-                var addedCount = 0
                 for email in page {
                     guard let id = email.optString("id") else { continue }
-                    if byId[id] == nil { addedCount += 1 }
                     byId[id] = email
                 }
                 lastId = ids.last
@@ -1382,13 +1395,20 @@ final class MailViewModel: ObservableObject {
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
                 let collectedFiltered = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
+                MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                 if !pageHasMore {
                     break
                 }
-                if addedCount > 0, let oldestDate, oldestDate <= minimumCoverage {
+                if let oldestDate, oldestDate <= minimumCoverage {
+                    // Run-Fix "Endlos-Sync": Die 30-Tage-Coverage-Abdeckung
+                    // bricht jetzt nach DATUM ab (vorher Required
+                    // `addedCount > 0` - mit vollständigem Cache-Snapshot
+                    // waren alle Seiten-IDs bekannt, addedCount war 0 und
+                    // der Break griff nie: jeder Sync lud 3 Seiten erneut
+                    // und re-cachte 304 Mails ~30x in 80 s, Log 10.09.
+                    // 18:29-18:31).
                     break
                 }
             }
@@ -1419,7 +1439,7 @@ final class MailViewModel: ObservableObject {
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
             let savedCollected = finalCollected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-            MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: savedCollected, queryState: state)
+            MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
             // Stands (Voll-Refresh) sind die optimistisch entfernten IDs
@@ -1454,7 +1474,7 @@ final class MailViewModel: ObservableObject {
                 JmapLog.write("P64 stale verification removed \(removedSet.count) of \(cachedIds.count) cached mails")
                 var kept = finalSnapshot.filter { !removedSet.contains($0.optString("id") ?? "") }
                 kept = kept.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: kept, queryState: finalState)
+                MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 // Live-Liste ebenfalls bereinigen: auf einem anderen Gerät /
                 // im Web gelöschte Mails entfernen. NUR Entfernen auf Basis des
                 // AKTUELLEN Listenstands (kein Republish des alten Snapshots -
@@ -1482,7 +1502,7 @@ final class MailViewModel: ObservableObject {
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
             guard generation == listGeneration else { return }
-            if let cached = MailCache.loadMessages(account: mailAccount?.account ?? "", mailboxId: mailbox.id) {
+            if let cached = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
                 let accId = mailbox.accountId
                 messages = .success(cached.emails.map {
                     JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
@@ -1522,7 +1542,7 @@ final class MailViewModel: ObservableObject {
                     return
                 }
                 let page = try await api.getEmails(accountId: accId, ids: ids, properties: JmapApi.listSyncProperties)
-                let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id)
+                let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id)
                 var emails = snapshot?.emails ?? []
                 var known = Set(emails.compactMap { $0.optString("id") })
                 var added = 0
@@ -1538,7 +1558,7 @@ final class MailViewModel: ObservableObject {
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
                 let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
+                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(keptEmails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })))
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
@@ -1801,7 +1821,7 @@ final class MailViewModel: ObservableObject {
            let inbox = cached.first(where: { ($0["role"] as? String) == "inbox" }) {
             let total = inbox["unreadEmails"] as? Int ?? 0
             JmapLog.write("Mail unread count (cache) -> \(total)")
-            postUnreadBadge(total)
+            postUnreadBadge(total, derived: true)
             if currentMailbox != nil {
                 applyUnreadCountToMailboxList(total)
             }
@@ -2157,14 +2177,14 @@ final class MailViewModel: ObservableObject {
 
         // Mirror the change into the cached snapshot.
         let accountName = mailAccount?.account ?? ""
-        guard let snapshot = MailCache.loadMessages(account: accountName, mailboxId: message.mailboxId) else { return }
+        guard let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: message.mailboxId) else { return }
         var emails = snapshot.emails
         for i in emails.indices where emails[i].optString("id") == message.emailId {
             var keywords = emails[i]["keywords"] as? [String: Any] ?? [:]
             keywords[keyword] = value
             emails[i]["keywords"] = keywords
         }
-        MailCache.saveMessages(account: accountName, mailboxId: message.mailboxId, emails: emails, queryState: snapshot.queryState)
+        MailCache.saveMessages(account: cacheAccountKey, mailboxId: message.mailboxId, emails: emails, queryState: snapshot.queryState)
     }
 
     private func updateLocalMessage(_ updated: MailMessage) {
@@ -2190,9 +2210,9 @@ final class MailViewModel: ObservableObject {
         pendingRemovedIds.formUnion(removed)
         if useJmap, let mailbox = currentMailbox {
             let accountName = mailAccount?.account ?? ""
-            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
                 let filtered = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
             }
         }
         if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
@@ -2338,9 +2358,9 @@ final class MailViewModel: ObservableObject {
         // enthält sie ja noch.
         if useJmap, let mailbox = currentMailbox {
             let accountName = mailAccount?.account ?? ""
-            if let snapshot = MailCache.loadMessages(account: accountName, mailboxId: mailbox.id) {
+            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
                 let filtered = snapshot.emails.filter { !removedIds.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: accountName, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
             }
         }
         // Badge sofort: entfernte ungelesene Nachrichten des Posteingangs abziehen.

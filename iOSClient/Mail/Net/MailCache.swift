@@ -63,7 +63,11 @@ enum MailCache {
         guard let compressed = try? Data(contentsOf: fileURL(account: account, mailboxId: mailboxId)),
               let data = decompress(compressed),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let emails = json["emails"] as? [[String: Any]] else { return nil }
+              let emails = json["emails"] as? [[String: Any]] else {
+            JmapLog.write("messages cache load: MISS (account=\(account), mailboxId=\(mailboxId))")
+            return nil
+        }
+        JmapLog.write("messages cache load: HIT (\(emails.count) mails, account=\(account), mailboxId=\(mailboxId))")
         return MessageSnapshot(emails: emails, queryState: json["queryState"] as? String)
     }
 
