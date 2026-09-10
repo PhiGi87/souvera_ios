@@ -54,6 +54,18 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
     private var onEntrySettled: (() -> Void)?
 
+    /// Header-Zelle neu konfigurieren (Zustandswechsel Lade-Spinner /
+    /// "Anfang der Unterhaltung" / leer).
+    private func reconfigureHeader() {
+        guard let collectionView else { return }
+        let headerIndexPath = IndexPath(item: 0, section: Self.headerSection)
+        guard let cell = collectionView.cellForItem(at: headerIndexPath) else { return }
+        cell.contentConfiguration = UIHostingConfiguration {
+            headerContent
+        }
+        .margins(.all, 0)
+    }
+
     // MARK: - Interner Zustand
 
     private weak var collectionView: UICollectionView?
