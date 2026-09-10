@@ -617,6 +617,19 @@ final class MailViewModel: ObservableObject {
 
     /// Ungelesen gesamt → Badge am Mail-Tab (NotificationCenter).
     func updateUnreadBadge() {
+        // Run-Fix "Badge flattert": Ohne autoritative Quelle (Postfachliste
+        // noch nicht geladen UND kein bekannter Zähler) darf NICHT
+        // gepostet werden - der Fallback 0 hat den Tab-Badge beim
+        // Mail-Tab-Eintritt kurz auf 0 gezogen, bevor die echte
+        // Email/query-Zählung kam (Log 10.09. 14:21:17 / 14:24:37:
+        // "tab badge set -> 0" gefolgt von 47 innerhalb 1 s).
+        let isAuthoritative: Bool
+        if case .success = mailboxes {
+            isAuthoritative = true
+        } else {
+            isAuthoritative = personalInboxUnread > 0
+        }
+        guard isAuthoritative else { return }
         let count: Int
         if case let .success(boxes) = mailboxes {
             // Nur der Posteingang des eigenen Postfachs zählt.

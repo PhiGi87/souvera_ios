@@ -68,9 +68,15 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var stableSizeCount = 0
     private var entryTimeoutTask: Task<Void, Never>?
 
-    // Re-Anchor-Nachführung (gleicher Drift nach Prepend/Extension)
-    private var pendingReanchorId: Int64?
-    private var pendingReanchorUntil = Date.distantPast
+    // Pull/Prepend: Edge-Trigger + Offset-Delta-Erhaltung
+    // (Run 10.09.-Fix "Zucken": Der Pull war level-getriggert - der
+    // Self-Sizing-Drift hielt den Offset unter 0 und kettenreiche
+    // Nachlade-Pulls mit Re-Anchor-Kämpfen waren die Folge. Jetzt feuert
+    // der Pull nur beim Übergang in den Overscroll (Re-Arm bei >= 0), und
+    // Voranstellen erhält die Leseposition über die contentSize-Delta-
+    // Technik statt über scrollToItem-Kämpfe mit dem ziehenden Finger.)
+    private var wasOverscrolled = false
+    private var pendingPrependOldHeight: CGFloat?
 
     // MARK: - Update vom SwiftUI-Host
 
@@ -92,6 +98,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
             didInitialEntry = false
             isExtendingWindow = false
             pendingEntryBoundary = unreadBoundary
+            wasOverscrolled = false
         }
         self.items = items
         self.canLoadOlder = canLoadOlder && isPositioned
@@ -110,7 +117,23 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let newIds = items.map(\.id)
         if newIds != lastReloadedIds {
             lastReloadedIds = newIds
+            // Offset-Delta-Erhaltung (klassische UIKit-Prepend-Technik):
+            // Wurde ein Voranstellen (Pull/Fenster-Erweiterung) angestoßen,
+            // verschiebt der neue Inhalt die bisher sichtbaren Zeilen um
+            // die Differenz der Inhaltshöhen - contentOffset exakt
+            // nachführen. Deterministisch, ohne Höhen zu schätzen und ohne
+            // den ziehenden Finger zu bekämpfen.
+            let oldHeight = collectionView.contentSize.height
+            let isPrepend = pendingPrependOldHeight != nil
+            pendingPrependOldHeight = nil
             collectionView.reloadData()
+            if isPrepend {
+                collectionView.layoutIfNeeded()
+                let delta = collectionView.contentSize.height - oldHeight
+                if delta > 0 {
+                    collectionView.contentOffset.y += delta
+                }
+            }
             if !didInitialEntry, !items.isEmpty {
                 didInitialEntry = true
                 DispatchQueue.main.async { [weak self] in
@@ -194,12 +217,6 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
                 finishEntryStabilization(reason: "stable")
             }
         }
-
-        if let reanchorId = pendingReanchorId, Date() < pendingReanchorUntil {
-            reanchor(id: reanchorId)
-        } else if pendingReanchorId != nil {
-            pendingReanchorId = nil
-        }
     }
 
     func scrollToBottom(animated: Bool) {
@@ -207,18 +224,6 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let indexPath = IndexPath(item: items.count - 1, section: 0)
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
-    }
-
-    /// Re-Anchor (Verlaufs-Prepend und Render-Fenster-Erweiterung): die
-    /// bisher sichtbare älteste Zeile bleibt an derselben Stelle. Weil die
-    /// neu vorangestellten Zellen ihre Höhe erst noch auflösen, wird der
-    /// Anker im KVO-Pfad kurz nachgeführt (bis 1,2 s).
-    func reanchor(id: Int64) {
-        guard let collectionView, let index = items.firstIndex(where: { $0.message.id == id }) else { return }
-        collectionView.layoutIfNeeded()
-        collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
-        pendingReanchorId = id
-        pendingReanchorUntil = Date().addingTimeInterval(1.2)
     }
 
     /// Abschluss der Fenster-Erweiterung (Gate gegen Rückkopplung).
@@ -266,28 +271,38 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let userScrolling = scrollView.isTracking || scrollView.isDecelerating
         guard userScrolling else { return }
 
-        // Verlaufs-Pull: JEDER Overscroll am Listenanfang (talk-ios
-        // scrollViewDidScroll + contentOffset.y < 0); das Flaggen-Gate
-        // (canLoadOlder = hasMoreHistory && !isLoadingOlder) verhindert
-        // Doppel-Feuer.
-        if overscroll < 0, canLoadOlder {
-            let now = Date()
-            if now.timeIntervalSince(lastPullLogAt) > 1 {
-                lastPullLogAt = now
-                SouveraLog.write("LinkChat", "history pull triggered (scrollViewDidScroll, overscroll=\(Int(overscroll))px)")
+        // Verlaufs-Pull: EDGE-getriggert (Run-Fix "Zucken") - feuert nur
+        // beim Übergang in den Overscroll, Re-Arm erst bei Rückkehr >= 0.
+        // Ein level-getriggerter Pull hat den Self-Sizing-Drift in eine
+        // Kettennachladefalle verwandelt (Log 10.09. 14:21-14:22: fünf
+        // Pulls, komplette Historie in 25 s). Merken der Inhaltshöhe für
+        // die Offset-Delta-Erhaltung des Voranstellens.
+        if overscroll < 0 {
+            if !wasOverscrolled, canLoadOlder {
+                wasOverscrolled = true
+                pendingPrependOldHeight = scrollView.contentSize.height
+                let now = Date()
+                if now.timeIntervalSince(lastPullLogAt) > 1 {
+                    lastPullLogAt = now
+                    SouveraLog.write("LinkChat", "history pull triggered (overscroll edge, \(Int(overscroll))px)")
+                }
+                onPullToRefresh?()
             }
-            onPullToRefresh?()
+        } else {
+            wasOverscrolled = false
         }
 
-        // Render-Fenster-Erweiterung nahe dem Fensteranfang (Gate gegen
-        // Rückkopplung über isExtendingWindow; nur wenn überhaupt noch
-        // Zeilen oberhalb gerendert werden können).
+        // Render-Fenster-Erweiterung: ebenfalls edge-getriggert, nur wenn
+        // KEIN Server-Pull läuft (doppelseitiges Voranstellen sonst) und
+        // überhaupt Zeilen oberhalb gerendert werden können.
         if scrollView.contentOffset.y <= 4,
            overscroll >= 0,
+           !wasOverscrolled,
            canExtendWindow,
            !isExtendingWindow,
            let first = items.first {
             isExtendingWindow = true
+            pendingPrependOldHeight = scrollView.contentSize.height
             SouveraLog.write("LinkChat", "render window extension requested (firstId=\(first.message.id))")
             onWindowExtend?(first.message.id)
         }

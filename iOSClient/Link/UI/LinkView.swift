@@ -1149,7 +1149,7 @@ struct LinkChatView: View {
                 roomToken: token,
                 unreadBoundary: viewModel.unreadBoundary,
                 canLoadOlder: viewModel.hasMoreHistory && !viewModel.isLoadingOlder,
-                canExtendWindow: (renderedWindowStartIndex ?? 0) > 0,
+                canExtendWindow: (renderedWindowStartIndex ?? 0) > 0 && !viewModel.isLoadingOlder,
                 isPositioned: chatPositioned,
                 rowProvider: { globalIndex in
                     guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
@@ -1221,13 +1221,9 @@ struct LinkChatView: View {
                     guard !chatPositioned, let boundary else { return }
                     chatListController.requestEntry(boundary: boundary)
                 }
-                // Verlaufs-Prepend fertig -> auf die zuvor älteste Nachricht
-                // re-anchoren (Leseposition erhalten, talk-ios-Muster).
-                .onChange(of: viewModel.reanchorToMessageId) { _, anchorId in
-                    guard let anchorId, chatPositioned else { return }
-                    chatListController.reanchor(id: anchorId)
-                    SouveraLog.write("LinkChat", "re-anchor after history prepend: \(anchorId)")
-                }
+                // Verlaufs-Prepend fertig: Die Leseposition hält der
+                // Controller über die Offset-Delta-Erhaltung - kein
+                // zusätzlicher Re-Anchor-Scroll mehr nötig.
                 .onChange(of: items.last?.id) { _, newLastId in
                     // Neue Nachricht: wenn am Ende stehend, ans neue Ende
                     // klemmen (talk-ios shouldScrollOnNewMessages, 80 px);
@@ -1349,19 +1345,18 @@ struct LinkChatView: View {
         }
     }
 
-    /// Render-Fenster-Erweiterung (talk-ios-Muster): +40 Zeilen oben
-    /// nachladen; die Leseposition bleibt über scrollToItem(previousFirst,
-    /// .top) erhalten (UIKit: Offset-Erhalt deterministisch). Gate
-    /// isExtendingWindow gegen Rückkopplung mit scrollViewDidScroll.
+    /// Render-Fenster-Erweiterung: +40 Zeilen oben nachladen. Die
+    /// Leseposition erhält der Controller über die contentSize-Delta-
+    /// Technik (kein scrollToItem-Kampf mit dem ziehenden Finger). Das
+    /// Flug-Gate verhindert Doppelfeuer, bevor die neuen Zeilen im
+    /// nächsten SwiftUI-Update gelandet sind.
     private func extendRenderWindow(previousFirstId: Int64) {
         guard !windowExtensionInFlight, (renderedWindowStartIndex ?? 0) > 0 else { return }
         windowExtensionInFlight = true
         renderedBackExtra += Self.renderedBaseSize
         SouveraLog.write("LinkChat", "render window extended (+\(Self.renderedBaseSize), anchor \(previousFirstId))")
         Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 300_000_000)
-            chatListController.reanchor(id: previousFirstId)
-            chatListController.endWindowExtension()
+            try? await Task.sleep(nanoseconds: 600_000_000)
             windowExtensionInFlight = false
         }
     }
