@@ -1433,12 +1433,6 @@ struct LinkChatView: View {
         .accessibilityLabel(NSLocalizedString("_link_scroll_bottom_", comment: ""))
     }
 
-    /// Pull-Trigger (talk-ios-Muster): Flaggen-Gate, kein Zeit-Debounce.
-    private func triggerHistoryPull() {
-        guard chatPositioned, viewModel.hasMoreHistory, !viewModel.isLoadingOlder else { return }
-        Task { await viewModel.loadEarlierHistory() }
-    }
-
     /// Render-Fenster: nur die letzten `renderedBaseSize + renderedBackExtra`
     /// Zeilen rendern (mit Ungelesenen: ab Trennlinie - 2, damit das
     /// Separator-Ziel immer im Fenster liegt). Die Items tragen ihren
