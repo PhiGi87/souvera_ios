@@ -1176,6 +1176,9 @@ final class MailViewModel: ObservableObject {
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
         guard let api = jmapApi else { return }
         let accountGen = self.generation
+        // Run-Diagnose "Mail-Cache nach Neustart": Sync-Start loggen, um
+        // Wiederhol-Trigger im Log exakt zählen zu können.
+        JmapLog.write("sync \(mailbox.name) started (forceFullRefresh=\(forceFullRefresh))")
         // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync dieser
         // Mailbox, wird der neue Wunsch nur vorgemerkt und danach EINMAL
         // nachgezogen (keine parallelen Publishes, die sich überschreiben).

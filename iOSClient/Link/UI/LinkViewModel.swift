@@ -696,51 +696,114 @@ final class LinkViewModel: ObservableObject {
         guard let api else { return }
         let gen = generation
         pollTask = Task {
-            // Cache-first: gecachte Nachrichten SOFORT anzeigen - die
-            // Eintrittsposition (Trennlinie bzw. Ende) wird im View über
-            // scrollPosition deterministisch gesetzt, es gibt kein
-            // sichtbares Scrollen. Der Cache bleibt Offline-Fallback.
-            if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
-                let ordered = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
-                self.lastMessageId = ordered.last?.id ?? 0
+            let boundaryTarget: Int64? = roomUnread > 0 ? roomLastRead : nil
+            var loaded: [LinkChatMessage] = []
+            var covered = false
+
+            /// Publiziert den Stand und setzt die Entry-Flags (einmalig).
+            func publish() {
+                let ordered = loaded.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                self.lastMessageId = ordered.last?.id ?? self.lastMessageId
                 self.messages = .success(ordered)
+                if !self.windowLoadDone {
+                    self.windowLoadDone = true
+                    self.hasMoreHistory = true
+                }
                 self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
-                // Run-Fix "Ladezeit": Mit Cache SOFORT positionieren und
-                // einblenden (Liste <0,5 s sichtbar) - der Live-Fetch
-                // ersetzt den Stand danach im Hintergrund (Klemm-Logik
-                // hält das Ende).
-                self.windowLoadDone = true
             }
+
+            /// Abdeckungs-Check: Die Trennlinie (erste Meldung > lastRead)
+            /// ist nur darstellbar, wenn eine Meldung <= lastRead geladen
+            /// ist (oder kein Ungelesen existiert).
+            func isCovered(_ items: [LinkChatMessage]) -> Bool {
+                guard let boundaryTarget else { return true }
+                guard let oldest = items.map(\.id).min() else { return false }
+                return oldest <= boundaryTarget
+            }
+
+            // Cache-first: gecachte Nachrichten SOFORT anzeigen, WENN sie
+            // die Trennlinie abdecken (Run-Vorgabe "lieber länger aber
+            // sauber": sonst zentrierter Ladekreis, bis die Abdeckung per
+            // Kettenladen steht - kein Teil-Render mit späterem Sprung).
+            // Der Cache bleibt Offline-Fallback.
+            if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
+                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                self.lastMessageId = loaded.last?.id ?? 0
+                if isCovered(loaded) {
+                    covered = true
+                    publish()
+                    offlineNotice = nil
+                }
+            }
+            var anchor = loaded.map(\.id).min() ?? historyAnchor
+
+            // Live-Fetch Phase 1: die NEUESTE Seite (historyAnchor) - der
+            // Refresh aktualisiert den Cache-Stand; danach Kettenladen
+            // (ganze Seiten) bis die Trennlinie abgedeckt ist (max. 10
+            // Seiten Sicherheitscap; tiefer liegende Historie kommt in
+            // Phase 2).
             var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
             guard gen == self.generation else { return }
-            if history.isEmpty, let cached = LinkCache.loadMessages(token: token) {
+            if history.isEmpty, loaded.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar (FEHLER oder leer): letzte
-                // bekannte Nachrichten zeigen.
-                history = cached
+                // bekannte Nachrichten zeigen (Offline-Fallback).
+                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 cacheBannerActive = cacheBannerGate.shouldTrigger()
+                covered = true
+                publish()
             } else {
+                for message in history where loaded.first(where: { $0.id == message.id }) == nil {
+                    loaded.append(message)
+                }
+                loaded.sort { $0.id < $1.id }
                 offlineNotice = nil
+                // Anchor für die Abdeckungs-Kette auf die älteste geladene
+                // Meldung setzen (sonst würde die Kette dieselbe Seite
+                // erneut anfordern).
+                anchor = loaded.map(\.id).min() ?? anchor
+                if isCovered(loaded) {
+                    covered = true
+                    publish()
+                }
             }
-            if Task.isCancelled { return }
-            let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
-            self.lastMessageId = ordered.last?.id ?? 0
-            self.messages = .success(ordered)
+            var coverPages = 0
+            while gen == self.generation, !Task.isCancelled, !covered, coverPages < 10 {
+                coverPages += 1
+                let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false) ?? []
+                guard gen == self.generation else { return }
+                guard !older.isEmpty else {
+                    // Gesprächsanfang vor der Trennlinie: alles zeigen.
+                    covered = true
+                    publish()
+                    break
+                }
+                for message in older where loaded.first(where: { $0.id == message.id }) == nil {
+                    loaded.append(message)
+                }
+                loaded.sort { $0.id < $1.id }
+                if isCovered(loaded) {
+                    covered = true
+                    publish()
+                    break
+                }
+                anchor = loaded.map(\.id).min() ?? anchor
+            }
+
             // P68j: Room-Objekt nachziehen, falls beim Eintritt (z. B. über
             // Deep-Link) noch kein currentRoom vorhanden war - sonst fehlt
             // die "Neue Nachrichten"-Trennlinie (lastReadMessage = 0).
             if self.currentRoom == nil, case let .success(rooms) = self.conversations {
                 self.currentRoom = rooms.first(where: { $0.token == token })
             }
-            let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
-            let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
-            self.updateUnreadBoundary(roomLastRead: effectiveLastRead, roomUnread: effectiveUnread)
-            // Run-Vereinfachung 10.09.: Erste Seite reicht für den Eintritt -
-            // der KOMPLETTE Verlauf lädt danach im Hintergrund (Vollverlauf
-            // statt 7-Tage-Fenster).
+            if !covered {
+                // Sicherheitsnetz (Cap erreicht): zeigen, was da ist.
+                covered = true
+                publish()
+            }
+            // Run-Vereinfachung 10.09.: Phase 2 (Rest-Historie) lädt im
+            // Hintergrund nach dem Settle (Vollverlauf statt 7-Tage-Fenster).
             self.windowLoadDone = true
-            self.hasMoreHistory = true
-            self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
             await self.pollNewMessages(token: token)
         }
     }

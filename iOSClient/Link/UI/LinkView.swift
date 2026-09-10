@@ -946,7 +946,6 @@ struct LinkChatView: View {
     /// Nutzer ist am OBEREN Listenende (Offset <= 2 px) - schaltet die
     /// Hinweis-/Lade-Bubble sichtbar (Run-Korrektur: Bubble gehört in den
     /// Scroll-Inhalt, nicht fixiert).
-    @State private var chatAtTop = false
     /// UIKit-Chat-Liste: Scroll-Kommandos + Delegates (talk-ios-Muster).
     @StateObject private var chatListController = LinkChatListController()
     /// Echte Distanz zum Listenende (aus scrollViewDidScroll) - Grundlage
@@ -1148,6 +1147,7 @@ struct LinkChatView: View {
                 unreadBoundary: viewModel.unreadBoundary,
                 isLoadingHistory: viewModel.isLoadingHistory,
                 isPositioned: chatPositioned,
+                headerContent: chatHeaderContent(items: items),
                 rowProvider: { globalIndex in
                     guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
                     return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
@@ -1155,34 +1155,11 @@ struct LinkChatView: View {
                 onDistanceChanged: { distance in
                     handleBottomDistance(distance)
                 },
-                onTopAreaChanged: { isAtTop in
-                    if chatAtTop != isAtTop {
-                        chatAtTop = isAtTop
-                    }
-                },
                 onEntrySettled: {
                     onEntrySettled()
                 }
             )
             .opacity(chatPositioned ? 1 : 0)
-            // Lade-/Hinweis-Bubble: Während der Vollverlauf lädt PERSISTENT
-            // sichtbar (Run-Fix: der ~15-s-Load war unsichtbar - der Nutzer
-            // glaubte, es käme nichts mehr), danach "Anfang der
-            // Unterhaltung" nur am OBEREN Verlaufsende (chatAtTop).
-            .overlay(alignment: .top) {
-                if chatPositioned {
-                    if viewModel.isLoadingHistory {
-                        historyHintBubble {
-                            ProgressView()
-                            Text(NSLocalizedString("_link_older_loading_", comment: ""))
-                        }
-                    } else if chatAtTop, !viewModel.hasMoreHistory, !items.isEmpty {
-                        historyHintBubble {
-                            Text(NSLocalizedString("_link_history_start_", comment: ""))
-                        }
-                    }
-                }
-            }
                 // Raumwechsel: Zustände zurücksetzen (die Liste resetiert
                 // ihren Eintritts-Scroll selbst über roomToken).
                 .onChange(of: token) { _, _ in

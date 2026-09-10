@@ -6,7 +6,7 @@
 import SwiftUI
 import UIKit
 
-/// Ein Element des Render-Fensters: GLOBALE Index-Position in `visibleItems`
+/// Ein Element der Chat-Liste: GLOBALE Index-Position in `visibleItems`
 /// (für die Tages-/Zeit-/Avatar-Logik) plus Nachricht.
 struct LinkChatListItem: Identifiable, Equatable {
     let globalIndex: Int
@@ -18,20 +18,22 @@ struct LinkChatListItem: Identifiable, Equatable {
     }
 }
 
-/// UIKit-Chat-Liste (Run 10.09.): Ersetzt den SwiftUI-ScrollView, dessen
-/// Scroll-Steuerung auf iOS 26 unzuverlässig war. Muster aus
-/// nextcloud/talk-ios (UITableView) auf dokumentierte UIKit-APIs gemappt.
+/// UIKit-Chat-Liste (Run 11.09., zweiphasig): Die Liste zeigt AB DEM
+/// EINTRITT nur das Initialfenster (neueste Seite inkl. aller Ungelesenen,
+/// per bewährtem KVO-stabilisiertem Eintritts-Scroll positioniert) und
+/// wächst erst NACH dem Settle, wenn `loadRemainingHistoryInBackground`
+/// die älteren Batches liefert. Jeder Batch wird als Insert OBERHALB des
+/// sichtbaren Bereichs eingefügt (`performBatchUpdates` + `insertItems`) -
+/// UICollectionView hält dabei die sichtbaren Zeilen an Ort und Stelle
+/// (dokumentiertes Batch-Verhalten): kein Sprung, kein Drift, ruhiges
+/// Hochscrollen in die wachsende Historie. Konkurrierende Mechanismen
+/// (Pull, Fenster-Erweiterung, Reload-Kämpfe) sind entfernt - es gibt
+/// nur noch diesen einen Hintergrund-Actor.
 ///
-/// Self-Sizing-Drift (Log 10.09.: `entry scroll: bottom` landete doch
-/// oben): Bei UIHostingConfiguration-Zellen ist `contentSize` nach
-/// `reloadData` nur geschätzt - mit jeder auflösenden Zellenhöhe
-/// verschiebt sich der Offset. Gegenmittel (dokumentiertes KVO auf
-/// `contentSize`): Der Eintritts-Scroll wird bei JEDER Größenänderung
-/// erneut angesetzt, bis die Größe stabil ist (2 identische Messungen)
-/// oder das Timeout greift - erst dann gilt der Eintritt als gesetzt.
-/// Pull und Fenster-Erweiterung feuern zusätzlich nur bei echter
-/// Nutzer-Geste (isTracking/isDecelerating) - die "Geister"-Auslösungen
-/// während des Drifts sind damit ausgeschlossen.
+/// Abschnitt 0 = Header-Zelle (Lade-Spinner / "Anfang der Unterhaltung",
+/// steht IM Scroll-Inhalt am Verlaufskopf - nie über Text), Abschnitt 1 =
+/// Nachrichten. Die Zeilen-Inhalte bleiben SwiftUI über
+/// UIHostingConfiguration (iOS 16+, dokumentiert).
 @MainActor
 final class LinkChatListController: NSObject, ObservableObject, UICollectionViewDataSource, UICollectionViewDelegate {
 
@@ -40,13 +42,16 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         case separator(index: Int)
     }
 
+    private static let headerSection = 0
+    private static let messageSection = 1
+
     // MARK: - Vom SwiftUI-Host gesetzte Eingänge (je Update)
 
     private(set) var items: [LinkChatListItem] = []
     private var isLoadingHistory = false
+    private var headerContent: AnyView?
     private var rowProvider: ((Int) -> AnyView)?
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
-    private var onTopAreaChanged: ((_ isAtTop: Bool) -> Void)?
     private var onEntrySettled: (() -> Void)?
 
     // MARK: - Interner Zustand
@@ -56,6 +61,8 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var lastRoomToken: String?
     private var pendingEntryBoundary: Int64?
     private var didInitialEntry = false
+    /// Committete Nachrichten-IDs (aufsteigend, wie `items`).
+    private var committedIds: [Int64] = []
 
     // Eintritts-Stabilisierung
     private var isEntryStabilizing = false
@@ -64,58 +71,93 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var stableSizeCount = 0
     private var entryTimeoutTask: Task<Void, Never>?
 
-    // History-Load-Guardian (Run-Vereinfachung 10.09.): Während der
-    // Vollverlauf im Hintergrund lädt, wächst der Inhalt nach OBEN. Der
-    // Guardian verschiebt contentOffset um die exakte Höhendifferenz -
-    // die sichtbaren Zeilen bleiben pixelgenau auf dem Schirm. Abbruch,
-    // sobald der Nutzer selbst greift (isTracking) - dann hat er die
-    // Kontrolle (talk-ios shouldScrollOnNewMessages-Gedanke).
-    private var userTookControl = false
-    private var lastGuardedHeight: CGFloat = -1
-
     // MARK: - Update vom SwiftUI-Host
 
     func update(items: [LinkChatListItem],
                 roomToken: String,
                 unreadBoundary: Int64?,
                 isLoadingHistory: Bool,
-                isPositioned: Bool,
+                headerContent: AnyView?,
                 rowProvider: @escaping (Int) -> AnyView,
                 onDistanceChanged: @escaping (CGFloat) -> Void,
-                onTopAreaChanged: @escaping (Bool) -> Void,
                 onEntrySettled: @escaping () -> Void) {
         let roomChanged = roomToken != lastRoomToken
         if roomChanged {
             lastRoomToken = roomToken
             didInitialEntry = false
             pendingEntryBoundary = unreadBoundary
-            userTookControl = false
+            committedIds = []
         }
         self.items = items
         self.isLoadingHistory = isLoadingHistory
         self.rowProvider = rowProvider
         self.onDistanceChanged = onDistanceChanged
-        self.onTopAreaChanged = onTopAreaChanged
         self.onEntrySettled = onEntrySettled
+        self.headerContent = headerContent
 
         guard let collectionView else { return }
-        // reloadData nur bei wirklich geänderten Items (Vergleich über die
-        // Nachrichten-IDs) - sonst würde jedes SwiftUI-Rendering den
-        // Scroll-Zustand stören.
+
+        // Header-Zelle bei jedem Update auffrischen (billig - eine Zelle):
+        // der Zustand wechselt zwischen Lade-Spinner, "Anfang der
+        // Unterhaltung" und leer.
+        reconfigureHeader()
+
         let newIds = items.map(\.id)
-        if newIds != lastReloadedIds {
-            lastReloadedIds = newIds
-            collectionView.reloadData()
-            if !didInitialEntry, !items.isEmpty {
-                didInitialEntry = true
-                DispatchQueue.main.async { [weak self] in
-                    self?.performEntryScroll()
-                }
-            }
-        }
+        guard newIds != committedIds else { return }
+        applyDiff(newIds: newIds)
     }
 
-    private var lastReloadedIds: [Int64] = []
+    // MARK: - Incrementelle Pflege (Standard-Chat-Muster)
+
+    /// - Reiner Prepend (ältere Batches aus dem Hintergrund-Chain) ->
+    ///   oben einfügen; UICollectionView hält die sichtbaren Zeilen bei
+    ///   Batch-Updates an Ort und Stelle (dokumentiert).
+    /// - Reiner Append (neue Meldungen) -> unten einfügen.
+    /// - Alles andere (Edits/Removals/Mixed) -> voller Reload.
+    private func applyDiff(newIds: [Int64]) {
+        guard let collectionView else { return }
+        let old = committedIds
+        // Gemeinsames Präfix
+        var prefix = 0
+        while prefix < old.count, prefix < newIds.count, old[prefix] == newIds[prefix] { prefix += 1 }
+        // Gemeinsames Suffix
+        var suffixOld = old.count
+        var suffixNew = newIds.count
+        while suffixOld > prefix, suffixNew > prefix, old[suffixOld - 1] == newIds[suffixNew - 1] {
+            suffixOld -= 1
+            suffixNew -= 1
+        }
+        let insertedCount = suffixNew - prefix
+        let removedCount = (old.count - suffixOld) - prefix
+
+        if insertedCount == 0, removedCount == 0 { return }
+        committedIds = newIds
+
+        if removedCount == 0, insertedCount > 0 {
+            // Lage der Insertion relativ zur ERSTEN committeten Zeile:
+            // davor = Prepend (obere Insert-Region, außerhalb des
+            // sichtbaren Bereichs beim unten stehenden Nutzer), dahinter =
+            // Append (untere Insert-Region).
+            let prependCount = max(0, old.count - suffixOld)
+            let appendCount = insertedCount - prependCount
+            collectionView.performBatchUpdates {
+                if prependCount > 0 {
+                    collectionView.insertItems(
+                        at: (0..<prependCount).map { IndexPath(item: $0, section: Self.messageSection) }
+                    )
+                }
+                if appendCount > 0 {
+                    collectionView.insertItems(
+                        at: (old.count..<(old.count + appendCount)).map { IndexPath(item: $0, section: Self.messageSection) }
+                    )
+                }
+            }
+            return
+        }
+        // Removals oder Edits -> voller Reload (Position bleibt numerisch
+        // erhalten; UIKit hält sichtbare Zellen bei Self-Sizing stabil).
+        collectionView.reloadData()
+    }
 
     // MARK: - Öffentliche Scroll-Kommandos (SwiftUI -> UIKit)
 
@@ -131,7 +173,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
            let index = items.firstIndex(where: { $0.message.id == boundary }) {
             entryTarget = .separator(index: index)
             collectionView.layoutIfNeeded()
-            collectionView.scrollToItem(at: IndexPath(item: index, section: 0),
+            collectionView.scrollToItem(at: messageIndexPath(item: index),
                                         at: .centeredVertically, animated: false)
             SouveraLog.write("LinkChat", "entry scroll: separator \(boundary) centered")
         } else {
@@ -161,51 +203,39 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         onEntrySettled?()
     }
 
-    /// KVO auf contentSize (dokumentiert): Zwei Aufgaben -
-    /// 1. Eintritts-Stabilisierung: Ziel erneut anfahren, bis die Höhe
-    ///    stabil ist.
-    /// 2. History-Load-Guardian: während der Vollverlauf nachlädt, die
-    ///    sichtbaren Zeilen per Offset-Delta an Ort und Stelle halten
-    ///    (bis der Nutzer selbst greift).
+    /// KVO auf contentSize (dokumentiert): Eintritts-Stabilisierung - das
+    /// Ziel wird erneut angefahren, bis die Höhe stabil ist.
     private func handleContentSizeChanged() {
-        guard let collectionView else { return }
+        guard let collectionView, isEntryStabilizing else { return }
         let height = collectionView.contentSize.height
 
-        if isEntryStabilizing {
-            if abs(height - lastStableContentHeight) < 1 {
-                stableSizeCount += 1
-            } else {
-                stableSizeCount = 0
-            }
-            lastStableContentHeight = height
-
-            switch entryTarget {
-            case .bottom:
-                scrollToBottom(animated: false)
-            case .separator(let index):
-                collectionView.layoutIfNeeded()
-                collectionView.scrollToItem(at: IndexPath(item: index, section: 0),
-                                            at: .centeredVertically, animated: false)
-            }
-            if stableSizeCount >= 2 {
-                finishEntryStabilization(reason: "stable")
-            }
-            return
+        if abs(height - lastStableContentHeight) < 1 {
+            stableSizeCount += 1
+        } else {
+            stableSizeCount = 0
         }
+        lastStableContentHeight = height
 
-        // History-Load-Guardian: Inhalt wächst nach oben -> Offset um die
-        // Differenz nachführen, solange der Nutzer die Kontrolle nicht
-        // übernommen hat. (Die geladenen Zeilen stehen danach exakt dort,
-        // wo sie vor dem Nachladen waren.)
-        if isLoadingHistory, !userTookControl, height > lastGuardedHeight, lastGuardedHeight > 0 {
-            collectionView.contentOffset.y += (height - lastGuardedHeight)
+        switch entryTarget {
+        case .bottom:
+            scrollToBottom(animated: false)
+        case .separator(let index):
+            collectionView.layoutIfNeeded()
+            collectionView.scrollToItem(at: messageIndexPath(item: index),
+                                        at: .centeredVertically, animated: false)
         }
-        lastGuardedHeight = height
+        if stableSizeCount >= 2 {
+            finishEntryStabilization(reason: "stable")
+        }
+    }
+
+    private func messageIndexPath(item: Int) -> IndexPath {
+        IndexPath(item: item, section: Self.messageSection)
     }
 
     func scrollToBottom(animated: Bool) {
         guard let collectionView, !items.isEmpty else { return }
-        let indexPath = IndexPath(item: items.count - 1, section: 0)
+        let indexPath = messageIndexPath(item: items.count - 1)
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
     }
@@ -218,37 +248,29 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
 
     // MARK: - UICollectionViewDataSource
 
+    func numberOfSections(in collectionView: UICollectionView) -> Int {
+        2
+    }
+
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        items.count
+        section == Self.headerSection ? 1 : items.count
     }
 
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "LinkChatCell", for: indexPath)
-        if let index = items.indices.first(where: { $0 == indexPath.item }), let rowProvider {
+        if indexPath.section == Self.headerSection {
             cell.contentConfiguration = UIHostingConfiguration {
-                rowProvider(items[index].globalIndex)
+                headerContent
+            }
+            .margins(.all, 0)
+        } else if items.indices.contains(indexPath.item), let rowProvider {
+            cell.contentConfiguration = UIHostingConfiguration {
+                rowProvider(items[indexPath.item].globalIndex)
             }
             .margins(.all, 0)
         }
         cell.backgroundConfiguration = .clear()
         return cell
-    }
-
-    // MARK: - UIScrollViewDelegate
-
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        let distance = scrollView.contentSize.height
-            - scrollView.adjustedContentInset.bottom
-            - (scrollView.contentOffset.y + scrollView.frame.height)
-        onDistanceChanged?(distance)
-        onTopAreaChanged?(scrollView.contentOffset.y <= 2)
-
-        // Sobald der Nutzer selbst in die Liste greift, übernimmt er die
-        // Kontrolle - der History-Load-Guardian stellt das Nachführen ein.
-        if scrollView.isTracking, !userTookControl {
-            userTookControl = true
-            SouveraLog.write("LinkChat", "user took scroll control (history load guardian off)")
-        }
     }
 
     // MARK: - SwiftUI-Anbindung
@@ -268,7 +290,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         self.collectionView = collectionView
         // KVO auf contentSize (dokumentiertes NSKeyValueObserving) - Kern
-        // der Eintritts-Stabilisierung und des History-Load-Guardians.
+        // der Eintritts-Stabilisierung.
         contentSizeObservation = collectionView.observe(\UICollectionView.contentSize, options: [.new]) { [weak self] _, _ in
             Task { @MainActor [weak self] in
                 self?.handleContentSizeChanged()
@@ -286,9 +308,9 @@ struct LinkChatListView: UIViewRepresentable {
     let unreadBoundary: Int64?
     let isLoadingHistory: Bool
     let isPositioned: Bool
+    let headerContent: AnyView?
     let rowProvider: (Int) -> AnyView
     let onDistanceChanged: (CGFloat) -> Void
-    let onTopAreaChanged: (Bool) -> Void
     let onEntrySettled: () -> Void
 
     func makeUIView(context: Context) -> UICollectionView {
@@ -301,10 +323,9 @@ struct LinkChatListView: UIViewRepresentable {
             roomToken: roomToken,
             unreadBoundary: unreadBoundary,
             isLoadingHistory: isLoadingHistory,
-            isPositioned: isPositioned,
+            headerContent: headerContent,
             rowProvider: rowProvider,
             onDistanceChanged: onDistanceChanged,
-            onTopAreaChanged: onTopAreaChanged,
             onEntrySettled: onEntrySettled
         )
     }
