@@ -787,9 +787,12 @@ final class LinkViewModel: ObservableObject {
     /// inkrementelles Nachladen mit SwiftUI-self-sizing-Zellen lieferte
     /// keine ruhige Scroll-Erfahrung (Log 10.09.: Ketten-Pulls, Zucken).
     /// Fehlerhafte Fetches (nil) werden 1x wiederholt und brechen dann ab,
-    /// OHNE den Gesprächsanfang zu markieren.
-    private func loadFullHistory(token: String) async {
-        guard let api else { return }
+    /// OHNE den Gesprächsanfang zu markieren. Generation-Guard (Run-Fix):
+    /// ein Raumwechsel bricht den Load des VORHERIGEN Raums ab - sonst
+    /// veröffentlicht der alte Load in die Nachrichtenliste des neuen
+    /// Raums (Kreuzkontamination, Log 10.09. 17:23/17:24).
+    private func loadFullHistory(token: String, generation gen: Int) async {
+        guard let api, gen == self.generation else { return }
         guard case let .success(current) = messages, !current.isEmpty else {
             hasMoreHistory = false
             return
@@ -806,9 +809,9 @@ final class LinkViewModel: ObservableObject {
         var oldestLoaded = all.map(\.timestamp).min() ?? Date.distantFuture.timeIntervalSince1970
         var reachedStart = false
         var pages = 0
-        while !Task.isCancelled, pages < 500 {
+        while !Task.isCancelled, pages < 500, gen == self.generation {
             var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
-            if older == nil, !Task.isCancelled {
+            if older == nil, !Task.isCancelled, gen == self.generation {
                 // FEHLER (Transport/HTTP/Decode) - NICHT als
                 // Gesprächsanfang missdeuten: 1 Retry, danach Abbruch mit
                 // unverändertem hasMoreHistory.
@@ -847,11 +850,13 @@ final class LinkViewModel: ObservableObject {
     }
 
     /// Startet den Vollverlauf-Load im Hintergrund (nach sitzender
-    /// Eintrittspositionierung, Run-Vereinfachung 10.09.).
+    /// Eintrittspositionierung, Run-Vereinfachung 10.09.). Der Load trägt
+    /// die aktuelle Generation und verfällt beim Raumwechsel.
     func loadFullHistoryInBackground() {
         guard case let .chat(token, _) = route, hasMoreHistory, !isLoadingHistory else { return }
+        let gen = generation
         Task { [weak self] in
-            await self?.loadFullHistory(token: token)
+            await self?.loadFullHistory(token: token, generation: gen)
         }
     }
 

@@ -1165,18 +1165,18 @@ struct LinkChatView: View {
                 }
             )
             .opacity(chatPositioned ? 1 : 0)
-            // Hinweis-/Lade-Bubble am OBEREN VERLAUFSENDE (nur sichtbar,
-            // wenn der Nutzer ganz oben ist): Spinner während der
-            // Vollverlauf lädt, "Anfang der Unterhaltung" am Verlaufsanfang.
-            // (Ein Pull-Hinweis entfällt: Der Verlauf lädt komplett vor.)
+            // Lade-/Hinweis-Bubble: Während der Vollverlauf lädt PERSISTENT
+            // sichtbar (Run-Fix: der ~15-s-Load war unsichtbar - der Nutzer
+            // glaubte, es käme nichts mehr), danach "Anfang der
+            // Unterhaltung" nur am OBEREN Verlaufsende (chatAtTop).
             .overlay(alignment: .top) {
-                if chatPositioned, chatAtTop {
+                if chatPositioned {
                     if viewModel.isLoadingHistory {
                         historyHintBubble {
                             ProgressView()
                             Text(NSLocalizedString("_link_older_loading_", comment: ""))
                         }
-                    } else if !viewModel.hasMoreHistory, !items.isEmpty {
+                    } else if chatAtTop, !viewModel.hasMoreHistory, !items.isEmpty {
                         historyHintBubble {
                             Text(NSLocalizedString("_link_history_start_", comment: ""))
                         }

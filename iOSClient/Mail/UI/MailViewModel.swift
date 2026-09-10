@@ -639,6 +639,18 @@ final class MailViewModel: ObservableObject {
         } else {
             count = personalInboxUnread
         }
+        // Run-Fix 11.09. (Log 16:59:08.056 "tab badge set -> 0" zwischen
+        // Mailbox/get-Request und -Response): Der abgeleitete Pfad kann
+        // kurzzeitig eine FREMDE/leere Postfachliste halten (Account-
+        // Wechsel-Reste) und postet dann eine 0. Eine 0 aus diesem Pfad
+        // wird daher verworfen, solange der Store für diesen Account
+        // einen echten Zähler führt - die autoritative Email/query-
+        // Zählung (refreshUnreadBadge) postet echte 0en weiterhin direkt.
+        if count == 0,
+           SouveraBadgeStore.shared.unreadMail(account: mailAccount?.account ?? "") > 0 {
+            JmapLog.write("Mail unread badge -> skip derived 0 (store holds a real count)")
+            return
+        }
         postUnreadBadge(count)
     }
 
@@ -1358,12 +1370,20 @@ final class MailViewModel: ObservableObject {
                 hasMore = pageHasMore
                 // PROGRESSIVER Aufbau: nach jeder Seite die kumulierte Liste
                 // publizieren - die Übersicht wächst sichtbar, statt die
-                // ganze Zeit nur zu kreiseln.
+                // ganze Zeit nur zu kreiseln. UND nach jeder Seite in den
+                // Cache schreiben (Run-Fix "Cache nicht aktualisiert"):
+                // Bricht der Entry-Voll-Refresh vorzeitig ab (Nutzer
+                // verlässt den Tab -> Generation-Guard-Return), ist der
+                // frische Stand trotzdem gecacht - sonst zeigte jeder
+                // Eintritt erneut den alten Cache-Stand.
                 let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
                 guard generation == listGeneration else { return }
                 queryStates[cacheKey] = state
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
+                let collectedFiltered = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                MailCache.saveMessages(account: accountName, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
+                JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                 if !pageHasMore {
                     break
