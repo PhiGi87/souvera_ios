@@ -271,6 +271,13 @@ class NCMainTabBarController: UITabBarController {
             queue: .main
         ) { [weak self] _ in
             self?.updateMoreBadge()
+            // Run-Fix "Mail-Badge spinnt": Der Push-Pfad füttert den
+            // Badge-Store sofort (App-Icon 31 -> 32 im Log 10.09.), der
+            // Mail-Tab-Badge aktualisierte sich aber erst beim Öffnen des
+            // Mail-Tabs (stand 12:53-12:58 auf "1"). Der Tab spiegelt jetzt
+            // den Store für den AKTIVEN Account bei jeder Totals-Änderung.
+            let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            self?.updateMailBadge(SouveraBadgeStore.shared.unreadMail(account: active))
         }
         // Hintergrund-Poller für ungelesene Talk-Nachrichten (Badge).
         LinkBadgeMonitor.shared.start()

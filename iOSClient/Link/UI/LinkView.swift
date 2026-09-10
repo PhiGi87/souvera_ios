@@ -943,6 +943,10 @@ struct LinkChatView: View {
     @State private var chatPositioned = false
     /// "Runter zu den neuesten Nachrichten"-Button sichtbar (hochgescrollt)?
     @State private var showScrollBottom = false
+    /// Nutzer ist am OBEREN Listenende (Offset <= 2 px) - schaltet die
+    /// Hinweis-/Lade-Bubble sichtbar (Run-Korrektur: Bubble gehört in den
+    /// Scroll-Inhalt, nicht fixiert).
+    @State private var chatAtTop = false
     /// UIKit-Chat-Liste: Scroll-Kommandos + Delegates (talk-ios-Muster).
     @StateObject private var chatListController = LinkChatListController()
     /// Echte Distanz zum Listenende (aus scrollViewDidScroll) - Grundlage
@@ -1139,57 +1143,68 @@ struct LinkChatView: View {
         case let .error(message):
             Spacer(); Text(message).foregroundStyle(.secondary); Spacer()
         case let .success(items):
-            VStack(spacing: 0) {
-                // Hinweis-/Lade-Kopfzeile (talk-ios tableHeader-Parität):
-                // Spinner beim Nachladen, Pull-Hinweis wenn älterer Verlauf
-                // existiert. "Anfang der Unterhaltung" entspricht dem
-                // Zustand hasMoreHistory == false (keine Dauerleiste).
-                if viewModel.hasMoreHistory || viewModel.isLoadingOlder {
-                    Button {
-                        triggerHistoryPull()
-                    } label: {
+            LinkChatListView(
+                controller: chatListController,
+                items: renderedWindow,
+                roomToken: token,
+                unreadBoundary: viewModel.unreadBoundary,
+                canLoadOlder: viewModel.hasMoreHistory && !viewModel.isLoadingOlder,
+                canExtendWindow: (renderedWindowStartIndex ?? 0) > 0,
+                isPositioned: chatPositioned,
+                rowProvider: { globalIndex in
+                    guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
+                    return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
+                },
+                onPullToRefresh: {
+                    triggerHistoryPull()
+                },
+                onWindowExtend: { previousFirstId in
+                    extendRenderWindow(previousFirstId: previousFirstId)
+                },
+                onDistanceChanged: { distance in
+                    handleBottomDistance(distance)
+                },
+                onTopAreaChanged: { isAtTop in
+                    if chatAtTop != isAtTop {
+                        chatAtTop = isAtTop
+                    }
+                },
+                onEntrySettled: {
+                    onEntrySettled()
+                }
+            )
+            .opacity(chatPositioned ? 1 : 0)
+            // Hinweis-/Lade-Bubble am OBEREN VERLAUFSENDE (Run-Korrektur:
+            // keine fixierte Kopfzeile mehr - sie gehört in den Scroll-
+            // Inhalt und ist nur sichtbar, wenn der Nutzer ganz oben ist,
+            // wie vor der UIKit-Umstellung). Zustände: Spinner beim
+            // Nachladen, Pull-Hinweis wenn älterer Verlauf existiert
+            // (antippbar), "Anfang der Unterhaltung" am Verlaufsanfang.
+            .overlay(alignment: .top) {
+                if chatPositioned, chatAtTop {
+                    if viewModel.isLoadingOlder {
                         historyHintBubble {
-                            if !chatPositioned || viewModel.isLoadingOlder {
-                                ProgressView()
-                            }
-                            if viewModel.isLoadingOlder {
-                                Text(NSLocalizedString("_link_older_loading_", comment: ""))
-                            } else {
+                            ProgressView()
+                            Text(NSLocalizedString("_link_older_loading_", comment: ""))
+                        }
+                    } else if viewModel.hasMoreHistory {
+                        Button {
+                            triggerHistoryPull()
+                        } label: {
+                            historyHintBubble {
                                 Image(systemName: "chevron.down")
                                     .font(.caption2.weight(.semibold))
                                 Text(NSLocalizedString("_link_older_hint_", comment: ""))
                             }
                         }
+                        .buttonStyle(.plain)
+                    } else if !items.isEmpty {
+                        historyHintBubble {
+                            Text(NSLocalizedString("_link_history_start_", comment: ""))
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!chatPositioned)
                 }
-                LinkChatListView(
-                    controller: chatListController,
-                    items: renderedWindow,
-                    roomToken: token,
-                    unreadBoundary: viewModel.unreadBoundary,
-                    canLoadOlder: viewModel.hasMoreHistory && !viewModel.isLoadingOlder,
-                    canExtendWindow: (renderedWindowStartIndex ?? 0) > 0,
-                    isPositioned: chatPositioned,
-                    rowProvider: { globalIndex in
-                        guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
-                        return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
-                    },
-                    onPullToRefresh: {
-                        triggerHistoryPull()
-                    },
-                    onWindowExtend: { previousFirstId in
-                        extendRenderWindow(previousFirstId: previousFirstId)
-                    },
-                    onDistanceChanged: { distance in
-                        handleBottomDistance(distance)
-                    },
-                    onEntrySettled: {
-                        onEntrySettled()
-                    }
-                )
-                .opacity(chatPositioned ? 1 : 0)
+            }
                 // Raumwechsel: Zustände zurücksetzen (die Liste resetiert
                 // ihren Eintritts-Scroll selbst über roomToken).
                 .onChange(of: token) { _, _ in
@@ -1242,7 +1257,6 @@ struct LinkChatView: View {
                     }
                 }
             }
-        }
     }
 
     /// Dezente ovale Hinweis-Bubble: MITTIG (Spacer beidseitig - vorher

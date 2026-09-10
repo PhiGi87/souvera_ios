@@ -19,17 +19,26 @@ struct LinkChatListItem: Identifiable, Equatable {
 }
 
 /// UIKit-Chat-Liste (Run 10.09.): Ersetzt den SwiftUI-ScrollView, dessen
-/// Scroll-Steuerung auf iOS 26 unzuverlässig war (Eintritt landete immer
-/// oben, Scroll-Observer feuerten nicht, Pull tot). Muster 1:1 aus
-/// nextcloud/talk-ios (UITableView) übernommen - mit dokumentierten
-/// UIKit-APIs: imperative Scrolls nach dem Layout, scrollViewDidScroll
-/// mit Offset < 0 für den Verlaufs-Pull, Offset-Erhalt über
-/// scrollToItem(previousFirst, .top).
+/// Scroll-Steuerung auf iOS 26 unzuverlässig war. Muster aus
+/// nextcloud/talk-ios (UITableView) auf dokumentierte UIKit-APIs gemappt.
 ///
-/// Die Zeilen-Inhalte bleiben SwiftUI: Jede Cell hostet den bestehenden
-/// Zeilen-View über UIHostingConfiguration (iOS 16+, dokumentiert).
+/// Self-Sizing-Drift (Log 10.09.: `entry scroll: bottom` landete doch
+/// oben): Bei UIHostingConfiguration-Zellen ist `contentSize` nach
+/// `reloadData` nur geschätzt - mit jeder auflösenden Zellenhöhe
+/// verschiebt sich der Offset. Gegenmittel (dokumentiertes KVO auf
+/// `contentSize`): Der Eintritts-Scroll wird bei JEDER Größenänderung
+/// erneut angesetzt, bis die Größe stabil ist (2 identische Messungen)
+/// oder das Timeout greift - erst dann gilt der Eintritt als gesetzt.
+/// Pull und Fenster-Erweiterung feuern zusätzlich nur bei echter
+/// Nutzer-Geste (isTracking/isDecelerating) - die "Geister"-Auslösungen
+/// während des Drifts sind damit ausgeschlossen.
 @MainActor
 final class LinkChatListController: NSObject, ObservableObject, UICollectionViewDataSource, UICollectionViewDelegate {
+
+    private enum EntryTarget {
+        case bottom
+        case separator(index: Int)
+    }
 
     // MARK: - Vom SwiftUI-Host gesetzte Eingänge (je Update)
 
@@ -40,16 +49,28 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var onPullToRefresh: (() -> Void)?
     private var onWindowExtend: ((_ previousFirstId: Int64) -> Void)?
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
+    private var onTopAreaChanged: ((_ isAtTop: Bool) -> Void)?
     private var onEntrySettled: (() -> Void)?
 
     // MARK: - Interner Zustand
 
     private weak var collectionView: UICollectionView?
+    private var contentSizeObservation: NSKeyValueObservation?
     private var lastRoomToken: String?
     private var pendingEntryBoundary: Int64?
     private var didInitialEntry = false
     private var isExtendingWindow = false
-    private var lastPullLogAt = Date.distantPast
+
+    // Eintritts-Stabilisierung
+    private var isEntryStabilizing = false
+    private var entryTarget: EntryTarget = .bottom
+    private var lastStableContentHeight: CGFloat = -1
+    private var stableSizeCount = 0
+    private var entryTimeoutTask: Task<Void, Never>?
+
+    // Re-Anchor-Nachführung (gleicher Drift nach Prepend/Extension)
+    private var pendingReanchorId: Int64?
+    private var pendingReanchorUntil = Date.distantPast
 
     // MARK: - Update vom SwiftUI-Host
 
@@ -63,6 +84,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
                 onPullToRefresh: @escaping () -> Void,
                 onWindowExtend: @escaping (Int64) -> Void,
                 onDistanceChanged: @escaping (CGFloat) -> Void,
+                onTopAreaChanged: @escaping (Bool) -> Void,
                 onEntrySettled: @escaping () -> Void) {
         let roomChanged = roomToken != lastRoomToken
         if roomChanged {
@@ -78,35 +100,106 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         self.onPullToRefresh = onPullToRefresh
         self.onWindowExtend = onWindowExtend
         self.onDistanceChanged = onDistanceChanged
+        self.onTopAreaChanged = onTopAreaChanged
         self.onEntrySettled = onEntrySettled
 
         guard let collectionView else { return }
-        collectionView.reloadData()
-        if !didInitialEntry, !items.isEmpty {
-            didInitialEntry = true
-            DispatchQueue.main.async { [weak self] in
-                self?.performEntryScroll()
+        // reloadData nur bei wirklich geänderten Items (Vergleich über die
+        // Nachrichten-IDs) - sonst würde jedes SwiftUI-Rendering den
+        // Scroll-Zustand stören.
+        let newIds = items.map(\.id)
+        if newIds != lastReloadedIds {
+            lastReloadedIds = newIds
+            collectionView.reloadData()
+            if !didInitialEntry, !items.isEmpty {
+                didInitialEntry = true
+                DispatchQueue.main.async { [weak self] in
+                    self?.performEntryScroll()
+                }
             }
         }
     }
 
+    private var lastReloadedIds: [Int64] = []
+
     // MARK: - Öffentliche Scroll-Kommandos (SwiftUI -> UIKit)
 
     /// Eintritt: Ungelesen -> Trennlinie mittig (talk-ios .middle), sonst
-    /// ans Listenende. UIKit materialisiert synchron -> deterministisch.
+    /// ans Listenende. Anschließend Stabilisierungs-Phase: Solange sich
+    /// die Self-Sizing-Höhen noch ändern, wird das Ziel erneut angefahren.
     private func performEntryScroll() {
-        guard let collectionView else { return }
+        guard let collectionView, !items.isEmpty else { return }
+        isEntryStabilizing = true
+        stableSizeCount = 0
+        lastStableContentHeight = -1
         if let boundary = pendingEntryBoundary,
            let index = items.firstIndex(where: { $0.message.id == boundary }) {
+            entryTarget = .separator(index: index)
+            collectionView.layoutIfNeeded()
             collectionView.scrollToItem(at: IndexPath(item: index, section: 0),
                                         at: .centeredVertically, animated: false)
             SouveraLog.write("LinkChat", "entry scroll: separator \(boundary) centered")
         } else {
+            entryTarget = .bottom
             scrollToBottom(animated: false)
             SouveraLog.write("LinkChat", "entry scroll: bottom")
         }
         pendingEntryBoundary = nil
+        startEntryTimeout()
+    }
+
+    private func startEntryTimeout() {
+        entryTimeoutTask?.cancel()
+        entryTimeoutTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard !Task.isCancelled else { return }
+            self?.finishEntryStabilization(reason: "timeout")
+        }
+    }
+
+    private func finishEntryStabilization(reason: String) {
+        guard isEntryStabilizing else { return }
+        isEntryStabilizing = false
+        entryTimeoutTask?.cancel()
+        entryTimeoutTask = nil
+        SouveraLog.write("LinkChat", "entry settled (UIKit, \(reason))")
         onEntrySettled?()
+    }
+
+    /// KVO auf contentSize (dokumentiert): Selbst-Sizing-Höhen ändern die
+    /// Inhaltsgöße nach dem ersten Layout - Eintritts-Ziel und frischer
+    /// Re-Anchor werden solange erneut angefahren, bis sich die Größe
+    /// stabilisiert hat.
+    private func handleContentSizeChanged() {
+        guard let collectionView else { return }
+        let height = collectionView.contentSize.height
+
+        if isEntryStabilizing {
+            if abs(height - lastStableContentHeight) < 1 {
+                stableSizeCount += 1
+            } else {
+                stableSizeCount = 0
+            }
+            lastStableContentHeight = height
+
+            switch entryTarget {
+            case .bottom:
+                scrollToBottom(animated: false)
+            case .separator(let index):
+                collectionView.layoutIfNeeded()
+                collectionView.scrollToItem(at: IndexPath(item: index, section: 0),
+                                            at: .centeredVertically, animated: false)
+            }
+            if stableSizeCount >= 2 {
+                finishEntryStabilization(reason: "stable")
+            }
+        }
+
+        if let reanchorId = pendingReanchorId, Date() < pendingReanchorUntil {
+            reanchor(id: reanchorId)
+        } else if pendingReanchorId != nil {
+            pendingReanchorId = nil
+        }
     }
 
     func scrollToBottom(animated: Bool) {
@@ -117,11 +210,15 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     }
 
     /// Re-Anchor (Verlaufs-Prepend und Render-Fenster-Erweiterung): die
-    /// bisher sichtbare älteste Zeile bleibt an derselben Stelle.
+    /// bisher sichtbare älteste Zeile bleibt an derselben Stelle. Weil die
+    /// neu vorangestellten Zellen ihre Höhe erst noch auflösen, wird der
+    /// Anker im KVO-Pfad kurz nachgeführt (bis 1,2 s).
     func reanchor(id: Int64) {
         guard let collectionView, let index = items.firstIndex(where: { $0.message.id == id }) else { return }
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: false)
+        pendingReanchorId = id
+        pendingReanchorUntil = Date().addingTimeInterval(1.2)
     }
 
     /// Abschluss der Fenster-Erweiterung (Gate gegen Rückkopplung).
@@ -160,8 +257,14 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
             - scrollView.adjustedContentInset.bottom
             - (scrollView.contentOffset.y + scrollView.frame.height)
         onDistanceChanged?(distance)
+        onTopAreaChanged?(scrollView.contentOffset.y <= 2)
 
         let overscroll = scrollView.contentOffset.y - scrollView.adjustedContentInset.top
+        // Nur echte Nutzer-Gesten lösen Pull/Fenster-Erweiterung aus -
+        // programmatische Scrolls (Eintritts-Stabilisierung, Re-Anchor)
+        // dürfen die Mechanik nicht "geisterhaft" auslösen (Log 10.09.).
+        let userScrolling = scrollView.isTracking || scrollView.isDecelerating
+        guard userScrolling else { return }
 
         // Verlaufs-Pull: JEDER Overscroll am Listenanfang (talk-ios
         // scrollViewDidScroll + contentOffset.y < 0); das Flaggen-Gate
@@ -190,6 +293,8 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         }
     }
 
+    private var lastPullLogAt = Date.distantPast
+
     // MARK: - SwiftUI-Anbindung
 
     func makeCollectionView() -> UICollectionView {
@@ -206,6 +311,13 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         self.collectionView = collectionView
+        // KVO auf contentSize (dokumentiertes NSKeyValueObserving) - Kern
+        // der Eintritts-Stabilisierung und Re-Anchor-Nachführung.
+        contentSizeObservation = collectionView.observe(\UICollectionView.contentSize, options: [.new]) { [weak self] _, _ in
+            Task { @MainActor [weak self] in
+                self?.handleContentSizeChanged()
+            }
+        }
         return collectionView
     }
 }
@@ -223,6 +335,7 @@ struct LinkChatListView: UIViewRepresentable {
     let onPullToRefresh: () -> Void
     let onWindowExtend: (Int64) -> Void
     let onDistanceChanged: (CGFloat) -> Void
+    let onTopAreaChanged: (Bool) -> Void
     let onEntrySettled: () -> Void
 
     func makeUIView(context: Context) -> UICollectionView {
@@ -241,6 +354,7 @@ struct LinkChatListView: UIViewRepresentable {
             onPullToRefresh: onPullToRefresh,
             onWindowExtend: onWindowExtend,
             onDistanceChanged: onDistanceChanged,
+            onTopAreaChanged: onTopAreaChanged,
             onEntrySettled: onEntrySettled
         )
     }
