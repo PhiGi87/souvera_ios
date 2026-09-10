@@ -701,7 +701,9 @@ final class LinkViewModel: ObservableObject {
             var covered = false
 
             /// Publiziert den Stand und setzt die Entry-Flags (einmalig).
-            func publish() {
+            /// Closure statt lokaler func: lokale Funktionen erben die
+            /// Actor-Isolation nicht (Compile-Fehler in Swift 5-Modus).
+            let publish = {
                 let ordered = loaded.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
                 self.lastMessageId = ordered.last?.id ?? self.lastMessageId
                 self.messages = .success(ordered)
@@ -715,7 +717,7 @@ final class LinkViewModel: ObservableObject {
             /// Abdeckungs-Check: Die Trennlinie (erste Meldung > lastRead)
             /// ist nur darstellbar, wenn eine Meldung <= lastRead geladen
             /// ist (oder kein Ungelesen existiert).
-            func isCovered(_ items: [LinkChatMessage]) -> Bool {
+            let isCovered = { (items: [LinkChatMessage]) -> Bool in
                 guard let boundaryTarget else { return true }
                 guard let oldest = items.map(\.id).min() else { return false }
                 return oldest <= boundaryTarget
