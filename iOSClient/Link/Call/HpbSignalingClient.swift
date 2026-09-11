@@ -116,11 +116,11 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
     /// mitgesendet - der Echo-Wert des eingehenden Offers, damit der
     /// MCU die Antwort der richtigen Verbindung (video vs. screen)
     /// zuordnen kann.
-    func sendOffer(toSession: String, sdp: String, roomType: String = roomTypeVideo, sid: String? = nil) {
+    func sendOffer(toSession: String, sdp: String, roomType: String = "video", sid: String? = nil) {
         sendPayload(to: toSession, type: "offer", sdp: sdp, roomType: roomType, sid: sid)
     }
 
-    func sendAnswer(toSession: String, sdp: String, roomType: String = roomTypeVideo, sid: String? = nil) {
+    func sendAnswer(toSession: String, sdp: String, roomType: String = "video", sid: String? = nil) {
         sendPayload(to: toSession, type: "answer", sdp: sdp, roomType: roomType, sid: sid)
     }
 
@@ -128,7 +128,7 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         sendMessage(to: toSession, data: ["to": toSession, "type": "requestoffer", "roomType": roomTypeVideo])
     }
 
-    func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = roomTypeVideo, sid: String? = nil) {
+    func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = "video", sid: String? = nil) {
         var data: [String: Any] = [
             "to": toSession, "type": "candidate", "roomType": roomType,
             "payload": ["type": "candidate", "candidate": candidate]

@@ -604,7 +604,7 @@ final class CallSession: NSObject, HpbSignalingListener {
                 // roomType + sid DES OFFERS zurueckspiegeln (talk-ios) -
                 // hardcodet "video" liess den Screen-Peer nie verbinden.
                 self.signaling?.sendAnswer(toSession: fromSession, sdp: answer.sdp,
-                                           roomType: roomType, sid: peerSids[key])
+                                           roomType: roomType, sid: self.peerSids[key])
             }
         }
     }

@@ -574,7 +574,7 @@ actor LinkOcsApi {
     /// Teilnehmer im Call mit Session-Bezug (Run 11.09.): sessionId fuer
     /// die Zuordnung zu Video-/Platzhalter-Kacheln, actorId zum
     /// Herausfiltern der eigenen Person.
-    struct LinkCallParticipant {
+    struct LinkCallParticipant: Equatable {
         let sessionId: String
         let userId: String
         let displayName: String
