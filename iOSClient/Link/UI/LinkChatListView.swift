@@ -94,6 +94,13 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// scrollToRow bis die Position haelt). Tasks statt DispatchWorkItem:
     /// erben die MainActor-Isolation der Klasse und sind cancel-bar.
     private var entryRescrollTasks: [Task<Void, Never>] = []
+    /// Content-Signatur des letzten Updates: Aendert sich der Zellinhalt
+    /// relevante ViewModel-Stand (Bilder/PDF geladen, Boundary, ...) bei
+    /// UNVERAENDERTEN IDs, werden die sichtbaren Zellen rekonfiguriert -
+    /// Diffable fasst unveranderte Items sonst nie wieder an und die
+    /// Zelleninhalte blieben eingefroren (Platzhalter "Bild wird
+    /// geladen...", alte Gruppierung, Run-Feedback 11.09.).
+    private var lastContentSignature: Int = 0
 
     // MARK: - Update vom SwiftUI-Host
 
@@ -118,6 +125,7 @@ final class LinkChatListController: NSObject, ObservableObject {
             entryTarget = .bottom
             entryTimeoutTask?.cancel()
             entryTimeoutTask = nil
+            lastContentSignature = 0
         }
         self.items = items
         self.isLoadingHistory = isLoadingHistory
@@ -137,7 +145,18 @@ final class LinkChatListController: NSObject, ObservableObject {
         // zustandsaktuell ohne manuelle Manipulation.
 
         let newIds = items.map(\.id)
-        guard newIds != committedIds else { return }
+        let signature = contentSignature()
+        let contentChanged = signature != lastContentSignature
+        lastContentSignature = signature
+        if newIds == committedIds {
+            // Struktur unverändert - aber Zellinhalt (Bilder/PDF/Boundary)
+            // kann sich geaendert haben: sichtbare Zellen reaktiv
+            // auffrischen.
+            if contentChanged {
+                reconfigureVisibleMessages()
+            }
+            return
+        }
 
         // Reines Prepend? (aeltere Batches kommen nur on-demand am
         // Verlaufskopf via publishOlderBatch, bzw. waehrend der
@@ -154,6 +173,41 @@ final class LinkChatListController: NSObject, ObservableObject {
                 self?.performEntryScroll()
             }
         }
+    }
+
+    // MARK: - Content-Reaktivitaet
+
+    /// Billige Signatur allen zellrelevanten ViewModel-Stands (keine
+    /// Inhalte selbst - nur Zaehler/IDs; O(1)).
+    private func contentSignature() -> Int {
+        guard let viewModel else { return 0 }
+        var hash = 17
+        if case let .success(msgs) = viewModel.messages {
+            hash = hash &* 31 &+ msgs.count
+            hash = hash &* 31 &+ Int(truncatingIfNeeded: msgs.last?.id ?? 0)
+        }
+        hash = hash &* 31 &+ viewModel.chatImageCache.count
+        hash = hash &* 31 &+ viewModel.chatPdfCache.count
+        hash = hash &* 31 &+ Int(truncatingIfNeeded: viewModel.unreadBoundary ?? 0)
+        hash = hash &* 31 &+ (viewModel.hideUnreadSeparator ? 1 : 0)
+        hash = hash &* 31 &+ (viewModel.isLoadingHistory ? 1 : 0)
+        return hash
+    }
+
+    /// Rekonfiguriert NUR die sichtbaren Nachrichten-Zellen (geladene
+    /// Items - kein tf03/tf04-Risiko) per dokumentierter Diffable-API
+    /// (snapshot.reconfigureItems). Ausreichend: Unsichtbare Zellen
+    /// werden beim Scroll-Dequeue ohnehin frisch konfiguriert.
+    private func reconfigureVisibleMessages() {
+        guard let collectionView, let dataSource, !items.isEmpty else { return }
+        let visibleIds = collectionView.indexPathsForVisibleItems
+            .filter { $0.section == Self.messageSection.rawValue && $0.item < items.count }
+            .map { ListItem.message(id: items[$0.item].message.id) }
+        guard !visibleIds.isEmpty else { return }
+        var snapshot = dataSource.snapshot()
+        snapshot.reconfigureItems(visibleIds)
+        dataSource.apply(snapshot, animatingDifferences: false)
+        SouveraLog.write("LinkChat", "reconfigure visible cells: \(visibleIds.count)")
     }
 
     // MARK: - Snapshot-Anwendung

@@ -97,14 +97,12 @@ struct LinkView: View {
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
                             if viewModel.currentRoom?.hasCall == true {
-                                // Läuft im Raum bereits ein Call: direkt
+                                // Läuft im Raum bereits ein Call: pulsierend
+                                // grüner Join-Button (soll sofort ins Auge
+                                // fallen, Run-Feedback 11.09.) - direkt
                                 // teilnehmen statt neu anzurufen.
-                                Button {
+                                LinkPulsingCallButton {
                                     callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
-                                } label: {
-                                    Label(NSLocalizedString("_link_join_call_", comment: ""), systemImage: "phone.fill.arrow.up.right")
-                                        .foregroundStyle(.green)
-                                        .labelStyle(.titleAndIcon)
                                 }
                             } else {
                                 Button {
@@ -309,6 +307,42 @@ struct LinkView: View {
         var id: String { token }
     }
 #endif
+
+    /// Call-Button mit pulsierendem grünem Kreis-Hintergrund: ein im Raum
+    /// laufender Call soll optisch sofort herausstechen (Run-Feedback
+    /// 11.09., "Button einfach nur schwarz"). Bei Reduce Motion nur ein
+    /// sanfter Opacity-Hinweis statt Scale-Puls.
+    private struct LinkPulsingCallButton: View {
+        @Environment(\.accessibilityReduceMotion) private var reduceMotion
+        @State private var pulsing = false
+        let action: () -> Void
+
+        var body: some View {
+            Button(action: action) {
+                ZStack {
+                    Circle()
+                        .fill(Color.green.opacity(reduceMotion ? 0.30 : (pulsing ? 0.20 : 0.45)))
+                    if !reduceMotion {
+                        Circle()
+                            .stroke(Color.green.opacity(pulsing ? 0.15 : 0.6), lineWidth: 2)
+                            .scaleEffect(pulsing ? 1.3 : 0.95)
+                    }
+                    Image(systemName: "phone.fill.arrow.up.right")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
+                .frame(width: 30, height: 30)
+            }
+            .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
+            .onAppear { pulsing = true }
+            .animation(
+                reduceMotion
+                    ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true)
+                    : .easeInOut(duration: 1.1).repeatForever(autoreverses: true),
+                value: pulsing
+            )
+        }
+    }
 
     /// Green banner shown while a call is running without its own UI.
     private func activeCallBanner(title: String) -> some View {
@@ -1093,8 +1127,14 @@ struct LinkChatView: View {
     }
 
     private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
-        guard index > 0 else { return true }
-        let previous = visibleItems[index - 1]
+        // Nachbar per ID aufloesen (wie showsTime/showsAvatar): der rohe
+        // Index kann bei nachtraeglichen Inserts vor der Zelle auf einen
+        // falschen Nachbarn zeigen (eingefrorene Zelle -> doppelte/
+        // fehlende Tages-Trennlinien, Run-Feedback 11.09.).
+        let visible = visibleItems
+        guard let currentIndex = visible.firstIndex(where: { $0.id == message.id }) else { return true }
+        guard currentIndex > 0 else { return true }
+        let previous = visible[currentIndex - 1]
         let calendar = Calendar.current
         let prevDay = calendar.startOfDay(for: Date(timeIntervalSince1970: previous.timestamp))
         let thisDay = calendar.startOfDay(for: Date(timeIntervalSince1970: message.timestamp))

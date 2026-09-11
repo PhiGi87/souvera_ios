@@ -143,6 +143,21 @@ struct LinkChatMessage: Decodable, Identifiable {
         systemMessage == "reaction" || systemMessage == "reaction_revoked" || systemMessage == "reaction_deleted"
     }
 
+    /// Call-Verlaufsmeldungen (beitreten/verlassen/beendet ...) sollen im
+    /// Verlauf nicht erscheinen (Run-Feedback 11.09.) - NUR verpasste
+    /// Anrufe bleiben sichtbar. Läuft ein Call, zeigt stattdessen der
+    /// Call-Button seinen aktiven Zustand.
+    var isCallSystemMessage: Bool {
+        guard isSystemMessage, systemMessage.hasPrefix("call_") else { return false }
+        return systemMessage != "call_missed" && systemMessage != "call_tried"
+    }
+
+    /// Gemeinsames Ausblend-Kriterium fuer den Verlauf (Reaktions-Events
+    /// + Call-Verlaufsmeldungen).
+    var isHiddenSystemMessage: Bool {
+        isReactionEvent || isCallSystemMessage
+    }
+
     /// Text für die Weiterleitung (wie Talk Web): Mention-Platzhalter werden
     /// zu @"<id>" bzw. **Name** (mention-call) aufgelöst, andere Platzhalter
     /// zu ihren Namen; Datei-Nachrichten fallen auf "📎 Name" zurück.

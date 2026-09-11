@@ -716,7 +716,7 @@ final class LinkViewModel: ObservableObject {
             /// Closure statt lokaler func: lokale Funktionen erben die
             /// Actor-Isolation nicht (Compile-Fehler in Swift 5-Modus).
             let publish = {
-                let ordered = loaded.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                let ordered = loaded.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
                 self.lastMessageId = ordered.last?.id ?? self.lastMessageId
                 self.messages = .success(ordered)
                 if !self.windowLoadDone {
@@ -741,7 +741,7 @@ final class LinkViewModel: ObservableObject {
             // Kettenladen steht - kein Teil-Render mit späterem Sprung).
             // Der Cache bleibt Offline-Fallback.
             if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
-                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
                 self.lastMessageId = loaded.last?.id ?? 0
                 if isCovered(loaded) {
                     covered = true
@@ -761,7 +761,7 @@ final class LinkViewModel: ObservableObject {
             if history.isEmpty, loaded.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar (FEHLER oder leer): letzte
                 // bekannte Nachrichten zeigen (Offline-Fallback).
-                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+                loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
                 offlineNotice = NSLocalizedString("_link_offline_", comment: "")
                 cacheBannerActive = cacheBannerGate.shouldTrigger()
                 covered = true
@@ -913,7 +913,7 @@ final class LinkViewModel: ObservableObject {
                 reachedStart = true
                 break
             }
-            let fresh = older.filter { known.insert($0.id).inserted && !$0.isReactionEvent }
+            let fresh = older.filter { known.insert($0.id).inserted && !$0.isHiddenSystemMessage }
             let newAnchor = older.map(\.id).min() ?? anchor
             guard newAnchor < anchor else { break }
             anchor = newAnchor
@@ -999,7 +999,7 @@ final class LinkViewModel: ObservableObject {
                     }
                 }
                 let deduped = merged
-                    .filter { !$0.isReactionEvent }
+                    .filter { !$0.isHiddenSystemMessage }
                     .filter { !deletedIds.contains($0.id) }
                     .filter { seen.insert($0.id).inserted }
                     .sorted { $0.id < $1.id }
@@ -1100,7 +1100,7 @@ final class LinkViewModel: ObservableObject {
     private func reloadMessages(token: String) {
         Task {
             let history = await api?.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
-            let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isReactionEvent }
+            let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)
         }
