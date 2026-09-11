@@ -1136,6 +1136,7 @@ struct LinkChatView: View {
             let displayName = ownDisplayName
             let pendingTemps = viewModel.pendingMessages
                 .filter { $0.token == token }
+                .sorted { $0.createdAt < $1.createdAt }
                 .map { pending in
                     LinkChatMessage.makePending(
                         id: pending.id,
@@ -1147,7 +1148,6 @@ struct LinkChatView: View {
                         replyParent: replyParent(for: pending.replyTo, in: items)
                     )
                 }
-                .sorted { $0.createdAt < $1.createdAt }
             items.append(contentsOf: pendingTemps)
         }
         return items
@@ -1792,9 +1792,9 @@ private struct LinkMessageRow: View {
                         isImageMessage: viewModel.isImageMessage(message),
                         imageData: viewModel.chatImageCache[message.id],
                         imageFailed: viewModel.chatImageFailed.contains(message.id),
-                        pendingState: pendingState,
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
+                        pendingState: pendingState,
                         onImageTap: { onImageTap(message) },
                         onPdfTap: { onPdfTap(message) }
                     )
