@@ -1050,7 +1050,6 @@ final class LinkViewModel: ObservableObject {
                 continue
             }
             pollFailureStreak = 0
-            let fresh = result
             if !fresh.isEmpty {
                 lastMessageId = fresh.map(\.id).max() ?? lastMessageId
                 let current: [LinkChatMessage]

@@ -380,15 +380,15 @@ struct LinkParticipant: Decodable, Identifiable {
 /// Elternteil einer Antwort (Talk liefert die volle Nachricht als `parent`,
 /// ohne weitere Verschachtelung). Eigener Typ statt rekursivem
 /// LinkChatMessage (Struct-Rekursion wäre nicht zulässig).
-struct LinkParent: Decodable {
-    init(from message: LinkChatMessage) {
-        id = message.id
-        actorId = message.actorId
-        actorDisplayName = message.actorDisplayName
-        timestamp = message.timestamp
-        message = message.message
-        systemMessage = message.systemMessage
-        messageParameters = message.messageParameters
+struct LinkParent: Codable {
+    init(from source: LinkChatMessage) {
+        id = source.id
+        actorId = source.actorId
+        actorDisplayName = source.actorDisplayName
+        timestamp = source.timestamp
+        message = source.message
+        systemMessage = source.systemMessage
+        messageParameters = source.messageParameters
     }
 
     let id: Int64
@@ -424,7 +424,7 @@ struct LinkParent: Decodable {
     }
 }
 
-struct LinkRichObject: Decodable {
+struct LinkRichObject: Codable {
     let type: String?
     let name: String?
     let id: String?
