@@ -18,32 +18,38 @@ struct LinkChatListItem: Identifiable, Equatable {
     }
 }
 
-/// UIKit-Chat-Liste (Run 11.09., zweiphasig): Die Liste zeigt AB DEM
-/// EINTRITT nur das Initialfenster (neueste Seite inkl. aller Ungelesenen,
-/// per bewährtem KVO-stabilisiertem Eintritts-Scroll positioniert) und
-/// wächst erst NACH dem Settle, wenn `loadRemainingHistoryInBackground`
-/// die älteren Batches liefert. Jeder Batch wird als Insert OBERHALB des
-/// sichtbaren Bereichs eingefügt (`performBatchUpdates` + `insertItems`) -
-/// UICollectionView hält dabei die sichtbaren Zeilen an Ort und Stelle
-/// (dokumentiertes Batch-Verhalten): kein Sprung, kein Drift, ruhiges
-/// Hochscrollen in die wachsende Historie. Konkurrierende Mechanismen
-/// (Pull, Fenster-Erweiterung, Reload-Kämpfe) sind entfernt - es gibt
-/// nur noch diesen einen Hintergrund-Actor.
+/// UIKit-Chat-Liste (Run 11.09., zweiphasig, Diffable): Die Liste zeigt AB
+/// DEM EINTRITT nur das Initialfenster (neueste Seite inkl. aller
+/// Ungelesenen, per bewährtem KVO-stabilisiertem Eintritts-Scroll
+/// positioniert) und wächst erst NACH dem Settle, wenn
+/// `loadRemainingHistoryInBackground` die älteren Batches liefert. Jeder
+/// Batch wird per `NSDiffableDataSourceSnapshot` als Insert OBERHALB des
+/// sichtbaren Bereichs angewendet - die Datenquelle berechnet die
+/// Manipulationen garantiert gültig (keine
+/// Invalid-Batch-Updates-Crashklasse) und UICollectionView hält die
+/// sichtbaren Zeilen bei Insertionen darüber an Ort und Stelle: kein
+/// Sprung, kein Drift, ruhiges Hochscrollen in die wachsende Historie.
 ///
 /// Abschnitt 0 = Header-Zelle (Lade-Spinner / "Anfang der Unterhaltung",
 /// steht IM Scroll-Inhalt am Verlaufskopf - nie über Text), Abschnitt 1 =
 /// Nachrichten. Die Zeilen-Inhalte bleiben SwiftUI über
 /// UIHostingConfiguration (iOS 16+, dokumentiert).
 @MainActor
-final class LinkChatListController: NSObject, ObservableObject, UICollectionViewDataSource, UICollectionViewDelegate {
+final class LinkChatListController: NSObject, ObservableObject {
 
-    private enum EntryTarget {
-        case bottom
-        case separator(index: Int)
+    enum Section: Int, Hashable {
+        case header
+        case messages
     }
 
-    private static let headerSection = 0
-    private static let messageSection = 1
+    /// Diffable-Item: Header-Kennung oder Nachrichten-ID.
+    enum ListItem: Hashable {
+        case header
+        case message(id: Int64)
+    }
+
+    private static let headerSection = Section.header
+    private static let messageSection = Section.messages
 
     // MARK: - Vom SwiftUI-Host gesetzte Eingänge (je Update)
 
@@ -54,21 +60,10 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
     private var onEntrySettled: (() -> Void)?
 
-    /// Header-Zelle neu konfigurieren (Zustandswechsel Lade-Spinner /
-    /// "Anfang der Unterhaltung" / leer).
-    private func reconfigureHeader() {
-        guard let collectionView else { return }
-        let headerIndexPath = IndexPath(item: 0, section: Self.headerSection)
-        guard let cell = collectionView.cellForItem(at: headerIndexPath) else { return }
-        cell.contentConfiguration = UIHostingConfiguration {
-            headerContent
-        }
-        .margins(.all, 0)
-    }
-
     // MARK: - Interner Zustand
 
     private weak var collectionView: UICollectionView?
+    private var dataSource: UICollectionViewDiffableDataSource<Section, ListItem>?
     private var contentSizeObservation: NSKeyValueObservation?
     private var lastRoomToken: String?
     private var pendingEntryBoundary: Int64?
@@ -107,68 +102,34 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         self.onEntrySettled = onEntrySettled
         self.headerContent = headerContent
 
-        guard let collectionView else { return }
+        guard let dataSource else { return }
 
         // Header-Zelle bei jedem Update auffrischen (billig - eine Zelle):
         // der Zustand wechselt zwischen Lade-Spinner, "Anfang der
         // Unterhaltung" und leer.
-        reconfigureHeader()
+        dataSource.reconfigureItems([.header])
 
         let newIds = items.map(\.id)
         guard newIds != committedIds else { return }
-        applyDiff(newIds: newIds)
+        applySnapshot(ids: newIds)
+
+        if !didInitialEntry, !items.isEmpty {
+            didInitialEntry = true
+            DispatchQueue.main.async { [weak self] in
+                self?.performEntryScroll()
+            }
+        }
     }
 
-    // MARK: - Incrementelle Pflege (Standard-Chat-Muster)
+    // MARK: - Snapshot-Anwendung
 
-    /// - Reiner Prepend (ältere Batches aus dem Hintergrund-Chain) ->
-    ///   oben einfügen; UICollectionView hält die sichtbaren Zeilen bei
-    ///   Batch-Updates an Ort und Stelle (dokumentiert).
-    /// - Reiner Append (neue Meldungen) -> unten einfügen.
-    /// - Alles andere (Edits/Removals/Mixed) -> voller Reload.
-    private func applyDiff(newIds: [Int64]) {
-        guard let collectionView else { return }
-        let old = committedIds
-        // Gemeinsames Präfix
-        var prefix = 0
-        while prefix < old.count, prefix < newIds.count, old[prefix] == newIds[prefix] { prefix += 1 }
-        // Gemeinsames Suffix
-        var suffixOld = old.count
-        var suffixNew = newIds.count
-        while suffixOld > prefix, suffixNew > prefix, old[suffixOld - 1] == newIds[suffixNew - 1] {
-            suffixOld -= 1
-            suffixNew -= 1
-        }
-        let insertedCount = suffixNew - prefix
-        let removedCount = (old.count - suffixOld) - prefix
-
-        if insertedCount == 0, removedCount == 0 { return }
-        committedIds = newIds
-
-        if removedCount == 0, insertedCount > 0 {
-            // Lage der Insertion relativ zur ERSTEN committeten Zeile:
-            // davor = Prepend (obere Insert-Region, außerhalb des
-            // sichtbaren Bereichs beim unten stehenden Nutzer), dahinter =
-            // Append (untere Insert-Region).
-            let prependCount = max(0, old.count - suffixOld)
-            let appendCount = insertedCount - prependCount
-            collectionView.performBatchUpdates {
-                if prependCount > 0 {
-                    collectionView.insertItems(
-                        at: (0..<prependCount).map { IndexPath(item: $0, section: Self.messageSection) }
-                    )
-                }
-                if appendCount > 0 {
-                    collectionView.insertItems(
-                        at: (old.count..<(old.count + appendCount)).map { IndexPath(item: $0, section: Self.messageSection) }
-                    )
-                }
-            }
-            return
-        }
-        // Removals oder Edits -> voller Reload (Position bleibt numerisch
-        // erhalten; UIKit hält sichtbare Zellen bei Self-Sizing stabil).
-        collectionView.reloadData()
+    private func applySnapshot(ids: [Int64]) {
+        var snapshot = NSDiffableDataSourceSnapshot<Section, ListItem>()
+        snapshot.appendSections([.header, .messages])
+        snapshot.appendItems([.header], toSection: .header)
+        snapshot.appendItems(ids.map { ListItem.message(id: $0) }, toSection: .messages)
+        dataSource?.apply(snapshot, animatingDifferences: false)
+        committedIds = ids
     }
 
     // MARK: - Öffentliche Scroll-Kommandos (SwiftUI -> UIKit)
@@ -242,7 +203,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
     }
 
     private func messageIndexPath(item: Int) -> IndexPath {
-        IndexPath(item: item, section: Self.messageSection)
+        IndexPath(item: item, section: Self.messageSection.rawValue)
     }
 
     func scrollToBottom(animated: Bool) {
@@ -258,34 +219,7 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         performEntryScroll()
     }
 
-    // MARK: - UICollectionViewDataSource
-
-    func numberOfSections(in collectionView: UICollectionView) -> Int {
-        2
-    }
-
-    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
-        section == Self.headerSection ? 1 : items.count
-    }
-
-    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "LinkChatCell", for: indexPath)
-        if indexPath.section == Self.headerSection {
-            cell.contentConfiguration = UIHostingConfiguration {
-                headerContent
-            }
-            .margins(.all, 0)
-        } else if items.indices.contains(indexPath.item), let rowProvider {
-            cell.contentConfiguration = UIHostingConfiguration {
-                rowProvider(items[indexPath.item].globalIndex)
-            }
-            .margins(.all, 0)
-        }
-        cell.backgroundConfiguration = .clear()
-        return cell
-    }
-
-    // MARK: - SwiftUI-Anbindung
+    // MARK: - UICollectionViewDataSource (Diffable)
 
     func makeCollectionView() -> UICollectionView {
         var listConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
@@ -293,13 +227,33 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
         let layout = UICollectionViewCompositionalLayout.list(using: listConfiguration)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "LinkChatCell")
-        collectionView.dataSource = self
-        collectionView.delegate = self
         collectionView.backgroundColor = .clear
         collectionView.keyboardDismissMode = .interactive
         collectionView.alwaysBounceVertical = true
         collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.translatesAutoresizingMaskIntoConstraints = false
+
+        let dataSource = UICollectionViewDiffableDataSource<Section, ListItem>(collectionView: collectionView) { [weak self] collectionView, indexPath, item in
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "LinkChatCell", for: indexPath)
+            guard let self else { return cell }
+            if item == .header, let headerContent = self.headerContent {
+                cell.contentConfiguration = UIHostingConfiguration {
+                    headerContent
+                }
+                .margins(.all, 0)
+            } else if case let .message(id) = item, let rowProvider = self.rowProvider,
+                      let chatItem = self.items.first(where: { $0.message.id == id }) {
+                cell.contentConfiguration = UIHostingConfiguration {
+                    rowProvider(chatItem.globalIndex)
+                }
+                .margins(.all, 0)
+            }
+            cell.backgroundConfiguration = .clear()
+            return cell
+        }
+        collectionView.dataSource = dataSource
+        collectionView.delegate = self
+        self.dataSource = dataSource
         self.collectionView = collectionView
         // KVO auf contentSize (dokumentiertes NSKeyValueObserving) - Kern
         // der Eintritts-Stabilisierung.
@@ -309,6 +263,15 @@ final class LinkChatListController: NSObject, ObservableObject, UICollectionView
             }
         }
         return collectionView
+    }
+}
+
+extension LinkChatListController: UICollectionViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        let distance = scrollView.contentSize.height
+            - scrollView.adjustedContentInset.bottom
+            - (scrollView.contentOffset.y + scrollView.frame.height)
+        onDistanceChanged?(distance)
     }
 }
 

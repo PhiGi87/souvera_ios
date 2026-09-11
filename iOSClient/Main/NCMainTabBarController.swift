@@ -233,6 +233,15 @@ class NCMainTabBarController: UITabBarController {
                   let count = userInfo["count"] as? Int else { return }
             let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
             if account == active {
+                // Run-Fix "Badge flattert auf 0": Abgeleitete 0-Posts
+                // (Hintergrund-Sync-Zwischenstände, Cache-Fallback) löschen
+                // das Tab-Badge nicht, solange der Badge-Store einen echten
+                // Zähler hält - die Korrektur auf 0 kommt über die
+                // autoritative Email/query-Zählung (Vordergrund).
+                if count == 0, SouveraBadgeStore.shared.unreadMail(account: active) > 0 {
+                    JmapLog.write("Mail tab badge: skip derived 0 (store holds a real count)")
+                    return
+                }
                 self?.updateMailBadge(count)
             }
         }

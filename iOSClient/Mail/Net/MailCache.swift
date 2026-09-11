@@ -40,7 +40,10 @@ enum MailCache {
     private static func fileURL(account: String, mailboxId: String) -> URL {
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let safeMailbox = mailboxId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        return rootDirectory.appendingPathComponent("\(safeAccount)_\(safeMailbox).json.gz")
+        // v3: Nachrichten-Cache-Schlüssel wurden vereinheitlicht (mailboxId-
+        // Formate divergierten je Aufrufpfad) - legacy Dateien werden
+        // verworfen.
+        return rootDirectory.appendingPathComponent("\(safeAccount)_\(safeMailbox)-v3.json.gz")
     }
 
     struct MessageSnapshot {
@@ -145,7 +148,8 @@ enum MailCache {
 
     private static func mailboxesURL(account: String) -> URL {
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        return rootDirectory.appendingPathComponent("\(safeAccount)_mailboxes.json.gz")
+        // v3: siehe messages-v3 (Postfach-IDs vereinheitlicht).
+        return rootDirectory.appendingPathComponent("\(safeAccount)_mailboxes-v3.json.gz")
     }
 
     static func saveMailboxes(account: String, boxes: [[String: Any]]) {
