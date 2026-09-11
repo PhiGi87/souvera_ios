@@ -60,9 +60,9 @@ final class LinkChatListController: NSObject, ObservableObject {
 
     private(set) var items: [LinkChatListItem] = []
     private var isLoadingHistory = false
-    private var headerContent: AnyView?
     private var rowProvider: ((Int) -> AnyView)?
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
+    private var viewModel: LinkViewModel?
     private var onEntrySettled: (() -> Void)?
 
     // MARK: - Interner Zustand
@@ -89,7 +89,7 @@ final class LinkChatListController: NSObject, ObservableObject {
                 roomToken: String,
                 unreadBoundary: Int64?,
                 isLoadingHistory: Bool,
-                headerContent: AnyView?,
+                viewModel: LinkViewModel,
                 rowProvider: @escaping (Int) -> AnyView,
                 onDistanceChanged: @escaping (CGFloat) -> Void,
                 onEntrySettled: @escaping () -> Void) {
@@ -102,17 +102,19 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         self.items = items
         self.isLoadingHistory = isLoadingHistory
+        self.viewModel = viewModel
         self.rowProvider = rowProvider
         self.onDistanceChanged = onDistanceChanged
         self.onEntrySettled = onEntrySettled
-        self.headerContent = headerContent
 
         guard let dataSource else { return }
 
-        // Header-Zelle bei jedem Update auffrischen (billig - eine Zelle):
-        // der Zustand wechselt zwischen Lade-Spinner, "Anfang der
-        // Unterhaltung" und leer.
-        collectionView?.reconfigureItems(at: [IndexPath(item: 0, section: Self.headerSection.rawValue)])
+        // Header-Zelle NICHT per reconfigureItems anfassen: Der Aufruf
+        // crashte (tf03/tf04: Assertion, wenn das Header-Item noch nicht
+        // in der Collection View geladen ist). Die Zelle dequeue't beim
+        // Erreichen des Verlaufskopfs neu; ihr Inhalt (LinkChatHeader-
+        // Bubble) beobachtet das ViewModel reaktiv und ist damit
+        // zustandsaktuell ohne manuelle Manipulation.
 
         let newIds = items.map(\.id)
         guard newIds != committedIds else { return }
@@ -241,9 +243,9 @@ final class LinkChatListController: NSObject, ObservableObject {
         let dataSource = UICollectionViewDiffableDataSource<Section, ListItem>(collectionView: collectionView) { [weak self] collectionView, indexPath, item in
             let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "LinkChatCell", for: indexPath)
             guard let self else { return cell }
-            if item == .header, let headerContent = self.headerContent {
+            if item == .header, let viewModel = self.viewModel {
                 cell.contentConfiguration = UIHostingConfiguration {
-                    headerContent
+                    LinkChatHeaderBubble(viewModel: viewModel)
                 }
                 .margins(.all, 0)
             } else if case let .message(id) = item, let rowProvider = self.rowProvider,
@@ -288,7 +290,7 @@ struct LinkChatListView: UIViewRepresentable {
     let unreadBoundary: Int64?
     let isLoadingHistory: Bool
     let isPositioned: Bool
-    let headerContent: AnyView?
+    let viewModel: LinkViewModel
     let rowProvider: (Int) -> AnyView
     let onDistanceChanged: (CGFloat) -> Void
     let onEntrySettled: () -> Void
@@ -303,10 +305,58 @@ struct LinkChatListView: UIViewRepresentable {
             roomToken: roomToken,
             unreadBoundary: unreadBoundary,
             isLoadingHistory: isLoadingHistory,
-            headerContent: headerContent,
+            viewModel: viewModel,
             rowProvider: rowProvider,
             onDistanceChanged: onDistanceChanged,
             onEntrySettled: onEntrySettled
         )
+    }
+}
+
+
+/// Header-Zellen-Inhalt (Abschnitt 0 der Chat-Liste, steht IM Scroll-
+/// Inhalt am Verlaufskopf - nie ueber Text): Spinner waehrend der
+/// Vollverlauf laedt, "Anfang der Unterhaltung" am Verlaufsanfang.
+/// Beobachtet das ViewModel reaktiv - Zustandswechsel erscheinen ohne
+/// manuelle Zellen-Manipulation (Run-Fix: der fruehere
+/// reconfigureItems-Aufruf crashte, weil die Header-Zelle zum
+/// Aufrufzeitpunkt noch nicht in der Collection View existierte).
+struct LinkChatHeaderBubble: View {
+    @ObservedObject var viewModel: LinkViewModel
+
+    var body: some View {
+        Group {
+            if viewModel.isLoadingHistory {
+                hintBubble {
+                    ProgressView()
+                    Text(NSLocalizedString("_link_older_loading_", comment: ""))
+                }
+            } else if !viewModel.hasMoreHistory {
+                hintBubble {
+                    Text(NSLocalizedString("_link_history_start_", comment: ""))
+                }
+            } else {
+                // Weder Laden noch Gespraeuchsanfang: Bubble ausblenden
+                // (Self-Sizing reduziert die Zelle auf 0 Hoehe).
+                Color.clear.frame(height: 0)
+            }
+        }
+    }
+
+    private func hintBubble<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        HStack {
+            Spacer()
+            HStack(spacing: 8) {
+                content()
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(Color(NCBrandColor.shared.customer).opacity(0.12), in: Capsule())
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 }

@@ -1147,7 +1147,7 @@ struct LinkChatView: View {
                 unreadBoundary: viewModel.unreadBoundary,
                 isLoadingHistory: viewModel.isLoadingHistory,
                 isPositioned: chatPositioned,
-                headerContent: chatHeaderContent(items: items),
+                viewModel: viewModel,
                 rowProvider: { globalIndex in
                     guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
                     return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
@@ -1208,43 +1208,6 @@ struct LinkChatView: View {
             }
     }
 
-    /// Dezente ovale Hinweis-Bubble: MITTIG (Spacer beidseitig - vorher
-    /// rightbundig, obwohl "zentriert" dokumentiert) mit hellem
-    /// Souvera-Blau-Hintergrund statt neutralem Grau (Run-Feedback).
-    private func historyHintBubble<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        HStack {
-            Spacer()
-            HStack(spacing: 8) {
-                content()
-            }
-            .font(.caption2)
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 7)
-            .background(Color(NCBrandColor.shared.customer).opacity(0.12), in: Capsule())
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 6)
-    }
-
-    /// Header-Zellen-Inhalt (Abschnitt 0 der UIKit-Liste, steht IM
-    /// Scroll-Inhalt am Verlaufskopf - nie über Text): Spinner während der
-    /// Vollverlauf lädt, "Anfang der Unterhaltung" am Verlaufsanfang.
-    private func chatHeaderContent(items: [LinkChatMessage]) -> AnyView? {
-        if viewModel.isLoadingHistory {
-            return AnyView(historyHintBubble {
-                ProgressView()
-                Text(NSLocalizedString("_link_older_loading_", comment: ""))
-            })
-        }
-        if !viewModel.hasMoreHistory, !items.isEmpty {
-            return AnyView(historyHintBubble {
-                Text(NSLocalizedString("_link_history_start_", comment: ""))
-            })
-        }
-        return nil
-    }
 
     /// Dezente Trennlinie "Neue Nachrichten" (Talk-Standard).
     private var unreadSeparatorRow: some View {        HStack(spacing: 10) {
