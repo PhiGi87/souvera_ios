@@ -1747,6 +1747,7 @@ private struct LinkMessageRow: View {
                         isOwn: isOwn,
                         isImageMessage: viewModel.isImageMessage(message),
                         imageData: viewModel.chatImageCache[message.id],
+                        imageFailed: viewModel.chatImageFailed.contains(message.id),
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
                         onImageTap: { onImageTap(message) },
@@ -1841,6 +1842,9 @@ private struct LinkMessageBubble: View {
     /// P68k: Bildnachricht (Bild + Caption IN der Bubble, einheitliche Optik).
     var isImageMessage: Bool = false
     var imageData: Data?
+    /// Download endgueltig fehlgeschlagen -> "nicht verfuegbar"-Platzhalter
+    /// statt endlosem "Bild wird geladen..." (Run-Feedback 11.09.).
+    var imageFailed: Bool = false
     /// P68o: PDF-Nachricht (Thumbnail der 1. Seite + QuickLook-Tap).
     var isPdfMessage: Bool = false
     var pdfThumbData: Data?
@@ -1935,7 +1939,7 @@ private struct LinkMessageBubble: View {
                 .frame(maxWidth: 220, maxHeight: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .onTapGesture { onImageTap() }
-        } else if viewModel.chatImageFailed.contains(message.id) {
+        } else if imageFailed {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))
                 .frame(width: 160, height: 64)

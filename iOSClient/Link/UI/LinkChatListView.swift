@@ -384,11 +384,6 @@ final class LinkChatListController: NSObject, ObservableObject {
     func makeCollectionView() -> UICollectionView {
         var listConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
         listConfiguration.showsSeparators = false
-        // Realistische Schaetzhoehe: Der Default (~44pt) lag weit unter den
-        // echten Zeilenhoehen - jeder Prepend rechnete mit viel zu wenig
-        // neuem Inhalt (Schaetzfehler = Sprungursache). ~220 entspricht dem
-        // Mittel der Chat-Zeilen (Text/Bild/Mehrzeilig).
-        listConfiguration.estimatedItemHeight = 220
         let layout = UICollectionViewCompositionalLayout.list(using: listConfiguration)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "LinkChatCell")
