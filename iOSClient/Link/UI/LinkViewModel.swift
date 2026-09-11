@@ -772,6 +772,7 @@ final class LinkViewModel: ObservableObject {
                 let ordered = loaded.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
                 self.lastMessageId = ordered.last?.id ?? self.lastMessageId
                 self.messages = .success(ordered)
+                LinkCache.saveMessageArray(ordered, token: token)
                 if !self.windowLoadDone {
                     self.windowLoadDone = true
                     self.hasMoreHistory = true
@@ -1077,6 +1078,9 @@ final class LinkViewModel: ObservableObject {
                     .filter { seen.insert($0.id).inserted }
                     .sorted { $0.id < $1.id }
                 messages = .success(deduped)
+                // Stand in den Cache (offline Re-Entry behaelt zugestellte
+                // Nachrichten - Run-Feedback 12.09.).
+                LinkCache.saveMessageArray(deduped, token: token)
             }
         }
     }

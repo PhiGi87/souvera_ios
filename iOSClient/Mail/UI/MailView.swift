@@ -70,7 +70,6 @@ struct MailView: View {
         } message: { messages in
             Text(blacklistMessage(for: messages))
         }
-        .souveraOfflineBanner()
         .onAppear {
             viewModel.start()
             // P62g: JEDER Modul-Eintritt zieht die offene Mailbox nach -
@@ -997,6 +996,7 @@ private struct MailboxTreeRow: View {
 
 private struct MailMessageListView: View {
     @ObservedObject var viewModel: MailViewModel
+    @ObservedObject var networkStatus = SouveraNetworkStatus.shared
     /// false = Liste ist unter der Detailansicht versteckt gemountet; ihre
     /// Toolbar-Items (Bearbeiten/Sortierung/"Neue Mail") dürfen dann nicht
     /// in der Einzelansicht erscheinen.
@@ -1016,6 +1016,12 @@ private struct MailMessageListView: View {
     /// Stufe 1: Basis-Liste inkl. Overlay/Sheet/Toolbar/Aktionsleiste.
     private var baseContent: some View {
         VStack(spacing: 0) {
+            // Einheitlicher Offline-Banner (wie Link/Kalender) - INNERHALB
+            // der Listenstruktur, damit die Kopfzeile nicht verdeckt wird
+            // (Run-Feedback 12.09.).
+            if !networkStatus.isOnline {
+                SouveraOfflineBanner()
+            }
             if let notice = viewModel.offlineNotice {
                 Text(notice)
                     .font(.caption)

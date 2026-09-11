@@ -95,7 +95,7 @@ enum LinkRoomType: Int {
 }
 
 /// A single chat message in a conversation.
-struct LinkChatMessage: Decodable, Identifiable {
+struct LinkChatMessage: Codable, Identifiable {
     let id: Int64
     let token: String
     let actorId: String

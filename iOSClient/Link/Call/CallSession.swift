@@ -21,6 +21,7 @@ protocol CallSessionCallbacks: AnyObject {
     func onRemoteVideo(session: String, roomType: String, track: RTCVideoTrack)
     /// Remote-Stream wurde entfernt (z. B. Bildschirmfreigabe beendet).
     func onRemoteVideoRemoved(session: String, roomType: String)
+    func onRemoteVideoMuted(session: String, roomType: String, muted: Bool)
     /// Aktiver Sprecher gewechselt (Fokus-Modus).
     func onActiveSpeaker(session: String, roomType: String)
     func onEnded()
@@ -222,6 +223,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         self.mcuActive = mcuActive
         CallDebugLog.log("CallSession", "signaling connected own=\(ownSessionId) mcu=\(mcuActive)")
         timingLog("signaling connected")
+        startFrameStatsLoop()
         signalingConnected = true
         // P68w: Der Client joint den Raum direkt nach dem Hello (Session
         // wurde beim Connect übergeben). joinCall NICHT hier senden -
@@ -673,6 +675,64 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     func onClosed() {}
 
+    func onSessionsLeft(sessionIds: [String]) {
+        guard sessionIds.contains(ownSessionId) else { return }
+        // "fuer alle beenden" durch einen anderen Teilnehmer: die EIGENE
+        // Session ist im leave-Event -> Call sauber beenden (Run-Feedback
+        // 12.09.: Call blieb offen).
+        CallDebugLog.log("CallSession", "own session left (call ended for all) - ending")
+        end()
+    }
+
+    private var requestedScreenOffers: Set<String> = []
+    private var frameStatsTask: Task<Void, Never>?
+
+    func onRemoteVideoMuted(session: String, roomType: String, muted: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.callbacks?.onRemoteVideoMuted(session: session, roomType: roomType, muted: muted)
+        }
+    }
+
+    func onScreenShareActivity(fromSession: String, active: Bool) {
+        Self.webRtcQueue.async { [weak self] in
+            guard let self, active else { return }
+            guard self.requestedScreenOffers.insert(fromSession).inserted else { return }
+            CallDebugLog.log("CallSession", "screen unmute from \(fromSession.prefix(8)) - requesting screen offer")
+            self.signaling?.sendRequestOffer(toSession: fromSession, roomType: "screen")
+        }
+    }
+
+    /// Diagnostik (Run 12.09.): inbound frames/bytes pro Remote-Stream -
+    /// beweist im Log, ob der MCU die Screen-Verbindung mit Frames beliefert.
+    private func startFrameStatsLoop() {
+        frameStatsTask?.cancel()
+        frameStatsTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.logFrameStats()
+            }
+        }
+    }
+
+    private func logFrameStats() {
+        Self.webRtcQueue.async { [weak self] in
+            guard let self else { return }
+            for (key, peer) in self.peers where key.contains("|screen") || key.contains("|video") {
+                peer.statistics { report in
+                    let stats = report.statistics.values
+                        .filter { ($0.values["type"] as? String) == "inbound-rtp" && ($0.values["mediaType"] as? String) == "video" }
+                    for stat in stats {
+                        let frames = (stat.values["framesDecoded"] as? NSNumber)?.intValue ?? -1
+                        let bytes = (stat.values["bytesReceived"] as? NSNumber)?.int64Value ?? -1
+                        CallDebugLog.log("CallSession", "inbound [\(key.prefix(20))] framesDecoded=\(frames) bytes=\(bytes)")
+                    }
+                }
+            }
+        }
+    }
+
+
     // MARK: - Controls
 
     func setMuted(_ muted: Bool) {
@@ -987,6 +1047,8 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     private func end() {
         Task { @MainActor in SouveraRingbackPlayer.shared.stop() }
+        frameStatsTask?.cancel()
+        frameStatsTask = nil
         callbacks?.onEnded()
         LinkVoIPManager.shared.callSessionDidEnd(self)
     }

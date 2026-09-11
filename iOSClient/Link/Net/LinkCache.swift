@@ -55,10 +55,27 @@ struct LinkCache {
     }
 
     static func loadMessages(token: String) -> [LinkChatMessage]? {
+        // Neues Format (JSONEncoder-Array, Run 12.09.) hat Vorrang;
+        // Fallback auf das alte OCS-Envelope-Format (raw Server-Antwort).
+        if let url = fileURL("chatv2-\(token).json"),
+           let data = try? Data(contentsOf: url),
+           let messages = try? JSONDecoder().decode([LinkChatMessage].self, from: data) {
+            return messages
+        }
         guard let url = fileURL("chat-\(token).json"),
               let data = try? Data(contentsOf: url),
               let env = try? JSONDecoder().decode(OcsEnvelope<[LinkChatMessage]>.self, from: data) else { return nil }
         return env.ocs.data
+    }
+
+    /// Persistiert den gemergten Nachrichtenstand (JSONEncoder-Array) -
+    /// der Poll-Merge schrieb frueher NIE in den Cache, dadurch
+    /// verschwanden offline zugestellte Nachrichten beim Neustart des
+    /// Raums (Run-Feedback 12.09.).
+    static func saveMessageArray(_ messages: [LinkChatMessage], token: String) {
+        guard let url = fileURL("chatv2-\(token).json"),
+              let data = try? JSONEncoder().encode(messages) else { return }
+        try? data.write(to: url, options: .atomic)
     }
 }
 

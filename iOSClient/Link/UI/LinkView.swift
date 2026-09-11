@@ -1118,10 +1118,22 @@ struct LinkChatView: View {
     /// indexierte das messages-only-Array) liess pendent Zeilen als
     /// EmptyView rendern (Run-Feedback 11.09.: "waehrend offline nicht
     /// sichtbar").
+    /// Eigenen Anzeigenamen ableiten (fuer pendent Nachrichten): Name der
+    /// letzten eigenen Nachricht im Verlauf, sonst Username-Präfix. Der
+    /// fruehere Raumname erzeugte falsche Kuerzel ("TT" statt "AR",
+    /// Run-Feedback 12.09.).
+    private var ownDisplayName: String {
+        if let own = visibleItems.last(where: { $0.actorId == viewModel.currentUserId }),
+           !own.actorDisplayName.isEmpty {
+            return own.actorDisplayName
+        }
+        return viewModel.currentUserId.split(separator: "@").first.map(String.init) ?? viewModel.currentUserId
+    }
+
     private var renderMessages: [LinkChatMessage] {
         var items = visibleItems
         if case let .chat(token, _) = viewModel.route {
-            let displayName = viewModel.currentRoom?.displayName ?? token
+            let displayName = ownDisplayName
             let pendingTemps = viewModel.pendingMessages
                 .filter { $0.token == token }
                 .map { pending in
@@ -1135,7 +1147,7 @@ struct LinkChatView: View {
                         replyParent: replyParent(for: pending.replyTo, in: items)
                     )
                 }
-                .sorted { $0.id < $1.id }
+                .sorted { $0.createdAt < $1.createdAt }
             items.append(contentsOf: pendingTemps)
         }
         return items
@@ -1382,26 +1394,11 @@ struct LinkChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 2)
         } else {
-            if let pending = viewModel.pendingMessages.first(where: { $0.id == message.id }) {
-                // Sende-Status wie WhatsApp/Talk: 1 Haken = in der
-                // Warteschlange (Cache), 2 Haken = vom Server angenommen.
-                HStack(spacing: 6) {
-                    Spacer()
-                    if pending.state == .sent {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.secondary)
-                    }
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(pending.state == .sent ? Color.green : Color.secondary)
-                }
-                .padding(.horizontal, 12)
-            }
                             LinkMessageRow(
                                 viewModel: viewModel,
                                 message: message,
                                 isOwn: message.actorId == viewModel.currentUserId,
+                                pendingState: viewModel.pendingMessages.first(where: { $0.id == message.id })?.state,
                                 showTime: showsTime(index: index, message: message, items: items),
                                 showsAvatar: showsAvatar(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
@@ -1649,6 +1646,7 @@ private struct LinkMessageRow: View {
     @ObservedObject var viewModel: LinkViewModel
     let message: LinkChatMessage
     let isOwn: Bool
+    var pendingState: LinkPendingMessage.PendingState?
     var showTime: Bool = true
     var showsAvatar: Bool = true
     let onStartEdit: () -> Void
@@ -1794,6 +1792,7 @@ private struct LinkMessageRow: View {
                         isImageMessage: viewModel.isImageMessage(message),
                         imageData: viewModel.chatImageCache[message.id],
                         imageFailed: viewModel.chatImageFailed.contains(message.id),
+                        pendingState: pendingState,
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
                         onImageTap: { onImageTap(message) },
@@ -1894,6 +1893,10 @@ private struct LinkMessageBubble: View {
     /// P68o: PDF-Nachricht (Thumbnail der 1. Seite + QuickLook-Tap).
     var isPdfMessage: Bool = false
     var pdfThumbData: Data?
+    /// Sende-Status (Offline-Warteschlange): .queued = 1 Haken, .sent =
+    /// 2 Haken; nil = zugestellte Nachricht. Haken IN der Bubble rechts
+    /// neben der Nachricht (talk-web-Stil, Run-Feedback 12.09.).
+    var pendingState: LinkPendingMessage.PendingState?
     var onImageTap: () -> Void = {}
     var onPdfTap: () -> Void = {}
 
@@ -1922,10 +1925,16 @@ private struct LinkMessageBubble: View {
                         .souveraOpenURLAction()
                 }
             } else if message.fileName() != nil {
-                Text(displayText)
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(displayText)
+                    if let pendingState { deliveryCheckmarks(pendingState) }
+                }
             } else {
-                Text(message.attributedDisplayText())
-                    .souveraOpenURLAction()
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(message.attributedDisplayText())
+                        .souveraOpenURLAction()
+                    if let pendingState { deliveryCheckmarks(pendingState) }
+                }
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
@@ -1938,6 +1947,21 @@ private struct LinkMessageBubble: View {
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
         .foregroundStyle(isOwn ? .white : .primary)
+    }
+
+    /// Liefer-Haken (talk-web): 1 Haken = in der Warteschlange,
+    /// 2 Haken = vom Server angenommen.
+    @ViewBuilder
+    private func deliveryCheckmarks(_ state: LinkPendingMessage.PendingState) -> some View {
+        HStack(spacing: 1) {
+            if state == .sent {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 8, weight: .bold))
+            }
+            Image(systemName: "checkmark")
+                .font(.system(size: 8, weight: .bold))
+        }
+        .foregroundStyle(isOwn ? .white.opacity(0.85) : .secondary)
     }
 
     /// PDF-Thumbnail (1. Seite) im Bubble (Tap -> QuickLook), mit

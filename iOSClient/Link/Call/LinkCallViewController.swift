@@ -17,13 +17,21 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private let localView = RTCMTLVideoView()
     private var localTrack: RTCVideoTrack?
 
-    /// Kachel eines Remote-Streams (Fokus-Modus); Key = session|roomType.
-    private final class StreamTile {
+    /// Kachel eines Remote-Streams; Key = session|roomType. BIS ZUM
+    /// ERSTEN gerenderten Frame zeigt sie ein Avatar-Overlay (Initialen +
+    /// Name, talk-web-Stil) - keine schwarzen/leeren Kacheln mehr, wenn
+    /// eine Kamera aus ist oder ein Stream (z. B. Screenshare) noch keine
+    /// Frames liefert (Run-Feedback 12.09.).
+    private final class StreamTile: NSObject, RTCVideoViewDelegate {
         let container = UIView()
         let videoView = RTCMTLVideoView()
         let session: String
         let roomType: String
         var track: RTCVideoTrack?
+        private var hasRenderedFrame = false
+        private let overlay = UIView()
+        private let overlayAvatar = UILabel()
+        private let overlayName = UILabel()
 
         init(session: String, roomType: String) {
             self.session = session
@@ -35,6 +43,62 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             videoView.frame = container.bounds
             container.addSubview(videoView)
+            super.init()
+            videoView.delegate = self
+            buildOverlay()
+        }
+
+        /// Avatar-Overlay (Kreis + Name unten links, wie talk-web).
+        private func buildOverlay() {
+            overlay.backgroundColor = UIColor(white: 0.13, alpha: 1)
+            overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
+            overlay.frame = container.bounds
+            overlayAvatar.textAlignment = .center
+            overlayAvatar.textColor = .white
+            overlayAvatar.font = .systemFont(ofSize: 30, weight: .medium)
+            overlayAvatar.translatesAutoresizingMaskIntoConstraints = false
+            overlayName.textColor = .white
+            overlayName.font = .preferredFont(forTextStyle: .footnote)
+            overlayName.lineBreakMode = .byTruncatingTail
+            overlayName.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(overlayAvatar)
+            overlay.addSubview(overlayName)
+            container.addSubview(overlay)
+            NSLayoutConstraint.activate([
+                overlayAvatar.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                overlayAvatar.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+                overlayAvatar.widthAnchor.constraint(equalToConstant: 110),
+                overlayAvatar.heightAnchor.constraint(equalToConstant: 110),
+                overlayName.leadingAnchor.constraint(equalTo: overlay.leadingAnchor, constant: 12),
+                overlayName.trailingAnchor.constraint(lessThanOrEqualTo: overlay.trailingAnchor, constant: -12),
+                overlayName.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -10)
+            ])
+        }
+
+        func setOverlayIdentity(initials: String, name: String, color: UIColor) {
+            overlayAvatar.text = initials.uppercased()
+            overlayAvatar.backgroundColor = color
+            overlayAvatar.textColor = UIColor(red: 0.0, green: 0.4, blue: 0.62, alpha: 1)
+            overlayAvatar.layer.cornerRadius = 55
+            overlayAvatar.clipsToBounds = true
+            overlayName.text = name
+        }
+
+        func showOverlay() {
+            hasRenderedFrame = false
+            overlay.isHidden = false
+        }
+
+        func hideOverlayIfRendering() {
+            if hasRenderedFrame { overlay.isHidden = true }
+        }
+
+        func videoView(_ videoView: RTCVideoView, didRenderFrame size: CGSize) {
+            DispatchQueue.main.async {
+                guard !self.hasRenderedFrame else { return }
+                self.hasRenderedFrame = true
+                self.overlay.isHidden = true
+            }
         }
     }
 
@@ -792,11 +856,33 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             }
             tile.track = track
             track.add(tile.videoView)
+            // Overlay-Identitaet (Avatar + Name) aus der Teilnehmer-Liste.
+            let names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
+            let name = names[session] ?? ""
+            let initials = name.split(separator: " ").prefix(2)
+                .compactMap { $0.first.map(String.init) }
+                .joined()
+            tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
+                                    name: name,
+                                    color: UIColor(red: 0.78, green: 0.85, blue: 0.95, alpha: 1))
+            tile.showOverlay()
             CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
             let session = key.components(separatedBy: "|").first ?? ""
             let names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
             self.attachNameLabel(to: tile.container, name: names[session] ?? "")
             self.layoutTiles()
+        }
+    }
+
+    func onRemoteVideoMuted(session: String, roomType: String, muted: Bool) {
+        DispatchQueue.main.async {
+            let key = Self.key(session: session, roomType: roomType)
+            guard let tile = self.tiles[key] else { return }
+            if muted {
+                tile.showOverlay()
+            } else {
+                tile.hideOverlayIfRendering()
+            }
         }
     }
 

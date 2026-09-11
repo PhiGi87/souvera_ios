@@ -23,6 +23,18 @@ protocol HpbSignalingListener: AnyObject {
     func onOffer(fromSession: String, sid: String?, roomType: String, sdp: String)
     func onAnswer(fromSession: String, sid: String?, roomType: String, sdp: String)
     func onCandidate(fromSession: String, sid: String?, roomType: String, candidate: [String: Any])
+    /// Ein Teilnehmer hat den Call verlassen - ist die EIGENE Session
+    /// dabei (jemand hat "fuer alle beendet" gedrueckt), muss der Call
+    /// enden (Run-Feedback 11.09.: Call blieb offen).
+    func onSessionsLeft(sessionIds: [String])
+    /// Ein Teilnehmer hat seinen Bildschirmfreigabe-Stream (an-)geschaltet
+    /// (unmute/mute mit roomType=screen) - talk-ios fordert daraufhin
+    /// AKTIV den Screen-Offer an (NCCallController sendSendOfferMessage
+    /// roomType screen).
+    func onScreenShareActivity(fromSession: String, active: Bool)
+    /// Video an/aus der Remote-Session (mute/unmute name=video) - steuert
+    /// das Avatar-Overlay der Kachel (talk-web: Avatar statt schwarz).
+    func onRemoteVideoMuted(session: String, roomType: String, muted: Bool)
     func onClosed()
 }
 
@@ -124,8 +136,8 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         sendPayload(to: toSession, type: "answer", sdp: sdp, roomType: roomType, sid: sid)
     }
 
-    func sendRequestOffer(toSession: String) {
-        sendMessage(to: toSession, data: ["to": toSession, "type": "requestoffer", "roomType": roomTypeVideo])
+    func sendRequestOffer(toSession: String, roomType: String = "video") {
+        sendMessage(to: toSession, data: ["to": toSession, "type": "requestoffer", "roomType": roomType])
     }
 
     func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = "video", sid: String? = nil) {
@@ -284,6 +296,17 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         guard let event = root["event"] as? [String: Any] else { return }
         let target = event["target"] as? String
         let type = event["type"] as? String
+        // "leave": Sessions, die den Call verlassen haben (auch die
+        // EIGENE, wenn jemand "fuer alle beendet" drueckt).
+        if target == "room", type == "leave",
+           let leave = event["leave"] as? [[String: Any]] {
+            let sessions = leave.compactMap { $0["sessionId"] as? String ?? $0["sessionid"] as? String }
+            if !sessions.isEmpty {
+                CallDebugLog.log("HpbSignaling", "event leave sessions=\(sessions.map { String($0.prefix(8)) })")
+                listener?.onSessionsLeft(sessionIds: sessions)
+            }
+            return
+        }
         guard target == "participants", type == "update",
               let users = (event["update"] as? [String: Any])?["users"] as? [[String: Any]] else {
             CallDebugLog.log("HpbSignaling", "event target=\(target ?? "?") type=\(type ?? "?") (ignored)")
@@ -345,6 +368,15 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sid: sid, roomType: roomType, sdp: sdp) }
         case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, sid: sid, roomType: roomType, sdp: sdp) }
         case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, sid: sid, roomType: roomType, candidate: cand) }
+        case "unmute", "mute":
+            let muted = (data["type"] as? String) == "mute"
+            if roomType == "screen" {
+                listener?.onScreenShareActivity(fromSession: from,
+                                                active: !muted)
+            } else if roomType == "video",
+                      (payload?["name"] as? String) == "video" {
+                listener?.onRemoteVideoMuted(session: from, roomType: roomType, muted: muted)
+            }
         default: break
         }
     }
