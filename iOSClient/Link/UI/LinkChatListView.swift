@@ -112,7 +112,7 @@ final class LinkChatListController: NSObject, ObservableObject {
         // Header-Zelle bei jedem Update auffrischen (billig - eine Zelle):
         // der Zustand wechselt zwischen Lade-Spinner, "Anfang der
         // Unterhaltung" und leer.
-        collectionView.reconfigureItems([.header])
+        collectionView.reconfigureItems(at: [IndexPath(item: 0, section: Self.headerSection)])
 
         let newIds = items.map(\.id)
         guard newIds != committedIds else { return }
