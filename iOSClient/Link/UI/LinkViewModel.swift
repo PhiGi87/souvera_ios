@@ -53,6 +53,12 @@ final class LinkViewModel: ObservableObject {
     /// P68k: Inline-Bilder des Chats (Key = Message-ID; leeres Data =
     /// Laden fehlgeschlagen -> Chip-Fallback).
     @Published var chatImageCache: [Int64: Data] = [:]
+    /// Bilder, deren Download endgueltig fehlgeschlagen ist (max. 2
+    /// Versuche) - die Zelle zeigt dann "nicht verfuegbar" statt fuer
+    /// immer "Bild wird geladen..." (Run-Feedback 11.09.).
+    @Published var chatImageFailed: Set<Int64> = []
+    /// Versuchszaehler pro Bild (Session-scoped, nicht publiziert).
+    private var imageLoadAttempts: [Int64: Int] = [:]
     /// P68o: PDF-Anhänge: Thumbnail (1. Seite) + Temp-URL für QuickLook.
     @Published var chatPdfThumbCache: [Int64: Data] = [:]
     @Published var chatPdfCache: [Int64: URL] = [:]
@@ -181,6 +187,8 @@ final class LinkViewModel: ObservableObject {
         chatImageCache = [:]
         chatPdfThumbCache = [:]
         chatPdfCache = [:]
+        chatImageFailed = []
+        imageLoadAttempts = [:]
         unreadBoundary = nil
         lastMessageId = 0
         currentUserId = ""
@@ -263,17 +271,49 @@ final class LinkViewModel: ObservableObject {
     /// P68k: Lädt ein Chat-Bild (WebDAV) und skaliert es fürs Thumbnail
     /// herunter (Speicherschutz bei großen Fotos).
     func loadChatImage(for message: LinkChatMessage) async {
-        guard chatImageCache[message.id] == nil,
-              let info = message.fileInfo(),
-              let path = info.path,
-              let api else { return }
-        guard let url = await api.downloadChatAttachment(path: path),
-              let data = try? Data(contentsOf: url) else {
-            await MainActor.run { chatImageCache[message.id] = Data() }
+        let id = message.id
+        // Bereits geladen oder endgueltig gescheitert (2 Versuche): fertig.
+        if let cached = chatImageCache[id], !cached.isEmpty { return }
+        if chatImageFailed.contains(id), (imageLoadAttempts[id] ?? 0) >= 2 { return }
+        guard let info = message.fileInfo(), let api else {
+            CallDebugLog.log("LinkVM", "chat image \(id): no fileInfo/api - skipped")
             return
         }
-        let scaled = await Self.downscaledImageData(data, maxDimension: 1280) ?? data
-        await MainActor.run { chatImageCache[message.id] = scaled }
+        guard let path = info.path else {
+            // Ohne Pfad dauerhaft nicht ladbar (kein Retry-Spam).
+            CallDebugLog.log("LinkVM", "chat image \(id): fileInfo without path (\(info.name))")
+            await MainActor.run {
+                chatImageFailed.insert(id)
+                imageLoadAttempts[id] = 2
+                chatImageCache[id] = Data()
+            }
+            return
+        }
+        let attempt = (imageLoadAttempts[id] ?? 0) + 1
+        imageLoadAttempts[id] = attempt
+        if let url = await api.downloadChatAttachment(path: path),
+           let data = try? Data(contentsOf: url), !data.isEmpty {
+            let scaled = await Self.downscaledImageData(data, maxDimension: 1280) ?? data
+            CallDebugLog.log("LinkVM", "chat image \(id): loaded \(data.count) bytes (attempt \(attempt))")
+            await MainActor.run {
+                chatImageCache[id] = scaled
+                chatImageFailed.remove(id)
+            }
+        } else {
+            CallDebugLog.log("LinkVM", "chat image \(id): download FAILED (attempt \(attempt))")
+            if attempt < 2 {
+                // Ein Retry nach 1s (Funkloch/Timeout), danach Fehl-Marker.
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                if !Task.isCancelled {
+                    await loadChatImage(for: message)
+                }
+                return
+            }
+            await MainActor.run {
+                chatImageFailed.insert(id)
+                chatImageCache[id] = Data()
+            }
+        }
     }
 
     /// Skaliert Bilddaten auf maxDimension (längste Kante) herunter.

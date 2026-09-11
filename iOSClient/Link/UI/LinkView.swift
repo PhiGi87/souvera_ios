@@ -319,19 +319,23 @@ struct LinkView: View {
 
         var body: some View {
             Button(action: action) {
+                // Alles in FESTEN Grenzen (34x34): der fruehere Scale-Puls
+                // lief aus der Toolbar-Kapsel heraus (Run-Feedback 11.09.).
+                // Puls = Icon-Opacity + Ring wächst VON INNEN NACH AUSSEN
+                // innerhalb des festen Frames.
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(reduceMotion ? 0.30 : (pulsing ? 0.20 : 0.45)))
-                    if !reduceMotion {
-                        Circle()
-                            .stroke(Color.green.opacity(pulsing ? 0.15 : 0.6), lineWidth: 2)
-                            .scaleEffect(pulsing ? 1.3 : 0.95)
-                    }
+                        .fill(Color.green.opacity(0.16))
+                        .frame(width: 26, height: 26)
+                    Circle()
+                        .stroke(Color.green.opacity(pulsing ? 0.05 : 0.45), lineWidth: 2)
+                        .frame(width: pulsing ? 33 : 22, height: pulsing ? 33 : 22)
                     Image(systemName: "phone.fill.arrow.up.right")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.green)
+                        .opacity(reduceMotion ? 1.0 : (pulsing ? 0.6 : 1.0))
                 }
-                .frame(width: 30, height: 30)
+                .frame(width: 34, height: 34)
             }
             .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
             .onAppear { pulsing = true }
@@ -1918,7 +1922,10 @@ private struct LinkMessageBubble: View {
         }
     }
 
-    /// Bild im Bubble (Tap -> Vollbild), mit Lade-Platzhalter.
+    /// Bild im Bubble (Tap -> Vollbild), mit Lade-Platzhalter; nach
+    /// endgueltig fehlgeschlagenem Download (2 Versuche) "nicht
+    /// verfuegbar" statt fuer immer "Bild wird geladen..." (Run-Feedback
+    /// 11.09.).
     @ViewBuilder
     private var imageContent: some View {
         if let imageData, !imageData.isEmpty, let ui = UIImage(data: imageData) {
@@ -1928,6 +1935,18 @@ private struct LinkMessageBubble: View {
                 .frame(maxWidth: 220, maxHeight: 220)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .onTapGesture { onImageTap() }
+        } else if viewModel.chatImageFailed.contains(message.id) {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color(.secondarySystemBackground))
+                .frame(width: 160, height: 64)
+                .overlay(
+                    HStack(spacing: 6) {
+                        Image(systemName: "photo.slash").font(.caption)
+                        Text(NSLocalizedString("_link_image_failed_", comment: ""))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                )
         } else {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))

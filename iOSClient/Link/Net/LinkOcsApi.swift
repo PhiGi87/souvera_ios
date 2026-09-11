@@ -158,8 +158,15 @@ actor LinkOcsApi {
         guard let url = URL(string: "\(root)/remote.php/dav/files/\(encodedUser)/\(encodedFolder)/\(encodedName)") else { return nil }
         var req = URLRequest(url: url)
         req.setValue(account.basicAuthHeader, forHTTPHeaderField: "Authorization")
-        guard let (data, response) = try? await session.data(for: req),
-              (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        guard let (data, response) = try? await session.data(for: req) else {
+            CallDebugLog.log("LinkOcsApi", "chat attachment download FAILED transport path=\(path)")
+            return nil
+        }
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard statusCode == 200 else {
+            CallDebugLog.log("LinkOcsApi", "chat attachment download FAILED status=\(statusCode) path=\(path)")
+            return nil
+        }
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent(name)
         try? FileManager.default.removeItem(at: fileURL)

@@ -101,6 +101,8 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// Zelleninhalte blieben eingefroren (Platzhalter "Bild wird
     /// geladen...", alte Gruppierung, Run-Feedback 11.09.).
     private var lastContentSignature: Int = 0
+    /// Cooldown fuer Batch-Publikationen am Verlaufskopf.
+    private var lastOlderRequestAt: CFTimeInterval = 0
 
     // MARK: - Update vom SwiftUI-Host
 
@@ -187,6 +189,7 @@ final class LinkChatListController: NSObject, ObservableObject {
             hash = hash &* 31 &+ Int(truncatingIfNeeded: msgs.last?.id ?? 0)
         }
         hash = hash &* 31 &+ viewModel.chatImageCache.count
+        hash = hash &* 31 &+ viewModel.chatImageFailed.count
         hash = hash &* 31 &+ viewModel.chatPdfCache.count
         hash = hash &* 31 &+ Int(truncatingIfNeeded: viewModel.unreadBoundary ?? 0)
         hash = hash &* 31 &+ (viewModel.hideUnreadSeparator ? 1 : 0)
@@ -218,34 +221,29 @@ final class LinkChatListController: NSObject, ObservableObject {
         snapshot.appendItems([.header], toSection: .header)
         snapshot.appendItems(ids.map { ListItem.message(id: $0) }, toSection: .messages)
 
-        // Leseposition merken (Prepend-Pin): Anker = oberste sichtbare
-        // Nachricht. Sie ist realisiert -> exakter Frame; der relative
-        // Abstand zum Viewport wird nach dem Apply reproduziert. Der
-        // Apply mit animatingDifferences=false laeuft synchron auf dem
-        // Main-Actor ab, der IndexPath stammt aus den committeten
-        // sichtbaren Zellen - kein manueller Batch, keine Index-Arithmetik
-        // (Crashklassen tf01-tf04 bleiben ausgeschlossen).
-        var anchor: (indexPath: IndexPath, relative: CGFloat)?
+        // Prepend: Inhaltshoehe vor/nach dem Apply messen und das Offset
+        // um das Delta nachziehen (Stream-/Chat-SDK-Standard). KEIN Pin
+        // mehr ueber absolute Frames: nach dem Einfuegen von ~100 Zellen
+        // beruhen die Attribute auf Schaetzhoehen - der alte Pin rechnete
+        // damit massiv falsch und der Offset wurde geclampt = Sprung zum
+        // Gespraechsanfang (Log 11.09.: relative=-579, 3 Pins in 160ms).
+        // Das Delta bleibt auf den Schaetzfehler beschraenkt und wird beim
+        // Weiterscrollen von UIKit-Kalibrierung kontinuierlich aufgeloest.
+        var oldContentHeight: CGFloat?
+        var oldOffsetY: CGFloat?
         if isPrepend, !isEntryStabilizing, let collectionView {
-            let topVisible = collectionView.indexPathsForVisibleItems
-                .filter { $0.section == Self.messageSection.rawValue }
-                .min { $0.item < $1.item }
-            if let topVisible,
-               let frame = collectionView.layoutAttributesForItem(at: topVisible)?.frame {
-                anchor = (topVisible, frame.minY - collectionView.contentOffset.y)
-            }
+            oldContentHeight = collectionView.contentSize.height
+            oldOffsetY = collectionView.contentOffset.y
         }
 
         dataSource?.apply(snapshot, animatingDifferences: false) { [weak self] in
             guard let self, self.committedIds == ids, let collectionView = self.collectionView else { return }
-            guard let anchor else { return }
-            // Pin: oberste sichtbare Nachricht wieder an dieselbe
-            // Viewport-Position setzen (nicht talk-ios .top-Anker - der
-            // springt zum Kopf und wuerde beim Lesen am Ende abreissen).
-            if let frame = collectionView.layoutAttributesForItem(at: anchor.indexPath)?.frame {
-                collectionView.contentOffset.y = frame.minY - anchor.relative
-                SouveraLog.write("LinkChat", "re-anchor after history prepend: item=\(anchor.indexPath.item) relative=\(Int(anchor.relative))")
-            }
+            guard let oldContentHeight, let oldOffsetY else { return }
+            collectionView.layoutIfNeeded()
+            let delta = collectionView.contentSize.height - oldContentHeight
+            guard delta > 0 else { return }
+            collectionView.contentOffset.y = oldOffsetY + delta
+            SouveraLog.write("LinkChat", "re-anchor after history prepend (delta): +\(Int(delta))pt")
         }
         committedIds = ids
     }
@@ -386,6 +384,11 @@ final class LinkChatListController: NSObject, ObservableObject {
     func makeCollectionView() -> UICollectionView {
         var listConfiguration = UICollectionLayoutListConfiguration(appearance: .plain)
         listConfiguration.showsSeparators = false
+        // Realistische Schaetzhoehe: Der Default (~44pt) lag weit unter den
+        // echten Zeilenhoehen - jeder Prepend rechnete mit viel zu wenig
+        // neuem Inhalt (Schaetzfehler = Sprungursache). ~220 entspricht dem
+        // Mittel der Chat-Zeilen (Text/Bild/Mehrzeilig).
+        listConfiguration.estimatedItemHeight = 220
         let layout = UICollectionViewCompositionalLayout.list(using: listConfiguration)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "LinkChatCell")
@@ -439,8 +442,13 @@ extension LinkChatListController: UICollectionViewDelegate {
         // anfordern (talk-ios laedt Verlauf ebenfalls nur am Kopf nach).
         // Erst NACH dem Eintritts-Settle - in der Phase gehoert der
         // Offset dem Entry-Scroll.
+        // Cooldown: Ein Batch-Publish pro 400ms - der fruehere Pin loss
+        // bei einem Fling 3 Batches in 160ms anwenden (Log 11.09.), jede
+        // Anwendung verschiebt das Offset und stapelte den Fehler.
         if !isEntryStabilizing, !items.isEmpty,
-           scrollView.contentOffset.y + scrollView.adjustedContentInset.top < 600 {
+           scrollView.contentOffset.y + scrollView.adjustedContentInset.top < 300,
+           CACurrentMediaTime() - lastOlderRequestAt >= 0.4 {
+            lastOlderRequestAt = CACurrentMediaTime()
             onRequestOlder?()
         }
     }

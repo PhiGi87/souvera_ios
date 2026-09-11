@@ -39,6 +39,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     private var tiles: [String: StreamTile] = [:]
+    /// Namen der Call-Teilnehmer (aus demParticipants-Endpunkt, alle mit
+    /// inCall != 0) - Grundlage fuer Audio-Platzhalter-Kacheln.
+    private var participantNames: [String] = []
+    /// Aktuell platzierte Platzhalter-Kacheln (wird je Layout neu aufgebaut).
+    private var placeholderTiles: [UIView] = []
     /// Manuell fokussierte Kachel (Tap auf eine kleine Kachel).
     private var manualFocusKey: String?
     /// Vom aktiven Sprecher fokussierte Kachel.
@@ -222,8 +227,68 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             let names = await api.callParticipantNames(token: token)
             await MainActor.run {
                 participantsLabel.text = names.isEmpty ? "" : names.joined(separator: ", ")
+                if names != participantNames {
+                    participantNames = names
+                    layoutTiles()
+                }
             }
         }
+    }
+
+    /// Audio-Teilnehmer ohne eigene Video-Kachel: statische Platzhalter
+    /// (Initiale + Name), damit das Raster bei >2 Teilnehmern alle zeigt.
+    private var audioOnlyCount: Int {
+        max(0, participantNames.count - tiles.count)
+    }
+
+    private func makePlaceholderTile(index: Int) -> UIView {
+        let container = UIView()
+        container.backgroundColor = UIColor.darkGray
+        container.layer.cornerRadius = 10
+        container.clipsToBounds = true
+
+        let name = index < participantNames.count ? participantNames[index] : ""
+        let initials = name.split(separator: " ").prefix(2)
+            .compactMap { $0.first.map(String.init) }
+            .joined()
+        let avatar = UILabel()
+        avatar.text = String(initials.prefix(2)).uppercased()
+        avatar.textColor = .white
+        avatar.font = .systemFont(ofSize: 22, weight: .semibold)
+        avatar.textAlignment = .center
+        avatar.translatesAutoresizingMaskIntoConstraints = false
+        let label = UILabel()
+        label.text = name
+        label.textColor = .white
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.textAlignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        let mic = UIImageView(image: UIImage(systemName: "mic.fill"))
+        mic.tintColor = .white
+        mic.contentMode = .scaleAspectFit
+        mic.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(avatar)
+        container.addSubview(label)
+        container.addSubview(mic)
+        NSLayoutConstraint.activate([
+            avatar.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+            avatar.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: avatar.bottomAnchor, constant: 6),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -4),
+            mic.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            mic.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -8),
+            mic.widthAnchor.constraint(equalToConstant: 14),
+            mic.heightAnchor.constraint(equalToConstant: 14)
+        ])
+        return container
+    }
+
+    /// Platzhalter-Kacheln aus dem View nehmen (vor jedem Layout).
+    private func clearPlaceholderTiles() {
+        placeholderTiles.forEach { $0.removeFromSuperview() }
+        placeholderTiles.removeAll()
     }
 
     private func setupVideoViews() {
@@ -310,6 +375,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
+        clearPlaceholderTiles()
         // P68e: Vollscreen verlassen (Call beendet/verlassen) - Banner
         // wieder erlauben, Presenter kann erneut präsentieren.
         LinkVoIPManager.shared.noteCallUIDismissed()
@@ -324,10 +390,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             layoutFocus()
             return
         }
-        if tiles.count == 1 {
-            // 1:1: entfernter Teilnehmer groß, Eigenansicht floating.
-            layoutFocus()
-        } else if layoutMode == .raster {
+        // Layout-Modus IMMER respektieren - auch bei nur einer Video-Kachel.
+        // Vorher zwang tiles.count == 1 den Fokus: Teilnehmer OHNE Video
+        // (nur Audio) erscheinen als Platzhalter-Kacheln, damit der
+        // Raster/Fokus-Wechsel bei >2 Teilnehmern sichtbar wirkt
+        // (Run-Feedback 11.09.: "kann nicht zur anderen Ansicht wechseln").
+        if layoutMode == .raster {
             layoutRaster()
         } else {
             layoutFocus()
@@ -353,6 +421,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let tileWidth = availableWidth / CGFloat(columns)
         let tileHeight = tileWidth * 1.4
 
+        clearPlaceholderTiles()
+
         var index = 0
         var x = margin
         var y = safeTop + margin
@@ -374,6 +444,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         for key in remoteKeys {
             guard let tile = tiles[key] else { continue }
             place(tile.container)
+        }
+        // Statische Platzhalter-Kacheln fuer Audio-Teilnehmer (ohne
+        // Video-Track): Initiale + Name, Mic-Icon (Run-Entscheid 11.09.).
+        for i in 0..<audioOnlyCount {
+            let placeholder = makePlaceholderTile(index: i)
+            view.insertSubview(placeholder, at: 0)
+            placeholderTiles.append(placeholder)
+            place(placeholder)
         }
         if shouldShowLocalView {
             place(localContainer)
@@ -430,6 +508,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 x += tileWidth + gap
             }
         }
+        clearPlaceholderTiles()
         lastFocusedKey = focusKey
         layoutLocalFloating()
     }
