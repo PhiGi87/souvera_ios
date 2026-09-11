@@ -34,6 +34,11 @@ struct LinkChatListItem: Identifiable, Equatable {
 /// steht IM Scroll-Inhalt am Verlaufskopf - nie über Text), Abschnitt 1 =
 /// Nachrichten. Die Zeilen-Inhalte bleiben SwiftUI über
 /// UIHostingConfiguration (iOS 16+, dokumentiert).
+    private enum EntryTarget {
+        case bottom
+        case separator(index: Int)
+    }
+
 @MainActor
 final class LinkChatListController: NSObject, ObservableObject {
 
@@ -107,7 +112,7 @@ final class LinkChatListController: NSObject, ObservableObject {
         // Header-Zelle bei jedem Update auffrischen (billig - eine Zelle):
         // der Zustand wechselt zwischen Lade-Spinner, "Anfang der
         // Unterhaltung" und leer.
-        dataSource.reconfigureItems([.header])
+        collectionView.reconfigureItems([.header])
 
         let newIds = items.map(\.id)
         guard newIds != committedIds else { return }
