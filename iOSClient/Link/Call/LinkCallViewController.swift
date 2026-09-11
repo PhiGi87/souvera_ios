@@ -41,7 +41,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var tiles: [String: StreamTile] = [:]
     /// Namen der Call-Teilnehmer (aus demParticipants-Endpunkt, alle mit
     /// inCall != 0) - Grundlage fuer Audio-Platzhalter-Kacheln.
-    private var participantNames: [String] = []
+    /// Teilnehmer im Call OHNE die eigene Person (Session-Bezug fuer
+    /// Kachel-Namen und Platzhalter-Zaehlung - die eigene Session in der
+    /// Liste liess die Platzhalter kippen, Run-Feedback 11.09.).
+    private var callParticipants: [LinkOcsApi.LinkCallParticipant] = []
     /// Aktuell platzierte Platzhalter-Kacheln (wird je Layout neu aufgebaut).
     private var placeholderTiles: [UIView] = []
     /// Manuell fokussierte Kachel (Tap auf eine kleine Kachel).
@@ -97,7 +100,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         view.backgroundColor = .black
         setupVideoViews()
         setupControls()
-        setupParticipantsOverlay()
+        setupInfoLabel()
 
         if let attached = attachedSession {
             self.session = attached
@@ -148,7 +151,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                         await MainActor.run {
                             self.isVideoOn = false
                             self.videoButton?.setImage(UIImage(systemName: "video.slash.fill"), for: .normal)
-                            self.participantsLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
+                            self.infoLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
                         }
                     }
                 }
@@ -201,61 +204,75 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         present(alert, animated: true)
     }
 
-    // MARK: - Participants overlay
+    // MARK: - Participants
 
-    private let participantsLabel = UILabel()
+    /// Hinweiszeile (z. B. Kamera verweigert) - KEINE Teilnehmernamen mehr:
+    /// die stehen jetzt AN den Kacheln (Run-Feedback 11.09.).
+    private let infoLabel = UILabel()
 
-    private var participantRefreshTimer: Timer?
-
-    private func setupParticipantsOverlay() {
-        participantsLabel.translatesAutoresizingMaskIntoConstraints = false
-        participantsLabel.textColor = .white
-        participantsLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
-        participantsLabel.numberOfLines = 0
-        participantsLabel.textAlignment = .center
-        view.addSubview(participantsLabel)
+    private func setupInfoLabel() {
+        infoLabel.translatesAutoresizingMaskIntoConstraints = false
+        infoLabel.textColor = .white
+        infoLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
+        infoLabel.numberOfLines = 0
+        infoLabel.textAlignment = .center
+        view.addSubview(infoLabel)
         NSLayoutConstraint.activate([
-            participantsLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            participantsLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            participantsLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+            infoLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
         ])
     }
+
+    private var participantRefreshTimer: Timer?
 
     private func loadParticipants() {
         Task {
             let api = LinkOcsApi(account: account)
-            let names = await api.callParticipantNames(token: token)
+            let participants = await api.callParticipants(token: token)
+                .filter { $0.userId != account.username }
             await MainActor.run {
-                participantsLabel.text = names.isEmpty ? "" : names.joined(separator: ", ")
-                if names != participantNames {
-                    participantNames = names
+                if participants != callParticipants {
+                    callParticipants = participants
+                    updateTileNameLabels()
                     layoutTiles()
                 }
             }
         }
     }
 
-    /// Audio-Teilnehmer ohne eigene Video-Kachel: statische Platzhalter
-    /// (Initiale + Name), damit das Raster bei >2 Teilnehmern alle zeigt.
-    private var audioOnlyCount: Int {
-        max(0, participantNames.count - tiles.count)
+    /// Sessions, die bereits eine Kachel haben (video ODER screen).
+    private var tiledSessions: Set<String> {
+        Set(tiles.keys.compactMap { $0.components(separatedBy: "|").first })
     }
 
-    private func makePlaceholderTile(index: Int) -> UIView {
+    /// Audio-Teilnehmer ohne eigene Kachel: statische Platzhalter, damit
+    /// Raster/Fokus bei >2 Teilnehmern alle zeigt.
+    private var audioOnlyParticipants: [LinkOcsApi.LinkCallParticipant] {
+        let tiled = tiledSessions
+        return callParticipants.filter { !tiled.contains($0.sessionId) }
+    }
+
+    private func makePlaceholderTile(participant: LinkOcsApi.LinkCallParticipant) -> UIView {
+        // Stil wie die Avatar-Kreise der Raum-UEbersicht: farbiger Kreis
+        // mit Initialen, Name darunter (Run-Feedback 11.09.).
         let container = UIView()
-        container.backgroundColor = UIColor.darkGray
+        container.backgroundColor = UIColor(white: 0.15, alpha: 1)
         container.layer.cornerRadius = 10
         container.clipsToBounds = true
 
-        let name = index < participantNames.count ? participantNames[index] : ""
+        let name = participant.displayName
         let initials = name.split(separator: " ").prefix(2)
             .compactMap { $0.first.map(String.init) }
             .joined()
         let avatar = UILabel()
         avatar.text = String(initials.prefix(2)).uppercased()
         avatar.textColor = .white
-        avatar.font = .systemFont(ofSize: 22, weight: .semibold)
+        avatar.font = .systemFont(ofSize: 18, weight: .semibold)
         avatar.textAlignment = .center
+        avatar.backgroundColor = UIColor(red: 0.2, green: 0.55, blue: 0.9, alpha: 1)
+        avatar.layer.cornerRadius = 26
+        avatar.clipsToBounds = true
         avatar.translatesAutoresizingMaskIntoConstraints = false
         let label = UILabel()
         label.text = name
@@ -273,7 +290,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         container.addSubview(mic)
         NSLayoutConstraint.activate([
             avatar.centerXAnchor.constraint(equalTo: container.centerXAnchor),
-            avatar.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -12),
+            avatar.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -14),
+            avatar.widthAnchor.constraint(equalToConstant: 52),
+            avatar.heightAnchor.constraint(equalToConstant: 52),
             label.topAnchor.constraint(equalTo: avatar.bottomAnchor, constant: 6),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -4),
@@ -283,6 +302,37 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             mic.heightAnchor.constraint(equalToConstant: 14)
         ])
         return container
+    }
+
+    /// Name-Label an EINER Kachel (tag 4711 = austauschbar).
+    private func attachNameLabel(to container: UIView, name: String) {
+        container.viewWithTag(4711)?.removeFromSuperview()
+        guard !name.isEmpty else { return }
+        let label = UILabel()
+        label.tag = 4711
+        label.text = name
+        label.textColor = .white
+        label.font = .preferredFont(forTextStyle: .caption1)
+        label.shadowColor = .black
+        label.shadowOffset = CGSize(width: 0, height: 1)
+        label.textAlignment = .center
+        label.lineBreakMode = .byTruncatingTail
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 6),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -6)
+        ])
+    }
+
+    /// Namen aller Video-Kacheln auffrischen (session -> Name).
+    private func updateTileNameLabels() {
+        let names = Dictionary(uniqueKeysWithValues: callParticipants.map { ($0.sessionId, $0.displayName) })
+        for (key, tile) in tiles {
+            guard let session = key.components(separatedBy: "|").first else { continue }
+            attachNameLabel(to: tile.container, name: names[session] ?? "")
+        }
     }
 
     /// Platzhalter-Kacheln aus dem View nehmen (vor jedem Layout).
@@ -447,8 +497,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
         // Statische Platzhalter-Kacheln fuer Audio-Teilnehmer (ohne
         // Video-Track): Initiale + Name, Mic-Icon (Run-Entscheid 11.09.).
-        for i in 0..<audioOnlyCount {
-            let placeholder = makePlaceholderTile(index: i)
+        for participant in audioOnlyParticipants {
+            let placeholder = makePlaceholderTile(participant: participant)
             view.insertSubview(placeholder, at: 0)
             placeholderTiles.append(placeholder)
             place(placeholder)
@@ -511,8 +561,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // Modi - vorher verschwanden sie beim Fokus-Wechsel, Run-
             // Feedback 11.09.).
             clearPlaceholderTiles()
-            for i in 0..<audioOnlyCount {
-                let placeholder = makePlaceholderTile(index: i)
+            for participant in audioOnlyParticipants {
+                let placeholder = makePlaceholderTile(participant: participant)
                 view.insertSubview(placeholder, at: 0)
                 placeholderTiles.append(placeholder)
                 placeholder.layer.cornerRadius = 10
@@ -705,7 +755,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     func onVideoPermissionDenied() {
         DispatchQueue.main.async {
             self.videoButton?.setImage(UIImage(systemName: "video.slash.fill"), for: .normal)
-            self.participantsLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
+            self.infoLabel.text = NSLocalizedString("_link_camera_denied_", comment: "")
         }
     }
 
@@ -743,6 +793,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             tile.track = track
             track.add(tile.videoView)
             CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
+            let session = key.components(separatedBy: "|").first ?? ""
+            let names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
+            self.attachNameLabel(to: tile.container, name: names[session] ?? "")
             self.layoutTiles()
         }
     }

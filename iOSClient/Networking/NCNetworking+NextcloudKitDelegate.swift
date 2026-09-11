@@ -14,20 +14,9 @@ extension NCNetworking {
         if typeReachability == NKTypeReachability.reachableCellular || typeReachability == NKTypeReachability.reachableEthernetOrWiFi {
             lastReachability = true
         } else {
-            if lastReachability {
-                let windowScenes = UIApplication.shared.connectedScenes
-                    .compactMap { $0 as? UIWindowScene }
-                    .filter { $0.activationState == .foregroundActive || $0.activationState == .foregroundInactive }
-                Task {
-                    for windowScene in windowScenes {
-                        await showWarningBanner(windowScene: windowScene,
-                                                subtitle: "_network_not_available_",
-                                                systemImage: "wifi.exclamationmark.circle",
-                                                imageAnimation: .bounce,
-                                                errorCode: NSURLErrorNotConnectedToInternet)
-                    }
-                }
-            }
+            // Offline-Hinweis bewusst KEIN Popup mehr: die Modul-Roots
+            // (Link/Mail/Kalender) zeigen den dezenten SouveraOfflineBanner
+            // (Run-Feedback 11.09.).
             lastReachability = false
         }
         networkReachability = typeReachability

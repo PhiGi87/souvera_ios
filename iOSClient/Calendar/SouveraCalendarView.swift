@@ -75,6 +75,7 @@ struct SouveraCalendarView: View {
             GeometryReader { geometry in
                 let isWide = geometry.size.width > geometry.size.height
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
+                // (Offline-Banner haengt am Root-NavigationStack, siehe unten.)
                 VStack(spacing: 0) {
                     if searchActive {
                         calendarSearchField
@@ -88,6 +89,7 @@ struct SouveraCalendarView: View {
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .souveraOfflineBanner()
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Ein einziger Button mit Auswahl-Menü (wie die
@@ -163,7 +165,6 @@ struct SouveraCalendarView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.significantTimeChangeNotification)) { _ in
             Task { await viewModel.load() }
         }
-        .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.actionFeedback {
                 HStack(spacing: 8) {

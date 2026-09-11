@@ -39,6 +39,11 @@ final class CallSession: NSObject, HpbSignalingListener {
     private var localVideo: RTCVideoTrack?
 
     private var peers: [String: RTCPeerConnection] = [:]
+    /// talk-ios NCPeerConnection.sid: die "sid" des eingehenden Offers -
+    /// wird in Answer und Candidates ZURUECKGESPIEGELT, damit der MCU die
+    /// Nachricht der richtigen Verbindung zuordnen kann (video vs. screen
+    /// derselben Session).
+    private var peerSids: [String: String] = [:]
     private var observers: [String: PeerObserver] = [:]
     private var requestedOffers: Set<String> = []
     private var pendingIceServers: [RTCIceServer] = []
@@ -248,6 +253,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         signaling?.close()
         signaling = nil
         peers.removeAll()
+        peerSids.removeAll()
         statusChannels.removeAll()
         publisherCreated = false
         joinCallSent = false
@@ -566,17 +572,27 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
     }
 
-    func onOffer(fromSession: String, sdp: String, roomType: String) {
+    func onOffer(fromSession: String, sid: String?, roomType: String, sdp: String) {
         Self.webRtcQueue.async { [weak self] in
-            self?.handleOffer(fromSession: fromSession, sdp: sdp, roomType: roomType)
+            self?.handleOffer(fromSession: fromSession, sid: sid, roomType: roomType, sdp: sdp)
         }
     }
 
     /// P68w: On-Queue-Implementierung (serielle WebRTC-Queue, Basis-Muster).
-    private func handleOffer(fromSession: String, sdp: String, roomType: String) {
+    private func handleOffer(fromSession: String, sid: String?, roomType: String, sdp: String) {
         // Peers pro Session UND Stream-Typ (Bildschirmfreigabe kommt als
-        // zweites Angebot derselben Session).
+        // zweites Angebot derselben Session). talk-ios processOfferAnswer:
+        // eine neue sid auf bestehender Verbindung = alte ist veraltet und
+        // wird neu angelegt.
         let key = Self.streamKey(session: fromSession, roomType: roomType)
+        if let currentSid = peerSids[key], !currentSid.isEmpty, let sid, !sid.isEmpty, currentSid != sid,
+           let stale = peers[key] {
+            CallDebugLog.log("CallSession", "stale peer \(fromSession.prefix(8))|\(roomType) sid changed - recreating")
+            peers.removeValue(forKey: key)
+            peerSids.removeValue(forKey: key)
+            stale.close()
+        }
+        peerSids[key] = sid ?? peerSids[key]
         let peer = peerFor(key: key, session: fromSession, addLocalTracks: !mcuActive, isPublisher: false, roomType: roomType)
         // P68f: Remote-Offer ebenfalls mit H264-Präferenz setzen.
         let remote = RTCSessionDescription(type: .offer, sdp: Self.preferringVideoCodec(sdp, codec: "H264"))
@@ -585,19 +601,24 @@ final class CallSession: NSObject, HpbSignalingListener {
             peer.answer(for: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil)) { answer, _ in
                 guard let answer else { return }
                 peer.setLocalDescription(answer) { _ in }
-                self.signaling?.sendAnswer(toSession: fromSession, sdp: answer.sdp)
+                // roomType + sid DES OFFERS zurueckspiegeln (talk-ios) -
+                // hardcodet "video" liess den Screen-Peer nie verbinden.
+                self.signaling?.sendAnswer(toSession: fromSession, sdp: answer.sdp,
+                                           roomType: roomType, sid: peerSids[key])
             }
         }
     }
 
-    func onAnswer(fromSession: String, roomType: String, sdp: String) {
+    func onAnswer(fromSession: String, sid: String?, roomType: String, sdp: String) {
         Self.webRtcQueue.async { [weak self] in
-            self?.handleAnswer(fromSession: fromSession, roomType: roomType, sdp: sdp)
+            self?.handleAnswer(fromSession: fromSession, sid: sid, roomType: roomType, sdp: sdp)
         }
     }
 
     /// P68w: On-Queue-Implementierung (serielle WebRTC-Queue, Basis-Muster).
-    private func handleAnswer(fromSession: String, roomType: String, sdp: String) {
+    private func handleAnswer(fromSession: String, sid: String?, roomType: String, sdp: String) {
+        let answerKey = Self.streamKey(session: fromSession, roomType: roomType)
+        if let sid { peerSids[answerKey] = sid }
         // Diagnose: Akzeptiert der MCU unser m=video im Re-Offer?
         // (Port 0 = abgelehnt.)
         let kinds = Self.mediaLines(of: sdp)
@@ -607,7 +628,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         // getrennte Streams fuer video/screen) - der fruehere "erster
         // passender"-Fallback konnte die Screen-Answer auf dem Video-Peer
         // landen lassen (Screenshare blieb schwarz).
-        let peer = peers[Self.streamKey(session: fromSession, roomType: roomType)]
+        let peer = peers[answerKey]
             ?? peers[fromSession]
             ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
         // P68f: auch die ANSWER mit H264-Präferenz setzen (talk-iOS-Muster:
@@ -628,7 +649,7 @@ final class CallSession: NSObject, HpbSignalingListener {
         "\(session)|\(roomType)"
     }
 
-    func onCandidate(fromSession: String, roomType: String, candidate: [String: Any]) {
+    func onCandidate(fromSession: String, sid: String?, roomType: String, candidate: [String: Any]) {
         Self.webRtcQueue.async { [weak self] in
             guard let self,
                   let sdp = candidate["candidate"] as? String else { return }
@@ -636,7 +657,9 @@ final class CallSession: NSObject, HpbSignalingListener {
             // bisherigen Video-Pfad kompatibel. Ohne roomType-Lookup wurden
             // ICE-Candidates der Screen-Session verworfen (Screenshare
             // verband nie, Run-Feedback 11.09.).
-            let peer = peers[Self.streamKey(session: fromSession, roomType: roomType)]
+            let candidateKey = Self.streamKey(session: fromSession, roomType: roomType)
+            if let sid { peerSids[candidateKey] = sid }
+            let peer = peers[candidateKey]
                 ?? peers[fromSession]
                 ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
             guard let peer else {
@@ -974,7 +997,9 @@ final class CallSession: NSObject, HpbSignalingListener {
             "sdpMid": candidate.sdpMid ?? "",
             "sdpMLineIndex": Int(candidate.sdpMLineIndex)
         ]
-        signaling?.sendCandidate(toSession: session, candidate: json, roomType: roomType)
+        let key = Self.streamKey(session: session, roomType: roomType)
+        signaling?.sendCandidate(toSession: session, candidate: json,
+                                 roomType: roomType, sid: peerSids[key])
     }
 
     fileprivate func emitRemoteVideo(session: String, roomType: String, track: RTCVideoTrack) {

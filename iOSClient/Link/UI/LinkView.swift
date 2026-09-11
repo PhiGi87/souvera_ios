@@ -51,6 +51,7 @@ struct LinkView: View {
             // MailView; Size-Classes sind auf iPad/iPhone unzuverlässig.
             GeometryReader { geo in
                 content
+                    .souveraOfflineBanner()
                     .frame(width: geo.size.width, height: geo.size.height)
                     .onAppear { updateLandscapeLayout(geo.size) }
                     .onChange(of: geo.size) { _, newSize in
@@ -195,7 +196,6 @@ struct LinkView: View {
                 activeCallBanner(title: info.title)
             }
         }
-        .souveraCacheBanner(active: $viewModel.cacheBannerActive)
         .overlay(alignment: .bottom) {
             if let feedback = viewModel.actionFeedback {
                 HStack(spacing: 8) {
@@ -1112,11 +1112,13 @@ struct LinkChatView: View {
         return items.filter { $0.systemMessage != "message_deleted" }
     }
 
-    /// Kompletter Verlauf als UIKit-Liste-Items (globaler Index = Listen-
-    /// position - der Render-Fenster-Mechanismus ist mit der Vollverlauf-
-    /// Vereinfachung entfallen). ANGEHAENGT: pendent Nachrichten der
-    /// Offline-Warteschlange (negative IDs, mit Marker gerendert).
-    private var chatListItems: [LinkChatListItem] {
+    /// Render-Basis: Verlauf + abgeleitete pendent Nachrichten der
+    /// Offline-Warteschlange (negative IDs). EINE Quelle fuer
+    /// chatListItems UND rowProvider - der fruehere Split (rowProvider
+    /// indexierte das messages-only-Array) liess pendent Zeilen als
+    /// EmptyView rendern (Run-Feedback 11.09.: "waehrend offline nicht
+    /// sichtbar").
+    private var renderMessages: [LinkChatMessage] {
         var items = visibleItems
         if case let .chat(token, _) = viewModel.route {
             let displayName = viewModel.currentRoom?.displayName ?? token
@@ -1136,7 +1138,14 @@ struct LinkChatView: View {
                 .sorted { $0.id < $1.id }
             items.append(contentsOf: pendingTemps)
         }
-        return items.enumerated().map { LinkChatListItem(globalIndex: $0.offset, message: $0.element) }
+        return items
+    }
+
+    /// Kompletter Verlauf als UIKit-Liste-Items (globaler Index = Listen-
+    /// position - der Render-Fenster-Mechanismus ist mit der Vollverlauf-
+    /// Vereinfachung entfallen).
+    private var chatListItems: [LinkChatListItem] {
+        renderMessages.enumerated().map { LinkChatListItem(globalIndex: $0.offset, message: $0.element) }
     }
 
     /// Antwort-Kontext fuer pendent Nachrichten (Quote aus dem geladenen
@@ -1144,12 +1153,6 @@ struct LinkChatView: View {
     private func replyParent(for replyTo: Int64?, in items: [LinkChatMessage]) -> LinkParent? {
         guard let replyTo, let original = items.first(where: { $0.id == replyTo }) else { return nil }
         return LinkParent(from: original)
-    }
-
-    /// Pendent Nachricht der Offline-Warteschlange (negative Temp-ID und
-    /// noch in der Queue - gesendete Temps verlieren den Marker).
-    private func isPendingMessage(_ message: LinkChatMessage) -> Bool {
-        message.id < 0 && viewModel.pendingMessages.contains(where: { $0.id == message.id })
     }
 
     private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
@@ -1219,8 +1222,9 @@ struct LinkChatView: View {
                 isPositioned: chatPositioned,
                 viewModel: viewModel,
                 rowProvider: { globalIndex in
-                    guard items.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
-                    return AnyView(chatRow(index: globalIndex, message: items[globalIndex], items: items))
+                    let render = renderMessages
+                    guard render.indices.contains(globalIndex) else { return AnyView(EmptyView()) }
+                    return AnyView(chatRow(index: globalIndex, message: render[globalIndex], items: render))
                 },
                 onDistanceChanged: { distance in
                     handleBottomDistance(distance)
@@ -1378,17 +1382,19 @@ struct LinkChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 2)
         } else {
-            if isPendingMessage(message) {
-                // "Wartet auf Versand"-Zeile (Offline-Warteschlange).
-                HStack(spacing: 4) {
+            if let pending = viewModel.pendingMessages.first(where: { $0.id == message.id }) {
+                // Sende-Status wie WhatsApp/Talk: 1 Haken = in der
+                // Warteschlange (Cache), 2 Haken = vom Server angenommen.
+                HStack(spacing: 6) {
                     Spacer()
-                    Image(systemName: "clock.badge.exclamationmark")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Text(NSLocalizedString("_link_message_pending_", comment: ""))
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                    Spacer()
+                    if pending.state == .sent {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(pending.state == .sent ? Color.green : Color.secondary)
                 }
                 .padding(.horizontal, 12)
             }

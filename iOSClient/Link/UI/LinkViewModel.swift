@@ -1051,6 +1051,15 @@ final class LinkViewModel: ObservableObject {
             }
             pollFailureStreak = 0
             if !fresh.isEmpty {
+                // Zugestellte pendent Nachrichten aus der Queue raeumen:
+                // eigene, frische Nachricht mit identischem Text trifft ein
+                // -> das ✓✓-Pendant wird zur echten Nachricht.
+                let ownTexts = Set(fresh
+                    .filter { $0.actorId == currentUserId }
+                    .map(\.message))
+                if !ownTexts.isEmpty {
+                    pendingMessages.removeAll { $0.state == .sent && ownTexts.contains($0.text) }
+                }
                 lastMessageId = fresh.map(\.id).max() ?? lastMessageId
                 let current: [LinkChatMessage]
                 if case let .success(existing) = messages { current = existing } else { current = [] }
@@ -1115,8 +1124,13 @@ final class LinkViewModel: ObservableObject {
                     return
                 }
                 await MainActor.run {
-                    self.pendingMessages.removeAll { $0.id == pending.id }
-                    self.persistPendingMessages()
+                    // 2. Haken: Server hat angenommen. Die Zeile bleibt
+                    // bestehen, bis die echte Nachricht per Poll eintrifft
+                    // (Match in pollNewMessages) - kein Flackern.
+                    if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+                        self.pendingMessages[idx].state = .sent
+                        self.persistPendingMessages()
+                    }
                 }
             }
         }
@@ -1127,7 +1141,8 @@ final class LinkViewModel: ObservableObject {
     private func enqueuePending(token: String, text: String, replyTo: Int64?) {
         let pending = LinkPendingMessage(id: nextPendingTempId, token: token,
                                          text: text, replyTo: replyTo,
-                                         createdAt: Date().timeIntervalSince1970)
+                                         createdAt: Date().timeIntervalSince1970,
+                                         state: .queued)
         nextPendingTempId -= 1
         pendingMessages.append(pending)
         persistPendingMessages()

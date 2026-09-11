@@ -236,16 +236,9 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         // App-Lifecycle ab; Guard im Presenter greift nur bei aktivem Call).
         LinkVoIPManager.shared.presentCallUIIfNeeded()
 
-        if !NextcloudKit.shared.isNetworkReachable(),
-           let windowScenee = SceneManager.shared.getWindow(scene: scene)?.windowScene {
-            Task {
-                await showWarningBanner(windowScene: windowScenee,
-                                        subtitle: "_network_not_available_",
-                                        systemImage: "wifi.exclamationmark.circle",
-                                        imageAnimation: .bounce,
-                                        errorCode: NSURLErrorNotConnectedToInternet)
-            }
-        }
+        // Offline-Hinweis bewusst KEIN Popup mehr: die Modul-Roots
+        // (Link/Mail/Kalender) zeigen den dezenten SouveraOfflineBanner
+        // (Run-Feedback 11.09.).
     }
 
     func sceneWillResignActive(_ scene: UIScene) {

@@ -566,13 +566,28 @@ actor LinkOcsApi {
     private struct CallParticipant: Decodable {
         let displayName: String?
         let actorType: String?
+        let actorId: String?
+        let sessionId: String?
         let inCall: Int?
+    }
+
+    /// Teilnehmer im Call mit Session-Bezug (Run 11.09.): sessionId fuer
+    /// die Zuordnung zu Video-/Platzhalter-Kacheln, actorId zum
+    /// Herausfiltern der eigenen Person.
+    struct LinkCallParticipant {
+        let sessionId: String
+        let userId: String
+        let displayName: String
     }
 
     /// Display names of the room participants currently in a call.
     /// Geister-Einträge (gelöschte Nutzer, beendete Gast-Sessions) werden
     /// ausgeblendet.
     func callParticipantNames(token: String) async -> [String] {
+        await callParticipants(token: token).map(\.displayName)
+    }
+
+    func callParticipants(token: String) async -> [LinkCallParticipant] {
         guard let body = await get("\(base)/api/v4/room/\(token)/participants"),
               let data = body.data(using: .utf8),
               let env = try? decoder.decode(OcsEnvelope<[CallParticipant]>.self, from: data) else { return [] }
@@ -580,8 +595,14 @@ actor LinkOcsApi {
         return (env.ocs.data ?? [])
             .filter { ($0.inCall ?? 0) != 0 }
             .filter { $0.actorType != "deleted_users" }
-            .compactMap { $0.displayName }
-            .filter { !$0.isEmpty && !deletedNames.contains($0) }
+            .compactMap { participant -> LinkCallParticipant? in
+                guard let name = participant.displayName,
+                      !name.isEmpty, !deletedNames.contains(name),
+                      let sessionId = participant.sessionId, !sessionId.isEmpty else { return nil }
+                return LinkCallParticipant(sessionId: sessionId,
+                                           userId: participant.actorId ?? "",
+                                           displayName: name)
+            }
     }
 
     // MARK: - HTTP plumbing

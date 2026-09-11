@@ -475,9 +475,38 @@ struct LinkSuggestion: Decodable, Identifiable {
 /// Rueckkehr online automatisch gesendet wird. ID ist NEGATIV und
 /// identisch mit der Temp-Nachricht-ID im Chat-Verlauf (Marker-Zuordnung).
 struct LinkPendingMessage: Codable, Equatable {
+    /// 1 Haken = in der Warteschlange (Cache), 2 Haken = vom Server
+    /// angenommen (WhatsApp/Talk-Konvention, Run-Feedback 11.09.).
+    enum PendingState: String, Codable {
+        case queued
+        case sent
+    }
+
     let id: Int64
     let token: String
     let text: String
     let replyTo: Int64?
     let createdAt: TimeInterval
+    var state: PendingState
+
+    init(id: Int64, token: String, text: String, replyTo: Int64?,
+         createdAt: TimeInterval, state: PendingState = .queued) {
+        self.id = id
+        self.token = token
+        self.text = text
+        self.replyTo = replyTo
+        self.createdAt = createdAt
+        self.state = state
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int64.self, forKey: .id)
+        token = try c.decode(String.self, forKey: .token)
+        text = try c.decode(String.self, forKey: .text)
+        replyTo = try c.decodeIfPresent(Int64.self, forKey: .replyTo)
+        createdAt = try c.decode(TimeInterval.self, forKey: .createdAt)
+        // Altbestand ohne state- Schluessel: queued.
+        state = (try? c.decode(PendingState.self, forKey: .state)) ?? .queued
+    }
 }

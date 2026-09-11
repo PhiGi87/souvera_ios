@@ -20,9 +20,9 @@ protocol HpbSignalingListener: AnyObject {
     /// publishers).
     func onSelfInCall()
     func onParticipants(sessionIds: [String])
-    func onOffer(fromSession: String, sdp: String, roomType: String)
-    func onAnswer(fromSession: String, roomType: String, sdp: String)
-    func onCandidate(fromSession: String, roomType: String, candidate: [String: Any])
+    func onOffer(fromSession: String, sid: String?, roomType: String, sdp: String)
+    func onAnswer(fromSession: String, sid: String?, roomType: String, sdp: String)
+    func onCandidate(fromSession: String, sid: String?, roomType: String, candidate: [String: Any])
     func onClosed()
 }
 
@@ -112,26 +112,38 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
 
     // MARK: - Sending
 
-    func sendOffer(toSession: String, sdp: String) { sendPayload(to: toSession, type: "offer", sdp: sdp) }
-    func sendAnswer(toSession: String, sdp: String) { sendPayload(to: toSession, type: "answer", sdp: sdp) }
+    /// talk-ios NCSignalingMessage.functionDict(): roomType UND sid werden
+    /// mitgesendet - der Echo-Wert des eingehenden Offers, damit der
+    /// MCU die Antwort der richtigen Verbindung (video vs. screen)
+    /// zuordnen kann.
+    func sendOffer(toSession: String, sdp: String, roomType: String = roomTypeVideo, sid: String? = nil) {
+        sendPayload(to: toSession, type: "offer", sdp: sdp, roomType: roomType, sid: sid)
+    }
+
+    func sendAnswer(toSession: String, sdp: String, roomType: String = roomTypeVideo, sid: String? = nil) {
+        sendPayload(to: toSession, type: "answer", sdp: sdp, roomType: roomType, sid: sid)
+    }
 
     func sendRequestOffer(toSession: String) {
         sendMessage(to: toSession, data: ["to": toSession, "type": "requestoffer", "roomType": roomTypeVideo])
     }
 
-    func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = "video") {
-        let data: [String: Any] = [
+    func sendCandidate(toSession: String, candidate: [String: Any], roomType: String = roomTypeVideo, sid: String? = nil) {
+        var data: [String: Any] = [
             "to": toSession, "type": "candidate", "roomType": roomType,
             "payload": ["type": "candidate", "candidate": candidate]
         ]
+        if let sid { data["sid"] = sid }
         sendMessage(to: toSession, data: data)
     }
 
-    private func sendPayload(to toSession: String, type: String, sdp: String) {
-        let data: [String: Any] = [
-            "to": toSession, "type": type, "roomType": roomTypeVideo,
+    private func sendPayload(to toSession: String, type: String, sdp: String, roomType: String, sid: String?) {
+        var data: [String: Any] = [
+            "to": toSession, "type": type, "roomType": roomType,
             "payload": ["type": type, "sdp": sdp]
         ]
+        if let sid { data["sid"] = sid }
+        CallDebugLog.log("HpbSignaling", "send to=\(toSession.prefix(12)) type=\(type) roomType=\(roomType) sid=\(sid ?? "-")")
         sendMessage(to: toSession, data: data)
     }
 
@@ -314,6 +326,11 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
               let data = message["data"] as? [String: Any] else { return }
         let payload = data["payload"] as? [String: Any]
         let roomType = data["roomType"] as? String ?? "video"
+        // talk-ios: die "sid" des Peers korreliert Answer/Candidate mit der
+        // richtigen Verbindung am Server - PFLICHT bei Sessions mit zwei
+        // Streams (video + screen), sonst landet die Antwort am falschen
+        // Peer (Screenshare blieb schwarz).
+        let sid = data["sid"] as? String
         // P68h: empfangene Candidate-Flut kollabieren (nur jede 15.).
         let recvType = data["type"] as? String ?? "?"
         if recvType == "candidate" {
@@ -325,9 +342,9 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
             CallDebugLog.log("HpbSignaling", "recv msg from=\(from.prefix(8)) type=\(recvType) roomType=\(roomType)")
         }
         switch data["type"] as? String {
-        case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sdp: sdp, roomType: roomType) }
-        case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, roomType: roomType, sdp: sdp) }
-        case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, roomType: roomType, candidate: cand) }
+        case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sid: sid, roomType: roomType, sdp: sdp) }
+        case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, sid: sid, roomType: roomType, sdp: sdp) }
+        case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, sid: sid, roomType: roomType, candidate: cand) }
         default: break
         }
     }
