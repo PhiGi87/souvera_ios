@@ -245,6 +245,23 @@ class NCMainTabBarController: UITabBarController {
                 self?.updateMailBadge(count)
             }
         }
+        // Run-Fix "Badge Account-Wechsel": Bei jedem Account-Wechsel
+        // ALLE Tab-Badges SOFORT aus dem Badge-Store setzen (letzter
+        // bekannter Stand je Account) - null Wartezeit auf Sync/Netzwerk.
+        // Der BackgroundSync korrigiert die Werte danach autoritativ.
+        NotificationCenter.default.addObserver(
+            forName: Notification.Name(NCGlobal.shared.notificationCenterChangeUser),
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self else { return }
+            let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            let store = SouveraBadgeStore.shared
+            self.updateMailBadge(store.unreadMail(account: active))
+            self.updateLinkBadge(store.linkUnread(account: active))
+            self.updateMoreBadge()
+            JmapLog.write("Tab badges refreshed on account switch (active=\(active))")
+        }
         let calendarController = makeHostedTab(
             root: SouveraCalendarView(),
             titleKey: "_calendar_",

@@ -422,6 +422,16 @@ final class MailViewModel: ObservableObject {
     /// Cache-/UI-Zustand - kein Vermischen zwischen Accounts).
     private func resetForAccountChange() {
         generation += 1
+        // Run-Fix "Badge Account-Wechsel": Badge-Zustand des ALTEN
+        // Accounts unverzüglich neutralisieren - sonst posten abgeleitete
+        // Pfade den Alt-Zähler unter dem Namen des NEUEN Accounts
+        // ("Badges bleiben stehen", Log 11.09.). Der Store behält die
+        // letzten bekannten Zähler je Account; der Tab-Badge zeigt nach
+        // dem Wechsel den Store-Wert des neuen Accounts (Sofort-
+        // Auffrischung im Tab-Controller), bis die autoritative Zählung
+        // des neuen Accounts eintrifft.
+        personalInboxUnread = 0
+        hasAuthoritativeBadgeCount = false
         imapClient = nil
         jmapClient = nil
         jmapApi = nil
@@ -596,6 +606,12 @@ final class MailViewModel: ObservableObject {
 
     /// Sofortiger Badge-Zähler (persönlicher Posteingang).
     @Published private(set) var personalInboxUnread: Int = 0
+    /// Run-Fix "Badge Account-Wechsel": true erst NACH der ersten
+    /// autoritativen Email/query-Zählung - abgeleitete/optimistische
+    /// Pfade posten davor weder Alt-Werte des VORHERIGEN Accounts noch
+    /// verfrühte 0en (Log 11.09.: "tab badge set -> 0" beim Wechsel,
+    /// danach älte Zähler des Vorgänger-Accounts).
+    private var hasAuthoritativeBadgeCount = false
 
     /// `derived = true` für NICHT-autoritative Quellen (abgeleitete
     /// Postfachlisten-Summen, Cache-Fallback): Diese dürfen eine 0 NICHT
@@ -606,6 +622,12 @@ final class MailViewModel: ObservableObject {
     /// autoritative Email/query-Zählung posten echte 0en weiterhin.
     private func postUnreadBadge(_ count: Int, derived: Bool = false) {
         let clamped = max(0, count)
+        if clamped == 0, !hasAuthoritativeBadgeCount {
+            // Run-Fix "Badge Account-Wechsel": Ohne autoritative Zählung
+            // wird keine 0 gebaut (Store-Wert bleibt unangetastet).
+            JmapLog.write("Mail unread badge -> skip derived 0 (store holds a real count)")
+            return
+        }
         if derived, clamped == 0,
            SouveraBadgeStore.shared.unreadMail(account: mailAccount?.account ?? "") > 0 {
             JmapLog.write("Mail unread badge -> skip derived 0 (store holds a real count)")
@@ -1812,6 +1834,7 @@ final class MailViewModel: ObservableObject {
                    let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
                    let total = resp["total"] as? Int {
                     JmapLog.write("Mail unread count (Email/query) -> \(total)")
+                    hasAuthoritativeBadgeCount = true
                     postUnreadBadge(total)
                     applyUnreadCountToMailboxList(total)
                     return
