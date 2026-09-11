@@ -507,8 +507,26 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 )
                 x += tileWidth + gap
             }
+            // Audio-Teilnehmer als Platzhalter IM STRIP (sichtbar in beiden
+            // Modi - vorher verschwanden sie beim Fokus-Wechsel, Run-
+            // Feedback 11.09.).
+            clearPlaceholderTiles()
+            for i in 0..<audioOnlyCount {
+                let placeholder = makePlaceholderTile(index: i)
+                view.insertSubview(placeholder, at: 0)
+                placeholderTiles.append(placeholder)
+                placeholder.layer.cornerRadius = 10
+                placeholder.layer.borderWidth = 1.5
+                placeholder.layer.borderColor = UIColor.white.withAlphaComponent(0.6).cgColor
+                placeholder.frame = CGRect(
+                    x: x,
+                    y: stripTopY,
+                    width: tileWidth,
+                    height: tileHeight
+                )
+                x += tileWidth + gap
+            }
         }
-        clearPlaceholderTiles()
         lastFocusedKey = focusKey
         layoutLocalFloating()
     }

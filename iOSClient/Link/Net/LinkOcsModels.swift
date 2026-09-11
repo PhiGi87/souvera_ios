@@ -118,6 +118,47 @@ struct LinkChatMessage: Decodable, Identifiable {
         case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf, parent
     }
 
+    /// Offline-Warteschlange (Run 11.09.): Temporaere Nachricht mit
+    /// NEGATIVER ID (kollisionsfrei zu Server-IDs) - wird nach dem
+    /// erfolgreichen Senden durch die echte Server-Nachricht ersetzt.
+    static func makePending(id: Int64, token: String, actorId: String, displayName: String, timestamp: TimeInterval, text: String, replyParent: LinkParent?) -> LinkChatMessage {
+        var obj: [String: Any] = [
+            "id": id,
+            "token": token,
+            "actorId": actorId,
+            "actorDisplayName": displayName,
+            "actorType": "users",
+            "timestamp": Int(timestamp),
+            "message": text,
+            "systemMessage": ""
+        ]
+        if let replyParent, let data = try? JSONEncoder().encode(replyParent),
+           let parentObj = try? JSONSerialization.jsonObject(with: data) {
+            obj["parent"] = parentObj
+        }
+        if let data = try? JSONSerialization.data(withJSONObject: obj),
+           let msg = try? JSONDecoder().decode(LinkChatMessage.self, from: data) {
+            return msg
+        }
+        return LinkChatMessage(pendingId: id, token: token, actorId: actorId, displayName: displayName, timestamp: timestamp, text: text)
+    }
+
+    /// Fallback ohne Decoder (falls JSON-Erzeugung scheitert).
+    private init(pendingId: Int64, token: String, actorId: String, displayName: String, timestamp: TimeInterval, text: String) {
+        self.id = pendingId
+        self.token = token
+        self.actorId = actorId
+        self.actorDisplayName = displayName
+        self.actorType = "users"
+        self.timestamp = timestamp
+        self.message = text
+        self.systemMessage = ""
+        self.messageParameters = nil
+        self.reactions = [:]
+        self.reactionsSelf = []
+        self.parent = nil
+    }
+
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int64.self, forKey: .id)
@@ -340,6 +381,16 @@ struct LinkParticipant: Decodable, Identifiable {
 /// ohne weitere Verschachtelung). Eigener Typ statt rekursivem
 /// LinkChatMessage (Struct-Rekursion wäre nicht zulässig).
 struct LinkParent: Decodable {
+    init(from message: LinkChatMessage) {
+        id = message.id
+        actorId = message.actorId
+        actorDisplayName = message.actorDisplayName
+        timestamp = message.timestamp
+        message = message.message
+        systemMessage = message.systemMessage
+        messageParameters = message.messageParameters
+    }
+
     let id: Int64
     let actorId: String
     let actorDisplayName: String
@@ -417,4 +468,16 @@ struct LinkSuggestion: Decodable, Identifiable {
         label = (try? c.decode(String.self, forKey: .label)) ?? ""
         source = (try? c.decode(String.self, forKey: .source)) ?? ""
     }
+}
+
+
+/// Offline-Warteschlange (Run 11.09.): eine geparkte Nachricht, die bei
+/// Rueckkehr online automatisch gesendet wird. ID ist NEGATIV und
+/// identisch mit der Temp-Nachricht-ID im Chat-Verlauf (Marker-Zuordnung).
+struct LinkPendingMessage: Codable, Equatable {
+    let id: Int64
+    let token: String
+    let text: String
+    let replyTo: Int64?
+    let createdAt: TimeInterval
 }

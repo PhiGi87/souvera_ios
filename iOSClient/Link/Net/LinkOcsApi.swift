@@ -124,14 +124,21 @@ actor LinkOcsApi {
         return messages
     }
 
-    func sendMessage(token: String, message: String, replyTo: Int64? = nil) async {
+    @discardableResult
+    func sendMessage(token: String, message: String, replyTo: Int64? = nil) async -> Bool {
         var body: [String: Any] = ["message": message]
         if let replyTo { body["replyTo"] = replyTo }
         let payload = try? JSONSerialization.data(withJSONObject: body)
         var req = signed(url: "\(base)/api/v1/chat/\(token)", method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = payload
-        _ = try? await session.data(for: req)
+        guard let (_, response) = try? await session.data(for: req) else {
+            CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> transport FAILED")
+            return false
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> \(status)")
+        return (200..<300).contains(status)
     }
 
     /// Talk-Standard: Read-Marker für den Raum setzen (POST chat/{token}/read).

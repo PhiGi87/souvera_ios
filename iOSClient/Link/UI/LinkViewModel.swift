@@ -9,6 +9,7 @@
 
 import Foundation
 import Combine
+import Network
 
 extension Notification.Name {
     /// Posted whenever the active call state changes (started/ended).
@@ -94,6 +95,15 @@ final class LinkViewModel: ObservableObject {
 
     private(set) var currentUserId: String = ""
 
+    /// Offline-Warteschlange (Run 11.09.): Nachrichten, die offline
+    /// eingegeben wurden - persistiert (LinkCache), im Chat mit
+    /// Pendenz-Marker sichtbar, Versand automatisch bei Rueckkehr online.
+    @Published private(set) var pendingMessages: [LinkPendingMessage] = []
+    @Published private(set) var isOnline = true
+    private let pathMonitor = NWPathMonitor()
+    private var nextPendingTempId: Int64 = -1
+    private var pollFailureStreak = 0
+
     /// Push-Deep-Link-Beobachter (Chat-Raum direkt öffnen).
     private var deepLinkObserver: NSObjectProtocol?
     private var accountChangeObserver: NSObjectProtocol?
@@ -109,6 +119,7 @@ final class LinkViewModel: ObservableObject {
     private var generation = 0
 
     init() {
+        startNetworkMonitor()
         deepLinkObserver = NotificationCenter.default.addObserver(
             forName: SouveraPushDeepLink.opened,
             object: nil,
@@ -189,6 +200,7 @@ final class LinkViewModel: ObservableObject {
         chatPdfCache = [:]
         chatImageFailed = []
         imageLoadAttempts = [:]
+        loadPendingMessages()
         unreadBoundary = nil
         lastMessageId = 0
         currentUserId = ""
@@ -219,6 +231,7 @@ final class LinkViewModel: ObservableObject {
 
     /// Resolves the active account and loads the conversation list. Idempotent.
     func start() {
+        loadPendingMessages()
         if api == nil {
             guard let account = LinkAccount.active() else {
                 conversations = .error("No account")
@@ -1024,8 +1037,20 @@ final class LinkViewModel: ObservableObject {
     private func pollNewMessages(token: String) async {
         guard let api else { return }
         while !Task.isCancelled, case let .chat(currentToken, _) = route, currentToken == token {
-            let fresh = await api.getMessages(token: token, lastKnownId: lastMessageId, future: true, timeoutSeconds: pollTimeout) ?? []
+            let result = await api.getMessages(token: token, lastKnownId: lastMessageId, future: true, timeoutSeconds: pollTimeout)
             if Task.isCancelled { return }
+            // Backoff bei Transport-/HTTP-Fehlern: der fruehere Hot-Loop
+            // spamte hunderte Requests pro Sekunde (Log dyd2aaa1ba,
+            // Offline-Phase). 1s -> 2s -> ... max 30s, Reset bei Erfolg.
+            guard let fresh = result else {
+                pollFailureStreak += 1
+                let delay = UInt64(min(30, pollFailureStreak) * 1_000_000_000)
+                CallDebugLog.log("LinkVM", "poll FAILED (streak \(pollFailureStreak)) - backoff \(delay / 1_000_000_000)s")
+                try? await Task.sleep(nanoseconds: delay)
+                continue
+            }
+            pollFailureStreak = 0
+            let fresh = result
             if !fresh.isEmpty {
                 lastMessageId = fresh.map(\.id).max() ?? lastMessageId
                 let current: [LinkChatMessage]
@@ -1054,7 +1079,93 @@ final class LinkViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         let outgoing = mentionAwareMessage(trimmed)
-        Task { await api.sendMessage(token: token, message: outgoing, replyTo: replyTo) }
+        // Offline: in die persistente Warteschlange - die UI leitet die
+        // pendent Nachricht direkt aus der Queue ab (Marker inklusive).
+        guard isOnline else {
+            enqueuePending(token: token, text: outgoing, replyTo: replyTo)
+            return
+        }
+        let gen = generation
+        Task { [weak self] in
+            let ok = await api.sendMessage(token: token, message: outgoing, replyTo: replyTo)
+            guard let self, gen == self.generation else { return }
+            if !ok {
+                CallDebugLog.log("LinkVM", "send FAILED (online path) - enqueueing as pending")
+                await MainActor.run {
+                    self.enqueuePending(token: token, text: outgoing, replyTo: replyTo)
+                }
+            }
+        }
+    }
+
+    /// Sendet alle geparkten Nachrichten EINES Raums der Reihe nach;
+    /// bricht beim ersten Fehler ab (noch offline).
+    func flushPendingMessages(token: String) {
+        guard isOnline, let api else { return }
+        let queue = pendingMessages.filter { $0.token == token }
+        guard !queue.isEmpty else { return }
+        CallDebugLog.log("LinkVM", "flushing \(queue.count) pending messages for \(token)")
+        Task { [weak self] in
+            for pending in queue {
+                guard let self, self.isOnline else { return }
+                let ok = await api.sendMessage(token: pending.token,
+                                               message: pending.text,
+                                               replyTo: pending.replyTo)
+                guard ok else {
+                    CallDebugLog.log("LinkVM", "flush failed - stopping (still offline?)")
+                    return
+                }
+                await MainActor.run {
+                    self.pendingMessages.removeAll { $0.id == pending.id }
+                    self.persistPendingMessages()
+                }
+            }
+        }
+    }
+
+    // MARK: - Offline-Warteschlange
+
+    private func enqueuePending(token: String, text: String, replyTo: Int64?) {
+        let pending = LinkPendingMessage(id: nextPendingTempId, token: token,
+                                         text: text, replyTo: replyTo,
+                                         createdAt: Date().timeIntervalSince1970)
+        nextPendingTempId -= 1
+        pendingMessages.append(pending)
+        persistPendingMessages()
+    }
+
+    private func persistPendingMessages() {
+        LinkCache.savePendingMessages(pendingMessages, account: cacheAccountKey)
+    }
+
+    private func loadPendingMessages() {
+        pendingMessages = LinkCache.loadPendingMessages(account: cacheAccountKey)
+    }
+
+    private var cacheAccountKey: String {
+        LinkAccount.active()?.account ?? "unknown"
+    }
+
+    private func startNetworkMonitor() {
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            let online = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if online, !self.isOnline {
+                    self.isOnline = true
+                    CallDebugLog.log("LinkVM", "network back ONLINE - flushing pending queue")
+                    // Offene Nachrichten aller Raeume der Reihe nach senden.
+                    let tokens = Set(self.pendingMessages.map(\.token))
+                    for token in tokens {
+                        self.flushPendingMessages(token: token)
+                    }
+                } else if !online, self.isOnline {
+                    self.isOnline = false
+                    CallDebugLog.log("LinkVM", "network OFFLINE - sends go to pending queue")
+                }
+            }
+        }
+        pathMonitor.start(queue: DispatchQueue(label: "souvera.link.pathmonitor"))
     }
 
     /// Leitet eine Nachricht in einen anderen Channel weiter (wie Talk Web:

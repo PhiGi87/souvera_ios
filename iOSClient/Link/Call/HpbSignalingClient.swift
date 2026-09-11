@@ -21,8 +21,8 @@ protocol HpbSignalingListener: AnyObject {
     func onSelfInCall()
     func onParticipants(sessionIds: [String])
     func onOffer(fromSession: String, sdp: String, roomType: String)
-    func onAnswer(fromSession: String, sdp: String)
-    func onCandidate(fromSession: String, candidate: [String: Any])
+    func onAnswer(fromSession: String, roomType: String, sdp: String)
+    func onCandidate(fromSession: String, roomType: String, candidate: [String: Any])
     func onClosed()
 }
 
@@ -326,8 +326,8 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         }
         switch data["type"] as? String {
         case "offer": if let sdp = payload?["sdp"] as? String { listener?.onOffer(fromSession: from, sdp: sdp, roomType: roomType) }
-        case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, sdp: sdp) }
-        case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, candidate: cand) }
+        case "answer": if let sdp = payload?["sdp"] as? String { listener?.onAnswer(fromSession: from, roomType: roomType, sdp: sdp) }
+        case "candidate": if let cand = payload?["candidate"] as? [String: Any] { listener?.onCandidate(fromSession: from, roomType: roomType, candidate: cand) }
         default: break
         }
     }

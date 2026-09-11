@@ -61,3 +61,26 @@ struct LinkCache {
         return env.ocs.data
     }
 }
+
+// MARK: - Offline-Warteschlange (Run 11.09.)
+
+extension LinkCache {
+    private static func pendingFileURL(account: String) -> URL? {
+        fileURL("pending_messages_" + account + ".json")
+    }
+
+    /// Persistiert die Offline-Warteschlange EINES Accounts (App-Neustarts
+    /// ueberleben - geparkte Nachrichten duerfen nicht verloren gehen).
+    static func savePendingMessages(_ pending: [LinkPendingMessage], account: String) {
+        guard let url = pendingFileURL(account: account),
+              let data = try? JSONEncoder().encode(pending) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func loadPendingMessages(account: String) -> [LinkPendingMessage] {
+        guard let url = pendingFileURL(account: account),
+              let data = try? Data(contentsOf: url),
+              let pending = try? JSONDecoder().decode([LinkPendingMessage].self, from: data) else { return [] }
+        return pending
+    }
+}

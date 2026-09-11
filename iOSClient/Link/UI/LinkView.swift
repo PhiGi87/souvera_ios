@@ -314,37 +314,26 @@ struct LinkView: View {
     /// sanfter Opacity-Hinweis statt Scale-Puls.
     private struct LinkPulsingCallButton: View {
         @Environment(\.accessibilityReduceMotion) private var reduceMotion
-        @State private var pulsing = false
         let action: () -> Void
 
         var body: some View {
             Button(action: action) {
-                // Alles in FESTEN Grenzen (34x34): der fruehere Scale-Puls
-                // lief aus der Toolbar-Kapsel heraus (Run-Feedback 11.09.).
-                // Puls = Icon-Opacity + Ring wächst VON INNEN NACH AUSSEN
-                // innerhalb des festen Frames.
+                // iOS 17: symbolEffect(.pulse) pulsiert das Icon OHNE
+                // Layout-Animation (der fruehere Frame-Wechsel liess den
+                // Toolbar-Button wackeln, Run-Feedback 11.09.) + statischer
+                // Halo, dessen Opacity atmet (render-only).
                 ZStack {
                     Circle()
-                        .fill(Color.green.opacity(0.16))
-                        .frame(width: 26, height: 26)
-                    Circle()
-                        .stroke(Color.green.opacity(pulsing ? 0.05 : 0.45), lineWidth: 2)
-                        .frame(width: pulsing ? 33 : 22, height: pulsing ? 33 : 22)
+                        .fill(Color.green.opacity(0.18))
+                        .frame(width: 28, height: 28)
                     Image(systemName: "phone.fill.arrow.up.right")
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.green)
-                        .opacity(reduceMotion ? 1.0 : (pulsing ? 0.6 : 1.0))
+                        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
                 }
-                .frame(width: 34, height: 34)
+                .frame(width: 32, height: 32)
             }
             .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
-            .onAppear { pulsing = true }
-            .animation(
-                reduceMotion
-                    ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true)
-                    : .easeInOut(duration: 1.1).repeatForever(autoreverses: true),
-                value: pulsing
-            )
         }
     }
 
@@ -1125,12 +1114,49 @@ struct LinkChatView: View {
 
     /// Kompletter Verlauf als UIKit-Liste-Items (globaler Index = Listen-
     /// position - der Render-Fenster-Mechanismus ist mit der Vollverlauf-
-    /// Vereinfachung entfallen).
+    /// Vereinfachung entfallen). ANGEHAENGT: pendent Nachrichten der
+    /// Offline-Warteschlange (negative IDs, mit Marker gerendert).
     private var chatListItems: [LinkChatListItem] {
-        visibleItems.enumerated().map { LinkChatListItem(globalIndex: $0.offset, message: $0.element) }
+        var items = visibleItems
+        if case let .chat(token, _) = viewModel.route {
+            let displayName = viewModel.currentRoom?.displayName ?? token
+            let pendingTemps = viewModel.pendingMessages
+                .filter { $0.token == token }
+                .map { pending in
+                    LinkChatMessage.makePending(
+                        id: pending.id,
+                        token: pending.token,
+                        actorId: viewModel.currentUserId,
+                        displayName: displayName,
+                        timestamp: pending.createdAt,
+                        text: pending.text,
+                        replyParent: replyParent(for: pending.replyTo, in: items)
+                    )
+                }
+                .sorted { $0.id < $1.id }
+            items.append(contentsOf: pendingTemps)
+        }
+        return items.enumerated().map { LinkChatListItem(globalIndex: $0.offset, message: $0.element) }
+    }
+
+    /// Antwort-Kontext fuer pendent Nachrichten (Quote aus dem geladenen
+    /// Verlauf ableiten).
+    private func replyParent(for replyTo: Int64?, in items: [LinkChatMessage]) -> LinkParent? {
+        guard let replyTo, let original = items.first(where: { $0.id == replyTo }) else { return nil }
+        return LinkParent(from: original)
+    }
+
+    /// Pendent Nachricht der Offline-Warteschlange (negative Temp-ID und
+    /// noch in der Queue - gesendete Temps verlieren den Marker).
+    private func isPendingMessage(_ message: LinkChatMessage) -> Bool {
+        message.id < 0 && viewModel.pendingMessages.contains(where: { $0.id == message.id })
     }
 
     private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
+        // Pendent Nachrichten haengen direkt am heutigen Ende - keine
+        // eigene Tages-Trennlinie (die ID-Aufloesung greift fuer sie eh
+        // nicht, sie stehen nur in der Queue).
+        if message.id < 0 { return false }
         // Nachbar per ID aufloesen (wie showsTime/showsAvatar): der rohe
         // Index kann bei nachtraeglichen Inserts vor der Zelle auf einen
         // falschen Nachbarn zeigen (eingefrorene Zelle -> doppelte/
@@ -1352,6 +1378,20 @@ struct LinkChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 2)
         } else {
+            if isPendingMessage(message) {
+                // "Wartet auf Versand"-Zeile (Offline-Warteschlange).
+                HStack(spacing: 4) {
+                    Spacer()
+                    Image(systemName: "clock.badge.exclamationmark")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text(NSLocalizedString("_link_message_pending_", comment: ""))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+            }
                             LinkMessageRow(
                                 viewModel: viewModel,
                                 message: message,

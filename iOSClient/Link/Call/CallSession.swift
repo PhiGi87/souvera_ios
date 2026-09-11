@@ -590,20 +590,26 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
     }
 
-    func onAnswer(fromSession: String, sdp: String) {
+    func onAnswer(fromSession: String, roomType: String, sdp: String) {
         Self.webRtcQueue.async { [weak self] in
-            self?.handleAnswer(fromSession: fromSession, sdp: sdp)
+            self?.handleAnswer(fromSession: fromSession, roomType: roomType, sdp: sdp)
         }
     }
 
     /// P68w: On-Queue-Implementierung (serielle WebRTC-Queue, Basis-Muster).
-    private func handleAnswer(fromSession: String, sdp: String) {
+    private func handleAnswer(fromSession: String, roomType: String, sdp: String) {
         // Diagnose: Akzeptiert der MCU unser m=video im Re-Offer?
         // (Port 0 = abgelehnt.)
         let kinds = Self.mediaLines(of: sdp)
         CallDebugLog.log("CallSession", "answer from \(fromSession.prefix(8)) m-lines=[\(kinds.joined(separator: ","))]")
         CallDebugLog.log("CallSession", "answer video codecs: \(Self.videoCodecLines(of: sdp))")
-        let peer = peers[fromSession] ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
+        // Peer gezielt ueber session|roomType finden (die Session sendet
+        // getrennte Streams fuer video/screen) - der fruehere "erster
+        // passender"-Fallback konnte die Screen-Answer auf dem Video-Peer
+        // landen lassen (Screenshare blieb schwarz).
+        let peer = peers[Self.streamKey(session: fromSession, roomType: roomType)]
+            ?? peers[fromSession]
+            ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
         // P68f: auch die ANSWER mit H264-Präferenz setzen (talk-iOS-Muster:
         // bestimmt unseren Sende-Codec).
         let preferredAnswer = Self.preferringVideoCodec(sdp, codec: "H264")
@@ -622,10 +628,21 @@ final class CallSession: NSObject, HpbSignalingListener {
         "\(session)|\(roomType)"
     }
 
-    func onCandidate(fromSession: String, candidate: [String: Any]) {
+    func onCandidate(fromSession: String, roomType: String, candidate: [String: Any]) {
         Self.webRtcQueue.async { [weak self] in
-            guard let self, let peer = self.peers[fromSession],
+            guard let self,
                   let sdp = candidate["candidate"] as? String else { return }
+            // Peer ueber session|roomType finden; Fallbacks halten den
+            // bisherigen Video-Pfad kompatibel. Ohne roomType-Lookup wurden
+            // ICE-Candidates der Screen-Session verworfen (Screenshare
+            // verband nie, Run-Feedback 11.09.).
+            let peer = peers[Self.streamKey(session: fromSession, roomType: roomType)]
+                ?? peers[fromSession]
+                ?? peers.first(where: { $0.key.hasPrefix("\(fromSession)|") })?.value
+            guard let peer else {
+                CallDebugLog.log("CallSession", "candidate for UNKNOWN peer \(fromSession.prefix(8))|\(roomType) - dropped")
+                return
+            }
             let ice = RTCIceCandidate(sdp: sdp, sdpMLineIndex: Int32(candidate["sdpMLineIndex"] as? Int ?? 0), sdpMid: candidate["sdpMid"] as? String)
             peer.add(ice) { _ in }
         }
