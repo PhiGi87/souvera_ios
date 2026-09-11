@@ -36,7 +36,9 @@ struct LinkChatListItem: Identifiable, Equatable {
 /// UIHostingConfiguration (iOS 16+, dokumentiert).
     private enum EntryTarget {
         case bottom
-        case separator(index: Int)
+        /// Boundary als Message-ID (nicht Index): Phase-1-Updates und
+        /// Verlaufs-Prepends verschieben Indizes, die ID bleibt stabil.
+        case separator(id: Int64)
     }
 
 @MainActor
@@ -64,6 +66,7 @@ final class LinkChatListController: NSObject, ObservableObject {
     private var onDistanceChanged: ((_ distanceToBottom: CGFloat) -> Void)?
     private var viewModel: LinkViewModel?
     private var onEntrySettled: (() -> Void)?
+    private var onRequestOlder: (() -> Void)?
 
     // MARK: - Interner Zustand
 
@@ -82,6 +85,15 @@ final class LinkChatListController: NSObject, ObservableObject {
     private var lastStableContentHeight: CGFloat = -1
     private var stableSizeCount = 0
     private var entryTimeoutTask: Task<Void, Never>?
+    /// Startzeit des Eintritts: das Settle braucht eine Mindestdauer,
+    /// sonst feuert es, bevor die Self-Sizing-Hoehen real sind (Log
+    /// 11.09.: "entry scroll" und "settled" in derselben Millisekunde).
+    private var entryStartTime: CFTimeInterval = 0
+    /// Korrektur-Paesse (+0,15/+0,35/+0,7 s): fahren das Eintrittsziel
+    /// erneut an, bis die Hoehen real sind (talk-ios: wiederholtes
+    /// scrollToRow bis die Position haelt). Tasks statt DispatchWorkItem:
+    /// erben die MainActor-Isolation der Klasse und sind cancel-bar.
+    private var entryRescrollTasks: [Task<Void, Never>] = []
 
     // MARK: - Update vom SwiftUI-Host
 
@@ -92,13 +104,20 @@ final class LinkChatListController: NSObject, ObservableObject {
                 viewModel: LinkViewModel,
                 rowProvider: @escaping (Int) -> AnyView,
                 onDistanceChanged: @escaping (CGFloat) -> Void,
-                onEntrySettled: @escaping () -> Void) {
+                onEntrySettled: @escaping () -> Void,
+                onRequestOlder: @escaping () -> Void) {
         let roomChanged = roomToken != lastRoomToken
         if roomChanged {
             lastRoomToken = roomToken
             didInitialEntry = false
             pendingEntryBoundary = unreadBoundary
             committedIds = []
+            // Laufende Eintritts-Phase des VORHERIGEN Raums beenden.
+            cancelEntryRescrollPasses()
+            isEntryStabilizing = false
+            entryTarget = .bottom
+            entryTimeoutTask?.cancel()
+            entryTimeoutTask = nil
         }
         self.items = items
         self.isLoadingHistory = isLoadingHistory
@@ -106,6 +125,7 @@ final class LinkChatListController: NSObject, ObservableObject {
         self.rowProvider = rowProvider
         self.onDistanceChanged = onDistanceChanged
         self.onEntrySettled = onEntrySettled
+        self.onRequestOlder = onRequestOlder
 
         guard let dataSource else { return }
 
@@ -118,7 +138,15 @@ final class LinkChatListController: NSObject, ObservableObject {
 
         let newIds = items.map(\.id)
         guard newIds != committedIds else { return }
-        applySnapshot(ids: newIds)
+
+        // Reines Prepend? (aeltere Batches kommen nur on-demand am
+        // Verlaufskopf via publishOlderBatch, bzw. waehrend der
+        // Eintritts-Phase aus der Phase-1-Abdeckungskette.)
+        let isPurePrepend = !committedIds.isEmpty
+            && newIds.count > committedIds.count
+            && Array(newIds.suffix(committedIds.count)) == committedIds
+
+        applySnapshot(ids: newIds, isPrepend: isPurePrepend)
 
         if !didInitialEntry, !items.isEmpty {
             didInitialEntry = true
@@ -130,12 +158,41 @@ final class LinkChatListController: NSObject, ObservableObject {
 
     // MARK: - Snapshot-Anwendung
 
-    private func applySnapshot(ids: [Int64]) {
+    private func applySnapshot(ids: [Int64], isPrepend: Bool = false) {
         var snapshot = NSDiffableDataSourceSnapshot<Section, ListItem>()
         snapshot.appendSections([.header, .messages])
         snapshot.appendItems([.header], toSection: .header)
         snapshot.appendItems(ids.map { ListItem.message(id: $0) }, toSection: .messages)
-        dataSource?.apply(snapshot, animatingDifferences: false)
+
+        // Leseposition merken (Prepend-Pin): Anker = oberste sichtbare
+        // Nachricht. Sie ist realisiert -> exakter Frame; der relative
+        // Abstand zum Viewport wird nach dem Apply reproduziert. Der
+        // Apply mit animatingDifferences=false laeuft synchron auf dem
+        // Main-Actor ab, der IndexPath stammt aus den committeten
+        // sichtbaren Zellen - kein manueller Batch, keine Index-Arithmetik
+        // (Crashklassen tf01-tf04 bleiben ausgeschlossen).
+        var anchor: (indexPath: IndexPath, relative: CGFloat)?
+        if isPrepend, !isEntryStabilizing, let collectionView {
+            let topVisible = collectionView.indexPathsForVisibleItems
+                .filter { $0.section == Self.messageSection.rawValue }
+                .min { $0.item < $1.item }
+            if let topVisible,
+               let frame = collectionView.layoutAttributesForItem(at: topVisible)?.frame {
+                anchor = (topVisible, frame.minY - collectionView.contentOffset.y)
+            }
+        }
+
+        dataSource?.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self, self.committedIds == ids, let collectionView = self.collectionView else { return }
+            guard let anchor else { return }
+            // Pin: oberste sichtbare Nachricht wieder an dieselbe
+            // Viewport-Position setzen (nicht talk-ios .top-Anker - der
+            // springt zum Kopf und wuerde beim Lesen am Ende abreissen).
+            if let frame = collectionView.layoutAttributesForItem(at: anchor.indexPath)?.frame {
+                collectionView.contentOffset.y = frame.minY - anchor.relative
+                SouveraLog.write("LinkChat", "re-anchor after history prepend: item=\(anchor.indexPath.item) relative=\(Int(anchor.relative))")
+            }
+        }
         committedIds = ids
     }
 
@@ -146,23 +203,65 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// die Self-Sizing-Höhen noch ändern, wird das Ziel erneut angefahren.
     private func performEntryScroll() {
         guard let collectionView, !items.isEmpty else { return }
+        cancelEntryRescrollPasses()
         isEntryStabilizing = true
         stableSizeCount = 0
         lastStableContentHeight = -1
-        if let boundary = pendingEntryBoundary,
-           let index = items.firstIndex(where: { $0.message.id == boundary }) {
-            entryTarget = .separator(index: index)
-            collectionView.layoutIfNeeded()
-            collectionView.scrollToItem(at: messageIndexPath(item: index),
-                                        at: .centeredVertically, animated: false)
-            SouveraLog.write("LinkChat", "entry scroll: separator \(boundary) centered")
+        entryStartTime = CACurrentMediaTime()
+        if let boundary = pendingEntryBoundary {
+            // Ziel als ID: die Nachricht kann beim ersten Pass noch nicht
+            // im Fenster sein (Phase-1-Kette publiziert nach) - die
+            // Paesse stufen die Trennlinie nach, sobald sie da ist.
+            entryTarget = .separator(id: boundary)
         } else {
             entryTarget = .bottom
-            scrollToBottom(animated: false)
-            SouveraLog.write("LinkChat", "entry scroll: bottom")
         }
+        scrollToEntryTarget()
         pendingEntryBoundary = nil
+        [0.15, 0.35, 0.7].forEach { delay in
+            entryRescrollTasks.append(Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                guard !Task.isCancelled else { return }
+                guard let self, self.isEntryStabilizing else { return }
+                self.scrollToEntryTarget()
+                self.evaluateEntrySettle()
+            })
+        }
         startEntryTimeout()
+    }
+
+    /// Faehrt das Eintrittsziel an: Trennlinie (Index je Pass neu aus der
+    /// Boundary-ID abgeleitet) oder Listenende.
+    private func scrollToEntryTarget() {
+        guard let collectionView, !items.isEmpty else { return }
+        switch entryTarget {
+        case .bottom:
+            scrollToBottom(animated: false)
+        case .separator(let id):
+            if let index = items.firstIndex(where: { $0.message.id == id }) {
+                collectionView.layoutIfNeeded()
+                collectionView.scrollToItem(at: messageIndexPath(item: index),
+                                            at: .centeredVertically, animated: false)
+            } else {
+                // Boundary (noch) nicht im Fenster: zunaechst ans Ende.
+                scrollToBottom(animated: false)
+            }
+        }
+    }
+
+    /// Settle erst nach Mindestdauer UND stabiler Hoehe (behebt das
+    /// Sofort-Settle desselben Millisekunden-Timestamps, Log 11.09.).
+    private func evaluateEntrySettle() {
+        guard isEntryStabilizing else { return }
+        if stableSizeCount >= 2,
+           CACurrentMediaTime() - entryStartTime >= 0.4 {
+            finishEntryStabilization(reason: "stable")
+        }
+    }
+
+    private func cancelEntryRescrollPasses() {
+        entryRescrollTasks.forEach { $0.cancel() }
+        entryRescrollTasks.removeAll()
     }
 
     private func startEntryTimeout() {
@@ -177,6 +276,7 @@ final class LinkChatListController: NSObject, ObservableObject {
     private func finishEntryStabilization(reason: String) {
         guard isEntryStabilizing else { return }
         isEntryStabilizing = false
+        cancelEntryRescrollPasses()
         entryTimeoutTask?.cancel()
         entryTimeoutTask = nil
         SouveraLog.write("LinkChat", "entry settled (UIKit, \(reason))")
@@ -196,17 +296,9 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         lastStableContentHeight = height
 
-        switch entryTarget {
-        case .bottom:
-            scrollToBottom(animated: false)
-        case .separator(let index):
-            collectionView.layoutIfNeeded()
-            collectionView.scrollToItem(at: messageIndexPath(item: index),
-                                        at: .centeredVertically, animated: false)
-        }
-        if stableSizeCount >= 2 {
-            finishEntryStabilization(reason: "stable")
-        }
+        // Ziel erneut anfahren (Index je Pass aus der ID abgeleitet).
+        scrollToEntryTarget()
+        evaluateEntrySettle()
     }
 
     private func messageIndexPath(item: Int) -> IndexPath {
@@ -220,10 +312,19 @@ final class LinkChatListController: NSObject, ObservableObject {
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
     }
 
-    /// Nachziehender Eintritts-Scroll (verspätete Ungelesen-Trennlinie).
-    func requestEntry(boundary: Int64?) {
-        pendingEntryBoundary = boundary
-        performEntryScroll()
+    /// Verspaetete Ungelesen-Trennlinie (Room-Objekt/Boundary kommt nach
+    /// dem Cache-first): Waehrend der Eintritts-Phase das Ziel auf die
+    /// Trennlinie umstellen und sofort anfahren; danach nicht mehr in die
+    /// Leseposition eingreifen.
+    func applyBoundary(_ boundary: Int64?) {
+        guard let boundary else { return }
+        if isEntryStabilizing {
+            entryTarget = .separator(id: boundary)
+            scrollToEntryTarget()
+            evaluateEntrySettle()
+        } else if !didInitialEntry {
+            pendingEntryBoundary = boundary
+        }
     }
 
     // MARK: - UICollectionViewDataSource (Diffable)
@@ -279,6 +380,15 @@ extension LinkChatListController: UICollectionViewDelegate {
             - scrollView.adjustedContentInset.bottom
             - (scrollView.contentOffset.y + scrollView.frame.height)
         onDistanceChanged?(distance)
+
+        // Nahe am Verlaufskopf: naechste gepufferte aeltere Batches
+        // anfordern (talk-ios laedt Verlauf ebenfalls nur am Kopf nach).
+        // Erst NACH dem Eintritts-Settle - in der Phase gehoert der
+        // Offset dem Entry-Scroll.
+        if !isEntryStabilizing, !items.isEmpty,
+           scrollView.contentOffset.y + scrollView.adjustedContentInset.top < 600 {
+            onRequestOlder?()
+        }
     }
 }
 
@@ -294,6 +404,7 @@ struct LinkChatListView: UIViewRepresentable {
     let rowProvider: (Int) -> AnyView
     let onDistanceChanged: (CGFloat) -> Void
     let onEntrySettled: () -> Void
+    let onRequestOlder: () -> Void
 
     func makeUIView(context: Context) -> UICollectionView {
         controller.makeCollectionView()
@@ -308,7 +419,8 @@ struct LinkChatListView: UIViewRepresentable {
             viewModel: viewModel,
             rowProvider: rowProvider,
             onDistanceChanged: onDistanceChanged,
-            onEntrySettled: onEntrySettled
+            onEntrySettled: onEntrySettled,
+            onRequestOlder: onRequestOlder
         )
     }
 }

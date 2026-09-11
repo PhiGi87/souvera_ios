@@ -1157,6 +1157,11 @@ struct LinkChatView: View {
                 },
                 onEntrySettled: {
                     onEntrySettled()
+                },
+                onRequestOlder: {
+                    // On-demand-Verlauf am Kopf: naechste gepufferte
+                    // Batch einfuegen (Controller haelt die Position).
+                    viewModel.publishOlderBatch()
                 }
             )
             .opacity(chatPositioned ? 1 : 0)
@@ -1169,10 +1174,12 @@ struct LinkChatView: View {
                     lastVisibleMessageId = items.last?.id
                 }
                 // Verspätete Trennlinie (Room-Objekt/Boundary kommt nach dem
-                // Cache-first): Eintritts-Scroll auf den Separator nachziehen.
+                // Cache-first): Der Controller zieht das Eintrittsziel auf
+                // die Trennlinie nach, solange die Eintritts-Phase läuft -
+                // nicht der frühere !chatPositioned-Guard (der feuerte nie,
+                // weil chatPositioned vor der Boundary bereits true war).
                 .onChange(of: viewModel.unreadBoundary) { _, boundary in
-                    guard !chatPositioned, let boundary else { return }
-                    chatListController.requestEntry(boundary: boundary)
+                    chatListController.applyBoundary(boundary)
                 }
                 // Verlaufs-Prepend fertig: Die Leseposition hält der
                 // Controller über die Offset-Delta-Erhaltung - kein

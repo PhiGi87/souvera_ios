@@ -72,6 +72,14 @@ final class LinkViewModel: ObservableObject {
     /// Erste ungelesene Nachricht (id > lastReadMessage) - Basis für die
     /// "Neue Nachrichten"-Trennlinie und die Eintrittsposition.
     @Published private(set) var unreadBoundary: Int64?
+    /// Gepufferte, noch NICHT publizierte aeltere Verlaufs-Batches
+    /// (Vollverlauf-Kette). Publiziert wird on-demand am Verlaufskopf
+    /// (publishOlderBatch): Inserts erfolgen dort, wo der Anker-Scroll
+    /// des Controllers exakt ist (Anker-Zelle realisiert) - Hintergrund-
+    /// Prepends waehrend des Lesens am Ende wuerden die Liste "herum-
+    /// irren" lassen (Log 11.09. 15:25).
+    private var pendingOlderBatches: [[LinkChatMessage]] = []
+    private var historyChainReachedStart = false
     /// true, sobald der User bis zu den neuesten Nachrichten gescrollt hat -
     /// die Trennlinie wird ausgeblendet, der Read-Marker gesetzt.
     @Published private(set) var hideUnreadSeparator = false
@@ -179,6 +187,8 @@ final class LinkViewModel: ObservableObject {
         offlineNotice = nil
         typingNames = []
         conversationsSignature = ""
+        pendingOlderBatches = []
+        historyChainReachedStart = false
         start()
     }
 
@@ -678,6 +688,8 @@ final class LinkViewModel: ObservableObject {
         messages = .loading
         lastMessageId = 0
         pollTask?.cancel()
+        pendingOlderBatches = []
+        historyChainReachedStart = false
         // Ungelesen-Zustand VOR dem Laden merken (Basis für Trennlinie
         // und Read-Marker); die Position wird daraus direkt bestimmt.
         let roomUnread = currentRoom?.unreadMessages ?? 0
@@ -908,18 +920,54 @@ final class LinkViewModel: ObservableObject {
             if !fresh.isEmpty {
                 all.append(contentsOf: fresh)
                 oldestLoaded = min(oldestLoaded, fresh.map(\.timestamp).min() ?? oldestLoaded)
-                if !Task.isCancelled {
-                    self.messages = .success(all.sorted { $0.id < $1.id })
+                if !Task.isCancelled, gen == self.generation {
+                    // NICHT sofort publizieren (Insert-oben beim Lesen am
+                    // Ende = Herumirren, Log 11.09.): puffern; der
+                    // Controller fordert Batches on-demand am Verlaufskopf
+                    // an (publishOlderBatch) und haelt dort die Position
+                    // ueber den Anker-Scroll.
+                    pendingOlderBatches.append(fresh.sorted { $0.id < $1.id })
                 }
             }
             if older.count < 100 {
                 reachedStart = true
                 break
             }
+            // Drosselung: Dem Layout/Self-Sizing zwischen den Batches Luft
+            // geben, damit die Insert-oben-Kette die Liste nicht flutet
+            // (ruhiges Hochscrollen, kein Ruckeln).
+            try? await Task.sleep(nanoseconds: 300_000_000)
             pages += 1
         }
-        hasMoreHistory = !reachedStart && anchor > 0
-        CallDebugLog.log("LinkViewModel", "full history loaded for \(token): total=\(all.count) oldest=\(Int(oldestLoaded)) reachedStart=\(reachedStart)")
+        historyChainReachedStart = reachedStart
+        hasMoreHistory = (!reachedStart && anchor > 0) || !pendingOlderBatches.isEmpty
+        CallDebugLog.log("LinkViewModel", "full history loaded for \(token): total=\(all.count) oldest=\(Int(oldestLoaded)) reachedStart=\(reachedStart) buffered=\(pendingOlderBatches.count) batches")
+    }
+
+    /// Publiziert die naechsten gepufferten aelteren Nachrichten (on-demand
+    /// am Verlaufskopf, vom Controller angefordert): 1+ Batches bis ~60
+    /// Nachrichten in `messages` einfuegen. Der Controller erkennt das
+    /// Prepend und haelt die Leseposition ueber den Anker-Scroll. Bei
+    /// leerem Puffer wird hasMoreHistory endgueltig gesetzt (dann zeigt
+    /// die Bubble "Anfang der Unterhaltung").
+    @discardableResult
+    func publishOlderBatch() -> Bool {
+        guard case let .success(current) = messages else { return false }
+        guard !pendingOlderBatches.isEmpty else {
+            if historyChainReachedStart {
+                hasMoreHistory = false
+            }
+            return false
+        }
+        var published = pendingOlderBatches.removeFirst()
+        while let next = pendingOlderBatches.first, published.count + next.count <= 60 {
+            published.append(contentsOf: pendingOlderBatches.removeFirst())
+        }
+        messages = .success((published + current).sorted { $0.id < $1.id })
+        if pendingOlderBatches.isEmpty, historyChainReachedStart {
+            hasMoreHistory = false
+        }
+        return true
     }
 
     /// Startet den Vollverlauf-Load im Hintergrund (nach sitzender
