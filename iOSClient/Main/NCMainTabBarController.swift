@@ -258,7 +258,7 @@ class NCMainTabBarController: UITabBarController {
             let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
             let store = SouveraBadgeStore.shared
             self.updateMailBadge(store.unreadMail(account: active))
-            self.updateLinkBadge(store.linkUnread(account: active))
+            self.updateLinkBadge(store.unreadLink(account: active))
             self.updateMoreBadge()
             JmapLog.write("Tab badges refreshed on account switch (active=\(active))")
         }
