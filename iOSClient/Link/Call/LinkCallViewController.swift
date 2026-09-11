@@ -97,7 +97,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         /// seine erste Groesse liefert (erste Frames) - der
         /// nextcloud-WebRTC-Fork hat kein RTCVideoView/didRenderFrame
         /// (talk-ios nutzt exakt diesen Delegaten).
-        @objc func videoView(_ videoView: RTCMTLVideoView, didChangeVideoSize size: CGSize) {
+        @objc func videoView(_ videoView: any RTCVideoRenderer, didChangeVideoSize size: CGSize) {
             DispatchQueue.main.async {
                 guard !self.hasRenderedFrame else { return }
                 self.hasRenderedFrame = true
