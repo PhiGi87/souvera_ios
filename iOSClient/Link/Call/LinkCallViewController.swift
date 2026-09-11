@@ -22,7 +22,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Name, talk-web-Stil) - keine schwarzen/leeren Kacheln mehr, wenn
     /// eine Kamera aus ist oder ein Stream (z. B. Screenshare) noch keine
     /// Frames liefert (Run-Feedback 12.09.).
-    private final class StreamTile: NSObject, RTCVideoViewDelegate {
+    private final class StreamTile: NSObject, RTCVideoRendererDelegate {
         let container = UIView()
         let videoView = RTCMTLVideoView()
         let session: String
@@ -93,7 +93,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             if hasRenderedFrame { overlay.isHidden = true }
         }
 
-        func videoView(_ videoView: RTCVideoView, didRenderFrame size: CGSize) {
+        /// talk-web-Proxy: didChangeVideoSize feuert, sobald der Stream
+        /// seine erste Groesse liefert (erste Frames) - der
+        /// nextcloud-WebRTC-Fork hat kein RTCVideoView/didRenderFrame
+        /// (talk-ios nutzt exakt diesen Delegaten).
+        func videoView(_ videoView: any RTCVideoRenderer, didChangeVideoSize size: CGSize) {
             DispatchQueue.main.async {
                 guard !self.hasRenderedFrame else { return }
                 self.hasRenderedFrame = true
@@ -867,9 +871,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                                     color: UIColor(red: 0.78, green: 0.85, blue: 0.95, alpha: 1))
             tile.showOverlay()
             CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
-            let session = key.components(separatedBy: "|").first ?? ""
-            let names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
-            self.attachNameLabel(to: tile.container, name: names[session] ?? "")
+            self.attachNameLabel(to: tile.container, name: name)
             self.layoutTiles()
         }
     }
