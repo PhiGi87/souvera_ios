@@ -22,7 +22,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Name, talk-web-Stil) - keine schwarzen/leeren Kacheln mehr, wenn
     /// eine Kamera aus ist oder ein Stream (z. B. Screenshare) noch keine
     /// Frames liefert (Run-Feedback 12.09.).
-    private final class StreamTile: NSObject, RTCVideoRendererDelegate {
+    private final class StreamTile: NSObject, RTCVideoViewDelegate {
         let container = UIView()
         let videoView = RTCMTLVideoView()
         let session: String
@@ -97,7 +97,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         /// seine erste Groesse liefert (erste Frames) - der
         /// nextcloud-WebRTC-Fork hat kein RTCVideoView/didRenderFrame
         /// (talk-ios nutzt exakt diesen Delegaten).
-        func videoView(_ videoView: any RTCVideoRenderer, didChangeVideoSize size: CGSize) {
+        @objc func videoView(_ videoView: RTCMTLVideoView, didChangeVideoSize size: CGSize) {
             DispatchQueue.main.async {
                 guard !self.hasRenderedFrame else { return }
                 self.hasRenderedFrame = true
