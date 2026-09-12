@@ -310,7 +310,11 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         if target == "room", type == "leave" {
             var sessions: [String] = []
             let leave = event["leave"]
-            if let list = leave as? [[String: Any]] {
+            if let list = leave as? [String] {
+                // BEKANNT gewordene Form (Log dzkmaaa1ku): plain Array von
+                // Session-ID-Strings.
+                sessions = list
+            } else if let list = leave as? [[String: Any]] {
                 for entry in list {
                     if let s = entry["sessionId"] as? String ?? entry["sessionid"] as? String {
                         sessions.append(s)

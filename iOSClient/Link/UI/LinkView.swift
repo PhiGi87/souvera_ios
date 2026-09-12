@@ -1276,17 +1276,21 @@ struct LinkChatView: View {
                     // Neue Nachricht: wenn am Ende stehend, ans neue Ende
                     // klemmen (talk-ios shouldScrollOnNewMessages, 80 px);
                     // nach dem Senden (scrollToNewestPending) immer.
+                    // Pinning statt Einzel-Scroll: die Self-Sizing-Hoehen
+                    // der neuen Zelle sind beim ersten Versuch noch Schaetzer
+                    // - ohne Nachfuehren rutschte die Nachricht unter die
+                    // Kante (Run 12.09.).
                     if scrollToNewestPending,
                        let newLastId,
                        newLastId != lastVisibleMessageId {
                         scrollToNewestPending = false
-                        chatListController.scrollToBottom(animated: false)
+                        chatListController.pinToBottomUntilStable()
                         viewModel.noteScrolledToNewest()
                     } else if chatPositioned,
                               newLastId != nil,
                               newLastId != lastVisibleMessageId,
                               chatBottomDistance <= 80 {
-                        chatListController.scrollToBottom(animated: false)
+                        chatListController.pinToBottomUntilStable()
                     }
                     lastVisibleMessageId = newLastId
                 }

@@ -372,6 +372,56 @@ final class LinkChatListController: NSObject, ObservableObject {
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
     }
 
+    // MARK: - Pin-to-Bottom (eigene Nachrichten sichtbar halten)
+
+    private var pinToBottomTask: Task<Void, Never>?
+
+    /// Offset exakt aufs reale Listenende (scrollToItem rechnet mit
+    /// Schaetzhoehen unrealisierter Zellen - die neue unterste Nachricht
+    /// rutschte dadurch unter die Display-Kante, Run 12.09.).
+    private func scrollToBottomExact() {
+        guard let collectionView, !items.isEmpty else { return }
+        collectionView.layoutIfNeeded()
+        let target = max(0, collectionView.contentSize.height
+                            - collectionView.bounds.height
+                            + collectionView.adjustedContentInset.bottom)
+        collectionView.contentOffset.y = target
+    }
+
+    /// Stabilisierungs-Loop (Muster des Eintritts-Scrolls): bis die
+    /// Content-Hoehe 3 Messungen stabil bleibt (~1,2 s max) alle 100 ms
+    /// aufs Ende pinnen; Self-Sizing-Hoehen realisieren sich dabei.
+    func pinToBottomUntilStable() {
+        pinToBottomTask?.cancel()
+        pinToBottomTask = Task { [weak self] in
+            var lastHeight: CGFloat = -1
+            var stable = 0
+            for _ in 0..<12 {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, !Task.isCancelled else { return }
+                    self.scrollToBottomExact()
+                    let height = self.collectionView?.contentSize.height ?? 0
+                    if abs(height - lastHeight) < 1 {
+                        stable += 1
+                        if stable >= 3 { self.pinToBottomTask?.cancel() }
+                    } else {
+                        stable = 0
+                    }
+                    lastHeight = height
+                }
+            }
+        }
+    }
+
+    /// Nutzer greift ein: Pinning sofort abbrechen (die "80px"-Regel der
+    /// SwiftUI-Seite uebernimmt wieder).
+    func cancelPinToBottom() {
+        pinToBottomTask?.cancel()
+        pinToBottomTask = nil
+    }
+
     /// Verspaetete Ungelesen-Trennlinie (Room-Objekt/Boundary kommt nach
     /// dem Cache-first): Waehrend der Eintritts-Phase das Ziel auf die
     /// Trennlinie umstellen und sofort anfahren; danach nicht mehr in die
@@ -435,6 +485,10 @@ final class LinkChatListController: NSObject, ObservableObject {
 }
 
 extension LinkChatListController: UICollectionViewDelegate {
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        cancelPinToBottom()
+    }
+
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         let distance = scrollView.contentSize.height
             - scrollView.adjustedContentInset.bottom
