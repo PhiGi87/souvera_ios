@@ -1929,11 +1929,19 @@ private struct LinkMessageBubble: View {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
             if isPdfMessage {
-                // Kein Dateiname/Caption unter dem Thumbnail - der Name ist
-                // nur im Vollbild-Viewer sichtbar (Run-Feedback 13.09.).
-                pdfContent
+                // Haken RECHTS NEBEN dem Thumbnail (mit Abstand, keine
+                // Ueberlappung - Run-Feedback 14.09.). Kein Dateiname/Caption
+                // unter dem Thumbnail - der Name ist nur im Vollbild-Viewer
+                // sichtbar (Run-Feedback 13.09.).
+                HStack(alignment: .center, spacing: 6) {
+                    pdfContent
+                    if let pendingState { deliveryCheckmarks(pendingState) }
+                }
             } else if isImageMessage {
-                imageContent
+                HStack(alignment: .center, spacing: 6) {
+                    imageContent
+                    if let pendingState { deliveryCheckmarks(pendingState) }
+                }
             } else if message.fileName() != nil {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(displayText)
@@ -1956,24 +1964,6 @@ private struct LinkMessageBubble: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
-        // Haken auch an Bild-/PDF-/Datei-Bubbles (Run-Feedback 14.09.: sie
-        // fehlten dort komplett): 1 Haken = Warteschlange, 2 = Server ok.
-        .overlay(alignment: .bottomTrailing) {
-            if let pendingState {
-                HStack(spacing: -3) {
-                    if pendingState == .sent {
-                        Image(systemName: "checkmark")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundStyle(.white)
-                    }
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 8)
-                .padding(.bottom, 4)
-            }
-        }
         .foregroundStyle(isOwn ? .white : .primary)
     }
 
