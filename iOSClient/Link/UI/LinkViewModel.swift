@@ -866,7 +866,13 @@ final class LinkViewModel: ObservableObject {
                 covered = true
                 publish()
             } else {
-                for message in history where loaded.first(where: { $0.id == message.id }) == nil {
+                // Server-First: bereits bekannte Nachrichten durch die
+                // Server-Version ersetzen (aktuelle Reaktions-Summaries).
+                for message in history {
+                    if let idx = loaded.firstIndex(where: { $0.id == message.id }) {
+                        loaded[idx] = message
+                        continue
+                    }
                     loaded.append(message)
                 }
                 loaded.sort { $0.id < $1.id }
@@ -1062,7 +1068,10 @@ final class LinkViewModel: ObservableObject {
         while let next = pendingOlderBatches.first, published.count + next.count <= 60 {
             published.append(contentsOf: pendingOlderBatches.removeFirst())
         }
-        messages = .success((published + current).sorted { $0.id < $1.id })
+        // Server-First: bei Kollision gewinnt die frisch geladene
+        // Server-Version (aktuelle Reaktions-Summaries, Run 13.09.).
+        messages = .success(mergeServerFirst(current: current, fresh: published)
+            .sorted { $0.id < $1.id })
         if pendingOlderBatches.isEmpty, historyChainReachedStart {
             hasMoreHistory = false
         }
@@ -1105,13 +1114,15 @@ final class LinkViewModel: ObservableObject {
                 // Reconcile: zugestellte Anhänge anhand fileInfo.name
                 // entfernen (Text-Match greift bei Datei-Nachrichten nicht,
                 // Run-Feedback 13.09.: Foto doppelt + stucked).
+                // CASE-INSENSITIV: der Server benennt Uploads um
+                // ("Foto_x.png" -> "foto_x.png", Run-Feedback 13.09.).
                 let ownFileNames = Set(fresh
                     .filter { $0.actorId == currentUserId }
-                    .compactMap { $0.fileInfo()?.name })
+                    .compactMap { $0.fileInfo()?.name.lowercased() })
                 if !ownFileNames.isEmpty {
                     pendingMessages.removeAll { entry in
                         entry.state == .sent && entry.kind == .attachment
-                            && ownFileNames.contains(entry.fileName ?? "")
+                            && ownFileNames.contains((entry.fileName ?? "").lowercased())
                     }
                 }
                 // "Anruf fuer alle beenden" (talk-ios NCChatController):
@@ -1136,19 +1147,20 @@ final class LinkViewModel: ObservableObject {
                 lastMessageId = fresh.map(\.id).max() ?? lastMessageId
                 let current: [LinkChatMessage]
                 if case let .success(existing) = messages { current = existing } else { current = [] }
-                let merged = (current + fresh)
+                // Server-First: frische Server-Version gewinnt bei
+                // ID-Kollision (aktuelle reactions-Summaries, Run 13.09.).
                 var seen = Set<Int64>()
                 var deletedIds = Set<Int64>()
-                for message in merged {
+                let mergedForIds = current + fresh
+                for message in mergedForIds {
                     if let parentId = message.deletedParentId {
                         deletedIds.insert(parentId)
                     }
                 }
-                let deduped = merged
+                let deduped = mergeServerFirst(current: current, fresh: fresh)
                     .filter { !$0.isHiddenSystemMessage }
                     .filter { !deletedIds.contains($0.id) }
                     .filter { seen.insert($0.id).inserted }
-                    .sorted { $0.id < $1.id }
                 messages = .success(deduped)
                 // Stand in den Cache (offline Re-Entry behaelt zugestellte
                 // Nachrichten - Run-Feedback 12.09.).
@@ -1633,12 +1645,13 @@ final class LinkViewModel: ObservableObject {
     private func reconcilePendingMessages(with items: [LinkChatMessage]) {
         guard !pendingMessages.isEmpty else { return }
         let ownTexts = Set(items.filter { $0.actorId == currentUserId }.map(\.message))
-        let ownFileNames = Set(items.compactMap { $0.fileInfo()?.name })
+        // CASE-INSENSITIV beim Dateinamen (Server benennt Uploads um).
+        let ownFileNames = Set(items.compactMap { $0.fileInfo()?.name.lowercased() })
         let before = pendingMessages.count
         pendingMessages.removeAll { entry in
             guard entry.state == .sent else { return false }
             if entry.kind == .attachment {
-                return ownFileNames.contains(entry.fileName ?? "")
+                return ownFileNames.contains((entry.fileName ?? "").lowercased())
             }
             return ownTexts.contains(entry.text)
         }
@@ -1655,6 +1668,20 @@ final class LinkViewModel: ObservableObject {
     /// unsichtbar - unsere eigenen (optimistisch gesetzten) waren sichtbar
     /// (Run-Feedback 12.09., Browser-Vergleich). Das Event selbst bleibt
     /// ausgeblendet (isHiddenSystemMessage).
+    /// Server-First-Merge (Run 13.09.): bei ID-Kollision gewinnt die
+    /// FRISCHE (Server-)Version - der Poll/Seiten-Fetch liefert die
+    /// Nachrichten mit AKTUELLEM reactions-Summary; der frühere Merge
+    /// behielt die veraltete Cache-Kopie, wodurch fremde Reaktions-Pills
+    /// unsichtbar blieben (u. a. alte Events vor einem Fix-Build).
+    private func mergeServerFirst(current: [LinkChatMessage], fresh: [LinkChatMessage]) -> [LinkChatMessage] {
+        guard !fresh.isEmpty else { return current }
+        var byId = Dictionary(uniqueKeysWithValues: current.map { ($0.id, $0) })
+        for message in fresh {
+            byId[message.id] = message
+        }
+        return byId.values.sorted { $0.id < $1.id }
+    }
+
     private func applyReactionEvents(_ fresh: [LinkChatMessage]) {
         let events = fresh.filter { $0.isReactionEvent }
         guard !events.isEmpty, case var .success(list) = messages else { return }

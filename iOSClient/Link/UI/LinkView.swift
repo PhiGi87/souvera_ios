@@ -1020,6 +1020,8 @@ struct LinkChatView: View {
                 let data = try? Data(contentsOf: url)
                 if didStart { url.stopAccessingSecurityScopedResource() }
                 guard let data else { return }
+                // Auch Datei-Anhänge ans neue Ende pinnen (Run 13.09.).
+                scrollToNewestPending = true
                 viewModel.sendAttachment(
                     data: data,
                     fileName: url.lastPathComponent,
@@ -1345,6 +1347,8 @@ struct LinkChatView: View {
                 counter += 1
                 let name = "Foto_\(Int(Date().timeIntervalSince1970))_\(counter).\(ext)"
                 let mime = type?.preferredMIMEType ?? "image/jpeg"
+                // Auch Anhänge ans neue Ende pinnen (Run 13.09.).
+                scrollToNewestPending = true
                 viewModel.sendAttachment(data: data, fileName: name, mimeType: mime)
             }
             await MainActor.run { photoSelections = [] }
@@ -1844,6 +1848,16 @@ private struct LinkMessageRow: View {
                     } label: {
                         Label(NSLocalizedString("_link_react_message_", comment: ""), systemImage: "face.smiling")
                     }
+                    if isOwn {
+                        // Löschen gehört ins Lang-Touch-Menü, nicht in den
+                        // Swipe (Run-Feedback 13.09. - versehentliches
+                        // Löschen beim Wischen).
+                        Button(role: .destructive) {
+                            viewModel.deleteMessage(message)
+                        } label: {
+                            Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                        }
+                    }
                     if let ownReaction = message.reactionsSelf.first {
                         // Run-Vorgabe E2: eigene Reaktion auch aus dem
                         // Kontextmenü entfernen (destruktive Rolle,
@@ -1878,12 +1892,6 @@ private struct LinkMessageRow: View {
             }
             .tint(.blue)
             if isOwn {
-                Button {
-                    viewModel.deleteMessage(message)
-                } label: {
-                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                }
-                .tint(.red)
                 Button {
                     onStartEdit()
                 } label: {

@@ -94,6 +94,8 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// scrollToRow bis die Position haelt). Tasks statt DispatchWorkItem:
     /// erben die MainActor-Isolation der Klasse und sind cancel-bar.
     private var entryRescrollTasks: [Task<Void, Never>] = []
+    /// onEntrySettled wurde gemeldet (einmalig je Raum, Run 13.09.).
+    private var didReportPositioned = false
     /// Content-Signatur des letzten Updates: Aendert sich der Zellinhalt
     /// relevante ViewModel-Stand (Bilder/PDF geladen, Boundary, ...) bei
     /// UNVERAENDERTEN IDs, werden die sichtbaren Zellen rekonfiguriert -
@@ -124,6 +126,7 @@ final class LinkChatListController: NSObject, ObservableObject {
             // Laufende Eintritts-Phase des VORHERIGEN Raums beenden.
             cancelEntryRescrollPasses()
             isEntryStabilizing = false
+            didReportPositioned = false
             entryTarget = .bottom
             entryTimeoutTask?.cancel()
             entryTimeoutTask = nil
@@ -288,6 +291,14 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         scrollToEntryTarget()
         pendingEntryBoundary = nil
+        // Liste SOFORT nach dem ersten Ziel-Scroll einblenden (Run 13.09.:
+        // bis zu 2,5s leere Fläche bis zum Settle). Die Korrektur-Pässe und
+        // die KVO-Stabilisierung laufen unsichtbar weiter; onEntrySettled
+        // wird nur EINMAL gemeldet (revealt + startet den Hintergrund-Load).
+        if !didReportPositioned {
+            didReportPositioned = true
+            onEntrySettled?()
+        }
         [0.15, 0.35, 0.7].forEach { delay in
             entryRescrollTasks.append(Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
@@ -337,7 +348,7 @@ final class LinkChatListController: NSObject, ObservableObject {
     private func startEntryTimeout() {
         entryTimeoutTask?.cancel()
         entryTimeoutTask = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
             self?.finishEntryStabilization(reason: "timeout")
         }
@@ -350,7 +361,8 @@ final class LinkChatListController: NSObject, ObservableObject {
         entryTimeoutTask?.cancel()
         entryTimeoutTask = nil
         SouveraLog.write("LinkChat", "entry settled (UIKit, \(reason))")
-        onEntrySettled?()
+        // onEntrySettled bereits beim ersten Ziel-Scroll gemeldet
+        // (didReportPositioned) - hier nur noch Log/State.
     }
 
     /// KVO auf contentSize (dokumentiert): Eintritts-Stabilisierung - das
@@ -406,17 +418,24 @@ final class LinkChatListController: NSObject, ObservableObject {
         pinToBottomTask = Task { [weak self] in
             var lastHeight: CGFloat = -1
             var stable = 0
-            for _ in 0..<12 {
-                try? await Task.sleep(nanoseconds: 100_000_000)
+            // Fester Tick-Plan (Run 13.09.): Self-Sizing-Schätzungen
+            // stabilisieren sich, BEVOR die neue unterste Zelle realisiert
+            // ist - der frühere 3x-stabil-Exit endete zu früh und die
+            // Nachricht blieb unter der Kante. Kein Exit vor 1,0s.
+            let ticks: [UInt64] = [0, 200_000_000, 300_000_000, 500_000_000, 500_000_000, 500_000_000]
+            for (index, tick) in ticks.enumerated() {
+                if index > 0 {
+                    try? await Task.sleep(nanoseconds: tick)
+                }
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self, !Task.isCancelled else { return }
                     self.scrollToBottomExact()
                     let height = self.collectionView?.contentSize.height ?? 0
-                    if abs(height - lastHeight) < 1 {
+                    if index >= 3, abs(height - lastHeight) < 1 {
                         stable += 1
-                        if stable >= 3 { self.pinToBottomTask?.cancel() }
-                    } else {
+                        if stable >= 2 { self.pinToBottomTask?.cancel() }
+                    } else if index >= 3 {
                         stable = 0
                     }
                     lastHeight = height
