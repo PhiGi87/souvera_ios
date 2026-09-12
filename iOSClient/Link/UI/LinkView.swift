@@ -709,15 +709,6 @@ struct LinkConversationListView: View {
                 Divider()
             }
             List {
-            if let offlineNotice = viewModel.offlineNotice {
-                Section {
-                    HStack(spacing: 8) {
-                        Image(systemName: "wifi.slash").foregroundStyle(.secondary)
-                        Text(offlineNotice).font(.footnote).foregroundStyle(.secondary)
-                    }
-                    .padding(.vertical, 2)
-                }
-            }
 #if DEBUG
             Section(NSLocalizedString("_link_debug_", comment: "")) {
                 Button {
@@ -1953,10 +1944,12 @@ private struct LinkMessageBubble: View {
     /// 2 Haken = vom Server angenommen.
     @ViewBuilder
     private func deliveryCheckmarks(_ state: LinkPendingMessage.PendingState) -> some View {
-        HStack(spacing: 1) {
+        // Doppelhaken UEBERLAPPEND (WhatsApp/Talk-Optik, Run-Feedback 12.09.).
+        HStack(spacing: -4) {
             if state == .sent {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
+                    .opacity(state == .sent ? 1 : 0)
             }
             Image(systemName: "checkmark")
                 .font(.system(size: 8, weight: .bold))

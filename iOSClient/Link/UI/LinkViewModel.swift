@@ -789,6 +789,21 @@ final class LinkViewModel: ObservableObject {
                 return oldest <= boundaryTarget
             }
 
+            // OFFLINE (Run 12.09.): NICHT auf Live-Fetches warten - der
+            // Cache wird SOFORT publiziert (Abdeckung egal), sonst hingen
+            // die timeout=0-Fetches minutenlang und der Chat blieb leer.
+            if !isOnline {
+                if let cached = LinkCache.loadMessages(token: token), !cached.isEmpty {
+                    loaded = cached.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
+                    self.lastMessageId = loaded.last?.id ?? 0
+                }
+                covered = true
+                publish()
+                CallDebugLog.log("LinkVM", "offline entry: cache published (\(loaded.count) messages), live chain skipped")
+                self.windowLoadDone = true
+                return
+            }
+
             // Cache-first: gecachte Nachrichten SOFORT anzeigen, WENN sie
             // die Trennlinie abdecken (Run-Vorgabe "lieber länger aber
             // sauber": sonst zentrierter Ladekreis, bis die Abdeckung per
@@ -810,7 +825,7 @@ final class LinkViewModel: ObservableObject {
             // (ganze Seiten) bis die Trennlinie abgedeckt ist (max. 10
             // Seiten Sicherheitscap; tiefer liegende Historie kommt in
             // Phase 2).
-            var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
+            var history = await api.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 10) ?? []
             guard gen == self.generation else { return }
             if history.isEmpty, loaded.isEmpty, let cached = LinkCache.loadMessages(token: token) {
                 // Server nicht erreichbar (FEHLER oder leer): letzte
@@ -838,7 +853,7 @@ final class LinkViewModel: ObservableObject {
             var coverPages = 0
             while gen == self.generation, !Task.isCancelled, !covered, coverPages < 10 {
                 coverPages += 1
-                let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false) ?? []
+                let older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 10, saveCache: false) ?? []
                 guard gen == self.generation else { return }
                 guard !older.isEmpty else {
                     // Gesprächsanfang vor der Trennlinie: alles zeigen.
@@ -949,14 +964,14 @@ final class LinkViewModel: ObservableObject {
         var reachedStart = false
         var pages = 0
         while !Task.isCancelled, pages < 500, gen == self.generation {
-            var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+            var older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 10, saveCache: false)
             if older == nil, !Task.isCancelled, gen == self.generation {
                 // FEHLER (Transport/HTTP/Decode) - NICHT als
                 // Gesprächsanfang missdeuten: 1 Retry, danach Abbruch mit
                 // unverändertem hasMoreHistory.
                 try? await Task.sleep(nanoseconds: 500_000_000)
                 guard !Task.isCancelled else { return }
-                older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 0, saveCache: false)
+                older = await api.getMessages(token: token, lastKnownId: anchor, future: false, timeoutSeconds: 10, saveCache: false)
             }
             guard let older else {
                 CallDebugLog.log("LinkViewModel", "full-history fetch FAILED for \(token) anchor=\(anchor) - aborting (moreOlder stays \(hasMoreHistory))")
@@ -1029,6 +1044,10 @@ final class LinkViewModel: ObservableObject {
     /// die aktuelle Generation und verfällt beim Raumwechsel.
     func loadFullHistoryInBackground() {
         guard case let .chat(token, _) = route, hasMoreHistory, !isLoadingHistory else { return }
+        guard isOnline else {
+            CallDebugLog.log("LinkVM", "offline - full history fetch skipped")
+            return
+        }
         let gen = generation
         Task { [weak self] in
             await self?.loadFullHistory(token: token, generation: gen)
@@ -1157,7 +1176,18 @@ final class LinkViewModel: ObservableObject {
     }
 
     private func loadPendingMessages() {
-        pendingMessages = LinkCache.loadPendingMessages(account: cacheAccountKey)
+        var loaded = LinkCache.loadPendingMessages(account: cacheAccountKey)
+        // Defensive: doppelte IDs in der Persistenz filtern (kein Fall
+        // heute, aber eine Diffable-Duplikat-Assertion darf nie entstehen).
+        var seen = Set<Int64>()
+        loaded = loaded.filter { seen.insert($0.id).inserted }
+        pendingMessages = loaded
+        // KRITISCH: den Temp-ID-Zaehler HINTER die geladenen IDs setzen.
+        // Ohne das kollidierte die erste neue Nachricht nach einem
+        // App-Neustart mit einer persistierten ID (beide -1) -> doppelte
+        // Item-Identifier im Diffable-Snapshot -> SIGABRT (TestFlight-
+        // Crashs 12.09., offline um 00:22/00:23).
+        nextPendingTempId = (loaded.map(\.id).min() ?? 0) - 1
     }
 
     private var cacheAccountKey: String {
@@ -1176,6 +1206,14 @@ final class LinkViewModel: ObservableObject {
                     let tokens = Set(self.pendingMessages.map(\.token))
                     for token in tokens {
                         self.flushPendingMessages(token: token)
+                    }
+                    // Raum-Poll neu starten: der Offline-Eintrag hat die
+                    // Live-Kette uebersprungen (Run 12.09.).
+                    if case let .chat(token, _) = self.route {
+                        self.pollTask?.cancel()
+                        self.pollTask = Task { [weak self] in
+                            await self?.pollNewMessages(token: token)
+                        }
                     }
                 } else if !online, self.isOnline {
                     self.isOnline = false
@@ -1268,7 +1306,7 @@ final class LinkViewModel: ObservableObject {
     /// Fetches the full recent history once (used after edits/deletions).
     private func reloadMessages(token: String) {
         Task {
-            let history = await api?.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 0) ?? []
+            let history = await api?.getMessages(token: token, lastKnownId: historyAnchor, future: false, timeoutSeconds: 10) ?? []
             let ordered = history.sorted { $0.id < $1.id }.filter { !$0.isHiddenSystemMessage }
             self.lastMessageId = ordered.last?.id ?? 0
             self.messages = .success(ordered)

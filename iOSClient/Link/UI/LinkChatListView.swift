@@ -215,7 +215,15 @@ final class LinkChatListController: NSObject, ObservableObject {
 
     // MARK: - Snapshot-Anwendung
 
-    private func applySnapshot(ids: [Int64], isPrepend: Bool = false) {
+    private func applySnapshot(ids rawIds: [Int64], isPrepend: Bool = false) {
+        // Defensive (TestFlight-Crash 12.09.: doppelte Item-Identifiers ->
+        // SIGABRT in appendItems): Duplikate filtern, erstes Vorkommen
+        // gewinnt. Diffable-Assertions duerfen die App NIE crashen.
+        var seenIds = Set<Int64>()
+        let ids = rawIds.filter { seenIds.insert($0).inserted }
+        if ids.count != rawIds.count {
+            SouveraLog.write("LinkChat", "snapshot dedupe: \(rawIds.count) -> \(ids.count) (duplicate message ids!)")
+        }
         var snapshot = NSDiffableDataSourceSnapshot<Section, ListItem>()
         snapshot.appendSections([.header, .messages])
         snapshot.appendItems([.header], toSection: .header)

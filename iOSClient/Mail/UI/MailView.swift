@@ -1022,12 +1022,6 @@ private struct MailMessageListView: View {
             if !networkStatus.isOnline {
                 SouveraOfflineBanner()
             }
-            if let notice = viewModel.offlineNotice {
-                Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.vertical, 4)
-            }
             switch viewModel.messages {
             case .loading:
                 // Kein Ladekreis: Der Fortschritt läuft über das Overlay
