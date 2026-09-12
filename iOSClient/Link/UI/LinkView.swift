@@ -1282,14 +1282,12 @@ struct LinkChatView: View {
                 // Verlaufs-Prepend fertig: Die Leseposition hält der
                 // Controller über die Offset-Delta-Erhaltung - kein
                 // zusätzlicher Re-Anchor-Scroll mehr nötig.
-                .onChange(of: items.last?.id) { _, newLastId in
-                    // Neue Nachricht: wenn am Ende stehend, ans neue Ende
-                    // klemmen (talk-ios shouldScrollOnNewMessages, 80 px);
-                    // nach dem Senden (scrollToNewestPending) immer.
-                    // Pinning statt Einzel-Scroll: die Self-Sizing-Hoehen
-                    // der neuen Zelle sind beim ersten Versuch noch Schaetzer
-                    // - ohne Nachfuehren rutschte die Nachricht unter die
-                    // Kante (Run 12.09.).
+                .onChange(of: renderMessages.last?.id) { _, newLastId in
+                    // Neue Nachricht (Server-Echo ODER offline Queue-Zuwachs):
+                    // ans neue Ende klemmen. Beobachtet wird renderMessages
+                    // (Verlauf + pendent Nachrichten) - der fruehere
+                    // items-only-Trigger feuerte offline nie, pendent
+                    // Nachrichten rutschten unter die Kante (Run 14.09.).
                     if scrollToNewestPending,
                        let newLastId,
                        newLastId != lastVisibleMessageId {
@@ -1707,9 +1705,11 @@ private struct LinkMessageRow: View {
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
+                        // DECKEND (Run-Feedback 14.09.: 0.2-Opazität liess den
+                        // Hintergrund durchscheinen): festes helles Grün.
                         Capsule().fill(isOwn
                             ? Color.orange.opacity(0.95)
-                            : Color.green.opacity(0.2))
+                            : Color(red: 0.5, green: 0.85, blue: 0.55))
                     )
                     .overlay(
                         Capsule().stroke(isOwn ? Color.white.opacity(0.85) : .clear, lineWidth: 1)
@@ -1956,6 +1956,24 @@ private struct LinkMessageBubble: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
+        // Haken auch an Bild-/PDF-/Datei-Bubbles (Run-Feedback 14.09.: sie
+        // fehlten dort komplett): 1 Haken = Warteschlange, 2 = Server ok.
+        .overlay(alignment: .bottomTrailing) {
+            if let pendingState {
+                HStack(spacing: -3) {
+                    if pendingState == .sent {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(.white)
+                    }
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 8)
+                .padding(.bottom, 4)
+            }
+        }
         .foregroundStyle(isOwn ? .white : .primary)
     }
 
