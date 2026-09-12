@@ -1692,10 +1692,10 @@ private struct LinkMessageRow: View {
         return letters.joined().uppercased()
     }
 
-    /// Emoji-Reaktions-Pills, halb überlappend am unteren Bubble-Rand.
-    /// Run-Vorgabe: eigene Reaktion = oranger Hintergrund + Ring als
-    /// Eigen-Kennung, fremde Reaktionen = blauer Hintergrund (Brand-Tint,
-    /// AA-sicher mit weißer Schrift).
+    /// Emoji-Reaktions-Pills, halb überlappend an der linken unteren
+    /// Bubble-Ecke (einheitlich für eigene UND fremde Nachrichten,
+    /// Run-Feedback 13.09.). Fremde Reaktionen = helles Grün (abgehoben
+    /// vom Nachrichten-Blau), eigene = orange + Ring als Eigen-Kennung.
     @ViewBuilder
     private func reactionPills(message: LinkChatMessage) -> some View {
         HStack(spacing: 4) {
@@ -1703,13 +1703,13 @@ private struct LinkMessageRow: View {
                 let isOwn = message.reactionsSelf.contains(emoji)
                 Text("\(emoji) \(count)")
                     .font(.caption2)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(isOwn ? .white : .primary)
                     .padding(.horizontal, 6)
                     .padding(.vertical, 2)
                     .background(
                         Capsule().fill(isOwn
                             ? Color.orange.opacity(0.95)
-                            : Color(NCBrandColor.shared.customer))
+                            : Color.green.opacity(0.2))
                     )
                     .overlay(
                         Capsule().stroke(isOwn ? Color.white.opacity(0.85) : .clear, lineWidth: 1)
@@ -1823,13 +1823,14 @@ private struct LinkMessageRow: View {
                             await viewModel.loadChatPdf(for: message)
                         }
                     }
-                        .overlay(alignment: isOwn ? .bottomTrailing : .bottomLeading) {
-                            // Reaktionen leicht überlappend am unteren Bubble-Rand,
-                            // etwas eingerückt (nicht ganz bündig mit der Kante),
+                        .overlay(alignment: .bottomLeading) {
+                            // Reaktionen leicht überlappend an der LINKEN
+                            // unteren Bubble-Ecke - bei eigenen Nachrichten
+                            // genau wie bei fremden (Run-Feedback 13.09.),
                             // ohne den Nachrichtentext zu verdecken.
                             if !message.reactions.isEmpty {
                                 reactionPills(message: message)
-                                    .offset(x: isOwn ? -6 : 6, y: 10)
+                                    .offset(x: 6, y: 10)
                             }
                         }
                     if !isOwn { Spacer(minLength: 40) }

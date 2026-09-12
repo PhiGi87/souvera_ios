@@ -261,6 +261,8 @@ final class LinkViewModel: ObservableObject {
     /// Anhänge UND Souvera-Dateien-Freigaben) und erzeugt das Thumbnail
     /// der ersten Seite.
     func loadChatPdf(for message: LinkChatMessage) async {
+        // Pendent Zeilen: Thumbnail aus den lokalen Bytes (siehe loadChatImage).
+        if message.id < 0 { return }
         guard chatPdfThumbCache[message.id] == nil,
               let info = message.fileInfo(),
               let path = info.path,
@@ -291,6 +293,10 @@ final class LinkViewModel: ObservableObject {
     /// herunter (Speicherschutz bei großen Fotos).
     func loadChatImage(for message: LinkChatMessage) async {
         let id = message.id
+        // Pendent Zeilen (Offline-Anhang): die Vorschau kommt aus den
+        // lokalen Bytes (chatImageCache) - ohne Server-Pfad wuerde der
+        // Loader sonst den failed-Marker setzen und die Vorschau killen.
+        if id < 0 { return }
         // Bereits geladen oder endgueltig gescheitert (2 Versuche): fertig.
         if let cached = chatImageCache[id], !cached.isEmpty { return }
         if chatImageFailed.contains(id), (imageLoadAttempts[id] ?? 0) >= 2 { return }
@@ -1337,6 +1343,24 @@ final class LinkViewModel: ObservableObject {
         // Item-Identifier im Diffable-Snapshot -> SIGABRT (TestFlight-
         // Crashs 12.09., offline um 00:22/00:23).
         nextPendingTempId = (loaded.map(\.id).min() ?? 0) - 1
+        // Vorschauen rehydrieren (Run 13.09.): offline Anhänge zeigen
+        // ihr echtes Bild/Thumbnail auch nach einem App-Neustart.
+        let key = cacheAccountKey
+        Task { [weak self] in
+            for pending in loaded where pending.kind == .attachment && pending.state == .queued {
+                guard let self, let data = LinkCache.loadPendingAttachment(id: pending.id, account: key) else { continue }
+                let mime = pending.mimeType ?? ""
+                if mime.hasPrefix("image/") {
+                    let scaled = await Self.downscaledImageData(data, maxDimension: 1280) ?? data
+                    await MainActor.run { self.chatImageCache[pending.id] = scaled }
+                } else if mime.lowercased() == "application/pdf",
+                          let url = LinkCache.pendingAttachmentURL(id: pending.id, account: key),
+                          let thumb = NCUtility().pdfThumbnail(url: url, width: 220),
+                          let thumbData = thumb.jpegData(compressionQuality: 0.85) {
+                    await MainActor.run { self.chatPdfThumbCache[pending.id] = thumbData }
+                }
+            }
+        }
     }
 
     private var cacheAccountKey: String {
@@ -1572,6 +1596,20 @@ final class LinkViewModel: ObservableObject {
         pendingMessages.append(pending)
         LinkCache.savePendingAttachment(data, id: pending.id, account: cacheAccountKey)
         persistPendingMessages()
+        // Lokale VORSCHAU: echtes Bild bzw. PDF-Thumbnail aus den lokalen
+        // Bytes - die Bubble zeigt den Anhang sofort statt Platzhalters
+        // (Run-Feedback 13.09.).
+        if mimeType.hasPrefix("image/") {
+            Task {
+                let scaled = await Self.downscaledImageData(data, maxDimension: 1280) ?? data
+                await MainActor.run { chatImageCache[pending.id] = scaled }
+            }
+        } else if mimeType.lowercased() == "application/pdf",
+                  let url = LinkCache.pendingAttachmentURL(id: pending.id, account: cacheAccountKey),
+                  let thumb = NCUtility().pdfThumbnail(url: url, width: 220),
+                  let thumbData = thumb.jpegData(compressionQuality: 0.85) {
+            chatPdfThumbCache[pending.id] = thumbData
+        }
         CallDebugLog.log("LinkVM", "attachment queued offline: \(fileName) (\(data.count) bytes)")
     }
 

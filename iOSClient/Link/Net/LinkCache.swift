@@ -105,6 +105,10 @@ extension LinkCache {
 // MARK: - Offline-Anhang-Ablage (Run 12.09.)
 
 extension LinkCache {
+    static func pendingAttachmentURL(id: Int64, account: String) -> URL? {
+        attachmentURL(id: id, account: account)
+    }
+
     private static func attachmentURL(id: Int64, account: String) -> URL? {
         guard let dir = cacheDirectory else { return nil }
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
