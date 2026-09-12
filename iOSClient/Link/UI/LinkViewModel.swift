@@ -1556,10 +1556,12 @@ final class LinkViewModel: ObservableObject {
                 guard let self, self.isOnline else { return }
                 var ok = true
                 for emoji in entry.removes {
-                    ok = ok && await api.removeReaction(token: entry.token, messageId: entry.messageId, emoji: emoji)
+                    let removed = await api.removeReaction(token: entry.token, messageId: entry.messageId, emoji: emoji)
+                    ok = ok && removed
                 }
                 if ok, let desired = entry.desired {
-                    ok = await api.addReaction(token: entry.token, messageId: entry.messageId, emoji: desired)
+                    let added = await api.addReaction(token: entry.token, messageId: entry.messageId, emoji: desired)
+                    ok = ok && added
                 }
                 guard ok else {
                     CallDebugLog.log("LinkVM", "reaction flush failed - stopping")
