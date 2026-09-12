@@ -37,7 +37,12 @@ enum MailCache {
         try? fm.removeItem(at: rootDirectory.appendingPathComponent("bodies-\(safeAccount)", isDirectory: true))
     }
 
-    private static func fileURL(account: String, mailboxId: String) -> URL {
+    /// Cache-Datei je Konto+Ordner. LEERE Keys sind verboten: der
+    /// Kaltstart-Race (Log dzxuaaa1n1) erzeugte ""-keyed Dateien wie
+    /// "_|Inbox-v3.json.gz" - Leserieten mit leerem Key sahen immer MISS.
+    /// save*/load* guarden deshalb vorab.
+    private static func fileURL(account: String, mailboxId: String) -> URL? {
+        guard !account.isEmpty, !mailboxId.isEmpty else { return nil }
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let safeMailbox = mailboxId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         // v3: Nachrichten-Cache-Schlüssel wurden vereinheitlicht (mailboxId-
@@ -46,12 +51,25 @@ enum MailCache {
         return rootDirectory.appendingPathComponent("\(safeAccount)_\(safeMailbox)-v3.json.gz")
     }
 
+    /// Bereinigt Muell-Dateien aus dem Start-Race (Dateien, die mit "_"
+    /// beginnen = leerer Account-Teil).
+    static func cleanupEmptyAccountFiles() {
+        guard let files = try? FileManager.default.contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil) else { return }
+        for url in files where url.lastPathComponent.hasPrefix("_") {
+            try? FileManager.default.removeItem(at: url)
+        }
+    }
+
     struct MessageSnapshot {
         let emails: [[String: Any]]
         let queryState: String?
     }
 
     static func saveMessages(account: String, mailboxId: String, emails: [[String: Any]], queryState: String?) {
+        guard let fileURL = fileURL(account: account, mailboxId: mailboxId) else {
+            JmapLog.write("messages cache save: SKIPPED (empty account/mailboxId)")
+            return
+        }
         let payload: [String: Any] = [
             "emails": emails,
             "queryState": queryState ?? NSNull()
@@ -59,11 +77,12 @@ enum MailCache {
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let compressed = compress(data) else { return }
         try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
-        try? compressed.write(to: fileURL(account: account, mailboxId: mailboxId), options: .atomic)
+        try? compressed.write(to: fileURL, options: .atomic)
     }
 
     static func loadMessages(account: String, mailboxId: String) -> MessageSnapshot? {
-        guard let compressed = try? Data(contentsOf: fileURL(account: account, mailboxId: mailboxId)),
+        guard let fileURL = fileURL(account: account, mailboxId: mailboxId),
+              let compressed = try? Data(contentsOf: fileURL),
               let data = decompress(compressed),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let emails = json["emails"] as? [[String: Any]] else {
@@ -75,7 +94,8 @@ enum MailCache {
     }
 
     static func remove(account: String, mailboxId: String) {
-        try? FileManager.default.removeItem(at: fileURL(account: account, mailboxId: mailboxId))
+        guard let fileURL = fileURL(account: account, mailboxId: mailboxId) else { return }
+        try? FileManager.default.removeItem(at: fileURL)
     }
 
     // MARK: - Body-Cache (IMAP-artig: Inhalte aller geladenen Mails)
@@ -146,21 +166,25 @@ enum MailCache {
 
     // MARK: - Mailbox list snapshot
 
-    private static func mailboxesURL(account: String) -> URL {
+    private static func mailboxesURL(account: String) -> URL? {
+        // LEERER Account-Key verboten (Kaltstart-Race, siehe fileURL).
+        guard !account.isEmpty else { return nil }
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         // v3: siehe messages-v3 (Postfach-IDs vereinheitlicht).
         return rootDirectory.appendingPathComponent("\(safeAccount)_mailboxes-v3.json.gz")
     }
 
     static func saveMailboxes(account: String, boxes: [[String: Any]]) {
-        guard let data = try? JSONSerialization.data(withJSONObject: boxes),
+        guard let mailboxesURL = mailboxesURL(account: account),
+              let data = try? JSONSerialization.data(withJSONObject: boxes),
               let compressed = compress(data) else { return }
         try? FileManager.default.createDirectory(at: rootDirectory, withIntermediateDirectories: true)
-        try? compressed.write(to: mailboxesURL(account: account), options: .atomic)
+        try? compressed.write(to: mailboxesURL, options: .atomic)
     }
 
     static func loadMailboxes(account: String) -> [[String: Any]]? {
-        guard let compressed = try? Data(contentsOf: mailboxesURL(account: account)),
+        guard let mailboxesURL = mailboxesURL(account: account),
+              let compressed = try? Data(contentsOf: mailboxesURL),
               let data = decompress(compressed),
               let boxes = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return nil }
         return boxes

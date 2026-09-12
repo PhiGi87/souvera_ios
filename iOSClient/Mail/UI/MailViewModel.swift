@@ -336,6 +336,9 @@ final class MailViewModel: ObservableObject {
 
     func start() {
         if imapClient != nil || jmapClient != nil { return }
+        // Muell-Dateien aus dem frueheren Kaltstart-Race entfernen (leerer
+        // Account-Teil, z. B. "_|Inbox-v3.json.gz").
+        MailCache.cleanupEmptyAccountFiles()
         startAutoRefresh()
         // ALLES asynchron (Task statt synchron im SwiftUI-Update-Zyklus):
         // Der vorherige synchrone Cache-First-Block machte einen SYNC
@@ -346,7 +349,19 @@ final class MailViewModel: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             // Account-Key ASYNCHRON auflösen (kein sync Realm-Read).
-            self.fallbackAccountKey = await NCManageDatabase.shared.getActiveTableAccountAsync()?.account ?? ""
+            // RETRY: direkt nach App-Start liefert der Realm-Read teils
+            // leer (Start-Race, Log dzxuaaa1n1 12:07: "mailboxId=|Inbox"
+            // MISS) - dann wrde der gesamte Cache-Pfad mit LEEREM Key
+            // laufen und der Nutzer sah erst nach dem Netzwerk-Load etwas.
+            for _ in 0..<3 {
+                self.fallbackAccountKey = await NCManageDatabase.shared.getActiveTableAccountAsync()?.account ?? ""
+                if !self.fallbackAccountKey.isEmpty { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
+            guard !self.cacheAccountKey.isEmpty else {
+                JmapLog.write("start: no active account key - skipping cache-first (will retry via applyAccount)")
+                return
+            }
             // Cache-First: letzten Postfach-/Nachrichten-Stand sofort
             // anzeigen - kein Spinner und offline-tauglich. Der Live-Load
             // ersetzt ihn.

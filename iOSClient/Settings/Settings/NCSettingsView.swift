@@ -468,16 +468,32 @@ struct NCSettingsView: View {
         isSendingLogs = true
         logsResult = nil
         Task {
-            let result = await SouveraLogSender.sendLogs()
+            // 10s-Timeout: bei langsamen Verbindungen wartete der Nutzer
+            // minutenlang auf den JMAP-Versand (Run-Feedback 12.09.).
+            // Nach dem Timeout oeffnet sich das NATIVE Apple-Teilen mit dem
+            // fertigen Log-File - mit Vorab-Info im Overlay.
+            let result = await SouveraLogSender.sendLogsWithTimeout {
+                // Späterer Erfolg im Hintergrund: Ergebnis-Overlay zeigen.
+                Task { @MainActor in
+                    self.logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
+                }
+            }
             isSendingLogs = false
             switch result {
             case .success:
                 logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
             case .failure(let error):
-                SouveraLog.write("Settings", "logs send failed: \(error.localizedDescription)")
-                logsResult = (false, NSLocalizedString("_settings_logs_failed_", comment: ""))
-                // Fallback: Share-Sheet, damit die Logs trotzdem rauskommen.
-                presentShareFallback()
+                if case SouveraLogSender.MailSendError.timeout = error {
+                    SouveraLog.write("Settings", "logs send timed out (10s) - offering native share")
+                    // Vorab-Info: Ergebnis-Overlay informieren, bevor das
+                    // Apple-Teilen erscheint.
+                    logsResult = (true, NSLocalizedString("_settings_logs_timeout_share_", comment: ""))
+                    presentShareFallback()
+                } else {
+                    SouveraLog.write("Settings", "logs send failed: \(error.localizedDescription)")
+                    logsResult = (false, NSLocalizedString("_settings_logs_failed_", comment: ""))
+                    presentShareFallback()
+                }
             }
         }
     }

@@ -78,11 +78,52 @@ enum SouveraLogSender {
         return "normal: \(normal) | voip: \(voip)"
     }
 
-    /// Sendet die Logs als JMAP-Mail an die feste Host-On-Adresse.
-    static func sendLogs() async -> Result<String, Error> {
-        // Log-Inhalt ZUERST einfrieren - ein Accountwechsel während des
-        // Versands darf den Inhalt niemals verändern/verlieren.
+    /// Sendet die Logs als JMAP-Mail - mit 10s-GESAMT-Timeout: bei
+    /// langsamen Verbindungen wartete der Nutzer sonst minutenlang
+    /// (Session + Blob-Upload + Draft + Submit, je 60s Timeouts, 2
+    /// Versuche; Run-Feedback 12.09.). Bei Timeout -> .timeout: die
+    /// Settings bieten dann das native Teilen an. Der Versand-Task laeuft
+    /// dahinter weiter - faellt er spter doch noch erfolgreich an, wird
+    /// das Ergebnis via onLateSuccess gemeldet (dedupliziert).
+    static func sendLogsWithTimeout(timeoutSeconds: UInt64 = 10,
+                                    onLateSuccess: @escaping @Sendable () -> Void) async -> Result<String, Error> {
         let logs = await Task.detached { combinedLog() }.value
+        let once = OnceBox()
+        return await withCheckedContinuation { continuation in
+            // Versand-Task: LAEUFT BEIM TIMEOUT WEITER (kein cancelAll -
+            // sonst wrde URLSession den Versand abbrechen). Fllt er spter
+            // erfolgreich an, wird onLateSuccess gemeldet.
+            Task {
+                let result = await Self.sendLogs(logs: logs)
+                if await once.claim() {
+                    continuation.resume(returning: result)
+                } else if case .success = result {
+                    await MainActor.run { onLateSuccess() }
+                }
+            }
+            // Timeout-Task: meldet nach 10s .timeout, wenn der Versand noch
+            // luft - die Settings zeigen dann das native Teilen.
+            Task {
+                try? await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                if await once.claim() {
+                    continuation.resume(returning: .failure(MailSendError.timeout))
+                }
+            }
+        }
+    }
+
+    private actor OnceBox {
+        private var claimed = false
+        func claim() -> Bool {
+            guard !claimed else { return false }
+            claimed = true
+            return true
+        }
+    }
+
+    private static func sendLogs(logs: String) async -> Result<String, Error> {
+        // Log-Inhalt ist vorgefroren (Aufrufer) - ein Accountwechsel
+        // während des Versands darf den Inhalt nie verändern.
         // 2 Versuche: scheitert der Versand (z. B. weil während des
         // Versands der Account gewechselt wurde), wird die Credential
         // frisch aufgelöst und EINMAL wiederholt.
@@ -185,11 +226,13 @@ enum SouveraLogSender {
 
     enum MailSendError: LocalizedError {
         case noClient
+        case timeout
         case smtp(String)
 
         var errorDescription: String? {
             switch self {
             case .noClient: return "Mail-Konto nicht verfügbar"
+            case .timeout: return "Zeitüberschreitung beim Log-Versand"
             case .smtp(let message): return message
             }
         }
