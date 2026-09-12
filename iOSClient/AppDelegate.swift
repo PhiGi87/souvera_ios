@@ -218,6 +218,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     // MARK: - Push Notifications
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        // Link-Nachricht für den AKTUELL geöffneten Raum: kein Banner, nur
+        // Ton (Run-Feedback 12.09.). Token kommt für lokale talk_-Meldungen
+        // direkt aus der userInfo, für Remote-Pushes schreibt der NSE
+        // das entschlüsselte Raum-Token hinein.
+        let info = notification.request.content.userInfo
+        // willPresent laeuft garantiert auf dem Main-Thread.
+        let openToken = MainActor.assumeIsolated { SouveraOpenChatState.shared.token }
+        if let token = info["token"] as? String, !token.isEmpty,
+           token == openToken {
+            SouveraLog.write("Push", "foreground push for OPEN room - banner suppressed (sound only)")
+            completionHandler([.sound])
+            return
+        }
         completionHandler([.list, .banner, .sound])
     }
 

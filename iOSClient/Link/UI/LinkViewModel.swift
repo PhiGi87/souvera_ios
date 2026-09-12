@@ -99,6 +99,10 @@ final class LinkViewModel: ObservableObject {
     /// eingegeben wurden - persistiert (LinkCache), im Chat mit
     /// Pendenz-Marker sichtbar, Versand automatisch bei Rueckkehr online.
     @Published private(set) var pendingMessages: [LinkPendingMessage] = []
+    /// Offline-Reaktionen (kollabierte Endzustaende je Nachricht).
+    @Published private(set) var pendingReactions: [LinkPendingReaction] = []
+    private var nextPendingReactionId: Int64 = -1
+    private var isFlushingReactions = false
     @Published private(set) var isOnline = true
     private let pathMonitor = NWPathMonitor()
     private var nextPendingTempId: Int64 = -1
@@ -201,6 +205,7 @@ final class LinkViewModel: ObservableObject {
         chatImageFailed = []
         imageLoadAttempts = [:]
         loadPendingMessages()
+        loadPendingReactions()
         unreadBoundary = nil
         lastMessageId = 0
         currentUserId = ""
@@ -232,6 +237,7 @@ final class LinkViewModel: ObservableObject {
     /// Resolves the active account and loads the conversation list. Idempotent.
     func start() {
         loadPendingMessages()
+        loadPendingReactions()
         if api == nil {
             guard let account = LinkAccount.active() else {
                 conversations = .error("No account")
@@ -479,6 +485,13 @@ final class LinkViewModel: ObservableObject {
         let previous = message.reactionsSelf.first
         guard previous != emoji else { return }
         applyReactionReplace(messageId: message.id, from: previous, to: emoji)
+        // OFFLINE (Run 12.09.): kollabiert in die Reaktions-Warteschlange -
+        // die optimistische Bubble bleibt sichtbar, kein Rollback.
+        guard isOnline else {
+            enqueuePendingReaction(token: token, messageId: message.id,
+                                   desired: emoji, removes: previous.map { [$0] } ?? [])
+            return
+        }
         Task {
             var ok = true
             if let previous {
@@ -501,6 +514,11 @@ final class LinkViewModel: ObservableObject {
         guard let api, case let .chat(token, _) = route else { return }
         guard let previous = message.reactionsSelf.first else { return }
         applyReactionReplace(messageId: message.id, from: previous, to: nil)
+        guard isOnline else {
+            enqueuePendingReaction(token: token, messageId: message.id,
+                                   desired: nil, removes: [previous])
+            return
+        }
         Task {
             if !(await api.removeReaction(token: token, messageId: message.id, emoji: previous)) {
                 applyReactionReplace(messageId: message.id, from: nil, to: previous)
@@ -732,6 +750,17 @@ final class LinkViewModel: ObservableObject {
     @Published var participants: [LinkParticipant] = []
 
     func openConversation(token: String, title: String) {
+        // Eingehaengte Queue-Eintraege beim Raumeintritt abarbeiten
+        // (Run-Feedback 12.09.: 503er-Nachricht blieb mit 1 Haken haengen).
+        loadPendingReactions()
+        if isOnline {
+            if !pendingMessages.isEmpty {
+                flushPendingMessages(token: token)
+            }
+            if !pendingReactions.isEmpty {
+                flushPendingReactions(token: token)
+            }
+        }
         route = .chat(token: token, title: title)
         if case let .success(rooms) = conversations {
             currentRoom = rooms.first(where: { $0.token == token })
@@ -1110,6 +1139,7 @@ final class LinkViewModel: ObservableObject {
                 // Stand in den Cache (offline Re-Entry behaelt zugestellte
                 // Nachrichten - Run-Feedback 12.09.).
                 LinkCache.saveMessageArray(deduped, token: token)
+                reconcilePendingReactions()
             }
         }
     }
@@ -1124,16 +1154,43 @@ final class LinkViewModel: ObservableObject {
         // pendent Nachricht direkt aus der Queue ab (Marker inklusive).
         guard isOnline else {
             enqueuePending(token: token, text: outgoing, replyTo: replyTo)
+            schedulePendingFlushRetry(token: token)
             return
         }
         let gen = generation
         Task { [weak self] in
             let ok = await api.sendMessage(token: token, message: outgoing, replyTo: replyTo)
             guard let self, gen == self.generation else { return }
-            if !ok {
+            if ok {
+                // Selbstheilung: ein 503er-Hicksel frueher hat Nachrichten
+                // dauerhaft in der Queue eingesperrt (Log dz1eaaa1ps) -
+                // jeder erfolgreiche Sendevorgang raeumt jetzt mit auf.
+                await MainActor.run {
+                    self.flushPendingMessages(token: token)
+                    self.flushPendingReactions(token: token)
+                }
+            } else {
                 CallDebugLog.log("LinkVM", "send FAILED (online path) - enqueueing as pending")
                 await MainActor.run {
                     self.enqueuePending(token: token, text: outgoing, replyTo: replyTo)
+                    self.schedulePendingFlushRetry(token: token)
+                }
+            }
+        }
+    }
+
+    /// Retry-Leiter fuer hängende Queue-Eintraege: nach 5/20/60s erneut
+    /// flushen (cancel-bar, nur online) - ein 503er oder ein verpasster
+    /// ONLINE-Wechsel liess Nachrichten sonst dauerhaft mit 1 Haken
+    /// haengen (Run-Feedback 12.09.).
+    private func schedulePendingFlushRetry(token: String) {
+        for delay in [5, 20, 60] {
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(delay) * 1_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, self.isOnline else { return }
+                    self.flushPendingMessages(token: token)
                 }
             }
         }
@@ -1160,6 +1217,17 @@ final class LinkViewModel: ObservableObject {
             defer { Task { @MainActor [weak self] in self?.isFlushingPending = false } }
             for pending in queue {
                 guard let self, self.isOnline else { return }
+                if pending.kind == .attachment {
+                    // Angehaengter lokaler Anhang (Foto/Datei, Run 12.09.):
+                    // normaler Upload-Ablauf; Bytes weg -> als erledigt
+                    // entfernen statt ewig haengen zu bleiben.
+                    let attachmentOk = await self.flushPendingAttachment(pending)
+                    guard attachmentOk else {
+                        CallDebugLog.log("LinkVM", "attachment flush failed - stopping (still offline?)")
+                        return
+                    }
+                    continue
+                }
                 let ok = await api.sendMessage(token: pending.token,
                                                message: pending.text,
                                                replyTo: pending.replyTo)
@@ -1227,6 +1295,7 @@ final class LinkViewModel: ObservableObject {
                     let tokens = Set(self.pendingMessages.map(\.token))
                     for token in tokens {
                         self.flushPendingMessages(token: token)
+                        self.flushPendingReactions(token: token)
                     }
                     // Raum-Poll neu starten: der Offline-Eintrag hat die
                     // Live-Kette uebersprungen (Run 12.09.).
@@ -1405,15 +1474,162 @@ final class LinkViewModel: ObservableObject {
     func sendAttachment(data: Data, fileName: String, mimeType: String) {
         guard let api else { return }
         guard case let .chat(token, _) = route else { return }
-        Task {
+        // OFFLINE (Run 12.09.): Anhang in die Warteschlange - die Bytes
+        // liegen lokal vor und werden bei Wiederverbindung hochgeladen.
+        guard isOnline else {
+            enqueuePendingAttachment(token: token, data: data,
+                                     fileName: fileName, mimeType: mimeType)
+            schedulePendingFlushRetry(token: token)
+            return
+        }
+        Task { [weak self] in
             let ok = await api.uploadFileToChat(token: token, data: data, fileName: fileName, mimeType: mimeType)
-            if !ok {
-                actionFeedback = LinkActionFeedback(
-                    success: false,
-                    message: NSLocalizedString("_link_upload_failed_", comment: "")
-                )
+            guard let self else { return }
+            if ok {
+                await MainActor.run { self.flushPendingMessages(token: token) }
+            } else {
+                await MainActor.run {
+                    self.enqueuePendingAttachment(token: token, data: data,
+                                                  fileName: fileName, mimeType: mimeType)
+                    self.schedulePendingFlushRetry(token: token)
+                }
             }
         }
+    }
+
+    /// Lokalen Anhang (Foto/Datei vom Geraet) einreihen: Bytes in die
+    /// Pending-Ablage, Metadata in die Queue. Die Chat-Liste leitet die
+    /// pendent Zeile ab (Vorschau aus den lokalen Bytes, 1 Haken).
+    private func enqueuePendingAttachment(token: String, data: Data,
+                                          fileName: String, mimeType: String) {
+        let pending = LinkPendingMessage(id: nextPendingTempId, token: token,
+                                         text: fileName, replyTo: nil,
+                                         createdAt: Date().timeIntervalSince1970,
+                                         state: .queued,
+                                         kind: .attachment,
+                                         fileName: fileName, mimeType: mimeType)
+        nextPendingTempId -= 1
+        pendingMessages.append(pending)
+        LinkCache.savePendingAttachment(data, id: pending.id, account: cacheAccountKey)
+        persistPendingMessages()
+        CallDebugLog.log("LinkVM", "attachment queued offline: \(fileName) (\(data.count) bytes)")
+    }
+
+    // MARK: - Offline-Reaktionen
+
+    /// Reaktion in die Warteschlange, KOLLABIERt zum Endzustand: mehrere
+    /// Offline-Aenderungen derselben Nachricht ergeben EINEN Eintrag
+    /// (eigene-1-Reaktion-Prinzip).
+    private func enqueuePendingReaction(token: String, messageId: Int64,
+                                        desired: String?, removes: [String]) {
+        if let idx = pendingReactions.firstIndex(where: { $0.token == token && $0.messageId == messageId }) {
+            var merged = pendingReactions[idx]
+            var newRemoves = merged.removes
+            if let prev = merged.desired { newRemoves.append(prev) }
+            newRemoves.append(contentsOf: removes)
+            newRemoves.removeAll { $0 == desired }
+            merged.desired = desired
+            merged.removes = Array(Set(newRemoves)).sorted()
+            pendingReactions[idx] = merged
+        } else {
+            pendingReactions.append(LinkPendingReaction(
+                id: nextPendingReactionId, token: token, messageId: messageId,
+                desired: desired, removes: removes,
+                createdAt: Date().timeIntervalSince1970, state: .queued))
+            nextPendingReactionId -= 1
+        }
+        LinkCache.savePendingReactions(pendingReactions, account: cacheAccountKey)
+        schedulePendingFlushRetry(token: token)
+    }
+
+    /// Sendet geparkte Reaktionen der Reihe nach (remove(s) -> add).
+    func flushPendingReactions(token: String) {
+        guard isOnline, let api else { return }
+        guard !isFlushingReactions else { return }
+        let queue = pendingReactions.filter { $0.token == token && $0.state == .queued }
+        guard !queue.isEmpty else { return }
+        isFlushingReactions = true
+        CallDebugLog.log("LinkVM", "flushing \(queue.count) pending reactions for \(token)")
+        Task { [weak self] in
+            defer { Task { @MainActor [weak self] in self?.isFlushingReactions = false } }
+            for entry in queue {
+                guard let self, self.isOnline else { return }
+                var ok = true
+                for emoji in entry.removes {
+                    ok = ok && await api.removeReaction(token: entry.token, messageId: entry.messageId, emoji: emoji)
+                }
+                if ok, let desired = entry.desired {
+                    ok = await api.addReaction(token: entry.token, messageId: entry.messageId, emoji: desired)
+                }
+                guard ok else {
+                    CallDebugLog.log("LinkVM", "reaction flush failed - stopping")
+                    return
+                }
+                await MainActor.run {
+                    if let idx = self.pendingReactions.firstIndex(where: { $0.id == entry.id }) {
+                        self.pendingReactions[idx].state = .sent
+                        LinkCache.savePendingReactions(self.pendingReactions, account: self.cacheAccountKey)
+                    }
+                }
+            }
+        }
+    }
+
+    /// Reconcile: .sent-Eintraege entfernen, wenn der Poll die Nachricht
+    /// im Zielzustand liefert (reactionsSelf) oder sie aelter als 10 Min
+    /// ist (Server hat per 201 bestaetigt; der Match ist kosmetisch).
+    private func reconcilePendingReactions() {
+        guard !pendingReactions.isEmpty else { return }
+        guard case let .success(items) = messages else { return }
+        let byId = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let before = pendingReactions.count
+        pendingReactions.removeAll { entry in
+            guard entry.state == .sent else { return false }
+            if Date().timeIntervalSince1970 - entry.createdAt > 600 { return true }
+            guard let message = byId[entry.messageId] else { return false }
+            if let desired = entry.desired {
+                return message.reactionsSelf == [desired]
+            }
+            return entry.removes.allSatisfy { (message.reactions[$0] ?? 0) == 0 }
+        }
+        if pendingReactions.count != before {
+            LinkCache.savePendingReactions(pendingReactions, account: cacheAccountKey)
+            CallDebugLog.log("LinkVM", "pending reactions reconcile: \(before) -> \(pendingReactions.count)")
+        }
+    }
+
+    private func loadPendingReactions() {
+        pendingReactions = LinkCache.loadPendingReactions(account: cacheAccountKey)
+        nextPendingReactionId = (pendingReactions.map(\.id).min() ?? 0) - 1
+    }
+
+    /// Laedt einen geparkten Anhang hoch (Flush-Pfad); Erfolg -> .sent
+    /// + Bytes loeschen; die Zeile verschwindet, wenn die echte Datei-
+    /// Nachricht per Poll eintrifft (Match auf fileInfo.name).
+    private func flushPendingAttachment(_ pending: LinkPendingMessage) async -> Bool {
+        guard let data = LinkCache.loadPendingAttachment(id: pending.id, account: cacheAccountKey),
+              let api else {
+            // Bytes weg (z. B. Cache bereinigt): als erledigt entfernen.
+            await MainActor.run {
+                if let idx = pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+                    pendingMessages.remove(at: idx)
+                    persistPendingMessages()
+                }
+            }
+            return true
+        }
+        let ok = await api.uploadFileToChat(token: pending.token, data: data,
+                                            fileName: pending.fileName ?? pending.text,
+                                            mimeType: pending.mimeType ?? "application/octet-stream")
+        guard ok else { return false }
+        await MainActor.run {
+            if let idx = pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+                pendingMessages[idx].state = .sent
+                persistPendingMessages()
+            }
+            LinkCache.removePendingAttachment(id: pending.id, account: cacheAccountKey)
+        }
+        return true
     }
 
     /// Shares an existing Souvera/Nextcloud file into the current chat.
@@ -1525,4 +1741,13 @@ final class LinkViewModel: ObservableObject {
 struct LinkActionFeedback: Equatable {
     let success: Bool
     let message: String
+}
+
+
+/// Aktuell geöffneter Chat-Raum (App-weit sichtbar): AppDelegate/NSE
+/// unterdrücken Push-Banner für DIESEN Raum (nur Ton), Run 12.09.
+@MainActor
+final class SouveraOpenChatState {
+    static let shared = SouveraOpenChatState()
+    var token: String?
 }

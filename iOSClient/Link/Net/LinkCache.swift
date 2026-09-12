@@ -101,3 +101,53 @@ extension LinkCache {
         return pending
     }
 }
+
+// MARK: - Offline-Anhang-Ablage (Run 12.09.)
+
+extension LinkCache {
+    private static func attachmentURL(id: Int64, account: String) -> URL? {
+        guard let dir = cacheDirectory else { return nil }
+        let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        try? FileManager.default.createDirectory(at: dir.appendingPathComponent("pending-att-\(safeAccount)", isDirectory: true), withIntermediateDirectories: true)
+        return dir.appendingPathComponent("pending-att-\(safeAccount)/att\(id).bin")
+    }
+
+    /// Anhang-Bytes des geparkten Elements ablegen/laden/loeschen.
+    static func savePendingAttachment(_ data: Data, id: Int64, account: String) {
+        guard let url = attachmentURL(id: id, account: account) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func loadPendingAttachment(id: Int64, account: String) -> Data? {
+        guard let url = attachmentURL(id: id, account: account) else { return nil }
+        return try? Data(contentsOf: url)
+    }
+
+    static func removePendingAttachment(id: Int64, account: String) {
+        guard let url = attachmentURL(id: id, account: account) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+}
+
+// MARK: - Offline-Reaktions-Warteschlange (Run 12.09.)
+
+extension LinkCache {
+    private static func pendingReactionsURL(account: String) -> URL? {
+        guard let dir = cacheDirectory else { return nil }
+        let safe = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return dir.appendingPathComponent("pending_reactions_\(safe).json")
+    }
+
+    static func savePendingReactions(_ reactions: [LinkPendingReaction], account: String) {
+        guard let url = pendingReactionsURL(account: account),
+              let data = try? JSONEncoder().encode(reactions) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func loadPendingReactions(account: String) -> [LinkPendingReaction] {
+        guard let url = pendingReactionsURL(account: account),
+              let data = try? Data(contentsOf: url),
+              let reactions = try? JSONDecoder().decode([LinkPendingReaction].self, from: data) else { return [] }
+        return reactions
+    }
+}

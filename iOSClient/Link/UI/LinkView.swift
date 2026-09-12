@@ -973,6 +973,13 @@ struct LinkChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
+                // Offenen Raum app-weit melden: Push-Banner für DIESEN Raum
+                // werden unterdrückt (nur Ton), Run 12.09.
+                .onAppear { SouveraOpenChatState.shared.token = token }
+                .onDisappear { if SouveraOpenChatState.shared.token == token { SouveraOpenChatState.shared.token = nil } }
+                .onChange(of: token) { _, newToken in
+                    SouveraOpenChatState.shared.token = newToken
+                }
                 .fullScreenCover(item: $fullscreenImageMessage) { target in
                     LinkImageViewer(
                         title: target.fileInfo()?.name ?? "",
@@ -1136,7 +1143,8 @@ struct LinkChatView: View {
                         displayName: displayName,
                         timestamp: pending.createdAt,
                         text: pending.text,
-                        replyParent: replyParent(for: pending.replyTo, in: items)
+                        replyParent: replyParent(for: pending.replyTo, in: items),
+                        attachmentFileName: pending.kind == .attachment ? pending.fileName : nil
                     )
                 }
             items.append(contentsOf: pendingTemps)

@@ -185,6 +185,14 @@ class NotificationService: UNNotificationServiceExtension {
                                 // Wert bleibt die Benachrichtigung stumm
                                 // (Feedback 05.09.). Nur bei echtem Inhalt.
                                 bestAttemptContent.sound = UNNotificationSound.default
+                                // Link-Push: Raum-Token (json["id"] = Raum-
+                                // token) + Konto in die userInfo - die App
+                                // unterdrückt damit Banner für den AKTUELL
+                                // geöffneten Raum (Run-Feedback 12.09.).
+                                if appName == "spreed" || appName == "talk", !objectId.isEmpty {
+                                    bestAttemptContent.userInfo["token"] = objectId
+                                    bestAttemptContent.userInfo["account"] = tableAccount.account
+                                }
                                 if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                     json["account"] = tableAccount.account as AnyObject
                                     pref.set(json, forKey: "NOTIFICATION_DATA")

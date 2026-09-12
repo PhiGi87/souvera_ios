@@ -121,7 +121,7 @@ struct LinkChatMessage: Codable, Identifiable {
     /// Offline-Warteschlange (Run 11.09.): Temporaere Nachricht mit
     /// NEGATIVER ID (kollisionsfrei zu Server-IDs) - wird nach dem
     /// erfolgreichen Senden durch die echte Server-Nachricht ersetzt.
-    static func makePending(id: Int64, token: String, actorId: String, displayName: String, timestamp: TimeInterval, text: String, replyParent: LinkParent?) -> LinkChatMessage {
+    static func makePending(id: Int64, token: String, actorId: String, displayName: String, timestamp: TimeInterval, text: String, replyParent: LinkParent?, attachmentFileName: String? = nil) -> LinkChatMessage {
         var obj: [String: Any] = [
             "id": id,
             "token": token,
@@ -135,6 +135,13 @@ struct LinkChatMessage: Codable, Identifiable {
         if let replyParent, let data = try? JSONEncoder().encode(replyParent),
            let parentObj = try? JSONSerialization.jsonObject(with: data) {
             obj["parent"] = parentObj
+        }
+        // Anhang: fileInfo()-faehige Parameter (Chip mit Dateiname).
+        if let attachmentFileName {
+            obj["messageParameters"] = ["file": [
+                "type": "file",
+                "name": attachmentFileName
+            ]]
         }
         if let data = try? JSONSerialization.data(withJSONObject: obj),
            let msg = try? JSONDecoder().decode(LinkChatMessage.self, from: data) {
@@ -482,21 +489,36 @@ struct LinkPendingMessage: Codable, Equatable {
         case sent
     }
 
+    /// Art des geparkten Elements (Run 12.09.): Text oder lokaler Anhang
+    /// (Foto/Datei vom Geraet - Bytes liegen in der Pending-Ablage).
+    enum PendingKind: String, Codable {
+        case text
+        case attachment
+    }
+
     let id: Int64
     let token: String
     let text: String
     let replyTo: Int64?
     let createdAt: TimeInterval
     var state: PendingState
+    var kind: PendingKind
+    /// Anhang: Dateiname + MIME (Bytes in der Pending-Ablage).
+    var fileName: String?
+    var mimeType: String?
 
     init(id: Int64, token: String, text: String, replyTo: Int64?,
-         createdAt: TimeInterval, state: PendingState = .queued) {
+         createdAt: TimeInterval, state: PendingState = .queued,
+         kind: PendingKind = .text, fileName: String? = nil, mimeType: String? = nil) {
         self.id = id
         self.token = token
         self.text = text
         self.replyTo = replyTo
         self.createdAt = createdAt
         self.state = state
+        self.kind = kind
+        self.fileName = fileName
+        self.mimeType = mimeType
     }
 
     init(from decoder: Decoder) throws {
@@ -506,7 +528,26 @@ struct LinkPendingMessage: Codable, Equatable {
         text = try c.decode(String.self, forKey: .text)
         replyTo = try c.decodeIfPresent(Int64.self, forKey: .replyTo)
         createdAt = try c.decode(TimeInterval.self, forKey: .createdAt)
-        // Altbestand ohne state- Schluessel: queued.
+        // Altbestand ohne state-/kind-Schluessel: queued/text.
         state = (try? c.decode(PendingState.self, forKey: .state)) ?? .queued
+        kind = (try? c.decode(PendingKind.self, forKey: .kind)) ?? .text
+        fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
+        mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
     }
+}
+
+
+/// Offline-Reaktion (Run 12.09.): eine geparkte Reaktions-Operation,
+/// kollabiert zum Endzustand (eigene-1-Reaktion-Prinzip). desired = das
+/// Emoji, das am Ende gesetzt sein soll (nil = entfernt); removes = die
+/// Emojis, die der Flush vorher wegnehmen muss (überschriebener Server-
+/// Stand). ID = NEGATIVE messageId.
+struct LinkPendingReaction: Codable, Equatable {
+    let id: Int64
+    let token: String
+    let messageId: Int64
+    var desired: String?
+    var removes: [String]
+    var createdAt: TimeInterval
+    var state: LinkPendingMessage.PendingState
 }

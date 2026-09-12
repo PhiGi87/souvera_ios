@@ -187,6 +187,16 @@ final class LinkChatListController: NSObject, ObservableObject {
         if case let .success(msgs) = viewModel.messages {
             hash = hash &* 31 &+ msgs.count
             hash = hash &* 31 &+ Int(truncatingIfNeeded: msgs.last?.id ?? 0)
+            // Reaktionszaehler: applyReactionReplace/entfernt und per Poll
+            // eintreffende Reactions aendern NICHT ids/count - ohne diesen
+            // Anteil blieben Reaktions-Bubbles unsichtbar (Run 12.09.).
+            var reactionSum = 0
+            for m in msgs {
+                reactionSum &+= m.reactions.count
+                reactionSum &+= m.reactionsSelf.count
+                for (_, count) in m.reactions { reactionSum &+= count }
+            }
+            hash = hash &* 31 &+ reactionSum
         }
         hash = hash &* 31 &+ viewModel.chatImageCache.count
         hash = hash &* 31 &+ viewModel.chatImageFailed.count
