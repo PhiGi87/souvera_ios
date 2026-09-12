@@ -26,6 +26,10 @@ protocol CallSessionCallbacks: AnyObject {
     func onScreenShareEnded(session: String, roomType: String)
     /// Anzeigename einer Session (nickChanged-Signaling).
     func onSessionNick(session: String, name: String)
+    /// ICE-Status der Peer-Verbindung: bei Bruch (disconnected/failed)
+    /// Avatar-Overlay statt schwarz, bei connected wieder Video
+    /// (Run-Feedback 12.09.: schwarze Kachel nach Screenshare-Ende).
+    func onRemoteIceStateChanged(session: String, roomType: String, connected: Bool)
     /// Aktiver Sprecher gewechselt (Fokus-Modus).
     func onActiveSpeaker(session: String, roomType: String)
     func onEnded()
@@ -732,6 +736,12 @@ final class CallSession: NSObject, HpbSignalingListener {
         }
     }
 
+    fileprivate func emitRemoteIceState(session: String, roomType: String, connected: Bool) {
+        DispatchQueue.main.async { [weak self] in
+            self?.callbacks?.onRemoteIceStateChanged(session: session, roomType: roomType, connected: connected)
+        }
+    }
+
     /// Diagnostik (Run 12.09.): inbound frames/bytes pro Remote-Stream -
     /// beweist im Log, ob der MCU die Screen-Verbindung mit Frames beliefert.
     private func startFrameStatsLoop() {
@@ -1228,6 +1238,11 @@ private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
     func peerConnectionShouldNegotiate(_ pc: RTCPeerConnection) {}
     func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
         CallDebugLog.log("PeerObserver", "key=\(key.prefix(12)) ICE connection -> \(Self.stateName(newState))")
+        if newState == .connected || newState == .completed {
+            owner?.emitRemoteIceState(session: session, roomType: roomType, connected: true)
+        } else if newState == .disconnected || newState == .failed {
+            owner?.emitRemoteIceState(session: session, roomType: roomType, connected: false)
+        }
         if newState == .connected, key == owner?.ownSessionId {
             // Publisher steht: Audio-Session-Zustand für die Diagnose loggen.
             let audio = RTCAudioSession.sharedInstance()

@@ -272,6 +272,12 @@ final class LinkVoIPManager: NSObject {
         activeSession?.hangup()
     }
 
+    /// Läuft für den Raum gerade ein Call (für "call_ended_everyone")?
+    func hasActiveCall(for token: String) -> Bool {
+        guard let session = activeSession, !session.hasEnded else { return false }
+        return session.token == token
+    }
+
     /// The call was ended from inside the app (hangup button): close the
     /// matching CallKit transaction so no dead call remains.
     func callEndedByApp() {

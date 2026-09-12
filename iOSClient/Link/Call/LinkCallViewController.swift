@@ -529,7 +529,16 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // Eigenansicht ausblenden, solange das Video nicht aktiv ist.
         localContainer.isHidden = !shouldShowLocalView
         // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
-        if let _ = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }) {
+        if let screenKey = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }),
+           let screenTile = tiles[screenKey] {
+            // LANDSCAPE: Screenshare ist DIE einzige Ansicht - Vollbild,
+            // kein Strip, keine Eigenansicht (Run-Feedback 12.09.).
+            if view.bounds.width > view.bounds.height {
+                screenTile.container.frame = view.bounds
+                screenTile.container.layer.cornerRadius = 0
+                clearPlaceholderTiles()
+                return
+            }
             layoutFocus()
             return
         }
@@ -913,6 +922,19 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 tile.showOverlay()
             } else {
                 tile.hideOverlayIfRendering()
+            }
+        }
+    }
+
+    func onRemoteIceStateChanged(session: String, roomType: String, connected: Bool) {
+        DispatchQueue.main.async {
+            guard roomType == "video" else { return }
+            let key = Self.key(session: session, roomType: roomType)
+            guard let tile = self.tiles[key] else { return }
+            if connected {
+                tile.hideOverlayIfRendering()
+            } else {
+                tile.showOverlay()
             }
         }
     }

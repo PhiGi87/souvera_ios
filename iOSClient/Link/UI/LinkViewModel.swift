@@ -1071,6 +1071,16 @@ final class LinkViewModel: ObservableObject {
             }
             pollFailureStreak = 0
             if !fresh.isEmpty {
+                // "Anruf fuer alle beenden" (talk-ios NCChatController):
+                // der Server schreibt eine Systemnachricht call_ended_
+                // everyone/call_ended in den Raum - vor dem (gewuenschten)
+                // Filtern auf diese Nachricht pruefen und den aktiven Call
+                // fuer diesen Raum beenden (Run-Feedback 12.09.).
+                if fresh.contains(where: { ($0.systemMessage == "call_ended_everyone" || $0.systemMessage == "call_ended") && $0.token == token }),
+                   LinkVoIPManager.shared.hasActiveCall(for: token) {
+                    CallDebugLog.log("LinkVM", "call_ended_everyone received - ending active call for \(token)")
+                    LinkVoIPManager.shared.endActiveCall()
+                }
                 // Zugestellte pendent Nachrichten aus der Queue raeumen:
                 // eigene, frische Nachricht mit identischem Text trifft ein
                 // -> das ✓✓-Pendant wird zur echten Nachricht.
@@ -1131,12 +1141,23 @@ final class LinkViewModel: ObservableObject {
 
     /// Sendet alle geparkten Nachrichten EINES Raums der Reihe nach;
     /// bricht beim ersten Fehler ab (noch offline).
+    private var isFlushingPending = false
+
     func flushPendingMessages(token: String) {
         guard isOnline, let api else { return }
-        let queue = pendingMessages.filter { $0.token == token }
+        // NUR .queued senden: ein zweites "back ONLINE"-Event durfte die
+        // .sent-Eintraege (warten auf Poll-Bestaetigung) erneut senden ->
+        // Doppel-Zustellung + falsche Reihenfolge (Run-Feedback 12.09.,
+        // Log dznyaaa1lp: Monitor feuerte 08:31 UND 08:32).
+        guard !isFlushingPending else { return }
+        let queue = pendingMessages.filter { $0.token == token && $0.state == .queued }
         guard !queue.isEmpty else { return }
-        CallDebugLog.log("LinkVM", "flushing \(queue.count) pending messages for \(token)")
+        isFlushingPending = true
+        CallDebugLog.log("LinkVM", "flushing \(queue.count) queued pending messages for \(token)")
         Task { [weak self] in
+            // Guard loest sich erst am ENDE des Flush-Task (defer im sync
+            // Teil wuerde sofort zuruecksetzen).
+            defer { Task { @MainActor [weak self] in self?.isFlushingPending = false } }
             for pending in queue {
                 guard let self, self.isOnline else { return }
                 let ok = await api.sendMessage(token: pending.token,
