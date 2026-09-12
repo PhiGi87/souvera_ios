@@ -39,7 +39,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             container.backgroundColor = .black
             container.layer.cornerRadius = 10
             container.clipsToBounds = true
-            videoView.videoContentMode = .scaleAspectFill
+            // Screenshare IMMER komplett sichtbar (Fit statt Fill) -
+            // quer wie hochkant; Kamera bleibt AspectFill (Run 12.09.).
+            videoView.videoContentMode = roomType == "screen" ? .scaleAspectFit : .scaleAspectFill
             videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             videoView.frame = container.bounds
             container.addSubview(videoView)
@@ -84,9 +86,24 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             overlayName.text = name
         }
 
+        private var overlayFallbackTask: Task<Void, Never>?
+
         func showOverlay() {
             hasRenderedFrame = false
             overlay.isHidden = false
+            // Fallback: feuert didChangeVideoSize nicht, verschwindet das
+            // Overlay spaetestens nach 10s - echtes Video bleibt nie
+            // verdeckt (Run 12.09.).
+            overlayFallbackTask?.cancel()
+            overlayFallbackTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                guard !Task.isCancelled else { return }
+                await MainActor.run { [weak self] in
+                    guard let self, !self.hasRenderedFrame else { return }
+                    self.overlay.isHidden = true
+                    CallDebugLog.log("CallVC", "overlay fallback hidden (no frame within 10s)")
+                }
+            }
         }
 
         func hideOverlayIfRendering() {
@@ -101,6 +118,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             DispatchQueue.main.async {
                 guard !self.hasRenderedFrame else { return }
                 self.hasRenderedFrame = true
+                self.overlayFallbackTask?.cancel()
                 self.overlay.isHidden = true
             }
         }
@@ -113,6 +131,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Kachel-Namen und Platzhalter-Zaehlung - die eigene Session in der
     /// Liste liess die Platzhalter kippen, Run-Feedback 11.09.).
     private var callParticipants: [LinkOcsApi.LinkCallParticipant] = []
+    /// Session->Name aus dem nickChanged-Signaling (hat Vorrang vor dem
+    /// Teilnehmer-Poll).
+    private var sessionNames: [String: String] = [:]
     /// Aktuell platzierte Platzhalter-Kacheln (wird je Layout neu aufgebaut).
     private var placeholderTiles: [UIView] = []
     /// Manuell fokussierte Kachel (Tap auf eine kleine Kachel).
@@ -394,9 +415,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         ])
     }
 
-    /// Namen aller Video-Kacheln auffrischen (session -> Name).
+    /// Namen aller Video-Kacheln auffrischen (session -> Name; nickChanged
+    /// hat Vorrang vor dem Teilnehmer-Poll).
     private func updateTileNameLabels() {
-        let names = Dictionary(uniqueKeysWithValues: callParticipants.map { ($0.sessionId, $0.displayName) })
+        var names = Dictionary(uniqueKeysWithValues: callParticipants.map { ($0.sessionId, $0.displayName) })
+        for (session, nick) in sessionNames {
+            names[session] = nick
+        }
         for (key, tile) in tiles {
             guard let session = key.components(separatedBy: "|").first else { continue }
             attachNameLabel(to: tile.container, name: names[session] ?? "")
@@ -860,8 +885,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             }
             tile.track = track
             track.add(tile.videoView)
-            // Overlay-Identitaet (Avatar + Name) aus der Teilnehmer-Liste.
-            let names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
+            // Overlay-Identitaet (Avatar + Name): nickChanged-Signaling hat
+            // Vorrang, sonst Teilnehmer-Poll.
+            var names = Dictionary(uniqueKeysWithValues: self.callParticipants.map { ($0.sessionId, $0.displayName) })
+            for (session2, nick) in self.sessionNames {
+                names[session2] = nick
+            }
             let name = names[session] ?? ""
             let initials = name.split(separator: " ").prefix(2)
                 .compactMap { $0.first.map(String.init) }
@@ -884,6 +913,39 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 tile.showOverlay()
             } else {
                 tile.hideOverlayIfRendering()
+            }
+        }
+    }
+
+    func onScreenShareEnded(session: String, roomType: String) {
+        DispatchQueue.main.async {
+            let key = Self.key(session: session, roomType: roomType)
+            guard let tile = self.tiles.removeValue(forKey: key) else { return }
+            CallDebugLog.log("CallVC", "remote tile removed (unshareScreen) \(key.prefix(14))")
+            tile.container.removeFromSuperview()
+            self.layoutTiles()
+        }
+    }
+
+    func onSessionNick(session: String, name: String) {
+        DispatchQueue.main.async {
+            // Session->Name AUS DEM SIGNALING (sofort statt 10s-Poll);
+            // behebt die "?"-Kreise bei Eigen-Test-Sessions (Run 12.09.).
+            let changed = self.sessionNames[session] != name
+            self.sessionNames[session] = name
+            guard changed else { return }
+            self.updateTileNameLabels()
+            for roomType in ["video", "screen"] {
+                guard let tile = self.tiles[Self.key(session: session, roomType: roomType)] else { continue }
+                let initials = name.split(separator: " ").prefix(2)
+                    .compactMap { $0.first.map(String.init) }
+                    .joined()
+                tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
+                                        name: name,
+                                        color: UIColor(red: 0.78, green: 0.85, blue: 0.95, alpha: 1))
+                if let label = tile.container.viewWithTag(4711) as? UILabel {
+                    label.text = name
+                }
             }
         }
     }

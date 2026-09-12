@@ -22,6 +22,10 @@ protocol CallSessionCallbacks: AnyObject {
     /// Remote-Stream wurde entfernt (z. B. Bildschirmfreigabe beendet).
     func onRemoteVideoRemoved(session: String, roomType: String)
     func onRemoteVideoMuted(session: String, roomType: String, muted: Bool)
+    /// Bildschirmfreigabe beendet: Screen-Peer/Stream/Kachel aufraeumen.
+    func onScreenShareEnded(session: String, roomType: String)
+    /// Anzeigename einer Session (nickChanged-Signaling).
+    func onSessionNick(session: String, name: String)
     /// Aktiver Sprecher gewechselt (Fokus-Modus).
     func onActiveSpeaker(session: String, roomType: String)
     func onEnded()
@@ -699,6 +703,32 @@ final class CallSession: NSObject, HpbSignalingListener {
             guard self.requestedScreenOffers.insert(fromSession).inserted else { return }
             CallDebugLog.log("CallSession", "screen unmute from \(fromSession.prefix(8)) - requesting screen offer")
             self.signaling?.sendRequestOffer(toSession: fromSession, roomType: "screen")
+        }
+    }
+
+    /// talk-ios processUnshareScreen: Screen-Peer schliessen und Stream
+    /// entfernen - ohne das froze die Kachel mit dem letzten Frame und
+    /// verdeckte (Fokus-Prioritaet screen) das Kamerabild (Run 12.09.).
+    func onScreenShareEnded(fromSession: String, roomType: String) {
+        Self.webRtcQueue.async { [weak self] in
+            guard let self else { return }
+            let key = Self.streamKey(session: fromSession, roomType: roomType)
+            CallDebugLog.log("CallSession", "unshareScreen \(fromSession.prefix(8)) - closing screen peer")
+            if let peer = self.peers.removeValue(forKey: key) {
+                peer.close()
+            }
+            self.peerSids.removeValue(forKey: key)
+            self.requestedScreenOffers.remove(fromSession)
+            if self.remoteStreams.removeValue(forKey: key) != nil {
+                self.callbacks?.onRemoteVideoRemoved(session: fromSession, roomType: roomType)
+                CallDebugLog.log("CallSession", "remote stream removed session=\(fromSession.prefix(8)) type=\(roomType)")
+            }
+        }
+    }
+
+    func onSessionNick(session: String, name: String) {
+        DispatchQueue.main.async { [weak self] in
+            self?.callbacks?.onSessionNick(session: session, name: name)
         }
     }
 

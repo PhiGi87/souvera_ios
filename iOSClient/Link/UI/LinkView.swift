@@ -1158,6 +1158,17 @@ struct LinkChatView: View {
         return LinkParent(from: original)
     }
 
+    /// Sende-Status: Queue-Pendant liefert .queued (1 Haken); JEDE andere
+    /// EIGENE Nachricht ist serverseitig angekommen -> .sent (2 Haken,
+    /// dauerhaft, talk-web-Stil - Run-Feedback 12.09.). Fremde: nil.
+    private func pendingState(for message: LinkChatMessage) -> LinkPendingMessage.PendingState? {
+        guard message.actorId == viewModel.currentUserId else { return nil }
+        if let queued = viewModel.pendingMessages.first(where: { $0.id == message.id }) {
+            return queued.state
+        }
+        return message.id > 0 ? .sent : nil
+    }
+
     private func showsDaySeparator(index: Int, message: LinkChatMessage) -> Bool {
         // Pendent Nachrichten haengen direkt am heutigen Ende - keine
         // eigene Tages-Trennlinie (die ID-Aufloesung greift fuer sie eh
@@ -1389,7 +1400,7 @@ struct LinkChatView: View {
                                 viewModel: viewModel,
                                 message: message,
                                 isOwn: message.actorId == viewModel.currentUserId,
-                                pendingState: viewModel.pendingMessages.first(where: { $0.id == message.id })?.state,
+                                pendingState: pendingState(for: message),
                                 showTime: showsTime(index: index, message: message, items: items),
                                 showsAvatar: showsAvatar(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },

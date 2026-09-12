@@ -32,6 +32,11 @@ protocol HpbSignalingListener: AnyObject {
     /// AKTIV den Screen-Offer an (NCCallController sendSendOfferMessage
     /// roomType screen).
     func onScreenShareActivity(fromSession: String, active: Bool)
+    /// Bildschirmfreigabe wurde beendet - Screen-Peer/Stream/Kachel
+    /// aufraeumen (talk-ios processUnshareScreen).
+    func onScreenShareEnded(fromSession: String, roomType: String)
+    /// Anzeigename einer Session (nickChanged-Signaling).
+    func onSessionNick(session: String, name: String)
     /// Video an/aus der Remote-Session (mute/unmute name=video) - steuert
     /// das Avatar-Overlay der Kachel (talk-web: Avatar statt schwarz).
     func onRemoteVideoMuted(session: String, roomType: String, muted: Bool)
@@ -297,19 +302,46 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
         let target = event["target"] as? String
         let type = event["type"] as? String
         // "leave": Sessions, die den Call verlassen haben (auch die
-        // EIGENE, wenn jemand "fuer alle beendet" drueckt).
-        if target == "room", type == "leave",
-           let leave = event["leave"] as? [[String: Any]] {
-            let sessions = leave.compactMap { $0["sessionId"] as? String ?? $0["sessionid"] as? String }
+        // EIGENE, wenn jemand "fuer alle beendet" drueckt). Die Payload-
+        // Form variiert (Array von Objekten ODER Objekt mit users/
+        // sessions-Liste) - beide Formen akzeptieren, Roh-JSON loggen,
+        // damit Abweichungen im Log sichtbar sind (Run 12.09.: Cast
+        // schlug still fehl, "fuer alle beenden" zog nicht).
+        if target == "room", type == "leave" {
+            var sessions: [String] = []
+            let leave = event["leave"]
+            if let list = leave as? [[String: Any]] {
+                for entry in list {
+                    if let s = entry["sessionId"] as? String ?? entry["sessionid"] as? String {
+                        sessions.append(s)
+                    }
+                }
+            } else if let dict = leave as? [String: Any] {
+                for key in ["users", "sessions", "sessionIds"] {
+                    if let list = dict[key] as? [[String: Any]] {
+                        for entry in list {
+                            if let s = entry["sessionId"] as? String ?? entry["sessionid"] as? String {
+                                sessions.append(s)
+                            }
+                        }
+                    } else if let list = dict[key] as? [String] {
+                        sessions.append(contentsOf: list)
+                    }
+                }
+            }
+            CallDebugLog.log("HpbSignaling", "event leave raw=\(leave ?? "nil") parsedSessions=\(sessions.map { String($0.prefix(8)) })")
             if !sessions.isEmpty {
-                CallDebugLog.log("HpbSignaling", "event leave sessions=\(sessions.map { String($0.prefix(8)) })")
                 listener?.onSessionsLeft(sessionIds: sessions)
             }
             return
         }
         guard target == "participants", type == "update",
               let users = (event["update"] as? [String: Any])?["users"] as? [[String: Any]] else {
-            CallDebugLog.log("HpbSignaling", "event target=\(target ?? "?") type=\(type ?? "?") (ignored)")
+            if target == "room", type == "message", let raw = event["message"] {
+                CallDebugLog.log("HpbSignaling", "event target=room type=message raw=\(raw)")
+            } else {
+                CallDebugLog.log("HpbSignaling", "event target=\(target ?? "?") type=\(type ?? "?") (ignored)")
+            }
             return
         }
 
@@ -376,6 +408,17 @@ final class HpbSignalingClient: NSObject, URLSessionWebSocketDelegate {
             } else if roomType == "video",
                       (payload?["name"] as? String) == "video" {
                 listener?.onRemoteVideoMuted(session: from, roomType: roomType, muted: muted)
+            }
+        case "unshareScreen":
+            // Freigabe beendet (Run-Feedback 12.09.: Screen-Kachel fror ein
+            // und verdeckte das Kamerabild) - talk-ios processUnshareScreen:
+            // Screen-Peer schliessen, Stream+Kachel entfernen.
+            listener?.onScreenShareEnded(fromSession: from, roomType: roomType)
+        case "nickChanged":
+            // Session-Name direkt aus dem Signaling (talk-ios
+            // processNickChanged) - sofortige Namen statt 10s-Poll-Wartezeit.
+            if let nick = payload?["name"] as? String, !nick.isEmpty {
+                listener?.onSessionNick(session: from, name: nick)
             }
         default: break
         }
