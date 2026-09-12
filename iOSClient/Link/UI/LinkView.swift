@@ -1805,7 +1805,7 @@ private struct LinkMessageRow: View {
                         isOwn: isOwn,
                         isImageMessage: viewModel.isImageMessage(message),
                         imageData: viewModel.chatImageCache[message.id],
-                        imageFailed: viewModel.chatImageFailed.contains(message.id),
+                        imageFailed: message.id > 0 && viewModel.chatImageFailed.contains(message.id),
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
                         pendingState: pendingState,
@@ -1920,24 +1920,11 @@ private struct LinkMessageBubble: View {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
             if isPdfMessage {
+                // Kein Dateiname/Caption unter dem Thumbnail - der Name ist
+                // nur im Vollbild-Viewer sichtbar (Run-Feedback 13.09.).
                 pdfContent
-                // Optionaler Text des Absenders unter dem Bild - auf die
-                // Thumbnail-Breite begrenzt, damit die Bubble nicht
-                // unnötig breit wird.
-                if let caption = message.fileCaption() {
-                    Text(caption)
-                        .frame(maxWidth: 180, alignment: .leading)
-                        .souveraOpenURLAction()
-                }
             } else if isImageMessage {
                 imageContent
-                // Optionaler Text des Absenders unter dem Bild - auf die
-                // Thumbnail-Breite begrenzt (Bubble passt sich dem Bild an).
-                if let caption = message.fileCaption() {
-                    Text(caption)
-                        .frame(maxWidth: 220, alignment: .leading)
-                        .souveraOpenURLAction()
-                }
             } else if message.fileName() != nil {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     Text(displayText)

@@ -396,6 +396,7 @@ struct LinkParent: Codable {
         message = source.message
         systemMessage = source.systemMessage
         messageParameters = source.messageParameters
+        reactions = nil
     }
 
     let id: Int64
@@ -407,11 +408,15 @@ struct LinkParent: Codable {
     /// P68l (1b): Parameter des Elternteils - ohne sie blieben
     /// {mention-user1}-Platzhalter im Antwort-Zitat roh stehen.
     let messageParameters: [String: LinkRichObject]?
+    /// Reaktions-Summary des Elternteils: Reaktions-Events liefern den
+    /// Parent MIT aktualisiertem Summary (talk-ios ersetzt daraus die
+    /// Nachricht) - Grundlage fuer die Reaktions-Pills (Run 12.09.).
+    var reactions: [String: Int]?
 
     var isSystemMessage: Bool { !systemMessage.isEmpty }
 
     enum CodingKeys: String, CodingKey {
-        case id, actorId, actorDisplayName, timestamp, message, systemMessage, messageParameters
+        case id, actorId, actorDisplayName, timestamp, message, systemMessage, messageParameters, reactions
     }
 
     init(from decoder: Decoder) throws {
@@ -423,6 +428,7 @@ struct LinkParent: Codable {
         message = (try? c.decode(String.self, forKey: .message)) ?? ""
         systemMessage = (try? c.decode(String.self, forKey: .systemMessage)) ?? ""
         messageParameters = (try? c.decode([String: LinkRichObject].self, forKey: .messageParameters))
+        reactions = (try? c.decode([String: Int].self, forKey: .reactions))
     }
 
     /// Zitat-Text mit aufgelösten Platzhaltern (Mentions -> @Name).
@@ -506,10 +512,16 @@ struct LinkPendingMessage: Codable, Equatable {
     /// Anhang: Dateiname + MIME (Bytes in der Pending-Ablage).
     var fileName: String?
     var mimeType: String?
+    /// Fehlversuche beim Flush WAEHREND online (Server lehnt ab, z. B.
+    /// 503): nach 3 Versuchen wird der Eintrag entfernt - sonst haengen
+    /// nicht zustellbare Nachrichten ewig mit 1 Haken (Run-Feedback
+    /// 13.09.). Transportfehler zaehlen nicht (offline = warten).
+    var attempts: Int
 
     init(id: Int64, token: String, text: String, replyTo: Int64?,
          createdAt: TimeInterval, state: PendingState = .queued,
-         kind: PendingKind = .text, fileName: String? = nil, mimeType: String? = nil) {
+         kind: PendingKind = .text, fileName: String? = nil, mimeType: String? = nil,
+         attempts: Int = 0) {
         self.id = id
         self.token = token
         self.text = text
@@ -519,6 +531,7 @@ struct LinkPendingMessage: Codable, Equatable {
         self.kind = kind
         self.fileName = fileName
         self.mimeType = mimeType
+        self.attempts = attempts
     }
 
     init(from decoder: Decoder) throws {
@@ -533,6 +546,7 @@ struct LinkPendingMessage: Codable, Equatable {
         kind = (try? c.decode(PendingKind.self, forKey: .kind)) ?? .text
         fileName = try c.decodeIfPresent(String.self, forKey: .fileName)
         mimeType = try c.decodeIfPresent(String.self, forKey: .mimeType)
+        attempts = (try? c.decode(Int.self, forKey: .attempts)) ?? 0
     }
 }
 

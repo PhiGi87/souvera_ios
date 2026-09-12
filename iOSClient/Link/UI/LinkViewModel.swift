@@ -802,6 +802,7 @@ final class LinkViewModel: ObservableObject {
                 self.lastMessageId = ordered.last?.id ?? self.lastMessageId
                 self.messages = .success(ordered)
                 LinkCache.saveMessageArray(ordered, token: token)
+                self.reconcilePendingMessages(with: ordered)
                 if !self.windowLoadDone {
                     self.windowLoadDone = true
                     self.hasMoreHistory = true
@@ -1100,6 +1101,19 @@ final class LinkViewModel: ObservableObject {
             }
             pollFailureStreak = 0
             if !fresh.isEmpty {
+                applyReactionEvents(fresh)
+                // Reconcile: zugestellte Anhänge anhand fileInfo.name
+                // entfernen (Text-Match greift bei Datei-Nachrichten nicht,
+                // Run-Feedback 13.09.: Foto doppelt + stucked).
+                let ownFileNames = Set(fresh
+                    .filter { $0.actorId == currentUserId }
+                    .compactMap { $0.fileInfo()?.name })
+                if !ownFileNames.isEmpty {
+                    pendingMessages.removeAll { entry in
+                        entry.state == .sent && entry.kind == .attachment
+                            && ownFileNames.contains(entry.fileName ?? "")
+                    }
+                }
                 // "Anruf fuer alle beenden" (talk-ios NCChatController):
                 // der Server schreibt eine Systemnachricht call_ended_
                 // everyone/call_ended in den Raum - vor dem (gewuenschten)
@@ -1223,7 +1237,18 @@ final class LinkViewModel: ObservableObject {
                     // entfernen statt ewig haengen zu bleiben.
                     let attachmentOk = await self.flushPendingAttachment(pending)
                     guard attachmentOk else {
-                        CallDebugLog.log("LinkVM", "attachment flush failed - stopping (still offline?)")
+                        // Gleiche attempts-Logik wie bei Text (3x online-
+                        // Fehlschlag -> entfernen, Run 13.09.).
+                        await MainActor.run {
+                            guard let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) else { return }
+                            self.pendingMessages[idx].attempts += 1
+                            if self.pendingMessages[idx].attempts >= 3 {
+                                CallDebugLog.log("LinkVM", "dropping undeliverable attachment after 3 attempts: \(pending.fileName ?? "?")")
+                                LinkCache.removePendingAttachment(id: pending.id, account: self.cacheAccountKey)
+                                self.pendingMessages.remove(at: idx)
+                            }
+                            self.persistPendingMessages()
+                        }
                         return
                     }
                     continue
@@ -1233,6 +1258,19 @@ final class LinkViewModel: ObservableObject {
                                                replyTo: pending.replyTo)
                 guard ok else {
                     CallDebugLog.log("LinkVM", "flush failed - stopping (still offline?)")
+                    await MainActor.run {
+                        // Server lehnt AB, obwohl online (z. B. 503): Versuch
+                        // zaehlen; nach 3 Versuchen NICHT zustellbare
+                        // Nachricht entfernen (Run-Feedback 13.09.).
+                        guard let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) else { return }
+                        self.pendingMessages[idx].attempts += 1
+                        if self.pendingMessages[idx].attempts >= 3 {
+                            CallDebugLog.log("LinkVM", "dropping undeliverable pending message after 3 attempts: \(pending.text.prefix(40))")
+                            LinkCache.removePendingAttachment(id: pending.id, account: self.cacheAccountKey)
+                            self.pendingMessages.remove(at: idx)
+                        }
+                        self.persistPendingMessages()
+                    }
                     return
                 }
                 await MainActor.run {
@@ -1270,6 +1308,16 @@ final class LinkViewModel: ObservableObject {
         // heute, aber eine Diffable-Duplikat-Assertion darf nie entstehen).
         var seen = Set<Int64>()
         loaded = loaded.filter { seen.insert($0.id).inserted }
+        // Sicherheitsnetz (Run-Feedback 13.09.): noch nie zugestellte
+        // .queued-Eintraege aelter als 24h entfernen (der Nutzer erwartet
+        // den Versand nicht mehr; alles Juengere bleibt und wird durch
+        // Retry-Leiter/Raumeintritt-Flush zugestellt).
+        let cutoff = Date().timeIntervalSince1970 - 24 * 3600
+        let stale = loaded.filter { $0.state == .queued && $0.createdAt < cutoff }
+        if !stale.isEmpty {
+            CallDebugLog.log("LinkVM", "purging \(stale.count) stale queued messages (>24h)")
+            loaded.removeAll { $0.state == .queued && $0.createdAt < cutoff }
+        }
         pendingMessages = loaded
         // KRITISCH: den Temp-ID-Zaehler HINTER die geladenen IDs setzen.
         // Ohne das kollidierte die erste neue Nachricht nach einem
@@ -1574,6 +1622,61 @@ final class LinkViewModel: ObservableObject {
                     }
                 }
             }
+        }
+    }
+
+    /// Self-Healing (Run 13.09.): verwaiste .sent-Eintraege entfernen -
+    /// deren echte Nachricht existiert bereits im geladenen Verlauf
+    /// (Match: eigener Actor + Text bzw. Dateiname). Aufruf nach jedem
+    /// Publish (Cache/Phase-1), damit auch historisch hängende Eintraege
+    /// beim Raumeintritt verschwinden.
+    private func reconcilePendingMessages(with items: [LinkChatMessage]) {
+        guard !pendingMessages.isEmpty else { return }
+        let ownTexts = Set(items.filter { $0.actorId == currentUserId }.map(\.message))
+        let ownFileNames = Set(items.compactMap { $0.fileInfo()?.name })
+        let before = pendingMessages.count
+        pendingMessages.removeAll { entry in
+            guard entry.state == .sent else { return false }
+            if entry.kind == .attachment {
+                return ownFileNames.contains(entry.fileName ?? "")
+            }
+            return ownTexts.contains(entry.text)
+        }
+        if pendingMessages.count != before {
+            persistPendingMessages()
+            CallDebugLog.log("LinkVM", "pending reconcile: \(before) -> \(pendingMessages.count)")
+        }
+    }
+
+    /// Reaktions-Events (systemMessage reaction/reaction_revoked/
+    /// reaction_deleted) auf die Eltern-Nachricht anwenden: der Parent im
+    /// Event traegt das AKTUALISIERTE reactions-Summary (talk-ios ersetzt
+    /// daraus die Nachricht). Ohne das blieben fremde Reaktions-Pills
+    /// unsichtbar - unsere eigenen (optimistisch gesetzten) waren sichtbar
+    /// (Run-Feedback 12.09., Browser-Vergleich). Das Event selbst bleibt
+    /// ausgeblendet (isHiddenSystemMessage).
+    private func applyReactionEvents(_ fresh: [LinkChatMessage]) {
+        let events = fresh.filter { $0.isReactionEvent }
+        guard !events.isEmpty, case var .success(list) = messages else { return }
+        var changed = false
+        for event in events {
+            guard let parent = event.parent, !parent.reactions.isEmpty else { continue }
+            guard let idx = list.firstIndex(where: { $0.id == parent.id }) else { continue }
+            var message = list[idx]
+            guard message.reactions != parent.reactions else { continue }
+            message.reactions = parent.reactions
+            // Eigene Actor-ID: reactionsSelf sauber halten - Emojis, die im
+            // Summary nicht mehr auftauchen, raus; ein vom Event-Actor
+            // (wir selbst) neu gesetztes Emoji rein.
+            if event.actorId == currentUserId {
+                message.reactionsSelf.removeAll { (message.reactions[$0] ?? 0) == 0 }
+            }
+            list[idx] = message
+            changed = true
+        }
+        if changed {
+            messages = .success(list)
+            CallDebugLog.log("LinkVM", "reaction events applied to \(events.count) parent message(s)")
         }
     }
 
