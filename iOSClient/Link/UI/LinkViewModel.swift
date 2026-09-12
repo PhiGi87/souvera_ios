@@ -1660,11 +1660,12 @@ final class LinkViewModel: ObservableObject {
         guard !events.isEmpty, case var .success(list) = messages else { return }
         var changed = false
         for event in events {
-            guard let parent = event.parent, !parent.reactions.isEmpty else { continue }
+            guard let parent = event.parent, let parentReactions = parent.reactions,
+                  !parentReactions.isEmpty else { continue }
             guard let idx = list.firstIndex(where: { $0.id == parent.id }) else { continue }
             var message = list[idx]
-            guard message.reactions != parent.reactions else { continue }
-            message.reactions = parent.reactions
+            guard message.reactions != parentReactions else { continue }
+            message.reactions = parentReactions
             // Eigene Actor-ID: reactionsSelf sauber halten - Emojis, die im
             // Summary nicht mehr auftauchen, raus; ein vom Event-Actor
             // (wir selbst) neu gesetztes Emoji rein.
