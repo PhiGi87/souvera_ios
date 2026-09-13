@@ -634,7 +634,7 @@ private struct MailFolderListView: View {
                     } label: {
                         Image(systemName: "arrow.up")
                             .font(.system(size: 17, weight: .semibold))
-                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                             .frame(width: 44, height: 44)
                             .background(.ultraThinMaterial, in: Circle())
                             .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
@@ -782,7 +782,7 @@ private struct MailFolderListView: View {
                 } label: {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 17, weight: .semibold))
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                         .frame(width: 44, height: 44)
                         .background(.ultraThinMaterial, in: Circle())
                         .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
@@ -913,19 +913,24 @@ private struct MailboxTreeRowBase: View {
                 HStack(spacing: 8) {
                     Image(systemName: icon(for: node.mailbox.kind))
                         .font(.body)
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                         .frame(width: 24)
                     Text(node.mailbox.displayName)
                         .font(.body)
                         .fontWeight(isActive ? .semibold : .regular)
-                        .foregroundStyle(isActive ? Color(NCBrandColor.shared.customer) : Color.primary)
+                        .foregroundStyle(isActive ? Color.Souvera.brandPrimaryDeep : Color.primary)
                     Spacer()
                     if showsUnread {
                         // Immer die EIGENEN Ungelesenen des Ordners zeigen -
                         // die Summe der Unterordner steht in deren Zeilen,
                         // sobald der Ordner aufgeklappt ist.
                         if node.mailbox.unreadCount > 0 {
-                            Text("\(node.mailbox.unreadCount)").foregroundStyle(.secondary)
+                            Text("\(node.mailbox.unreadCount)")
+                                .font(.caption2).fontWeight(.semibold)
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.Souvera.brandPrimaryDeep))
                         }
                     }
                 }
@@ -1298,7 +1303,7 @@ private struct MailMessageListView: View {
         } label: {
             Image(systemName: "arrow.up")
                 .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                 .frame(width: 44, height: 44)
                 .background(.ultraThinMaterial, in: Circle())
                 .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
@@ -1320,7 +1325,7 @@ private struct MailMessageListView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: selected.contains(message.id) ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                     MailRowContent(message: message)
                 }
             }
@@ -1485,13 +1490,13 @@ private struct MailNewFolderSheet: View {
                     } label: {
                         HStack {
                             Image(systemName: "tray.full")
-                                .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                             Text(NSLocalizedString("_mail_folder_position_root_", comment: ""))
                             Spacer()
                             if parent == nil {
                                 Image(systemName: "checkmark")
                                     .font(.subheadline)
-                                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                    .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                             }
                         }
                         .contentShape(Rectangle())
@@ -1510,7 +1515,7 @@ private struct MailNewFolderSheet: View {
                             if parent?.id == row.node.mailbox.id {
                                 Image(systemName: "checkmark")
                                     .font(.subheadline)
-                                    .foregroundStyle(Color(NCBrandColor.shared.customer))
+                                    .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                             }
                         }
                     }
@@ -1581,7 +1586,7 @@ private struct MailRowContent: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Circle().fill(message.isRead ? Color.clear : Color(NCBrandColor.shared.customer)).frame(width: 8, height: 8)
+            Circle().fill(message.isRead ? Color.clear : Color.Souvera.brandPrimaryDeep).frame(width: 8, height: 8)
             VStack(alignment: .leading, spacing: 2) {
                 HStack {
                     Text(showsRecipient ? message.displayTo : message.displayFrom)
@@ -2224,7 +2229,7 @@ struct MailComposeView: View {
                         }
                     } label: {
                         Image(systemName: "paperclip")
-                            .foregroundStyle(Color(NCBrandColor.shared.customer))
+                            .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                             .padding(8)
                     }
                 }
@@ -2270,7 +2275,7 @@ struct MailComposeView: View {
                     contactPickerField = kind
                 } label: {
                     Image(systemName: "person.crop.circle.badge.plus")
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                         .frame(width: 28, height: 28)
                 }
             }
@@ -2459,7 +2464,7 @@ struct AutoRefreshRingView: View {
                                 .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
                             Circle()
                                 .trim(from: 0, to: min(1, progress))
-                                .stroke(Color(NCBrandColor.shared.customer), style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                                .stroke(Color.Souvera.brandPrimaryDeep, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
                                 .rotationEffect(.degrees(-90))
                                 .animation(.linear(duration: 1), value: progress)
                         }
@@ -2470,7 +2475,7 @@ struct AutoRefreshRingView: View {
                     // "Aus" (R3): manueller Refresh-Button bleibt sichtbar.
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
                         .frame(width: 18, height: 18)
                 }
             }

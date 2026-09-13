@@ -111,11 +111,6 @@ struct LinkView: View {
                                 } label: {
                                     Image(systemName: "phone.fill").foregroundStyle(.green)
                                 }
-                                Button {
-                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: true)
-                                } label: {
-                                    Image(systemName: "video.fill").foregroundStyle(Color(NCBrandColor.shared.customer))
-                                }
                             }
                         }
                     }
@@ -1637,6 +1632,7 @@ struct LinkChatView: View {
                 .padding(.leading, 14)
                 .padding(.trailing, 10)
                 .padding(.vertical, 5)
+                .frame(minHeight: 44)
                 .background(Capsule().fill(Color(.systemBackground)))
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                 if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -1665,7 +1661,8 @@ struct LinkChatView: View {
                 }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 6)
+            .padding(.top, 6)
+            .padding(.bottom, 14)
             .animation(.easeInOut(duration: 0.2), value: draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
@@ -2326,11 +2323,13 @@ struct LinkRoomSettingsSheet: View {
     @State private var isPublic: Bool
     @State private var working = false
     @State private var copied = false
+    @State private var lobbyEnabled = false
 
     init(viewModel: LinkViewModel, room: LinkConversation) {
         self.viewModel = viewModel
         self.room = room
         _isPublic = State(initialValue: room.isPublic)
+        _lobbyEnabled = State(initialValue: room.lobbyState == 1)
     }
 
     var body: some View {
@@ -2354,6 +2353,26 @@ struct LinkRoomSettingsSheet: View {
                     .disabled(working)
                 } footer: {
                     Text(NSLocalizedString("_link_guests_allow_hint_", comment: ""))
+                }
+
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { lobbyEnabled },
+                        set: { newValue in
+                            guard !working else { return }
+                            Task {
+                                working = true
+                                let ok = await viewModel.toggleLobby(token: room.token, enabled: newValue)
+                                working = false
+                                if ok { lobbyEnabled = newValue }
+                            }
+                        }
+                    )) {
+                        Label(NSLocalizedString("_link_lobby_toggle_", comment: ""), systemImage: "hourglass")
+                    }
+                    .disabled(working)
+                } footer: {
+                    Text(NSLocalizedString("_link_lobby_toggle_hint_", comment: ""))
                 }
 
                 if isPublic {

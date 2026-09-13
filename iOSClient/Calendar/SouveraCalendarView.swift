@@ -87,7 +87,6 @@ struct SouveraCalendarView: View {
                 }
                 .padding(.top, 8)
             }
-            .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .souveraOfflineBanner()
             .toolbar {
@@ -342,9 +341,12 @@ struct SouveraCalendarView: View {
                     .frame(width: cellSize, height: cellSize)
                     .background(
                         Circle()
-                            .fill(isSelected ? Color(NCBrandColor.shared.customer) : .clear)
+                            .fill(isSelected
+                                  ? LinearGradient(colors: SouveraAppearance.gradientColors,
+                                                   startPoint: .top, endPoint: .bottom)
+                                  : LinearGradient(colors: [.clear, .clear]))
                     )
-                    .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color(NCBrandColor.shared.customer) : Color.primary) : Color.secondary))
+                    .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color.Souvera.brandPrimaryDeep : Color.primary) : Color.secondary))
                 Circle()
                     .fill(dayDotColor(day))
                     .frame(width: compact ? 3 : 5, height: compact ? 3 : 5)
@@ -629,7 +631,7 @@ private struct CalendarEventRow: View {
                 }
                 if event.talkRoomToken != nil {
                     Label(NSLocalizedString("_calendar_talk_channel_", comment: ""), systemImage: "bubble.left.and.bubble.right")
-                        .font(.caption).foregroundStyle(Color(NCBrandColor.shared.customer))
+                        .font(.caption).foregroundStyle(Color.Souvera.brandPrimaryDeep)
                 }
             }
         }

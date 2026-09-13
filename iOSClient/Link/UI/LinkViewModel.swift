@@ -618,6 +618,15 @@ final class LinkViewModel: ObservableObject {
     /// Gäste-Zugang für einen Raum an/aus (public/private schalten).
     /// Aktualisiert danach die Raumliste (neuer Typ public/group).
     @discardableResult
+    /// Lobby an/aus (Raum-Einstellungen, Run 15.09.) - API existiert
+    /// bereits (setLobby, Event-Raum-Pfad); Anzeige-Stand via loadConversations.
+    func toggleLobby(token: String, enabled: Bool) async -> Bool {
+        guard let api else { return false }
+        await api.setLobby(token: token, enabled: enabled)
+        loadConversations()
+        return true
+    }
+
     func toggleGuestAccess(token: String, enabled: Bool) async -> Bool {
         guard let api else { return false }
         if enabled {

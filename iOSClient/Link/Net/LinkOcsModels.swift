@@ -45,6 +45,9 @@ struct LinkConversation: Decodable, Identifiable {
     let isCustomAvatar: Bool
     /// Numerische Raum-ID (Signaling-"roomid" für WebSocket/Typing).
     let roomId: Int
+    /// Lobby-Status des Raums (0 = aus, 1 = an) - Grundlage für den
+    /// Lobby-Toggle in den Raum-Einstellungen (Run 15.09.).
+    let lobbyState: Int
 
     var id: String { token }
 
@@ -55,6 +58,7 @@ struct LinkConversation: Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case token, displayName, type, unreadMessages, hasCall, lastActivity, lastMessage, participantType, avatarVersion, isCustomAvatar, lastReadMessage, roomId = "id"
+        case lobbyState
     }
 
     init(from decoder: Decoder) throws {
@@ -70,6 +74,7 @@ struct LinkConversation: Decodable, Identifiable {
         lastMessage = try? c.decode(LinkChatMessage.self, forKey: .lastMessage)
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
         avatarVersion = (try? c.decode(String.self, forKey: .avatarVersion)) ?? ""
+        lobbyState = (try? c.decode(Int.self, forKey: .lobbyState)) ?? 0
         isCustomAvatar = (try? c.decode(Bool.self, forKey: .isCustomAvatar)) ?? false
         roomId = (try? c.decode(Int.self, forKey: .roomId)) ?? 0
     }
