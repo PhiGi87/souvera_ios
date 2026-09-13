@@ -852,7 +852,8 @@ private struct LinkConversationRow: View {
                     .frame(width: 44, height: 44)
                     .clipShape(Circle())
             } else {
-                Circle().fill(Color(NCBrandColor.shared.customer)).frame(width: 44, height: 44)
+                Circle().fill(LinearGradient(colors: SouveraAppearance.gradientColors,
+                                             startPoint: .top, endPoint: .bottom)).frame(width: 44, height: 44)
                 Image(systemName: room.isOneToOne ? "person.fill" : "person.3.fill")
                     .foregroundStyle(.white)
             }
@@ -1630,37 +1631,42 @@ struct LinkChatView: View {
                     TextField(NSLocalizedString("_link_message_", comment: ""), text: $draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .lineLimit(1...5)
-                    if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
-                        Button {
-                            let text = draft
-                            let replyTarget = replyingTo?.id
-                            draft = ""
-                            replyingTo = nil
-                            // P68n: Nach dem Senden automatisch ans Ende scrollen.
-                            scrollToNewestPending = true
-                            viewModel.send(text: text, replyTo: replyTarget)
-                        } label: {
-                            Image(systemName: "paperplane.fill")
-                                .font(.system(size: 14, weight: .semibold))
-                                .foregroundStyle(.white)
-                                .frame(width: 30, height: 30)
-                                .background(Circle().fill(Color(NCBrandColor.shared.customer)))
-                        }
-                        .transition(.scale.combined(with: .opacity))
-                    } else {
-                        // Reservierter Platz für den späteren Mikrofon-Button.
-                        Color.clear.frame(width: 30, height: 30)
-                    }
+                    // Reservierter Platz für den späteren Mikrofon-Button.
+                    Color.clear.frame(width: 30, height: 30)
                 }
                 .padding(.leading, 14)
                 .padding(.trailing, 10)
                 .padding(.vertical, 5)
                 .background(Capsule().fill(Color(.systemBackground)))
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                    // Sendeknopf RECHTS NEBEN der Pille (Run-Feedback 15.09.):
+                    // Pille verkürzt sich animiert, Knopf blendet ein/aus.
+                    Button {
+                        let text = draft
+                        let replyTarget = replyingTo?.id
+                        draft = ""
+                        replyingTo = nil
+                        // P68n: Nach dem Senden automatisch ans Ende scrollen.
+                        scrollToNewestPending = true
+                        viewModel.send(text: text, replyTo: replyTarget)
+                    } label: {
+                        Image(systemName: "paperplane.fill")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 44, height: 44)
+                            .background(
+                                Circle().fill(LinearGradient(colors: SouveraAppearance.gradientColors,
+                                                             startPoint: .top, endPoint: .bottom))
+                            )
+                            .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
+                    }
+                    .transition(.scale.combined(with: .opacity))
+                }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .animation(.easeInOut(duration: 0.18), value: draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            .animation(.easeInOut(duration: 0.2), value: draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
 }
@@ -1765,7 +1771,8 @@ private struct LinkMessageRow: View {
                 .clipShape(Circle())
         } else {
             ZStack {
-                Circle().fill(Color(NCBrandColor.shared.customer))
+                Circle().fill(LinearGradient(colors: SouveraAppearance.gradientColors,
+                                             startPoint: .top, endPoint: .bottom))
                 Text(initials(message.actorDisplayName))
                     .font(.caption2).foregroundStyle(.white)
             }
@@ -1986,8 +1993,16 @@ private struct LinkMessageBubble: View {
         // wickeln weiter. Textnachrichten sind unverändert.
         .fixedSize(horizontal: isImageMessage || isPdfMessage, vertical: false)
         .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
+            Group {
+                if isOwn {
+                    // Souvera-Gradient (wie Fullscreen-Hintergrund, Run 15.09.)
+                    LinearGradient(colors: SouveraAppearance.gradientColors,
+                                   startPoint: .top, endPoint: .bottom)
+                } else {
+                    Color(.secondarySystemBackground)
+                }
+            }
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         )
         // Liefer-Haken UNTEN RECHTS IN der Bubble - einheitlich fuer alle
         // Nachrichtentypen (Run-Feedback 14.09.: Doppel-Ausgabe durch zwei
