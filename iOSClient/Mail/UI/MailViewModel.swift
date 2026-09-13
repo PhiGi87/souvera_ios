@@ -1291,54 +1291,50 @@ final class MailViewModel: ObservableObject {
                         if let dict = item as? [String: Any], let id = dict["id"] as? String { return id }
                         return nil
                     } ?? []
-                    // Flag-Änderungen (gelesen/ungelesen, Flag) sind KEINE
-                    // Query-Result-Änderungen - queryChanges liefert sie
-                    // nicht. Lokal geänderte Nachrichten deshalb immer frisch
-                    // nachladen, sonst würde ein inkrementeller Sync den
-                    // alten (Cache-)Zustand zurückspielen.
+                    // Run 15.09.: queryChanges meldet KEINE Keyword-Änderungen
+                    // (gelesen/geflaggt per IMAP-Client/Web - live am Server
+                    // verifiziert). Deshalb die Snapshot-IDs IMMER frisch per
+                    // gebatchtem Email/get nachladen (maxObjectsInGet=500,
+                    // Server gewinnt): deckt externe Löschungen (removed),
+                    // Flag-/Status-Änderungen und Zusätze ab.
                     let dirty = Array(dirtyFlagIds[cacheKey] ?? [])
                     var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
-                    let refetch = Array(Set(added + dirty))
-                    if !refetch.isEmpty {
-                        let fetched = try await api.getEmails(accountId: accId, ids: refetch, properties: JmapApi.listSyncProperties)
-                        emails = mergeEmails(existing: emails, incoming: fetched)
-                        dirtyFlagIds[cacheKey] = nil
+                    // LIVE-Befund 15.09.: Stalwart meldet reine KEYWORD-
+                    // Aenderungen als "removed" (Mail existiert weiter, nur
+                    // Flags neu). removed-IDs darum MIT-refetchen - Email/get
+                    // liefert sie mit frischen Keywords zurueck (bzw. fehlen
+                    // sie dort, war die Mail wirklich geloescht).
+                    var refetchIds = Set(added + dirty + removed)
+                    for email in emails {
+                        if let id = email.optString("id"), !id.isEmpty { refetchIds.insert(id) }
                     }
+                    let refetch = Array(refetchIds)
+                    var fetchedAll: [[String: Any]] = []
+                    var cursor = 0
+                    while cursor < refetch.count {
+                        let batch = Array(refetch[cursor..<min(cursor + 500, refetch.count)])
+                        cursor += 500
+                        let fetched = try await api.getEmails(accountId: accId, ids: batch, properties: JmapApi.listSyncProperties)
+                        fetchedAll.append(contentsOf: fetched)
+                    }
+                    if !fetchedAll.isEmpty {
+                        emails = mergeEmails(existing: emails, incoming: fetchedAll)
+                    }
+                    dirtyFlagIds[cacheKey] = nil
                     let newState = changes.optString("newQueryState") ?? state
-                    // Cross-Check: Stalwart (host-on) meldet bei queryChanges
-                    // mitunter State-Advances OHNE added-Einträge (Log 05.09.
-                    // 18:14: state swd0ac -> swh0ac, added leer) - neue Mails
-                    // blieben so dauerhaft unsichtbar. Gegenprobe über die
-                    // Ungelesen-IDs; Abweichung -> in den Voll-Refresh fallen.
-                    var fallThroughToFullRefresh = false
-                    if refetch.isEmpty {
-                        if let unreadResp = try? await api.queryEmails(accountId: accId, inMailboxId: jmapMailboxId, limit: 0, notKeyword: "$seen"),
-                           let serverUnread = (unreadResp["ids"] as? [String]) {
-                            let snapshotUnread = Set(emails.filter {
-                                ($0["keywords"] as? [String: Any])?["$seen"] as? Bool != true
-                            }.compactMap { $0.optString("id") })
-                            if Set(serverUnread) != snapshotUnread {
-                                JmapLog.write("sync \(mailbox.name): queryChanges empty but unread set differs (server \(serverUnread.count)/cache \(snapshotUnread.count)) - full refresh")
-                                fallThroughToFullRefresh = true
-                            }
-                        }
-                    }
-                    if !fallThroughToFullRefresh {
-                        guard generation == listGeneration else { return }
-                        queryStates[cacheKey] = newState
-                        // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
-                        // inkrementelle Sync (Snapshot von VOR der Löschung) die
-                        // gelöschten Mails in den Cache (Reappear-Muster).
-                        let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
-                        MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
-                        messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
-                        pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
-                        hasMoreMessages = pageState.hasMore
-                        JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count)")
-                        return
-                    }
-                    // fallThroughToFullRefresh: unten läuft der Voll-Refresh
-                    // (Snapshot bleibt als Basis erhalten).
+
+                    guard generation == listGeneration else { return }
+                    queryStates[cacheKey] = newState
+                    // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
+                    // inkrementelle Sync (Snapshot von VOR der Löschung) die
+                    // gelöschten Mails in den Cache (Reappear-Muster).
+                    let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                    MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
+                    messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+                    pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
+                    hasMoreMessages = pageState.hasMore
+                    JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
+                    return
                 } catch {
                     // Incremental path failed - fall through to a full refresh.
                 }
@@ -1483,6 +1479,40 @@ final class MailViewModel: ObservableObject {
                     JmapLog.write("sync \(mailbox.name): removing \(stale.count) stale cached mails not on server")
                     for id in stale { byId.removeValue(forKey: id) }
                 }
+            }
+            // Rest-Abgleich ausserhalb des Fensters (Run 15.09.): die
+            // aeltesten 1000 NICHT im Fenster geladenen Cache-IDs frisch
+            // per gebatchtem Email/get nachladen und server-first ersetzen -
+            // externe Loeschungen/Status-Änderungen (z. B. per IMAP-Client)
+            // ausserhalb der 3-Seiten-Coverage syncen damit ebenfalls.
+            let outsideWindow = byId.keys.filter { !serverIds.contains($0) }
+            if !outsideWindow.isEmpty {
+                // Aelteste zuerst, Deckel 1000 (2 Batches à 500).
+                let sortedOutside = outsideWindow.compactMap { id -> (String, String)? in
+                    guard let raw = byId[id], let dateStr = raw["receivedAt"] as? String else { return nil }
+                    return (dateStr, id)
+                }
+                .sorted { $0.0 < $1.0 }
+                .prefix(1000)
+                var refetchIds = sortedOutside.map { $0.1 }
+                var cursor = 0
+                var refetched = 0
+                while cursor < refetchIds.count {
+                    let batch = Array(refetchIds[cursor..<min(cursor + 500, refetchIds.count)])
+                    cursor += 500
+                    guard let resp = try? await api.getEmails(accountId: accId, ids: batch, properties: JmapApi.listSyncProperties) else { break }
+                    let served = Set(resp.compactMap { $0.optString("id") })
+                    refetched += served.count
+                    for id in batch where !served.contains(id) {
+                        // Extern geloescht: aus dem Stand entfernen.
+                        byId.removeValue(forKey: id)
+                    }
+                    for email in resp {
+                        if let id = email.optString("id"), !id.isEmpty { byId[id] = email }
+                    }
+                }
+                JmapLog.write("sync \(mailbox.name): outside-window refetch: \(refetchIds.count) ids, \(refetched) on server")
+                _ = refetchIds
             }
             let finalCollected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
             guard generation == listGeneration else { return }
