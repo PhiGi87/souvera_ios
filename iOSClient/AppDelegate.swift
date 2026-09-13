@@ -36,7 +36,20 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         // erste DB-Open inkl. Schema-Migration läuft asynchron auf der
         // realmQueue, bevor irgendein Main-Thread-Aufruf synchron darauf
         // blockiert (Crash 10.09.: 2,2 s Launch-Blockade -> Watchdog-Kill).
+        // 0xdead10cc-Schutz (Run 14.09.): Der Realm-Open hält einen
+        // fcntl-Lock - wird die App währenddessen suspendiert, killt iOS
+        // den Prozess (Crash 202609122302). Der Hintergrund-Task hält die
+        // App aktiv, bis der Warm-up abgeschlossen ist.
+        var warmupBgID = UIApplication.shared.beginBackgroundTask(withName: "RealmWarmUp")
         NCManageDatabase.shared.core.warmUpRealmAsync()
+        DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+            DispatchQueue.main.async {
+                if warmupBgID != .invalid {
+                    UIApplication.shared.endBackgroundTask(warmupBgID)
+                    warmupBgID = .invalid
+                }
+            }
+        }
         if isUiTestingEnabled {
             Task {
                 await NCAccount().deleteAllAccounts()
