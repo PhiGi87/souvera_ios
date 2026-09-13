@@ -342,9 +342,9 @@ struct SouveraCalendarView: View {
                     .background(
                         Circle()
                             .fill(isSelected
-                                  ? LinearGradient(colors: SouveraAppearance.gradientColors,
-                                                   startPoint: .top, endPoint: .bottom)
-                                  : LinearGradient(colors: [.clear, .clear]))
+                                  ? AnyShapeStyle(LinearGradient(colors: SouveraAppearance.gradientColors,
+                                                                 startPoint: .top, endPoint: .bottom))
+                                  : AnyShapeStyle(Color.clear))
                     )
                     .foregroundStyle(isSelected ? Color.white : (inMonth ? (isToday ? Color.Souvera.brandPrimaryDeep : Color.primary) : Color.secondary))
                 Circle()
