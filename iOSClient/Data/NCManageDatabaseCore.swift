@@ -5,6 +5,7 @@
 import Foundation
 import RealmSwift
 import NextcloudKit
+import UIKit
 
 // Global flag used to control Realm write/read operations
 var isSuspendingDatabaseOperation: Bool = false
@@ -31,7 +32,20 @@ final class NCManageDatabaseCore {
     /// späteren synchronen Aufrufe von Main treffen einen bereits offenen
     /// RealmCoordinator und kehren sofort zurück.
     func warmUpRealmAsync() {
+        // 0xdead10cc-Schutz (Run 14.09.): Der Realm-Open haelt einen
+        // fcntl-Lock - wird die App WAEHREND dessen suspendiert, killt iOS
+        // den Prozess. Der Hintergrund-Task verhindert die sofortige
+        // Suspendierung, bis der Open abgeschlossen ist.
+        var bgID = UIApplication.shared.beginBackgroundTask(withName: "RealmWarmUp")
         realmQueue.async(qos: .userInitiated) {
+            defer {
+                DispatchQueue.main.async {
+                    if bgID != .invalid {
+                        UIApplication.shared.endBackgroundTask(bgID)
+                        bgID = .invalid
+                    }
+                }
+            }
             autoreleasepool {
                 do {
                     _ = try Realm()

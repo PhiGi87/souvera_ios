@@ -13,6 +13,7 @@
 
 import Combine
 import Foundation
+import UIKit
 
 enum MailUiState<T> {
     case loading
@@ -348,10 +349,21 @@ final class MailViewModel: ObservableObject {
         // Extension die geteilte Realm-DB hielt).
         Task { @MainActor [weak self] in
             guard let self else { return }
+            // 0xdead10cc-Schutz (Run 14.09.): der Realm-Read hält den
+            // fcntl-Lock - wird die App währenddessen suspendiert, killt
+            // iOS den Prozess. Hintergrund-Task hält die App aktiv, bis
+            // der Key steht.
+            var bgID = UIApplication.shared.beginBackgroundTask(withName: "MailAccountKey")
+            defer {
+                if bgID != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgID)
+                    bgID = .invalid
+                }
+            }
             // Account-Key ASYNCHRON auflösen (kein sync Realm-Read).
             // RETRY: direkt nach App-Start liefert der Realm-Read teils
             // leer (Start-Race, Log dzxuaaa1n1 12:07: "mailboxId=|Inbox"
-            // MISS) - dann wrde der gesamte Cache-Pfad mit LEEREM Key
+            // MISS) - dann würde der gesamte Cache-Pfad mit LEEREM Key
             // laufen und der Nutzer sah erst nach dem Netzwerk-Load etwas.
             for _ in 0..<3 {
                 self.fallbackAccountKey = await NCManageDatabase.shared.getActiveTableAccountAsync()?.account ?? ""

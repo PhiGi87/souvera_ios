@@ -1929,18 +1929,23 @@ private struct LinkMessageBubble: View {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
             if isPdfMessage {
-                // Haken RECHTS NEBEN dem Thumbnail (mit Abstand, keine
-                // Ueberlappung - Run-Feedback 14.09.). Kein Dateiname/Caption
-                // unter dem Thumbnail - der Name ist nur im Vollbild-Viewer
-                // sichtbar (Run-Feedback 13.09.).
-                HStack(alignment: .center, spacing: 6) {
+                // Haken UNTEN RECHTS neben dem Thumbnail (Run-Feedback
+                // 14.09.). Kein Dateiname/Caption unter dem Thumbnail - der
+                // Name ist nur im Vollbild-Viewer sichtbar (Run 13.09.).
+                HStack(alignment: .bottom, spacing: 6) {
                     pdfContent
-                    if let pendingState { deliveryCheckmarks(pendingState) }
+                    if let pendingState {
+                        deliveryCheckmarks(pendingState)
+                            .padding(.bottom, 2)
+                    }
                 }
             } else if isImageMessage {
-                HStack(alignment: .center, spacing: 6) {
+                HStack(alignment: .bottom, spacing: 6) {
                     imageContent
-                    if let pendingState { deliveryCheckmarks(pendingState) }
+                    if let pendingState {
+                        deliveryCheckmarks(pendingState)
+                            .padding(.bottom, 2)
+                    }
                 }
             } else if message.fileName() != nil {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
