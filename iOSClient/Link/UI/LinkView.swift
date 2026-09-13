@@ -2019,14 +2019,16 @@ private struct LinkMessageBubble: View {
     @ViewBuilder
     private func deliveryCheckmarks(_ state: LinkPendingMessage.PendingState) -> some View {
         // Doppelhaken UEBERLAPPEND (WhatsApp/Talk-Optik, Run-Feedback 12.09.).
-        HStack(spacing: -2) {
+        HStack(spacing: -5) {
             if state == .sent {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
                     .opacity(state == .sent ? 1 : 0)
+                    .offset(y: -1)
             }
             Image(systemName: "checkmark")
                 .font(.system(size: 8, weight: .bold))
+                .offset(y: 1)
         }
         .foregroundStyle(isOwn ? .white.opacity(0.85) : .secondary)
     }

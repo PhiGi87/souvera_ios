@@ -124,8 +124,16 @@ actor LinkOcsApi {
         return messages
     }
 
-    @discardableResult
-    func sendMessage(token: String, message: String, replyTo: Int64? = nil) async -> Bool {
+    struct SendResult {
+        let httpCode: Int
+        let ok: Bool
+        /// true, wenn der Server die Nachricht trotz Fehlercode bereits
+        /// erstellt hat (Talk meldet nach Erstellung einen 400 mit
+        /// error="message" - live verifiziert 15.09.).
+        var likelyCreated: Bool { ok || httpCode == 400 }
+    }
+
+    func sendMessage(token: String, message: String, replyTo: Int64? = nil) async -> SendResult {
         var body: [String: Any] = ["message": message]
         if let replyTo { body["replyTo"] = replyTo }
         let payload = try? JSONSerialization.data(withJSONObject: body)
@@ -134,11 +142,22 @@ actor LinkOcsApi {
         req.httpBody = payload
         guard let (_, response) = try? await session.data(for: req) else {
             CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> transport FAILED")
-            return false
+            return SendResult(httpCode: -1, ok: false)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> \(status)")
-        return (200..<300).contains(status)
+        return SendResult(httpCode: status, ok: (200..<300).contains(status))
+    }
+
+    /// Enthält der Chat bereits eine EIGENE Nachricht mit exakt diesem
+    /// Text (fuer Anti-Duplikat-Pruefung vor dem Flush)?
+    func chatContainsOwnMessage(token: String, actorId: String, text: String) async -> Bool {
+        guard let body = await get("\(base)/api/v1/chat/\(token)?format=json&lookIntoFuture=0&limit=30"),
+              let data = body.data(using: .utf8),
+              let env = try? decoder.decode(OcsEnvelope<[LinkChatMessage]>.self, from: data) else { return false }
+        return (env.ocs.data ?? []).contains {
+            $0.actorId == actorId && $0.message == text
+        }
     }
 
     /// Talk-Standard: Read-Marker für den Raum setzen (POST chat/{token}/read).

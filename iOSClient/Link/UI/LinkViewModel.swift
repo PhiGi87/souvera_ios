@@ -1199,24 +1199,40 @@ final class LinkViewModel: ObservableObject {
             return
         }
         let gen = generation
-        Task { [weak self] in
-            let ok = await api.sendMessage(token: token, message: outgoing, replyTo: replyTo)
-            guard let self, gen == self.generation else { return }
-            if ok {
-                // Selbstheilung: ein 503er-Hicksel frueher hat Nachrichten
-                // dauerhaft in der Queue eingesperrt (Log dz1eaaa1ps) -
-                // jeder erfolgreiche Sendevorgang raeumt jetzt mit auf.
-                await MainActor.run {
+        // SERIALIZIERTE PIPELINE (Run 15.09., Duplikats-Garantie): alle
+        // Sendungen (Direkt + Flush) laufen ueber EINE Task-Kette - kein
+        // paralleler Versand mehr, der dieselbe Nachricht doppelt
+        // zustellen koennte. 400 = Server erstellt die Nachricht trotzdem
+        // (live verifiziert) -> kein Retry, das Echo liefert sie.
+        enqueueSendOperation { [weak self] in
+            guard let self, self.generation == gen else { return }
+            let result = await api.sendMessage(token: token, message: outgoing, replyTo: replyTo)
+            await MainActor.run {
+                if result.ok {
+                    // Selbstheilung: erfolgreicher Sendevorgang raeumt die
+                    // Queue mit auf.
                     self.flushPendingMessages(token: token)
                     self.flushPendingReactions(token: token)
-                }
-            } else {
-                CallDebugLog.log("LinkVM", "send FAILED (online path) - enqueueing as pending")
-                await MainActor.run {
+                } else if result.httpCode == 400 {
+                    CallDebugLog.log("LinkVM", "send 400 (server likely created) - echo will deliver")
+                } else {
+                    CallDebugLog.log("LinkVM", "send FAILED (\(result.httpCode)) - enqueueing as pending")
                     self.enqueuePending(token: token, text: outgoing, replyTo: replyTo)
                     self.schedulePendingFlushRetry(token: token)
                 }
             }
+        }
+    }
+
+    /// Serialisierte Send-Pipeline: jede Operation wartet, bis die
+    /// vorherige abgeschlossen ist (Task-Kette) - Direkt-Send und Flush
+    /// koennen sich nicht mehr ueberlappen (Duplikats-Garantie).
+    private var sendPipelineTask: Task<Void, Never>?
+    private func enqueueSendOperation(_ operation: @escaping () async -> Void) {
+        let previous = sendPipelineTask
+        sendPipelineTask = Task { [weak previous] in
+            _ = await previous?.value
+            await operation()
         }
     }
 
@@ -1258,6 +1274,25 @@ final class LinkViewModel: ObservableObject {
             defer { Task { @MainActor [weak self] in self?.isFlushingPending = false } }
             for pending in queue {
                 guard let self, self.isOnline else { return }
+                if pending.kind == .text {
+                    // ANTI-DUPLIKAT (Run 15.09.): pruefe, ob der Server die
+                    // Nachricht bereits hat (frueherer 400-Versuch hat sie
+                    // evtl. trotzdem erstellt) -> nur .sent markieren, NICHT
+                    // erneut senden.
+                    let exists = await api.chatContainsOwnMessage(token: pending.token,
+                                                                  actorId: self.currentUserId,
+                                                                  text: pending.text)
+                    if exists {
+                        CallDebugLog.log("LinkVM", "flush: message already on server - marking sent without resend")
+                        await MainActor.run {
+                            if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+                                self.pendingMessages[idx].state = .sent
+                                self.persistPendingMessages()
+                            }
+                        }
+                        continue
+                    }
+                }
                 if pending.kind == .attachment {
                     // Angehaengter lokaler Anhang (Foto/Datei, Run 12.09.):
                     // normaler Upload-Ablauf; Bytes weg -> als erledigt
@@ -1280,15 +1315,28 @@ final class LinkViewModel: ObservableObject {
                     }
                     continue
                 }
-                let ok = await api.sendMessage(token: pending.token,
-                                               message: pending.text,
-                                               replyTo: pending.replyTo)
-                guard ok else {
+                let result = await api.sendMessage(token: pending.token,
+                                                   message: pending.text,
+                                                   replyTo: pending.replyTo)
+                if result.httpCode == 400 {
+                    // LIVE-Befund (15.09.): der Server erstellt die Nachricht
+                    // TROTZ 400 (error="message") - ein Retry wrde DUPlikate
+                    // erzeugen. Zustand .sent; der Poll-Echo liefert die
+                    // echte Nachricht und der Reconcile raeumt die Zeile ab.
+                    CallDebugLog.log("LinkVM", "flush 400 (server likely created) - marking sent, echo will deliver")
+                    await MainActor.run {
+                        if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {
+                            self.pendingMessages[idx].state = .sent
+                            self.persistPendingMessages()
+                        }
+                    }
+                    continue
+                }
+                guard result.ok else {
                     CallDebugLog.log("LinkVM", "flush failed - stopping (still offline?)")
                     await MainActor.run {
-                        // Server lehnt AB, obwohl online (z. B. 503): Versuch
-                        // zaehlen; nach 3 Versuchen NICHT zustellbare
-                        // Nachricht entfernen (Run-Feedback 13.09.).
+                        // Transportfehler (offline): Versuch zaehlen; nach
+                        // 3 Versuchen NICHT zustellbare Nachricht entfernen.
                         guard let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) else { return }
                         self.pendingMessages[idx].attempts += 1
                         if self.pendingMessages[idx].attempts >= 3 {
