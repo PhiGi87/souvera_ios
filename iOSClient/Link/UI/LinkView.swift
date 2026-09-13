@@ -2340,12 +2340,15 @@ struct LinkRoomSettingsSheet: View {
     @State private var copied = false
     @State private var lobbyEnabled = false
 
-    init(viewModel: LinkViewModel, room: LinkConversation) {
+    init(viewModel: LinkViewModel, room: LinkConversation, onLobbyChanged: @escaping () -> Void = {}) {
         self.viewModel = viewModel
         self.room = room
+        self.onLobbyChanged = onLobbyChanged
         _isPublic = State(initialValue: room.isPublic)
         _lobbyEnabled = State(initialValue: room.lobbyState == 1)
     }
+
+
 
     var body: some View {
         NavigationStack {
