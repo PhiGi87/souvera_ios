@@ -243,7 +243,13 @@ struct LinkView: View {
             LinkParticipantsSheet(viewModel: viewModel)
         }
         .sheet(item: $settingsRoom) { room in
-            LinkRoomSettingsSheet(viewModel: viewModel, room: room)
+            LinkRoomSettingsSheet(viewModel: viewModel, room: room, onLobbyChanged: {
+                // Frisches Raum-Objekt: der Lobby-Toggle zeigt beim
+                // Wieder-Oeffnen den Server-Stand (Run-Feedback 15.09.).
+                if let fresh = viewModel.currentRoom, fresh.token == room.token {
+                    settingsRoom = fresh
+                }
+            })
         }
         .overlay {
             if let request = startCallRequest {
@@ -804,7 +810,13 @@ struct LinkConversationListView: View {
                 + Text("\n\"") + Text(deleteRoom?.displayName ?? "") + Text("\"")
         }
         .sheet(item: $settingsRoom) { room in
-            LinkRoomSettingsSheet(viewModel: viewModel, room: room)
+            LinkRoomSettingsSheet(viewModel: viewModel, room: room, onLobbyChanged: {
+                // Frisches Raum-Objekt: der Lobby-Toggle zeigt beim
+                // Wieder-Oeffnen den Server-Stand (Run-Feedback 15.09.).
+                if let fresh = viewModel.currentRoom, fresh.token == room.token {
+                    settingsRoom = fresh
+                }
+            })
         }
     }
     }
@@ -2319,6 +2331,9 @@ struct LinkParticipantsSheet: View {
 struct LinkRoomSettingsSheet: View {
     @ObservedObject var viewModel: LinkViewModel
     let room: LinkConversation
+    /// Wird nach erfolgreicher Lobby-Aenderung gerufen - der Aufrufer
+    /// frischt sein Raum-Objekt (und damit das Sheet) auf.
+    var onLobbyChanged: () -> Void = {}
     @Environment(\.dismiss) private var dismiss
     @State private var isPublic: Bool
     @State private var working = false
@@ -2366,13 +2381,7 @@ struct LinkRoomSettingsSheet: View {
                                 working = false
                                 if ok {
                                     lobbyEnabled = newValue
-                                    // Frisches Raum-Objekt uebernehmen, damit
-                                    // der Toggle beim Wieder-oeffnen den
-                                    // Server-Stand zeigt (Run-Feedback 15.09.:
-                                    // er sprang sonst zurueck).
-                                    if let fresh = viewModel.currentRoom, fresh.token == room.token {
-                                        settingsRoom = fresh
-                                    }
+                                    onLobbyChanged()
                                 }
                             }
                         }
