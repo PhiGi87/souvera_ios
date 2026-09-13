@@ -1230,7 +1230,7 @@ final class LinkViewModel: ObservableObject {
     private var sendPipelineTask: Task<Void, Never>?
     private func enqueueSendOperation(_ operation: @escaping () async -> Void) {
         let previous = sendPipelineTask
-        sendPipelineTask = Task { [weak previous] in
+        sendPipelineTask = Task {
             _ = await previous?.value
             await operation()
         }
