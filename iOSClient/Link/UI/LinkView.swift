@@ -1596,46 +1596,71 @@ struct LinkChatView: View {
                 .padding(.horizontal, 12)
                 .padding(.top, 8)
             }
-            HStack(spacing: 8) {
-            Menu {
-                Button {
-                    showFilePicker = true
+            HStack(alignment: .bottom, spacing: 8) {
+                // Runder "+"-Button (Anhang-Menü) - Talk-Stil, Run 15.09.
+                Menu {
+                    Button {
+                        showFilePicker = true
+                    } label: {
+                        Label(NSLocalizedString("_link_attach_file_", comment: ""), systemImage: "doc.badge.plus")
+                    }
+                    Button {
+                        showPhotoPicker = true
+                    } label: {
+                        Label(NSLocalizedString("_link_attach_photos_", comment: ""), systemImage: "photo.on.rectangle")
+                    }
+                    Button {
+                        showNextcloudPicker = true
+                    } label: {
+                        Label(NSLocalizedString("_link_share_file_", comment: ""), systemImage: "building.columns")
+                    }
                 } label: {
-                    Label(NSLocalizedString("_link_attach_file_", comment: ""), systemImage: "doc.badge.plus")
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundStyle(.primary)
+                        .frame(width: 44, height: 44)
+                        .background(Circle().fill(Color(.systemBackground)))
+                        .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                 }
-                Button {
-                    showPhotoPicker = true
-                } label: {
-                    Label(NSLocalizedString("_link_attach_photos_", comment: ""), systemImage: "photo.on.rectangle")
+                // Weiße Pille als Textfeld-Container; rechts reservierter
+                // Bereich: Sendeknopf (blauer Kreis, weißes Icon) nur bei
+                // Text - sonst frei für den späteren Mikrofon-Button
+                // (Run-Feedback 15.09.).
+                HStack(spacing: 8) {
+                    TextField(NSLocalizedString("_link_message_", comment: ""), text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .lineLimit(1...5)
+                    if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
+                        Button {
+                            let text = draft
+                            let replyTarget = replyingTo?.id
+                            draft = ""
+                            replyingTo = nil
+                            // P68n: Nach dem Senden automatisch ans Ende scrollen.
+                            scrollToNewestPending = true
+                            viewModel.send(text: text, replyTo: replyTarget)
+                        } label: {
+                            Image(systemName: "paperplane.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Circle().fill(Color(NCBrandColor.shared.customer)))
+                        }
+                        .transition(.scale.combined(with: .opacity))
+                    } else {
+                        // Reservierter Platz für den späteren Mikrofon-Button.
+                        Color.clear.frame(width: 30, height: 30)
+                    }
                 }
-                Button {
-                    showNextcloudPicker = true
-                } label: {
-                    Label(NSLocalizedString("_link_share_file_", comment: ""), systemImage: "building.columns")
-                }
-            } label: {
-                Image(systemName: "paperclip")
-                    .foregroundStyle(Color(NCBrandColor.shared.customer))
-                    .frame(width: 30, height: 30)
+                .padding(.leading, 14)
+                .padding(.trailing, 10)
+                .padding(.vertical, 5)
+                .background(Capsule().fill(Color(.systemBackground)))
+                .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
             }
-            TextField(NSLocalizedString("_link_message_", comment: ""), text: $draft, axis: .vertical)
-                .textFieldStyle(.roundedBorder)
-                .lineLimit(1...5)
-            Button {
-                let text = draft
-                let replyTarget = replyingTo?.id
-                draft = ""
-                replyingTo = nil
-                // P68n: Nach dem Senden automatisch ans Ende scrollen.
-                scrollToNewestPending = true
-                viewModel.send(text: text, replyTo: replyTarget)
-            } label: {
-                Image(systemName: "paperplane.fill")
-                    .foregroundStyle(draft.trimmingCharacters(in: .whitespaces).isEmpty ? Color.secondary : Color(NCBrandColor.shared.customer))
-            }
-            .disabled(draft.trimmingCharacters(in: .whitespaces).isEmpty)
-            }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .animation(.easeInOut(duration: 0.18), value: draft.trimmingCharacters(in: .whitespaces).isEmpty)
         }
     }
 }
