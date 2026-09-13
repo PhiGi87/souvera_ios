@@ -622,7 +622,21 @@ final class LinkViewModel: ObservableObject {
     /// bereits (setLobby, Event-Raum-Pfad); Anzeige-Stand via loadConversations.
     func toggleLobby(token: String, enabled: Bool) async -> Bool {
         guard let api else { return false }
-        await api.setLobby(token: token, enabled: enabled)
+        let ok = await api.setLobby(token: token, enabled: enabled)
+        guard ok else {
+            CallDebugLog.log("LinkVM", "toggleLobby failed (\(enabled ? "on" : "off"))")
+            return false
+        }
+        // Server-Stand verifizieren (Run-Feedback 15.09.: der Toggle
+        // sprang zurueck, weil der Set-Aufruf still scheiterte).
+        if let room = await api.getRoom(token: token) {
+            let serverState = (room["lobbyState"] as? Int) ?? (enabled ? 1 : 0)
+            CallDebugLog.log("LinkVM", "toggleLobby verified: server lobbyState=\(serverState)")
+            if serverState != (enabled ? 1 : 0) {
+                CallDebugLog.log("LinkVM", "toggleLobby MISMATCH - reporting failure")
+                return false
+            }
+        }
         loadConversations()
         return true
     }
@@ -1191,6 +1205,15 @@ final class LinkViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         let outgoing = mentionAwareMessage(trimmed)
+        // Lobby aktiv: Hinweis einblenden (Run-Feedback 15.09.) - die
+        // Nachricht geht trotzdem in die Queue und wird nach dem
+        // Lobby-Ende zugestellt.
+        if currentRoom?.lobbyState == 1 {
+            actionFeedback = LinkActionFeedback(
+                success: true,
+                message: NSLocalizedString("_link_lobby_active_note_", comment: "")
+            )
+        }
         // Offline: in die persistente Warteschlange - die UI leitet die
         // pendent Nachricht direkt aus der Queue ab (Marker inklusive).
         guard isOnline else {
@@ -1198,30 +1221,13 @@ final class LinkViewModel: ObservableObject {
             schedulePendingFlushRetry(token: token)
             return
         }
-        let gen = generation
-        // SERIALIZIERTE PIPELINE (Run 15.09., Duplikats-Garantie): alle
-        // Sendungen (Direkt + Flush) laufen ueber EINE Task-Kette - kein
-        // paralleler Versand mehr, der dieselbe Nachricht doppelt
-        // zustellen koennte. 400 = Server erstellt die Nachricht trotzdem
-        // (live verifiziert) -> kein Retry, das Echo liefert sie.
-        enqueueSendOperation { [weak self] in
-            guard let self, self.generation == gen else { return }
-            let result = await api.sendMessage(token: token, message: outgoing, replyTo: replyTo)
-            await MainActor.run {
-                if result.ok {
-                    // Selbstheilung: erfolgreicher Sendevorgang raeumt die
-                    // Queue mit auf.
-                    self.flushPendingMessages(token: token)
-                    self.flushPendingReactions(token: token)
-                } else if result.httpCode == 400 {
-                    CallDebugLog.log("LinkVM", "send 400 (server likely created) - echo will deliver")
-                } else {
-                    CallDebugLog.log("LinkVM", "send FAILED (\(result.httpCode)) - enqueueing as pending")
-                    self.enqueuePending(token: token, text: outgoing, replyTo: replyTo)
-                    self.schedulePendingFlushRetry(token: token)
-                }
-            }
-        }
+        // EINHEITLICHER QUEUE-PFAD (Run 15.09.): online UND offline wird
+        // jede Nachricht eingereiht (1 Haken, sofort sichtbar) - die
+        // serialisierte Pipeline flusht und setzt .sent (2 Haken); der
+        // Poll-Echo entfernt die Zeile. Kein Direktpfad mehr, der bei
+        // 400/Backoff "verschwand" (Run-Feedback 14.09.).
+        enqueuePending(token: token, text: outgoing, replyTo: replyTo)
+        schedulePendingFlushRetry(token: token)
     }
 
     /// Serialisierte Send-Pipeline: jede Operation wartet, bis die
@@ -1320,9 +1326,10 @@ final class LinkViewModel: ObservableObject {
                                                    replyTo: pending.replyTo)
                 if result.httpCode == 400 {
                     // LIVE-Befund (15.09.): der Server erstellt die Nachricht
-                    // TROTZ 400 (error="message") - ein Retry wrde DUPlikate
-                    // erzeugen. Zustand .sent; der Poll-Echo liefert die
-                    // echte Nachricht und der Reconcile raeumt die Zeile ab.
+                    // TROTZ 400 (error="message") - KEIN Retry (wrde ein
+                    // Duplikat erzeugen). Zustand .sent (2 Haken); der Poll-
+                    // Echo liefert die echte Nachricht und der inline Match
+                    // raeumt die .sent-Zeile ab.
                     CallDebugLog.log("LinkVM", "flush 400 (server likely created) - marking sent, echo will deliver")
                     await MainActor.run {
                         if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {

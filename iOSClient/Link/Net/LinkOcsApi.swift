@@ -323,9 +323,16 @@ actor LinkOcsApi {
 
     /// Enables or disables the lobby for non-moderators (Talk stores this as
     /// lobbyState). Used when external guests join an event room.
-    func setLobby(token: String, enabled: Bool) async {
+    @discardableResult
+    func setLobby(token: String, enabled: Bool) async -> Bool {
         let req = signed(url: "\(base)/api/v4/room/\(token)/webinar/lobby?state=\(enabled ? 1 : 0)", method: "PUT")
-        _ = try? await session.data(for: req)
+        guard let (_, response) = try? await session.data(for: req) else {
+            CallDebugLog.log("OcsApi", "setLobby \(token) -> transport FAILED")
+            return false
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        CallDebugLog.log("OcsApi", "setLobby \(token) state=\(enabled ? 1 : 0) -> \(status)")
+        return (200..<300).contains(status)
     }
 
     // MARK: - Federation / externe Teilnehmer

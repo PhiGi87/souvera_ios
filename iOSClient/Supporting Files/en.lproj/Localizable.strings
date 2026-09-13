@@ -1196,3 +1196,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_link_older_hint_" = "Pull down to load older messages";
 "_link_history_start_" = "Start of conversation";
 "_link_reaction_remove_" = "Remove reaction %@";
+"_link_lobby_active_note_" = "Lobby is active – your message will be sent when you are let in.";

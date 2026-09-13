@@ -2019,16 +2019,14 @@ private struct LinkMessageBubble: View {
     @ViewBuilder
     private func deliveryCheckmarks(_ state: LinkPendingMessage.PendingState) -> some View {
         // Doppelhaken UEBERLAPPEND (WhatsApp/Talk-Optik, Run-Feedback 12.09.).
-        HStack(spacing: -5) {
+        HStack(spacing: -3) {
             if state == .sent {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
                     .opacity(state == .sent ? 1 : 0)
-                    .offset(y: -1)
             }
             Image(systemName: "checkmark")
                 .font(.system(size: 8, weight: .bold))
-                .offset(y: 1)
         }
         .foregroundStyle(isOwn ? .white.opacity(0.85) : .secondary)
     }
@@ -2366,7 +2364,16 @@ struct LinkRoomSettingsSheet: View {
                                 working = true
                                 let ok = await viewModel.toggleLobby(token: room.token, enabled: newValue)
                                 working = false
-                                if ok { lobbyEnabled = newValue }
+                                if ok {
+                                    lobbyEnabled = newValue
+                                    // Frisches Raum-Objekt uebernehmen, damit
+                                    // der Toggle beim Wieder-oeffnen den
+                                    // Server-Stand zeigt (Run-Feedback 15.09.:
+                                    // er sprang sonst zurueck).
+                                    if let fresh = viewModel.currentRoom, fresh.token == room.token {
+                                        settingsRoom = fresh
+                                    }
+                                }
                             }
                         }
                     )) {
