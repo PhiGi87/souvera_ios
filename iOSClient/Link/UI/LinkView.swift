@@ -1767,7 +1767,11 @@ private struct LinkMessageRow: View {
             }
             .padding(.horizontal, 8).padding(.vertical, 4)
             .background(Color.gray.opacity(0.1), in: RoundedRectangle(cornerRadius: 8))
-            .frame(maxWidth: 230, alignment: .leading)
+            // Bindung an die Bubble: bei EIGENEN Nachrichten rechtsbündig
+            // (rechte Kante von Zitat und Bubble incl. Haken-Spalte
+            // fluchten), bei fremden wie bisher linksbündig
+            // (Run-Feedback 15.09.).
+            .frame(maxWidth: 230, alignment: isOwn ? .trailing : .leading)
         }
     }
 
