@@ -1284,23 +1284,15 @@ struct LinkChatView: View {
                 // zusätzlicher Re-Anchor-Scroll mehr nötig.
                 .onChange(of: renderMessages.last?.id) { _, newLastId in
                     // Neue Nachricht (Server-Echo ODER offline Queue-Zuwachs):
-                    // ans neue Ende klemmen. Beobachtet wird renderMessages
-                    // (Verlauf + pendent Nachrichten) - der fruehere
-                    // items-only-Trigger feuerte offline nie, pendent
-                    // Nachrichten rutschten unter die Kante (Run 14.09.).
-                    if scrollToNewestPending,
-                       let newLastId,
-                       newLastId != lastVisibleMessageId {
-                        scrollToNewestPending = false
-                        chatListController.pinToBottomUntilStable()
-                        viewModel.noteScrolledToNewest()
-                    } else if chatPositioned,
-                              newLastId != nil,
-                              newLastId != lastVisibleMessageId,
-                              chatBottomDistance <= 80 {
-                        chatListController.pinToBottomUntilStable()
-                    }
-                    lastVisibleMessageId = newLastId
+                    // ans neue Ende klemmen - eigene immer, fremde wenn nicht
+                    // manuell hochgescrollt (Run-Feedback 14.09.).
+                    autoPinIfNeeded(newLastId: newLastId)
+                }
+                .onChange(of: viewModel.pendingMessages.count) { _, _ in
+                    // Direkter Offline-Trigger: Queue-Zuwachs pinned sofort
+                    // (Run-Feedback 14.09.: offline rutschten Nachrichten
+                    // unter die Kante).
+                    autoPinIfNeeded(newLastId: viewModel.pendingMessages.last?.id)
                 }
                 // "Zu den neuesten Nachrichten"-Button: am VIEWPORT gebunden,
                 // mittig unten, optisch identisch zum Mail-Up-Pfeil.
@@ -1367,6 +1359,21 @@ struct LinkChatView: View {
     /// UIKit-Liste hat den Eintritts-Scroll gesetzt (talk-ios: reloadData +
     /// imperative scrollToRow) -> Liste einblenden und den KOMPLETTEN
     /// Verlauf im Hintergrund nachladen (Run-Vereinfachung 10.09.).
+    /// Auto-Pin-Regel (Run 14.09.): EIGENE Nachrichten pinnen immer;
+    /// fremde pinnen, solange nicht manuell hochgescrollt wurde
+    /// (Toleranz 300 px = "am Ende").
+    private func autoPinIfNeeded(newLastId: Int64?) {
+        guard chatPositioned, newLastId != nil, newLastId != lastVisibleMessageId else { return }
+        if scrollToNewestPending {
+            scrollToNewestPending = false
+            chatListController.pinToBottomUntilStable()
+            viewModel.noteScrolledToNewest()
+        } else if chatBottomDistance <= 300 {
+            chatListController.pinToBottomUntilStable()
+        }
+        lastVisibleMessageId = newLastId
+    }
+
     private func onEntrySettled() {
         chatPositioned = true
         SouveraLog.write("LinkChat", "entry settled (UIKit)")
@@ -1929,38 +1936,22 @@ private struct LinkMessageBubble: View {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
             if isPdfMessage {
-                // Haken UNTEN RECHTS neben dem Thumbnail (Run-Feedback
-                // 14.09.). Kein Dateiname/Caption unter dem Thumbnail - der
-                // Name ist nur im Vollbild-Viewer sichtbar (Run 13.09.).
-                HStack(alignment: .bottom, spacing: 6) {
-                    pdfContent
-                    if let pendingState {
-                        deliveryCheckmarks(pendingState)
-                            .padding(.bottom, 2)
-                    }
-                }
+                // Kein Dateiname/Caption unter dem Thumbnail - der Name ist
+                // nur im Vollbild-Viewer sichtbar (Run-Feedback 13.09.).
+                pdfContent
             } else if isImageMessage {
-                HStack(alignment: .bottom, spacing: 6) {
-                    imageContent
-                    if let pendingState {
-                        deliveryCheckmarks(pendingState)
-                            .padding(.bottom, 2)
-                    }
-                }
+                imageContent
             } else if message.fileName() != nil {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(displayText)
-                    if let pendingState { deliveryCheckmarks(pendingState) }
-                }
+                Text(displayText)
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(message.attributedDisplayText())
-                        .souveraOpenURLAction()
-                    if let pendingState { deliveryCheckmarks(pendingState) }
-                }
+                Text(message.attributedDisplayText())
+                    .souveraOpenURLAction()
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+        // Eigene Nachrichten: Reserverand rechts, damit die Haken (unten
+        // rechts, s. u.) nicht unter dem Text liegen (Run-Feedback 14.09.).
+        .padding(.trailing, isOwn ? 34 : 0)
         // P68k-Width: Bild-/PDF-Bubbles huggen den Inhalt (kein breiter
         // Hintergrund); die Caption-Caps (220/180) bleiben erhalten und
         // wickeln weiter. Textnachrichten sind unverändert.
@@ -1969,6 +1960,16 @@ private struct LinkMessageBubble: View {
             RoundedRectangle(cornerRadius: 16)
                 .fill(isOwn ? Color(NCBrandColor.shared.customer).opacity(0.9) : Color(.secondarySystemBackground))
         )
+        // Liefer-Haken UNTEN RECHTS IN der Bubble - einheitlich fuer alle
+        // Nachrichtentypen (Run-Feedback 14.09.: Doppel-Ausgabe durch zwei
+        // Renderpfade und Ecken-Clipping behoben).
+        .overlay(alignment: .bottomTrailing) {
+            if let pendingState {
+                deliveryCheckmarks(pendingState)
+                    .padding(.trailing, 10)
+                    .padding(.bottom, 6)
+            }
+        }
         .foregroundStyle(isOwn ? .white : .primary)
     }
 
@@ -1977,7 +1978,7 @@ private struct LinkMessageBubble: View {
     @ViewBuilder
     private func deliveryCheckmarks(_ state: LinkPendingMessage.PendingState) -> some View {
         // Doppelhaken UEBERLAPPEND (WhatsApp/Talk-Optik, Run-Feedback 12.09.).
-        HStack(spacing: -4) {
+        HStack(spacing: -2) {
             if state == .sent {
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))

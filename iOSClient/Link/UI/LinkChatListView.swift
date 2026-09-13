@@ -418,11 +418,10 @@ final class LinkChatListController: NSObject, ObservableObject {
         pinToBottomTask = Task { [weak self] in
             var lastHeight: CGFloat = -1
             var stable = 0
-            // Fester Tick-Plan (Run 13.09.): Self-Sizing-Schätzungen
-            // stabilisieren sich, BEVOR die neue unterste Zelle realisiert
-            // ist - der frühere 3x-stabil-Exit endete zu früh und die
-            // Nachricht blieb unter der Kante. Kein Exit vor 1,0s.
-            let ticks: [UInt64] = [0, 200_000_000, 300_000_000, 500_000_000, 500_000_000, 500_000_000]
+            // Fester Tick-Plan (Run 14.09.): Exit erst nach Index 4 (~1,0s)
+            // UND 2x stabiler Höhe - offline kommt kein zweiter Trigger
+            // (Poll-Echo), der Loop muss selbst sicher konvergieren.
+            let ticks: [UInt64] = [0, 150_000_000, 150_000_000, 200_000_000, 250_000_000, 250_000_000, 250_000_000, 250_000_000]
             for (index, tick) in ticks.enumerated() {
                 if index > 0 {
                     try? await Task.sleep(nanoseconds: tick)
@@ -432,10 +431,11 @@ final class LinkChatListController: NSObject, ObservableObject {
                     guard let self, !Task.isCancelled else { return }
                     self.scrollToBottomExact()
                     let height = self.collectionView?.contentSize.height ?? 0
-                    if index >= 3, abs(height - lastHeight) < 1 {
+                    SouveraLog.write("LinkChat", "pin to bottom (tick \(index), height \(Int(height)))")
+                    if index >= 4, abs(height - lastHeight) < 1 {
                         stable += 1
                         if stable >= 2 { self.pinToBottomTask?.cancel() }
-                    } else if index >= 3 {
+                    } else if index >= 4 {
                         stable = 0
                     }
                     lastHeight = height
@@ -449,6 +449,37 @@ final class LinkChatListController: NSObject, ObservableObject {
     func cancelPinToBottom() {
         pinToBottomTask?.cancel()
         pinToBottomTask = nil
+    }
+
+    // MARK: - Tastatur (Run 14.09.)
+
+    /// Fokus ins Textfeld = aktiv schreiben: IMMER bedingungslos ans Ende
+    /// (auch von hochgescrollter Position, Run-Feedback 14.09.). Tastatur
+    /// zu: neu pinnen, wenn am Ende (<= 300 px), sonst Position halten.
+    private func addKeyboardObservers() {
+        let center = NotificationCenter.default
+        center.addObserver(forName: UIResponder.keyboardWillShowNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isEntryStabilizing else { return }
+                self.scrollToBottomExact()
+                self.pinToBottomUntilStable()
+            }
+        }
+        center.addObserver(forName: UIResponder.keyboardWillHideNotification,
+                           object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.isEntryStabilizing else { return }
+                guard let collectionView = self.collectionView else { return }
+                let maxOffset = collectionView.contentSize.height
+                    - collectionView.bounds.height
+                    + collectionView.adjustedContentInset.bottom
+                let atBottom = collectionView.contentOffset.y >= maxOffset - 300
+                if atBottom {
+                    self.pinToBottomUntilStable()
+                }
+            }
+        }
     }
 
     /// Verspaetete Ungelesen-Trennlinie (Room-Objekt/Boundary kommt nach
@@ -509,6 +540,7 @@ final class LinkChatListController: NSObject, ObservableObject {
                 self?.handleContentSizeChanged()
             }
         }
+        addKeyboardObservers()
         return collectionView
     }
 }
