@@ -389,19 +389,12 @@ struct LinkParticipant: Decodable, Identifiable {
         attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
         actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
         actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
-        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
-        participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
-        inCall = (try? c.decode(Int.self, forKey: .inCall)) ?? 0
-        lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
-    }
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
-        actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
-        actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
         displayName = (try? c.decode(String.self, forKey: .displayName)) ?? actorId
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
+        // Lobby-Verwaltung (Run 15.09.): Call-Status + Ping; alte Server
+        // liefern die Felder evtl. nicht -> tolerant Defaults.
+        inCall = (try? c.decode(Int.self, forKey: .inCall)) ?? 0
+        lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
     }
 }
 

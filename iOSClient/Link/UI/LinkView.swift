@@ -98,36 +98,7 @@ struct LinkView: View {
                             }
                             .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         }
-                        ToolbarItemGroup(placement: .topBarTrailing) {
-                            // Lobby-Verwaltung: nur Moderatoren, solange die
-                            // Lobby aktiv ist (Run 15.09.).
-                            if viewModel.currentRoom?.canManage == true,
-                               viewModel.currentRoom?.lobbyState == 1 {
-                                ToolbarItem(placement: .topBarTrailing) {
-                                    Button {
-                                        lobbyManagementRoom = viewModel.currentRoom
-                                    } label: {
-                                        Image(systemName: "clock.arrow.circlepath")
-                                    }
-                                    .accessibilityLabel(NSLocalizedString("_link_lobby_toggle_", comment: ""))
-                                }
-                            }
-                            if viewModel.currentRoom?.hasCall == true {
-                                // Läuft im Raum bereits ein Call: pulsierend
-                                // grüner Join-Button (soll sofort ins Auge
-                                // fallen, Run-Feedback 11.09.) - direkt
-                                // teilnehmen statt neu anzurufen.
-                                LinkPulsingCallButton {
-                                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
-                                }
-                            } else {
-                                Button {
-                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
-                                } label: {
-                                    Image(systemName: "phone.fill").foregroundStyle(.green)
-                                }
-                            }
-                        }
+                        chatRoomCallToolbar(token: token, title: title)
                     }
                     if case .home = viewModel.route {
                         ToolbarItem(placement: .topBarLeading) {
@@ -316,6 +287,40 @@ struct LinkView: View {
             )
         }
 #endif
+    }
+
+    /// Trailing-Buttons im Chat-Raum: Lobby-Verwaltung (nur Moderatoren
+    /// bei aktiver Lobby) + Call-Join/Start. Ausgelagert, damit die grosse
+    /// body-Expression den Type-Checker nicht sprengt (CI-Fehler 15.09.).
+    @ToolbarContentBuilder
+    private func chatRoomCallToolbar(token: String, title: String) -> some ToolbarContent {
+        if viewModel.currentRoom?.canManage == true,
+           viewModel.currentRoom?.lobbyState == 1 {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    lobbyManagementRoom = viewModel.currentRoom
+                } label: {
+                    Image(systemName: "clock.arrow.circlepath")
+                }
+                .accessibilityLabel(NSLocalizedString("_link_lobby_toggle_", comment: ""))
+            }
+        }
+        ToolbarItemGroup(placement: .topBarTrailing) {
+            if viewModel.currentRoom?.hasCall == true {
+                // Läuft im Raum bereits ein Call: pulsierend grüner
+                // Join-Button (Run-Feedback 11.09.) - direkt teilnehmen
+                // statt neu anzurufen.
+                LinkPulsingCallButton {
+                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                }
+            } else {
+                Button {
+                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
+                } label: {
+                    Image(systemName: "phone.fill").foregroundStyle(.green)
+                }
+            }
+        }
     }
 
 #if DEBUG
@@ -2597,6 +2602,7 @@ struct SouveraShareSheet: UIViewControllerRepresentable {
 
 
 
+
 /// Lobby-Verwaltung (Run 15.09.): Teilnehmer gruppiert nach Status
 /// (aktiv im Call / wartend in der Lobby / offline), mit Entfernen- und
 /// "Alle zulassen"-Aktion. Auto-Refresh alle 5 s.
@@ -2742,13 +2748,14 @@ private struct LinkLobbyManagementView: View {
 
     private func removeParticipant(_ participant: LinkParticipant) {
         workingAttendee = participant.attendeeId
+        // viewModel.removeParticipant ist fire-and-forget (Feedback +
+        // Refresh macht das ViewModel selbst) - Working-State nach kurzer
+        // Frist zuruecksetzen.
+        viewModel.removeParticipant(participant)
         Task {
-            let ok = await viewModel.removeParticipant(participant)
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
             await MainActor.run {
                 workingAttendee = nil
-                if ok {
-                    viewModel.loadParticipants()
-                }
             }
         }
     }
