@@ -318,7 +318,7 @@ struct MailView: View {
                         .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
                     }
                 }
-                if case .messages = viewModel.route, !route.isDetail, toolbarActiveForMessages {
+                if case .messages = viewModel.route, toolbarActiveForMessages {
                     // Run 15.09.: "..."-Menü (Bearbeiten/Sortierung/Papierkorb
                     // leeren) + "Neue Mail" - aus MailMessageListView hierher
                     // gehoben (System-Navigationbar versteckt).
