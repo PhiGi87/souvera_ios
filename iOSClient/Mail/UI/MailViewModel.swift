@@ -857,6 +857,7 @@ final class MailViewModel: ObservableObject {
                 unreadCount: box.unreadCount, messageCount: box.messageCount,
                 jmapId: box.jmapId, role: box.role, namespace: box.namespace,
                 ownerIdentity: box.ownerIdentity, parentId: parentId,
+                isSubscribed: box.isSubscribed,
                 mayRename: box.mayRename, mayDelete: box.mayDelete,
                 mayCreateChild: box.mayCreateChild
             )
