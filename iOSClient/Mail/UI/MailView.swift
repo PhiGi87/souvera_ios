@@ -36,6 +36,15 @@ struct MailView: View {
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
+            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
+            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
+            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
+            .toolbarBackground(
+                LinearGradient(colors: SouveraAppearance.gradientColors,
+                               startPoint: .top, endPoint: .bottom),
+                for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .onChange(of: searchQuery) { _, newValue in
                 scheduleSearch(newValue)
             }

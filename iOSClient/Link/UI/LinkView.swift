@@ -67,6 +67,15 @@ struct LinkView: View {
             }
             .navigationTitle(navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
+            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
+            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
+            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
+            .toolbarBackground(
+                LinearGradient(colors: SouveraAppearance.gradientColors,
+                               startPoint: .top, endPoint: .bottom),
+                for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
                 .toolbar {
                     if case let .chat(token, title) = viewModel.route {
                         // Landscape-Split: die Raumliste bleibt links sichtbar -
@@ -138,6 +147,10 @@ struct LinkView: View {
             viewModel.reconnectSignalingIfNeeded()
             viewModel.startRoomPolling()
             onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            }
             // Ein von außen angeforderter Raum wird nur geöffnet, wenn der
             // Nutzer nicht bereits in einem Chat navigiert (sonst würde die
             // Route mitten in der Bedienung überschrieben).
@@ -255,8 +268,14 @@ struct LinkView: View {
         }
         .sheet(isPresented: $showUserStatus, onDismiss: {
             // Status-Picker geschlossen: Button-Status aus der DB
-            // nachziehen (Pflege via NCUserStatusModel/NCService).
+            // nachziehen. Der Picker schreibt die DB erst in seinem
+            // onDisappear - darum sofort UND nach 1 s erneut lesen
+            // (Run 15.09., Feedback: Status erschien erst beim 2. Tap).
             onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            }
         }) {
             if let account = NCManageDatabase.shared.getActiveTableAccount()?.account {
                 NCUserStatusView(account: account, controller: nil)
@@ -2656,6 +2675,19 @@ enum LinkPresence {
         }
     }
 
+    /// Offizielle Nextcloud-Status-Icons (Run 15.09.): grüner Haken =
+    /// Online, gelber Mond = Abwesend, roter Kreis = Beschaeftigt,
+    /// roter Kreis mit Minus = Nicht stoeren, grauer Kreis = Unsichtbar.
+    static func symbol(for status: String?) -> Image {
+        switch status {
+        case "online": return Image(systemName: "checkmark.circle.fill")
+        case "away": return Image(systemName: "moon.circle.fill")
+        case "busy": return Image(systemName: "circle.fill")
+        case "dnd": return Image(systemName: "minus.circle.fill")
+        default: return Image(systemName: "circle")
+        }
+    }
+
     static func label(for status: String?) -> String {
         switch status {
         case "online": return NSLocalizedString("_online_", comment: "")
@@ -2675,23 +2707,23 @@ private struct LinkOnlineStatusButton: View {
     let action: () -> Void
 
     var body: some View {
+        // Schlichter Toolbar-Button (Run 15.09., Feedback: kein eigener
+        // Hintergrund - gleicher Stil wie der "+"-Button daneben).
         Button(action: action) {
-            Image(systemName: "person.circle.fill")
+            Image(systemName: "person.crop.circle")
                 .font(.system(size: 22))
                 .foregroundStyle(.primary)
-                .frame(width: 44, height: 44)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(.white.opacity(0.25), lineWidth: 0.5))
                 .overlay(alignment: .bottomTrailing) {
-                    Circle()
-                        .fill(LinkPresence.color(for: status))
-                        .frame(width: 13, height: 13)
-                        .overlay(Circle().stroke(.white, lineWidth: 1.5))
-                        .offset(x: 3, y: 3)
+                    // NC-Status-Symbol (Haken/Mond/Kreis) an der Kante,
+                    // weisser Ring wie beim Avatar-Muster.
+                    LinkPresence.symbol(for: status)
+                        .font(.system(size: 12))
+                        .symbolRenderingMode(.hierarchical)
+                        .foregroundStyle(LinkPresence.color(for: status))
+                        .background(Circle().fill(Color(.systemBackground)))
+                        .offset(x: 4, y: 4)
                 }
-                .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
         }
-        .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_set_user_status_", comment: ""))
     }
 }
@@ -2790,6 +2822,11 @@ private struct LinkLobbyManagementView: View {
     /// Presence-Status des Teilnehmers (nur bekannte User-Accounts).
     private func userStatus(_ participant: LinkParticipant) -> String? {
         guard participant.actorType == "users" else { return nil }
+        // Primaer der Teilnehmer-Status aus der API (includeStatus=true,
+        // echtes DND sofort); Bulk-Fetch nur Fallback (Run 15.09.).
+        if let status = participant.status, !status.isEmpty {
+            return status
+        }
         return viewModel.userStatuses[participant.actorId] ?? "offline"
     }
 
@@ -2815,17 +2852,22 @@ private struct LinkLobbyManagementView: View {
                         .font(.caption2).foregroundStyle(.white)
                 }
                 .frame(width: 30, height: 30)
-                // Presence-Dot an der Kante (Avatar-Muster).
-                Circle()
-                    .fill(LinkPresence.color(for: userStatus(participant)))
-                    .frame(width: 11, height: 11)
-                    .overlay(Circle().stroke(.white, lineWidth: 1.5))
+                // NC-Status-Symbol an der Kante (Avatar-Muster, Run 15.09.).
+                LinkPresence.symbol(for: userStatus(participant))
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(LinkPresence.color(for: userStatus(participant)))
+                    .background(Circle().fill(Color(.systemBackground)))
                     .offset(x: 3, y: 3)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(displayName(participant))
                     .lineLimit(1)
-                if let line = statusLine(participant) {
+                if let email = emailLine(participant) {
+                    Text(email)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                } else if let line = statusLine(participant) {
                     Text(line)
                         .font(.caption2).foregroundStyle(.secondary)
                         .lineLimit(1)
@@ -2840,29 +2882,52 @@ private struct LinkLobbyManagementView: View {
                         Button {
                             admit(participant)
                         } label: {
-                            Image(systemName: "person.badge.checkmark")
+                            // Gueltiges SF-Symbol (person.badge.checkmark
+                            // existiert nicht - der Button war unsichtbar).
+                            Image(systemName: "person.crop.circle.badge.checkmark")
                                 .foregroundStyle(.green)
                         }
                         .accessibilityLabel(NSLocalizedString("_lobby_admit_one_", comment: ""))
                     }
-                    Button {
-                        removeParticipant(participant)
-                    } label: {
-                        Image(systemName: "person.crop.circle.badge.minus")
-                            .foregroundStyle(.red)
+                    // Entfernen nur fuer externe Teilnehmer (guests/emails)
+                    // - interne Nutzer sind nicht entfernbar (Run 15.09.).
+                    if isExternal(participant) {
+                        Button {
+                            removeParticipant(participant)
+                        } label: {
+                            Image(systemName: "person.crop.circle.badge.minus")
+                                .foregroundStyle(.red)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_link_remove_participant_", comment: ""))
                     }
-                    .accessibilityLabel(NSLocalizedString("_link_remove_participant_", comment: ""))
                 }
             }
         }
     }
 
-    /// Namens-Fallback-Kette: Name -> actorId -> "Unbekannter Teilnehmer"
-    /// (nachgeruestete externe Namen erscheinen ohne Neuladen).
+    /// Externe Teilnehmer (guests/emails) - interne sind die
+    /// eingeladenen Owner/Moderator/User-Konten.
+    private func isExternal(_ participant: LinkParticipant) -> Bool {
+        participant.actorType == "guests" || participant.actorType == "emails"
+    }
+
+    /// Namens-Anzeige (Run 15.09., Talk-Web-Logik): Gaeste ohne Namen
+    /// heissen "Gast" - NIEMALS der kryptische Session-Hash. User mit
+    /// leerem Namen fallen auf die actorId zurueck.
     private func displayName(_ participant: LinkParticipant) -> String {
         if !participant.displayName.isEmpty { return participant.displayName }
+        if isExternal(participant) {
+            return NSLocalizedString("_link_guest_", comment: "")
+        }
         if !participant.actorId.isEmpty { return participant.actorId }
         return NSLocalizedString("_link_lobby_unknown_", comment: "")
+    }
+
+    /// Zweite Zeile fuer E-Mail-Teilnehmer (actorType "emails": die
+    /// E-Mail-Adresse steht in der actorId - wie im Talk-Web).
+    private func emailLine(_ participant: LinkParticipant) -> String? {
+        guard participant.actorType == "emails", !participant.actorId.isEmpty else { return nil }
+        return participant.actorId
     }
 
     private func initials(_ name: String) -> String {

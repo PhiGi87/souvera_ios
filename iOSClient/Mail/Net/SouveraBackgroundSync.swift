@@ -243,7 +243,9 @@ final class SouveraBackgroundSync {
         guard !calendars.isEmpty else { return }
 
         let now = Date()
-        guard let end = Calendar.current.date(byAdding: .day, value: 2, to: now) else { return }
+        // 7-Tage-Fenster (Run 15.09.): mehr Vorlauf fuer geplante lokale
+        // Erinnerungen beim Hintergrundlauf (frueher 2 Tage).
+        guard let end = Calendar.current.date(byAdding: .day, value: 7, to: now) else { return }
         var upcoming: [CalendarEventModel] = []
         for calendar in calendars {
             let entries = await client.fetchEvents(calendarHref: calendar.href, start: now, end: end)

@@ -377,12 +377,15 @@ struct LinkParticipant: Decodable, Identifiable {
     let inCall: Int
     /// Letzter Ping (Unix-Sekunden) - 0/alt = offline.
     let lastPing: TimeInterval
+    /// Nextcloud-Benutzer-Status (online/away/dnd/busy/invisible) - nur
+    /// mit includeStatus=true und fuer User-Accounts (Run 15.09.).
+    let status: String?
 
     var id: Int { attendeeId }
 
     enum CodingKeys: String, CodingKey {
         case attendeeId, actorType, actorId, displayName, participantType
-        case inCall, lastPing
+        case inCall, lastPing, status
     }
 
     init(from decoder: Decoder) throws {
@@ -390,15 +393,17 @@ struct LinkParticipant: Decodable, Identifiable {
         attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
         actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
         actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
-        let decodedName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
-        // Namens-Fallback (Run 15.09.): leerer Anzeigename -> actorId
-        // (sonst "Unbekannter Teilnehmer", obwohl die ID bekannt ist).
-        displayName = decodedName.isEmpty ? actorId : decodedName
+        // Namens-Handling (Run 15.09., 2. Runde): der Rohwert bleibt
+        // unangetastet (leer = leer) - Gaeste wuerden sonst den kryptischen
+        // Session-Hash als "Namen" bekommen. Anzeige-Regeln (Gast/E-Mail)
+        // liegen in der Lobby-View/Teilnehmerliste.
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
         // Lobby-Verwaltung (Run 15.09.): Call-Status + Ping; alte Server
         // liefern die Felder evtl. nicht -> tolerant Defaults.
         inCall = (try? c.decode(Int.self, forKey: .inCall)) ?? 0
         lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
+        status = try? c.decodeIfPresent(String.self, forKey: .status)
     }
 }
 

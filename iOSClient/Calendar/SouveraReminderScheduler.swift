@@ -68,6 +68,49 @@ enum SouveraReminderScheduler {
                 center.add(item.request)
             }
             JmapLog.write("Calendar reminders: scheduled \(scheduled) of \(pending.count) notifications (max 64)")
+
+            // Catch-up (Run 15.09., Log d29maaa3g2): Termine, die BEI
+            // geschlossener App angelegt wurden, haben keine geplante
+            // lokale Erinnerung - ihr Erinnerungszeitpunkt kann waehrend
+            // des App-Downloads gerade verpasst worden sein. Bei diesem
+            // Foreground-Laden sofort nachliefern (Fenster: letzte 10 min,
+            // Termin muss noch in der Zukunft liegen).
+            let missed = events.filter { event in
+                guard event.start > now, !event.reminders.isEmpty else { return false }
+                return event.reminders.contains { minutes in
+                    let fire = event.start.addingTimeInterval(-Double(minutes) * 60)
+                    return fire <= now && now.timeIntervalSince(fire) <= 600
+                }
+            }
+            for event in missed {
+                let minutes = event.reminders
+                    .map { Int(now.timeIntervalSince(event.start.addingTimeInterval(-Double($0) * 60))) }
+                    .min() ?? 0
+                let content = UNMutableNotificationContent()
+                let name = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                content.title = SouveraNotificationText.title(
+                    String(format: NSLocalizedString("_push_event_title_", comment: ""), name.isEmpty ? "—" : name)
+                )
+                let minutesLeft = max(1, Int(event.start.timeIntervalSince(now) / 60))
+                content.body = SouveraNotificationText.body(
+                    String(format: NSLocalizedString("_push_event_catchup_", comment: ""), minutesLeft)
+                )
+                content.sound = SouveraCalendarReminderSound.sound(account: account).sound
+                content.userInfo = [
+                    "uid": event.uid,
+                    "start": event.start.timeIntervalSince1970,
+                    "account": account
+                ]
+                let request = UNNotificationRequest(
+                    identifier: "\(prefix)catchup_\(event.uid)_\(Int(now.timeIntervalSince1970))",
+                    content: content,
+                    trigger: nil // sofort
+                )
+                center.add(request)
+            }
+            if !missed.isEmpty {
+                JmapLog.write("Calendar reminders: catch-up delivered for \(missed.count) event(s)")
+            }
         }
     }
 }

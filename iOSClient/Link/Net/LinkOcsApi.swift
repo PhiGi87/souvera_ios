@@ -383,15 +383,18 @@ actor LinkOcsApi {
         return (200..<300).contains(status)
     }
 
-    /// Teilnehmer einer Konversation auflisten.
+    /// Teilnehmer einer Konversation auflisten. includeStatus=true
+    /// liefert den Nextcloud-Benutzer-Status pro Teilnehmer (Talk-Doku;
+    /// nur fuer User-Accounts und < 100 Teilnehmer).
     func listParticipants(token: String) async -> [LinkParticipant] {
-        guard let body = await get("\(base)/api/v4/room/\(token)/participants") else { return [] }
+        guard let body = await get("\(base)/api/v4/room/\(token)/participants?includeStatus=true") else { return [] }
         let list: [LinkParticipant] = decodeList(body)
-        // Diagnose (Run 15.09.): leere Anzeigenamen ("Unbekannter
-        // Teilnehmer") herleiten - Rohdaten-Zusammenfassung loggen.
+        // Diagnose (Run 15.09.): leere Anzeigenamen und fehlende Status
+        // herleiten - Rohdaten-Zusammenfassung loggen.
         let summary = list.prefix(8).map { participant -> String in
             let name = participant.displayName.isEmpty ? "<leer>" : participant.displayName
-            return "id=\(participant.attendeeId) type=\(participant.participantType) call=\(participant.inCall) ping=\(Int(participant.lastPing)) name=\(name)"
+            let status = participant.status ?? "-"
+            return "id=\(participant.attendeeId) type=\(participant.participantType) actor=\(participant.actorType) call=\(participant.inCall) ping=\(Int(participant.lastPing)) status=\(status) name=\(name)"
         }.joined(separator: " | ")
         CallDebugLog.log("OcsApi", "participants \(token) (\(list.count)): \(summary)")
         return list

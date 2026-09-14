@@ -9,6 +9,10 @@ import NextcloudKit
 class NCFilesNavigationController: NCMainNavigationController {
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menü -
+        // 1:1 uebernommen (willShow + Async-Re-Apply, siehe unten, da die
+        // Basisklasse die Standard-Appearance asynchron zuruecksetzt).
+        applyBlueHeader()
 
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: NCGlobal.shared.notificationCenterReloadAvatar), object: nil, queue: nil) { notification in
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
@@ -25,6 +29,28 @@ class NCFilesNavigationController: NCMainNavigationController {
                 await self.setNavigationLeftItems()
             }
         }
+    }
+
+    override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
+        super.navigationController(navigationController, willShow: viewController, animated: animated)
+        // Async-Re-Apply gegen den asynchronen Reset der Basisklasse
+        // (gleiche Technik wie NCMoreNavigationController).
+        applyBlueHeader()
+        Task { @MainActor in
+            if navigationController.topViewController === viewController {
+                applyBlueHeader()
+            }
+        }
+    }
+
+    private func applyBlueHeader() {
+        let appearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+        navigationBar.compactScrollEdgeAppearance = appearance
+        navigationBar.isTranslucent = false
+        navigationBar.tintColor = .white
     }
 
     // MARK: - Right

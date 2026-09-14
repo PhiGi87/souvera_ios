@@ -89,6 +89,15 @@ struct SouveraCalendarView: View {
             }
             .navigationBarTitleDisplayMode(.inline)
             .souveraOfflineBanner()
+            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
+            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
+            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
+            .toolbarBackground(
+                LinearGradient(colors: SouveraAppearance.gradientColors,
+                               startPoint: .top, endPoint: .bottom),
+                for: .navigationBar)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbarColorScheme(.dark, for: .navigationBar)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     // Ein einziger Button mit Auswahl-Menü (wie die
