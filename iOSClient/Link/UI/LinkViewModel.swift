@@ -620,6 +620,11 @@ final class LinkViewModel: ObservableObject {
     @discardableResult
     /// Lobby an/aus (Raum-Einstellungen, Run 15.09.) - API existiert
     /// bereits (setLobby, Event-Raum-Pfad); Anzeige-Stand via loadConversations.
+    /// Lobby an/aus (Lobby-Verwaltung "Alle zulassen").
+    func setLobbyEnabled(_ enabled: Bool, token: String) async {
+        _ = await toggleLobby(token: token, enabled: enabled)
+    }
+
     func toggleLobby(token: String, enabled: Bool) async -> Bool {
         guard let api else { return false }
         let ok = await api.setLobby(token: token, enabled: enabled)
@@ -1280,25 +1285,6 @@ final class LinkViewModel: ObservableObject {
             defer { Task { @MainActor [weak self] in self?.isFlushingPending = false } }
             for pending in queue {
                 guard let self, self.isOnline else { return }
-                if pending.kind == .text {
-                    // ANTI-DUPLIKAT (Run 15.09.): pruefe, ob der Server die
-                    // Nachricht bereits hat (frueherer 400-Versuch hat sie
-                    // evtl. trotzdem erstellt) -> nur .sent markieren, NICHT
-                    // erneut senden.
-                    let exists = await api.chatContainsOwnMessage(token: pending.token,
-                                                                  actorId: self.currentUserId,
-                                                                  text: pending.text)
-                    if exists {
-                        CallDebugLog.log("LinkVM", "flush: message already on server - marking sent without resend")
-                        await MainActor.run {
-                            if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {
-                                self.pendingMessages[idx].state = .sent
-                                self.persistPendingMessages()
-                            }
-                        }
-                        continue
-                    }
-                }
                 if pending.kind == .attachment {
                     // Angehaengter lokaler Anhang (Foto/Datei, Run 12.09.):
                     // normaler Upload-Ablauf; Bytes weg -> als erledigt

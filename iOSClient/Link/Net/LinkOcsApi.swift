@@ -149,17 +149,6 @@ actor LinkOcsApi {
         return SendResult(httpCode: status, ok: (200..<300).contains(status))
     }
 
-    /// Enthält der Chat bereits eine EIGENE Nachricht mit exakt diesem
-    /// Text (fuer Anti-Duplikat-Pruefung vor dem Flush)?
-    func chatContainsOwnMessage(token: String, actorId: String, text: String) async -> Bool {
-        guard let body = await get("\(base)/api/v1/chat/\(token)?format=json&lookIntoFuture=0&limit=30"),
-              let data = body.data(using: .utf8),
-              let env = try? decoder.decode(OcsEnvelope<[LinkChatMessage]>.self, from: data) else { return false }
-        return (env.ocs.data ?? []).contains {
-            $0.actorId == actorId && $0.message == text
-        }
-    }
-
     /// Talk-Standard: Read-Marker für den Raum setzen (POST chat/{token}/read).
     func markRoomRead(token: String, lastReadMessage: Int64) async {
         var req = signed(url: "\(base)/api/v1/chat/\(token)/read", method: "POST")

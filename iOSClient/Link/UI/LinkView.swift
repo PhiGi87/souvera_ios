@@ -16,6 +16,8 @@ struct LinkView: View {
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
     @State private var callContext: CallContext?
+    /// Lobby-Verwaltung (Fullscreen): Raum mit aktiver Lobby.
+    @State private var lobbyManagementRoom: LinkConversation?
     @State private var showCallBanner = false
     @State private var returnToCall = false
     @State private var showCreateChannel = false
@@ -97,6 +99,19 @@ struct LinkView: View {
                             .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         }
                         ToolbarItemGroup(placement: .topBarTrailing) {
+                            // Lobby-Verwaltung: nur Moderatoren, solange die
+                            // Lobby aktiv ist (Run 15.09.).
+                            if viewModel.currentRoom?.canManage == true,
+                               viewModel.currentRoom?.lobbyState == 1 {
+                                ToolbarItem(placement: .topBarTrailing) {
+                                    Button {
+                                        lobbyManagementRoom = viewModel.currentRoom
+                                    } label: {
+                                        Image(systemName: "clock.arrow.circlepath")
+                                    }
+                                    .accessibilityLabel(NSLocalizedString("_link_lobby_toggle_", comment: ""))
+                                }
+                            }
                             if viewModel.currentRoom?.hasCall == true {
                                 // Läuft im Raum bereits ein Call: pulsierend
                                 // grüner Join-Button (soll sofort ins Auge
@@ -250,6 +265,9 @@ struct LinkView: View {
                     settingsRoom = fresh
                 }
             })
+        }
+        .fullScreenCover(item: $lobbyManagementRoom) { lobbyRoom in
+            LinkLobbyManagementView(viewModel: viewModel, room: lobbyRoom)
         }
         .overlay {
             if let request = startCallRequest {
@@ -2577,3 +2595,161 @@ struct SouveraShareSheet: UIViewControllerRepresentable {
 // MARK: - Chat-Scroll-Steuerung (A: ScrollPosition-Struct-API)
 
 
+
+
+/// Lobby-Verwaltung (Run 15.09.): Teilnehmer gruppiert nach Status
+/// (aktiv im Call / wartend in der Lobby / offline), mit Entfernen- und
+/// "Alle zulassen"-Aktion. Auto-Refresh alle 5 s.
+private struct LinkLobbyManagementView: View {
+    @ObservedObject var viewModel: LinkViewModel
+    let room: LinkConversation
+    @Environment(\.dismiss) private var dismiss
+    @State private var refreshTask: Task<Void, Never>?
+    @State private var now = Date()
+    @State private var workingAttendee: Int?
+
+    private var participants: [LinkParticipant] {
+        viewModel.participants.filter { $0.actorId != viewModel.currentUserId }
+    }
+
+    /// Wartende Lobby-Teilnehmer: verbunden (frischer Ping), aber nicht
+    /// im Call.
+    private var lobbyWaiting: [LinkParticipant] {
+        participants.filter { $0.inCall == 0 && isRecent($0.lastPing) }
+    }
+
+    private var offlineParticipants: [LinkParticipant] {
+        participants.filter { $0.inCall == 0 && !isRecent($0.lastPing) }
+    }
+
+    private func isRecent(_ lastPing: TimeInterval) -> Bool {
+        lastPing > 0 && Date().timeIntervalSince1970 - lastPing < 120
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section(NSLocalizedString("_lobby_section_active_", comment: "")) {
+                    let active = participants.filter { $0.inCall != 0 }
+                    if active.isEmpty {
+                        Text(NSLocalizedString("_lobby_empty_active_", comment: ""))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(active) { participant in
+                        participantRow(participant)
+                    }
+                }
+
+                Section(NSLocalizedString("_lobby_section_waiting_", comment: "")) {
+                    let waiting = lobbyWaiting
+                    if waiting.isEmpty {
+                        Text(NSLocalizedString("_lobby_empty_waiting_", comment: ""))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(waiting) { participant in
+                        participantRow(participant)
+                    }
+                    if !waiting.isEmpty {
+                        Button {
+                            Task { await viewModel.setLobbyEnabled(false, token: room.token) }
+                        } label: {
+                            Label(NSLocalizedString("_lobby_admit_all_", comment: ""), systemImage: "person.checkmark")
+                        }
+                    }
+                }
+
+                Section(NSLocalizedString("_lobby_section_offline_", comment: "")) {
+                    let offline = offlineParticipants
+                    if offline.isEmpty {
+                        Text(NSLocalizedString("_lobby_empty_offline_", comment: ""))
+                            .foregroundStyle(.secondary)
+                    }
+                    ForEach(offline) { participant in
+                        participantRow(participant)
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_link_lobby_title_", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
+                }
+            }
+            .onAppear {
+                viewModel.loadParticipants()
+                refreshTask = Task {
+                    while !Task.isCancelled {
+                        try? await Task.sleep(nanoseconds: 5_000_000_000)
+                        guard !Task.isCancelled else { return }
+                        viewModel.loadParticipants()
+                    }
+                }
+            }
+            .onDisappear {
+                refreshTask?.cancel()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func participantRow(_ participant: LinkParticipant) -> some View {
+        HStack(spacing: 10) {
+            ZStack {
+                Circle().fill(Color.Souvera.brandPrimaryDeep)
+                Text(initials(participant.displayName))
+                    .font(.caption2).foregroundStyle(.white)
+            }
+            .frame(width: 30, height: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(participant.displayName.isEmpty
+                     ? NSLocalizedString("_link_lobby_unknown_", comment: "")
+                     : participant.displayName)
+                    .lineLimit(1)
+                Text(statusText(participant))
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if workingAttendee == participant.attendeeId {
+                ProgressView()
+            } else {
+                Button {
+                    removeParticipant(participant)
+                } label: {
+                    Image(systemName: "person.crop.circle.badge.minus")
+                        .foregroundStyle(.red)
+                }
+                .accessibilityLabel(NSLocalizedString("_link_remove_participant_", comment: ""))
+            }
+        }
+    }
+
+    private func statusText(_ participant: LinkParticipant) -> String {
+        if participant.inCall != 0 {
+            return NSLocalizedString("_lobby_status_in_call_", comment: "")
+        }
+        if isRecent(participant.lastPing) {
+            return NSLocalizedString("_lobby_status_waiting_", comment: "")
+        }
+        return NSLocalizedString("_lobby_status_offline_", comment: "")
+    }
+
+    private func initials(_ name: String) -> String {
+        name.split(separator: " ").prefix(2)
+            .compactMap { $0.first.map(String.init) }
+            .joined().uppercased()
+    }
+
+    private func removeParticipant(_ participant: LinkParticipant) {
+        workingAttendee = participant.attendeeId
+        Task {
+            let ok = await viewModel.removeParticipant(participant)
+            await MainActor.run {
+                workingAttendee = nil
+                if ok {
+                    viewModel.loadParticipants()
+                }
+            }
+        }
+    }
+}

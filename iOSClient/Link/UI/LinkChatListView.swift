@@ -203,6 +203,14 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         hash = hash &* 31 &+ viewModel.chatImageCache.count
         hash = hash &* 31 &+ viewModel.chatImageFailed.count
+        // Pending-Zustaende (Run 15.09.): .queued -> .sent wechselt die
+        // Haeken (1 -> 2) ohne ID-/Count-Aenderung - ohne diesen Anteil
+        // blieben die Haken eingefroren bis zum Raumwechsel.
+        hash = hash &* 31 &+ viewModel.pendingMessages.count
+        for pending in viewModel.pendingMessages {
+            hash = hash &* 31 &+ Int(truncatingIfNeeded: pending.id)
+            hash = hash &* 31 &+ pending.state.rawValue.hashValue
+        }
         hash = hash &* 31 &+ viewModel.chatPdfCache.count
         hash = hash &* 31 &+ Int(truncatingIfNeeded: viewModel.unreadBoundary ?? 0)
         hash = hash &* 31 &+ (viewModel.hideUnreadSeparator ? 1 : 0)

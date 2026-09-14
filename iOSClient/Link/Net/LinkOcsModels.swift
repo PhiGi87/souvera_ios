@@ -372,11 +372,27 @@ struct LinkParticipant: Decodable, Identifiable {
     let actorId: String
     let displayName: String
     let participantType: Int
+    /// Im Call/Jetzt-aktiv-Flag (Run 15.09.).
+    let inCall: Int
+    /// Letzter Ping (Unix-Sekunden) - 0/alt = offline.
+    let lastPing: TimeInterval
 
     var id: Int { attendeeId }
 
     enum CodingKeys: String, CodingKey {
         case attendeeId, actorType, actorId, displayName, participantType
+        case inCall, lastPing
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
+        actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
+        actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
+        participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
+        inCall = (try? c.decode(Int.self, forKey: .inCall)) ?? 0
+        lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
     }
 
     init(from decoder: Decoder) throws {
