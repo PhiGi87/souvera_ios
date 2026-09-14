@@ -34,17 +34,13 @@ struct MailView: View {
                         updateLandscapeLayout(newSize)
                     }
             }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
-            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
-            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
-            .toolbarBackground(
-                LinearGradient(colors: SouveraAppearance.gradientColors,
-                               startPoint: .top, endPoint: .bottom),
-                for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
+            // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
+            // "Liquid Glass" flattet toolbarBackground-Verlaeufe. Header
+            // 1:1 wie Mehr/Dateien; System-Navigationbar versteckt.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                moduleHeader
+            }
             .onChange(of: searchQuery) { _, newValue in
                 scheduleSearch(newValue)
             }
@@ -53,9 +49,7 @@ struct MailView: View {
                 // geöffnet wurde: Suchfeld + Ergebnisliste wieder zeigen.
                 searchActive = (newRoute == .search)
             }
-            .toolbar {
-                toolbar
-            }
+
         }
         .confirmationDialog(
             NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
@@ -222,108 +216,102 @@ struct MailView: View {
         return preview
     }
 
-    @ToolbarContentBuilder
-    private var toolbar: some ToolbarContent {
-        // Alte Button-Struktur (wie vor dem 06.09.): Zurück in der
-        // System-Toolbar oben links - im Landscape nur bei offenem Detail,
-        // im Portrait wie immer bei Nicht-Ordner-Ansichten.
-        if !isFolders && !(landscapeLayout && !viewModel.route.isDetail) {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { viewModel.back() } label: {
-                    Image(systemName: "chevron.backward")
-                        .frame(width: 28, height: 28)
+    /// Souvera-Modul-Header (Run 15.09.): Route-abhaengige Fuehrung der
+    /// alten Toolbar-Items (1:1 uebernommen).
+    @ViewBuilder
+    private var moduleHeader: some View {
+        let showBack = !isFolders && !(landscapeLayout && !viewModel.route.isDetail)
+        let headerTitle: String = {
+            switch viewModel.route {
+            case .folders: return NSLocalizedString("_mail_", comment: "")
+            case .messages(let mailbox): return mailbox.displayName
+            default: return ""
+            }
+        }()
+        SouveraModuleHeader(
+            title: headerTitle,
+            titleAfterLeading: showBack && !headerTitle.isEmpty,
+            leading: {
+                if showBack {
+                    SouveraHeaderButton(icon: "chevron.backward") {
+                        viewModel.back()
+                    }
                 }
-                .frame(width: 44, height: 44)
-                .contentShape(Rectangle())
-            }
-        }
-        if case let .messages(mailbox) = viewModel.route {
-            // Ordnername als normale Schrift linksbündig - als .principal-
-            // Element (keine Button-Kapsel), volle Restbreite zwischen
-            // Zurück-Pfeil und Trailing-Items, damit nichts abgeschnitten wird.
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 0) {
-                    Text(mailbox.displayName)
-                        .font(.headline)
-                        .lineLimit(1)
-                    Spacer(minLength: 0)
+                if isFolders || landscapeLayout {
+                    if !(focusReaderActive && viewModel.route.isDetail) {
+                        AutoRefreshRingView(viewModel: viewModel)
+                            .frame(width: 40, height: 40)
+                            .background(Color.white, in: Circle())
+                    }
                 }
-                .allowsHitTesting(false)
-            }
-        }
-        if case let .detail(message) = viewModel.route {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                // Schnellaktion Antworten + EIN Sammelmenü für alles Weitere -
-                // mehrere Trailing-Items würden von iOS in ein automatisches
-                // "..."-Menü gekippt (Verschachtelung "..." > "...").
-                Button {
-                    viewModel.startCompose(mode: .reply, message: message)
-                } label: {
-                    Image(systemName: "arrowshape.turn.up.left")
-                }
-                .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
-                Menu {
-                    Button {
-                        viewModel.startCompose(mode: .replyAll, message: message)
-                    } label: {
-                        Label(NSLocalizedString("_mail_reply_all_", comment: ""), systemImage: "arrowshape.turn.up.left.2")
+            },
+            trailing: {
+                if case let .detail(message) = viewModel.route {
+                    SouveraHeaderPill {
+                        SouveraHeaderButton(icon: "arrowshape.turn.up.left") {
+                            viewModel.startCompose(mode: .reply, message: message)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
+                        Menu {
+                            Button {
+                                viewModel.startCompose(mode: .replyAll, message: message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_reply_all_", comment: ""), systemImage: "arrowshape.turn.up.left.2")
+                            }
+                            Button {
+                                viewModel.startCompose(mode: .forward, message: message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+                            }
+                            Button {
+                                Task { await viewModel.setRead([message], !message.isRead) }
+                            } label: {
+                                Label(message.isRead
+                                      ? NSLocalizedString("_mail_mark_unread_", comment: "")
+                                      : NSLocalizedString("_mail_mark_read_", comment: ""),
+                                      systemImage: message.isRead ? "envelope" : "envelope.open")
+                            }
+                            Button {
+                                detailMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                            } label: {
+                                Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                            }
+                            Button {
+                                viewModel.toggleFlagged(message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
+                            }
+                            Button {
+                                blacklistTarget = [message]
+                            } label: {
+                                Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
+                            }
+                            Button(role: .destructive) {
+                                viewModel.delete([message])
+                            } label: {
+                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 17, weight: .medium))
+                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                .frame(width: 40, height: 40)
+                        }
                     }
-                    Button {
-                        viewModel.startCompose(mode: .forward, message: message)
-                    } label: {
-                        Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+                } else if isFolders || landscapeLayout {
+                    SouveraHeaderPill {
+                        SouveraHeaderButton(icon: "magnifyingglass") {
+                            searchActive = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                        SouveraHeaderButton(icon: "folder.badge.plus") {
+                            showNewFolderSheet = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
                     }
-                    Button {
-                        Task { await viewModel.setRead([message], !message.isRead) }
-                    } label: {
-                        Label(message.isRead
-                              ? NSLocalizedString("_mail_mark_unread_", comment: "")
-                              : NSLocalizedString("_mail_mark_read_", comment: ""),
-                              systemImage: message.isRead ? "envelope" : "envelope.open")
-                    }
-                    Button {
-                        detailMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
-                    } label: {
-                        Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
-                    }
-                    Button {
-                        viewModel.toggleFlagged(message)
-                    } label: {
-                        Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
-                    }
-                    Button {
-                        blacklistTarget = [message]
-                    } label: {
-                        Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
-                    }
-                    Button(role: .destructive) {
-                        viewModel.delete([message])
-                    } label: {
-                        Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                }
-            }
-        }
-        // Landscape: Ring/Suche/Neuer Ordner in der System-Toolbar (gleiche
-        // Ebene wie bisher). Bei offener Fokus-Leser-Karte wird der Ring
-        // ausgeblendet (die Karte dimmt den Inhalt, der Zurück-Pfeil bleibt).
-        if isFolders || landscapeLayout {
-            if !(focusReaderActive && viewModel.route.isDetail) {
-                ToolbarItem(placement: .topBarLeading) {
-                    AutoRefreshRingView(viewModel: viewModel)
                 }
             }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { searchActive = true } label: { Image(systemName: "magnifyingglass") }
-                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                Button { showNewFolderSheet = true } label: { Image(systemName: "folder.badge.plus") }
-                    .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
-            }
-        }
+        )
     }
 
     @ViewBuilder

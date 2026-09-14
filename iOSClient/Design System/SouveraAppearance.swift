@@ -65,3 +65,98 @@ enum SouveraAppearance {
         return appearance
     }
 }
+
+// MARK: - Souvera-Modul-Header (Run 15.09.)
+//
+// Die SwiftUI-Module Mail/Kalender/Link nutzen statt der System-Navigationbar
+// einen eigenen Header: iOS 26 "Liquid Glass" ersetzt den per
+// toolbarBackground gesetzten Verlauf durch eine Glas-Fläche (einheitliches
+// Hellblau statt Verlauf) und rendert Buttons als getönte Glas-Pills. Der
+// eigene Header ist pixel-exakt 1:1 mit den UIKit-Bars von Mehr/Dateien:
+// blauer Verlauf (unten dunkel -> oben hell, hinter der Statusbar), weiße
+// opake Pills mit dunklen Icons, weiße Titel.
+
+import SwiftUI
+
+/// Einzelner Header-Button: weiße, opake Capsule mit dunklem Icon (1:1 mit
+/// Mehr/Dateien). Optionale freie Icon-Farbe (z. B. grüner Telefon-Button).
+struct SouveraHeaderButton: View {
+    let icon: String
+    var iconColor: Color = Color(red: 0.1, green: 0.1, blue: 0.1)
+    var accessibilityLabel: String = ""
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(iconColor)
+                .frame(width: 40, height: 40)
+                .background(Color.white, in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Pill, die mehrere Header-Buttons in EINER weißen Capsule gruppiert
+/// (wie die Doppel-Pills in Dateien/Mehr).
+struct SouveraHeaderPill<Content: View>: View {
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        HStack(spacing: 2) { content }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .background(Color.white, in: Capsule())
+    }
+}
+
+/// Modul-Header: blauer Souvera-Verlauf hinter der Statusbar, Titel weiß,
+/// Leading-/Trailing-Inhalte frei (Pills/Button-Ringe). Der Inhalt der
+/// Screens wird per safeAreaInset unter den Header gesetzt (opak, Inhalt
+/// läuft nicht dahinter durch - wie bei Mehr/Dateien).
+struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
+    /// Zentrierter Titel (leer = kein Titel, z. B. Kalender-Root).
+    var title: String = ""
+    /// Titel links neben dem Leading-Block (Chat-Raum-Stil: "< Test Termin").
+    var titleAfterLeading: Bool = false
+    @ViewBuilder var leading: Leading
+    @ViewBuilder var trailing: Trailing
+
+    private static let darkIcon = Color(red: 0.1, green: 0.1, blue: 0.1)
+
+    var body: some View {
+        HStack(spacing: 10) {
+            HStack(spacing: 8) { leading }
+
+            if titleAfterLeading, !title.isEmpty {
+                Text(title)
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            } else {
+                Spacer(minLength: 0)
+                if !title.isEmpty {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+            }
+
+            HStack(spacing: 8) { trailing }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .frame(maxWidth: .infinity)
+        .background(
+            LinearGradient(colors: SouveraAppearance.gradientColors,
+                           startPoint: .bottom, endPoint: .top)
+                .ignoresSafeArea(edges: .top)
+        )
+    }
+}

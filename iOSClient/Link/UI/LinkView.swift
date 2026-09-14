@@ -65,87 +65,20 @@ struct LinkView: View {
                         updateLandscapeLayout(newSize)
                     }
             }
-            .navigationTitle(navigationTitle)
-            .navigationBarTitleDisplayMode(.inline)
-            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
-            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
-            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
-            .toolbarBackground(
-                LinearGradient(colors: SouveraAppearance.gradientColors,
-                               startPoint: .top, endPoint: .bottom),
-                for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-                .toolbar {
-                    if case let .chat(token, title) = viewModel.route {
-                        // Landscape-Split: die Raumliste bleibt links sichtbar -
-                        // kein Zurück-Pfeil nötig.
-                        if !landscapeLayout {
-                            ToolbarItem(placement: .topBarLeading) {
-                                Button {
-                                    viewModel.back()
-                                } label: {
-                                    Image(systemName: "chevron.backward")
-                                        .frame(width: 28, height: 28)
-                                }
-                                .frame(width: 44, height: 44)
-                                .contentShape(Rectangle())
-                            }
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Menu {
-                                Button {
-                                    viewModel.loadParticipants()
-                                    showParticipants = true
-                                } label: {
-                                    Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
-                                }
-                                if viewModel.currentRoom?.canManage == true {
-                                    Button {
-                                        settingsRoom = viewModel.currentRoom
-                                    } label: {
-                                        Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "gearshape")
-                            }
-                            .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
-                        }
-                        chatRoomCallToolbar(token: token, title: title)
-                    }
-                    if case .home = viewModel.route {
-                        ToolbarItem(placement: .topBarLeading) {
-                            Button {
-                                searchActive = true
-                            } label: {
-                                Image(systemName: "magnifyingglass")
-                            }
-                            .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                        }
-                        // Online-Status (Run 15.09.): eigener runder
-                        // Button direkt links neben dem "+"-Button.
-                        ToolbarItem(placement: .topBarTrailing) {
-                            LinkOnlineStatusButton(status: onlineStatus) {
-                                showUserStatus = true
-                            }
-                        }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button {
-                                channelName = ""
-                                showCreateChannel = true
-                            } label: {
-                                Image(systemName: "plus")
-                            }
-                            .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
-                        }
-                    }
-                }
+            // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
+            // "Liquid Glass" flattet toolbarBackground-Verlaeufe und tintet
+            // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
+            // mit dunklen Icons); System-Navigationbar komplett versteckt.
+            .toolbar(.hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                moduleHeader
+            }
         }
         .onAppear {
             viewModel.start()
             viewModel.reconnectSignalingIfNeeded()
             viewModel.startRoomPolling()
+            viewModel.loadUserStatuses()
             onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -330,40 +263,6 @@ struct LinkView: View {
 #endif
     }
 
-    /// Trailing-Buttons im Chat-Raum: Lobby-Verwaltung (nur Moderatoren
-    /// bei aktiver Lobby) + Call-Join/Start. Ausgelagert, damit die grosse
-    /// body-Expression den Type-Checker nicht sprengt (CI-Fehler 15.09.).
-    @ToolbarContentBuilder
-    private func chatRoomCallToolbar(token: String, title: String) -> some ToolbarContent {
-        if viewModel.currentRoom?.canManage == true,
-           viewModel.currentRoom?.lobbyState == 1 {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    lobbyManagementRoom = viewModel.currentRoom
-                } label: {
-                    Image(systemName: "clock.arrow.circlepath")
-                }
-                .accessibilityLabel(NSLocalizedString("_link_lobby_toggle_", comment: ""))
-            }
-        }
-        ToolbarItemGroup(placement: .topBarTrailing) {
-            if viewModel.currentRoom?.hasCall == true {
-                // Läuft im Raum bereits ein Call: pulsierend grüner
-                // Join-Button (Run-Feedback 11.09.) - direkt teilnehmen
-                // statt neu anzurufen.
-                LinkPulsingCallButton {
-                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
-                }
-            } else {
-                Button {
-                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
-                } label: {
-                    Image(systemName: "phone.fill").foregroundStyle(.green)
-                }
-            }
-        }
-    }
-
 #if DEBUG
     private struct SimulatedCall: Identifiable {
         let token: String
@@ -432,6 +331,81 @@ struct LinkView: View {
         .shadow(radius: 4)
         .padding(.horizontal, 10)
         .padding(.top, 4)
+    }
+
+    /// Souvera-Modul-Header (Run 15.09.): Route-abhaengig Home oder
+    /// Chat-Raum. Ersetzt die System-Toolbar komplett.
+    @ViewBuilder
+    private var moduleHeader: some View {
+        if case let .chat(token, title) = viewModel.route {
+            SouveraModuleHeader(
+                title: navigationTitle,
+                leading: {
+                    if !landscapeLayout {
+                        SouveraHeaderButton(icon: "chevron.backward") {
+                            viewModel.back()
+                        }
+                    }
+                },
+                trailing: {
+                    SouveraHeaderPill {
+                        SouveraHeaderButton(icon: "person.2") {
+                            viewModel.loadParticipants()
+                            showParticipants = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_link_participants_", comment: ""))
+                        if viewModel.currentRoom?.canManage == true {
+                            SouveraHeaderButton(icon: "gearshape",
+                                                accessibilityLabel: NSLocalizedString("_link_room_settings_", comment: "")) {
+                                settingsRoom = viewModel.currentRoom
+                            }
+                        }
+                        if viewModel.currentRoom?.canManage == true,
+                           viewModel.currentRoom?.lobbyState == 1 {
+                            SouveraHeaderButton(icon: "clock.arrow.circlepath",
+                                                accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")) {
+                                lobbyManagementRoom = viewModel.currentRoom
+                            }
+                        }
+                        if viewModel.currentRoom?.hasCall == true {
+                            SouveraHeaderButton(icon: "phone.fill",
+                                                iconColor: .green,
+                                                accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
+                                callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                            }
+                        } else {
+                            SouveraHeaderButton(icon: "phone.fill",
+                                                iconColor: .green,
+                                                accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
+                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
+                            }
+                        }
+                    }
+                }
+            )
+        } else {
+            SouveraModuleHeader(
+                title: NSLocalizedString("_link_", comment: ""),
+                leading: {
+                    SouveraHeaderButton(icon: "magnifyingglass") {
+                        searchActive = true
+                    }
+                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                },
+                trailing: {
+                    SouveraHeaderPill {
+                        LinkOnlineStatusButton(status: onlineStatus) {
+                            showUserStatus = true
+                        }
+                        SouveraHeaderButton(icon: "plus") {
+                            channelName = ""
+                            showCreateChannel = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
+                    }
+                }
+            )
+        }
     }
 
     private var navigationTitle: String {
@@ -909,6 +883,14 @@ private struct LinkConversationRow: View {
         .contentShape(Rectangle())
     }
 
+    /// Nextcloud-Status des 1:1-Gegenuebers (Anzeigename-Mapping; der
+    /// Raumname eines 1:1-Chats ist der Kontoname des Peers).
+    private var peerStatus: String? {
+        guard room.isOneToOne else { return nil }
+        return viewModel.userStatusesByName[room.displayName]
+            ?? viewModel.userStatuses[room.displayName]
+    }
+
     /// Raum-Avatar (1:1 liefert den Avatar des Gegenübers) mit dem
     /// Unread-Badge überlappend unten rechts. SVG-Antworten (generierte
     /// Gruppen-Avatare) kann UIImage nicht dekodieren -> Icon-Kreis wie Talk.
@@ -937,6 +919,11 @@ private struct LinkConversationRow: View {
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(Color.red))
                     .offset(x: 3, y: 3)
+            } else if room.isOneToOne, let status = peerStatus {
+                // Status-Pill am Gegenueber von 1:1-Chats (Run 15.09.) -
+                // volle Farben, opak-weisser Ring, voll sichtbar.
+                LinkPresence.statusPill(for: status, size: 15)
+                    .offset(x: 2, y: 2)
             }
         }
         .task {
@@ -2697,6 +2684,33 @@ enum LinkPresence {
         default: return NSLocalizedString("_offline_", comment: "")
         }
     }
+
+    /// Sattes, deutliches Farbschema (kein systemYellow/-Green - die sind
+    /// auf hellem Grund zu blass; Run 15.09., Feedback "klare Farben").
+    static func vividColor(for status: String?) -> Color {
+        switch status {
+        case "online": return Color(red: 0.18, green: 0.72, blue: 0.27)   // #2EB845
+        case "away": return Color(red: 0.96, green: 0.65, blue: 0.14)     // #F5A623
+        case "dnd", "busy": return Color(red: 0.86, green: 0.16, blue: 0.16) // #DB2929
+        default: return Color(red: 0.55, green: 0.57, blue: 0.60)         // grau
+        }
+    }
+
+    /// Kleine Status-Pill (NC-Icon in Vollfarbe, opak-weisser Ring) - das
+    /// Element darf NIE abgeschnitten werden, darum ohne Offset ausserhalb
+    /// von Grenzen einsetzen (in ZStack bottomTrailing).
+    static func statusPill(for status: String?, size: CGFloat) -> some View {
+        symbol(for: status)
+            .font(.system(size: size, weight: .bold))
+            .symbolRenderingMode(.monochrome)
+            .foregroundStyle(vividColor(for: status))
+            .background(
+                Circle()
+                    .fill(Color.white)
+                    .frame(width: size + 5, height: size + 5)
+            )
+            .frame(width: size + 5, height: size + 5)
+    }
 }
 
 /// Online-Status-Button (Run 15.09.): runder Material-Button mit
@@ -2707,25 +2721,25 @@ private struct LinkOnlineStatusButton: View {
     let action: () -> Void
 
     var body: some View {
-        // Schlichter Toolbar-Button (Run 15.09., Feedback: kein eigener
-        // Hintergrund - gleicher Stil wie der "+"-Button daneben).
+        // Header-Button (Run 15.09., 2. Runde): Person-Icon zentriert im
+        // festen Frame, Status-Pill INNERHALB der Grenzen unten rechts -
+        // nichts wird abgeschnitten. Satte Vollfarben, opak-weisser Ring.
         Button(action: action) {
-            Image(systemName: "person.crop.circle")
-                .font(.system(size: 22))
-                .foregroundStyle(.primary)
-                .overlay(alignment: .bottomTrailing) {
-                    // NC-Status-Symbol (Haken/Mond/Kreis) an der Kante,
-                    // weisser Ring wie beim Avatar-Muster.
-                    LinkPresence.symbol(for: status)
-                        .font(.system(size: 12))
-                        .symbolRenderingMode(.hierarchical)
-                        .foregroundStyle(LinkPresence.color(for: status))
-                        .background(Circle().fill(Color(.systemBackground)))
-                        .offset(x: 4, y: 4)
-                }
+            ZStack(alignment: .bottomTrailing) {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 22, weight: .medium))
+                    .foregroundStyle(Self.darkIcon)
+                    .frame(width: 30, height: 30)
+                LinkPresence.statusPill(for: status, size: 13)
+            }
+            .frame(width: 32, height: 32)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
         .accessibilityLabel(NSLocalizedString("_set_user_status_", comment: ""))
     }
+
+    private static let darkIcon = Color(red: 0.1, green: 0.1, blue: 0.1)
 }
 
 /// Lobby-Verwaltung (Run 15.09., neu): Mitgliedschafts-basierte
@@ -2852,13 +2866,9 @@ private struct LinkLobbyManagementView: View {
                         .font(.caption2).foregroundStyle(.white)
                 }
                 .frame(width: 30, height: 30)
-                // NC-Status-Symbol an der Kante (Avatar-Muster, Run 15.09.).
-                LinkPresence.symbol(for: userStatus(participant))
-                    .font(.system(size: 13))
-                    .symbolRenderingMode(.hierarchical)
-                    .foregroundStyle(LinkPresence.color(for: userStatus(participant)))
-                    .background(Circle().fill(Color(.systemBackground)))
-                    .offset(x: 3, y: 3)
+                // NC-Status-Pill an der Kante (Avatar-Muster, Run 15.09.):
+                // satte Vollfarben, opak-weisser Ring - keine Transparenz.
+                LinkPresence.statusPill(for: userStatus(participant), size: 14)
             }
             VStack(alignment: .leading, spacing: 1) {
                 Text(displayName(participant))
@@ -2911,10 +2921,25 @@ private struct LinkLobbyManagementView: View {
         participant.actorType == "guests" || participant.actorType == "emails"
     }
 
+    /// Signaling-User-Daten des Teilnehmers (ueber sessionIds gemappt):
+    /// Klartext-Name/E-Mail von Gaesten - die OCS-Liste liefert fuer
+    /// E-Mail-Teilnehmer nur den SHA-256-Hash der Adresse (Run 15.09.).
+    private func signalingInfo(_ participant: LinkParticipant) -> LinkSignalingUserInfo? {
+        for sid in participant.sessionIds {
+            if let info = viewModel.signalingUsers[sid] {
+                return info
+            }
+        }
+        return nil
+    }
+
     /// Namens-Anzeige (Run 15.09., Talk-Web-Logik): Gaeste ohne Namen
     /// heissen "Gast" - NIEMALS der kryptische Session-Hash. User mit
     /// leerem Namen fallen auf die actorId zurueck.
     private func displayName(_ participant: LinkParticipant) -> String {
+        if let info = signalingInfo(participant), let name = info.displayName, !name.isEmpty {
+            return name
+        }
         if !participant.displayName.isEmpty { return participant.displayName }
         if isExternal(participant) {
             return NSLocalizedString("_link_guest_", comment: "")
@@ -2923,10 +2948,15 @@ private struct LinkLobbyManagementView: View {
         return NSLocalizedString("_link_lobby_unknown_", comment: "")
     }
 
-    /// Zweite Zeile fuer E-Mail-Teilnehmer (actorType "emails": die
-    /// E-Mail-Adresse steht in der actorId - wie im Talk-Web).
+    /// Zweite Zeile: E-Mail-Adresse. Quelle 1: Signaling-User-Daten
+    /// (Klartext). Quelle 2: actorId, WENN sie eine E-Mail ist ("@") -
+    /// sonst nichts (niemals einen Hash zeigen).
     private func emailLine(_ participant: LinkParticipant) -> String? {
-        guard participant.actorType == "emails", !participant.actorId.isEmpty else { return nil }
+        if let info = signalingInfo(participant), let email = info.email, !email.isEmpty {
+            return email
+        }
+        guard participant.actorType == "emails", !participant.actorId.isEmpty,
+              participant.actorId.contains("@") else { return nil }
         return participant.actorId
     }
 

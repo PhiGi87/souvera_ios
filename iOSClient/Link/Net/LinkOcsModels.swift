@@ -380,12 +380,15 @@ struct LinkParticipant: Decodable, Identifiable {
     /// Nextcloud-Benutzer-Status (online/away/dnd/busy/invisible) - nur
     /// mit includeStatus=true und fuer User-Accounts (Run 15.09.).
     let status: String?
+    /// Signaling-Session-IDs (512 Zeichen) - Schluessel fuer die Anreicherung
+    /// mit Gast-Namen/E-Mails aus den Signaling-Events (Run 15.09.).
+    let sessionIds: [String]
 
     var id: Int { attendeeId }
 
     enum CodingKeys: String, CodingKey {
         case attendeeId, actorType, actorId, displayName, participantType
-        case inCall, lastPing, status
+        case inCall, lastPing, status, sessionIds
     }
 
     init(from decoder: Decoder) throws {
@@ -404,6 +407,7 @@ struct LinkParticipant: Decodable, Identifiable {
         inCall = (try? c.decode(Int.self, forKey: .inCall)) ?? 0
         lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
         status = try? c.decodeIfPresent(String.self, forKey: .status)
+        sessionIds = (try? c.decode([String].self, forKey: .sessionIds)) ?? []
     }
 }
 
@@ -595,15 +599,28 @@ struct LinkPendingReaction: Codable, Equatable {
 struct LinkUserStatus: Decodable {
     let userId: String
     let status: String
+    let displayName: String
 
     enum CodingKeys: String, CodingKey {
         case userId
         case status
+        case displayName
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         userId = (try? c.decode(String.self, forKey: .userId)) ?? ""
         status = (try? c.decode(String.self, forKey: .status)) ?? "offline"
+        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
     }
+}
+
+/// User-Daten aus dem Signaling (Run 15.09.): der Talk-Backend liefert im
+/// `user`-Objekt der Session-Events den Klartext-Namen und - bei per E-Mail
+/// eingeladenen Gaesten - die E-Mail-Adresse (die OCS-Teilnehmerliste
+/// liefert dafuer nur den SHA-256-Hash).
+struct LinkSignalingUserInfo {
+    let sessionId: String
+    let displayName: String?
+    let email: String?
 }

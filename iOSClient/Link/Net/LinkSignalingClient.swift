@@ -31,6 +31,12 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
     /// Teilnehmer-Events (Join/Leave/usersInRoom, Run 15.09.) - triggert
     /// den Sofort-Refresh der Lobby-Verwaltung/Teilnehmerliste.
     var onParticipantsChanged: (() -> Void)?
+    /// Signaling-User-Daten (Run 15.09.): sessionId -> (Name, E-Mail) aus
+    /// dem Backend-`user`-Objekt. Talk-Web bezieht die Klartext-E-Mail
+    /// von Gaesten genau hierher (die OCS-Teilnehmerliste liefert nur den
+    /// SHA-256-Hash der E-Mail als actorId).
+    var onUserInfoChanged: (([String: LinkSignalingUserInfo]) -> Void)?
+    private var userInfoBySessionId: [String: LinkSignalingUserInfo] = [:]
 
     // MARK: - Verbindung
 
@@ -166,6 +172,7 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
         // in der Lobby-Verwaltung ankommen.
         if type.contains("participants") || type.contains("usersInRoom")
             || type == "join" || type == "leave" {
+            parseUserInfos(event: event)
             onParticipantsChanged?()
         }
         guard type.hasPrefix("signalingTyping") else { return }
@@ -182,6 +189,45 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
             startExpiryLoop()
         }
         publishTypers()
+    }
+
+    /// Session-Objekte aus den Signaling-Events ziehen und die User-Daten
+    /// (Name/E-Mail des Backends) nach sessionid ablegen.
+    private func parseUserInfos(event: [String: Any]) {
+        var sessionObjects: [[String: Any]] = []
+        if let target = event["target"] as? String, target == "room",
+           let join = event["join"] as? [[String: Any]] {
+            sessionObjects.append(contentsOf: join)
+        }
+        if let target = event["target"] as? String, target == "participants",
+           let update = event["update"] as? [[String: Any]] {
+            sessionObjects.append(contentsOf: update)
+        }
+        guard !sessionObjects.isEmpty else { return }
+        for session in sessionObjects {
+            // Schluessel: roomsessionid (Nextcloud-Talk-Session, deckt
+            // sich mit sessionIds aus der OCS-Teilnehmerliste).
+            let key = session["roomsessionid"] as? String
+                ?? session["sessionId"] as? String
+                ?? session["sessionid"] as? String
+                ?? ""
+            guard !key.isEmpty else { continue }
+            let user = session["user"] as? [String: Any] ?? [:]
+            let name = (user["displayName"] as? String)
+                ?? (user["displayname"] as? String)
+            let email = (user["email"] as? String)
+                ?? (user["emailAddress"] as? String)
+                ?? (user["emailaddress"] as? String)
+            userInfoBySessionId[key] = LinkSignalingUserInfo(
+                sessionId: key,
+                displayName: name,
+                email: email
+            )
+            if let name, !name.isEmpty {
+                CallDebugLog.log("Signaling", "user info session=\(key.prefix(10))... name=\(name) email=\(email ?? "-")")
+            }
+        }
+        onUserInfoChanged?(userInfoBySessionId)
     }
 
     private func publishTypers() {

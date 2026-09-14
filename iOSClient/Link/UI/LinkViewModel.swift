@@ -626,8 +626,13 @@ final class LinkViewModel: ObservableObject {
     }
 
     /// Bulk-Status der bekannten User (userId -> online/away/dnd/offline),
-    /// gepflegt fuer die Presence-Punkte in Lobby-Verwaltung/Teilnehmerliste.
+    /// gepflegt fuer die Presence-Pillen in Lobby/Raumliste (Run 15.09.).
     @Published var userStatuses: [String: String] = [:]
+    /// Gleiches Mapping nach Anzeigename - fuer 1:1-Raeume, deren Peer in
+    /// der Raumliste nur per Name bekannt ist.
+    @Published var userStatusesByName: [String: String] = [:]
+    /// Signaling-User-Daten (sessionId -> Name/E-Mail), Run 15.09.
+    @Published var signalingUsers: [String: LinkSignalingUserInfo] = [:]
     private var lastUserStatusFetch = Date.distantPast
     private var userStatusFetchTask: Task<Void, Never>?
 
@@ -638,10 +643,16 @@ final class LinkViewModel: ObservableObject {
         lastUserStatusFetch = Date()
         userStatusFetchTask = Task { [weak self] in
             guard let self, let api = self.api else { return }
-            let map = await api.listUserStatuses()
+            let maps = await api.listUserStatuses()
             await MainActor.run {
                 self.userStatusFetchTask = nil
-                if !map.isEmpty { self.userStatuses = map }
+                if !maps.byId.isEmpty {
+                    self.userStatuses = maps.byId
+                    // Anzeigenamen-Mapping fuer 1:1-Raeume: der Peer einer
+                    // 1:1-Konversation heisst in der Raumliste genau wie
+                    // sein Benutzerkonto.
+                    self.userStatusesByName = maps.byName
+                }
             }
         }
     }
@@ -1989,6 +2000,10 @@ final class LinkViewModel: ObservableObject {
         // (auch externer Teilnehmer) ohne Poll-Delay aktuell.
         signaling.onParticipantsChanged = { [weak self] in
             self?.loadParticipants()
+        }
+        // Signaling-User-Daten (Name/E-Mail von Gaesten) fuer die Lobby.
+        signaling.onUserInfoChanged = { [weak self] infos in
+            self?.signalingUsers = infos
         }
         signaling.onTypingChanged = { [weak self] names in
             self?.typingNames = names

@@ -87,77 +87,13 @@ struct SouveraCalendarView: View {
                 }
                 .padding(.top, 8)
             }
-            .navigationBarTitleDisplayMode(.inline)
+            // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
+            // "Liquid Glass" flattet toolbarBackground-Verlaeufe. Header
+            // 1:1 wie Mehr/Dateien; System-Navigationbar versteckt.
+            .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
-            // Souvera-Header (Run 15.09.): blauer Verlauf wie im Mehr-Menue
-            // - 1:1 (Verlauf auf der Bar, hinter der Statusbar; weisse
-            // Titel/Icons via Dark-Schema der Bar). Bleibt beim Scrollen.
-            .toolbarBackground(
-                LinearGradient(colors: SouveraAppearance.gradientColors,
-                               startPoint: .top, endPoint: .bottom),
-                for: .navigationBar)
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    // Ein einziger Button mit Auswahl-Menü (wie die
-                    // Mail-Sortierung): aktueller Modus + Häkchen.
-                    Menu {
-                        ForEach(CalendarViewMode.allCases) { mode in
-                            Button {
-                                viewMode = mode
-                            } label: {
-                                if viewMode == mode {
-                                    Label(mode.title, systemImage: "checkmark")
-                                } else {
-                                    Text(mode.title)
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(viewMode.title).font(.subheadline)
-                            Image(systemName: "chevron.down").font(.caption2)
-                        }
-                    }
-                    .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(3600)), existing: nil)
-                    } label: {
-                        Image(systemName: "plus")
-                    }
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    // "Heute": springt in ALLEN Ansichten (Tag/3 Tage/Monat)
-                    // auf den aktuellen Tag zurück.
-                    Button {
-                        selectedDay = Date()
-                        viewModel.visibleMonth = Date()
-                        // B3: Tag/3-Tage zur Jetzt-Linie springen lassen.
-                        scrollToNowTrigger += 1
-                    } label: {
-                        Text(NSLocalizedString("_calendar_today_", comment: ""))
-                            .font(.subheadline)
-                    }
-                    .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        searchActive = true
-                    } label: {
-                        Image(systemName: "magnifyingglass")
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                }
-                ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        showCalendarPicker = true
-                    } label: {
-                        Image(systemName: "calendar.badge.checkmark")
-                    }
-                }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                calendarHeader
             }
         }
         .onAppear {
@@ -1832,5 +1768,71 @@ private struct MonthYearPickerSheet: View {
             onSelect(date)
         }
         dismiss()
+    }
+}
+
+// MARK: - Souvera-Modul-Header (Run 15.09.)
+
+extension SouveraCalendarView {
+    /// Header 1:1 wie Mehr/Dateien: Verlauf, weisse Pills, dunkle Icons.
+    fileprivate var calendarHeader: some View {
+        SouveraModuleHeader(
+            leading: {
+                SouveraHeaderPill {
+                    // "Heute": springt in ALLEN Ansichten auf den
+                    // aktuellen Tag zurueck.
+                    Button {
+                        selectedDay = Date()
+                        viewModel.visibleMonth = Date()
+                        scrollToNowTrigger += 1
+                    } label: {
+                        Text(NSLocalizedString("_calendar_today_", comment: ""))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                            .padding(.horizontal, 8)
+                            .frame(height: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
+                    SouveraHeaderButton(icon: "magnifyingglass") {
+                        searchActive = true
+                    }
+                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                    SouveraHeaderButton(icon: "calendar.badge.checkmark") {
+                        showCalendarPicker = true
+                    }
+                }
+            },
+            trailing: {
+                SouveraHeaderPill {
+                    // Ansichts-Menue: aktueller Modus + Haeckchen.
+                    Menu {
+                        ForEach(CalendarViewMode.allCases) { mode in
+                            Button {
+                                viewMode = mode
+                            } label: {
+                                if viewMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(viewMode.title).font(.subheadline)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                        .padding(.horizontal, 8)
+                        .frame(height: 34)
+                    }
+                    .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
+                    SouveraHeaderButton(icon: "plus") {
+                        editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(3600)), existing: nil)
+                    }
+                }
+            }
+        )
     }
 }

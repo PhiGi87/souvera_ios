@@ -417,15 +417,19 @@ actor LinkOcsApi {
     /// Bulk-Abfrage der Nextcloud-Benutzer-Status (Online/Abwesend/DND/
     /// Invisible): userId -> status. Fuer Presence-Punkte in der Lobby-
     /// Verwaltung und der Teilnehmerliste.
-    func listUserStatuses() async -> [String: String] {
-        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return [:] }
+    func listUserStatuses() async -> (byId: [String: String], byName: [String: String]) {
+        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return ([:], [:]) }
         guard let data = body.data(using: .utf8),
-              let env = try? decoder.decode(OcsEnvelope<[LinkUserStatus]>.self, from: data) else { return [:] }
-        var map: [String: String] = [:]
+              let env = try? decoder.decode(OcsEnvelope<[LinkUserStatus]>.self, from: data) else { return ([:], [:]) }
+        var byId: [String: String] = [:]
+        var byName: [String: String] = [:]
         for entry in env.ocs.data ?? [] where !entry.userId.isEmpty {
-            map[entry.userId] = entry.status
+            byId[entry.userId] = entry.status
+            if !entry.displayName.isEmpty {
+                byName[entry.displayName] = entry.status
+            }
         }
-        return map
+        return (byId, byName)
     }
 
     // MARK: - Lobby-Zulassen (Run 15.09.)
