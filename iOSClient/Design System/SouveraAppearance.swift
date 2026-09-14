@@ -125,8 +125,6 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
-    private static let darkIcon = Color(red: 0.1, green: 0.1, blue: 0.1)
-
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) { leading }
