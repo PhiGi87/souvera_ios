@@ -51,6 +51,9 @@ struct Mailbox: Identifiable, Hashable {
     let namespace: MailboxNamespace
     let ownerIdentity: String?
     let parentId: String?
+    /// JMAP isSubscribed - nicht abonnierte Ordner werden in der Liste
+    /// ausgeblendet (Run 15.09., Stalwart legt user-Ordner unsubscribed an).
+    let isSubscribed: Bool
     /// JMAP myRights: darf dieser Ordner umbenannt/gelöscht werden bzw.
     /// Unterordner aufnehmen? (Systemordner liefern hier false.)
     let mayRename: Bool

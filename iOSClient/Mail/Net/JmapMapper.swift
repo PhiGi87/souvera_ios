@@ -39,6 +39,7 @@ enum JmapMapper {
             namespace: namespace,
             ownerIdentity: ownerIdentity,
             parentId: json.optString("parentId"),
+            isSubscribed: (json["isSubscribed"] as? Bool) ?? true,
             mayRename: (rights?["mayRename"] as? Bool) ?? true,
             mayDelete: (rights?["mayDelete"] as? Bool) ?? true,
             mayCreateChild: (rights?["mayCreateChild"] as? Bool) ?? true

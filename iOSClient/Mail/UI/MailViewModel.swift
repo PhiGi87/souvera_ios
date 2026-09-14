@@ -882,7 +882,15 @@ final class MailViewModel: ObservableObject {
 
     /// Builds the collapsible mailbox tree from the JMAP parentId hierarchy.
     func mailboxTree(for boxes: [Mailbox]) -> [MailboxNode] {
-        let byParent = Dictionary(grouping: boxes) { $0.parentId ?? "" }
+        // Run 15.09.: (1) nicht abonnierte Ordner ausblenden (Stalwart
+        // legt user-Ordner wie "leer" unsubscribed an), (2) Rollen-Ordner
+        // IMMER auf Root-Ebene - Stalwart nestet "Junk Email" gelegentlich
+        // unter beliebige Eltern; alle anderen Clients zeigen Rollen-
+        // Ordner ebenfalls auf oberster Ebene.
+        let visible = boxes.filter { $0.isSubscribed || $0.role != nil }
+        let byParent = Dictionary(grouping: visible) { box -> String in
+            box.role != nil ? "" : (box.parentId ?? "")
+        }
         func children(of id: String?) -> [MailboxNode] {
             let list = byParent[id ?? ""] ?? []
             return list
@@ -1341,6 +1349,11 @@ final class MailViewModel: ObservableObject {
                     }
                     if !fetchedAll.isEmpty {
                         emails = mergeEmails(existing: emails, incoming: fetchedAll)
+                    }
+                    // Run 15.09.: Flag-Aenderungen/Loeschungen vom Server
+                    // -> Pills autoritativ nachziehen (debounced).
+                    if dirty > 0 || !removed.isEmpty || !(dirtyFlagIds[cacheKey] ?? []).isEmpty {
+                        scheduleUnreadRefresh()
                     }
                     dirtyFlagIds[cacheKey] = nil
                     let newState = changes.optString("newQueryState") ?? state
@@ -1916,6 +1929,9 @@ final class MailViewModel: ObservableObject {
                     hasAuthoritativeBadgeCount = true
                     postUnreadBadge(total)
                     applyUnreadCountToMailboxList(total)
+                    // Run 15.09.: auch alle weiteren (geteilten) Inboxes
+                    // autoritativ aktualisieren.
+                    await refreshPerInboxUnreadCounts()
                     return
                 }
             }
@@ -1933,6 +1949,63 @@ final class MailViewModel: ObservableObject {
             return
         }
         await loadMailboxes(autoOpenInbox: false)
+    }
+
+    /// Run 15.09.: Autoritative Ungelesen-Zahl für ALLE Inboxes - auch
+    /// geteilte Identitäten. Der alte Pfad zählte nur die Inbox des
+    /// primären Accounts; die Pill einer geteilten Inbox (z. B. "Eingang"
+    /// für mail@arrt-it.de) blieb dadurch dauerhaft stehen.
+    func refreshPerInboxUnreadCounts() async {
+        guard let api = jmapApi else { return }
+        let inboxes = allMailboxes.filter { $0.kind == .inbox && $0.jmapId != nil }
+        guard !inboxes.isEmpty else { return }
+        var counts: [String: Int] = [:]
+        for box in inboxes {
+            guard let jmapId = box.jmapId else { continue }
+            if let resp = try? await api.queryEmails(accountId: box.accountId,
+                                                     inMailboxId: jmapId,
+                                                     limit: 0,
+                                                     calculateTotal: true,
+                                                     notKeyword: "$seen"),
+               let total = resp["total"] as? Int {
+                counts[box.id] = total
+                if box.namespace == .personal && box.accountId == session?.primaryAccountId {
+                    JmapLog.write("Mail unread count (Email/query) -> \(total)")
+                    hasAuthoritativeBadgeCount = true
+                    postUnreadBadge(total)
+                }
+            }
+        }
+        guard !counts.isEmpty else { return }
+        applyUnreadCounts(counts)
+    }
+
+    /// Setzt absolute Ungelesen-Zahlen auf die betroffenen Ordnerzeilen
+    /// (allMailboxes + published list).
+    private func applyUnreadCounts(_ counts: [String: Int]) {
+        func apply(_ boxes: [Mailbox]) -> [Mailbox] {
+            boxes.map { box -> Mailbox in
+                guard let count = counts[box.id], count != box.unreadCount else { return box }
+                var copy = box
+                copy.unreadCount = max(0, count)
+                return copy
+            }
+        }
+        allMailboxes = apply(allMailboxes)
+        if case let .success(boxes) = mailboxes {
+            mailboxes = .success(apply(boxes))
+        }
+    }
+
+    /// Debounced autoritativer Refresh nach Lese-/Sync-Aktionen (Run 15.09.).
+    private var unreadRefreshTask: Task<Void, Never>?
+    func scheduleUnreadRefresh() {
+        unreadRefreshTask?.cancel()
+        unreadRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            await self.refreshPerInboxUnreadCounts()
+        }
     }
 
     /// Setzt den absoluten Ungelesen-Zähler des persönlichen Posteingangs
@@ -2208,6 +2281,10 @@ final class MailViewModel: ObservableObject {
             postUnreadBadge(personalInboxUnread + badgeDelta)
         }
         applyUnreadDeltaToMailboxList(delta: badgeDelta)
+        // Run 15.09.: autoritativer Nachlauf (debounced) - korrigiert die
+        // Pills aller Ordner, auch geteilte Inboxes und Abweichungen durch
+        // Fremd-Clients. Kein loadMailboxes() (wuerde die Route umschalten).
+        scheduleUnreadRefresh()
     }
 
     /// Setzt die Postfachliste nur, wenn sich die Signatur geändert hat
