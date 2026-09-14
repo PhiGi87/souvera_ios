@@ -429,6 +429,7 @@ actor LinkOcsApi {
                 byName[entry.displayName] = entry.status
             }
         }
+        CallDebugLog.log("OcsApi", "user statuses: \(byId.count) users (byName \(byName.count))")
         return (byId, byName)
     }
 

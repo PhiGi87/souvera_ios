@@ -18,6 +18,14 @@ struct MailView: View {
     @State private var searchQuery = ""
     @State private var searchActive = false
     @State private var searchDebounceTask: Task<Void, Never>?
+    // Run 15.09.: Listen-UI-Status für den Modul-Header (Compose/„..."-
+    // Menü wanderten aus MailMessageListView hierher, da die System-
+    // Navigationbar versteckt ist).
+    @State private var listEditing = false
+    @State private var listSelected = Set<String>()
+    @State private var listShowEmptyTrashConfirm = false
+    @State private var listMoveTarget: ([MailMessage], [Mailbox])?
+    @State private var listBlacklistTarget: [MailMessage]?
 
     var body: some View {
         NavigationStack {
@@ -310,8 +318,66 @@ struct MailView: View {
                         .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
                     }
                 }
+                if case .messages = viewModel.route, !route.isDetail, toolbarActiveForMessages {
+                    // Run 15.09.: "..."-Menü (Bearbeiten/Sortierung/Papierkorb
+                    // leeren) + "Neue Mail" - aus MailMessageListView hierher
+                    // gehoben (System-Navigationbar versteckt).
+                    SouveraHeaderPill {
+                        Menu {
+                            if !listMessagesEmpty {
+                                Button { listEditing = true } label: {
+                                    Label(NSLocalizedString("_edit_", comment: ""), systemImage: "checklist")
+                                }
+                            }
+                            Menu {
+                                ForEach(MailSortOrder.allCases) { order in
+                                    Button {
+                                        viewModel.sortOrder = order
+                                    } label: {
+                                        if viewModel.sortOrder == order {
+                                            Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
+                                        } else {
+                                            Text(NSLocalizedString(order.titleKey, comment: ""))
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(NSLocalizedString("_mail_sort_", comment: ""), systemImage: "arrow.up.arrow.down")
+                            }
+                            if viewModel.currentMailbox?.kind == .trash {
+                                Button {
+                                    listShowEmptyTrashConfirm = true
+                                } label: {
+                                    Label(NSLocalizedString("_mail_trash_empty_", comment: ""), systemImage: "trash.slash")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color.primary)
+                                .frame(width: 44, height: 44)
+                                .modifier(SouveraHeaderGlass(shape: Circle()))
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
+                        SouveraHeaderButton(icon: "square.and.pencil") {
+                            viewModel.startCompose(mode: .new)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
+                    }
+                }
             }
         )
+    }
+
+    /// Messages-Route: die System-Toolbar-Items galten nur bei aktiver
+    /// Liste (nicht im Detail-Overlay) - Entsprechung von toolbarActive.
+    private var toolbarActiveForMessages: Bool {
+        !(landscapeLayout && viewModel.route.isDetail)
+    }
+
+    private var listMessagesEmpty: Bool {
+        if case let .success(items) = viewModel.messages { return items.isEmpty }
+        return true
     }
 
     @ViewBuilder
@@ -334,7 +400,10 @@ struct MailView: View {
                 // überlebt den Detail-Roundtrip (getrennte Branches erzeugten
                 // jeweils NEUE Instanzen -> Scroll ging verloren).
                 ZStack {
-                    MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
+                    MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail,
+                                        editing: $listEditing, selected: $listSelected,
+                                        moveTarget: $listMoveTarget, blacklistTarget: $listBlacklistTarget,
+                                        showEmptyTrashConfirm: $listShowEmptyTrashConfirm)
                     if let message = viewModel.route.detailMessage {
                         MailDetailView(viewModel: viewModel, message: message)
                     }
@@ -375,7 +444,10 @@ struct MailView: View {
                     } else {
                         // M2: gleiche Toolbar-Regel wie Portrait - "..."-Menü
                         // + Verfassen sichtbar, solange kein Detail offen ist.
-                        MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail)
+                        MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail,
+                                            editing: $listEditing, selected: $listSelected,
+                                            moveTarget: $listMoveTarget, blacklistTarget: $listBlacklistTarget,
+                                            showEmptyTrashConfirm: $listShowEmptyTrashConfirm)
                         if !focusReaderActive, let message = viewModel.route.detailMessage {
                             MailDetailView(viewModel: viewModel, message: message)
                         }
@@ -1012,13 +1084,13 @@ private struct MailMessageListView: View {
     /// Toolbar-Items (Bearbeiten/Sortierung/"Neue Mail") dürfen dann nicht
     /// in der Einzelansicht erscheinen.
     var toolbarActive: Bool = true
-    @State private var editing = false
-    @State private var selected = Set<String>()
-    @State private var moveTarget: ([MailMessage], [Mailbox])?
+    @Binding var editing: Bool
+    @Binding var selected: Set<String>()
+    @Binding var moveTarget: ([MailMessage], [Mailbox])?
     @State private var showScrollTop = false
     @State private var scrollOffset: CGFloat = 0
-    @State private var blacklistTarget: [MailMessage]?
-    @State private var showEmptyTrashConfirm = false
+    @Binding var blacklistTarget: [MailMessage]?
+    @Binding var showEmptyTrashConfirm: Bool
 
     var body: some View {
         withDialogs
@@ -1066,55 +1138,7 @@ private struct MailMessageListView: View {
                 }
             )
         }
-        .toolbar {
-            if toolbarActive, editing {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button(NSLocalizedString("_done_", comment: "")) {
-                        editing = false
-                        selected.removeAll()
-                    }
-                }
-            } else if toolbarActive {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Menu {
-                        if !isEmptyList {
-                            Button { editing = true } label: {
-                                Label(NSLocalizedString("_edit_", comment: ""), systemImage: "checklist")
-                            }
-                        }
-                        Menu {
-                            ForEach(MailSortOrder.allCases) { order in
-                                Button {
-                                    viewModel.sortOrder = order
-                                } label: {
-                                    if viewModel.sortOrder == order {
-                                        Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
-                                    } else {
-                                        Text(NSLocalizedString(order.titleKey, comment: ""))
-                                    }
-                                }
-                            }
-                        } label: {
-                            Label(NSLocalizedString("_mail_sort_", comment: ""), systemImage: "arrow.up.arrow.down")
-                        }
-                        if viewModel.currentMailbox?.kind == .trash {
-                            Button {
-                                showEmptyTrashConfirm = true
-                            } label: {
-                                Label(NSLocalizedString("_mail_trash_empty_", comment: ""), systemImage: "trash.slash")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
-                }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { viewModel.startCompose(mode: .new) } label: { Image(systemName: "square.and.pencil") }
-                        .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
-                }
-            }
-        }
+
         .safeAreaInset(edge: .bottom) {
             if editing && !selected.isEmpty {
                 HStack(spacing: 0) {

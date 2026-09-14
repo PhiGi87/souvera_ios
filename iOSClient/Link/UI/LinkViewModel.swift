@@ -367,16 +367,11 @@ final class LinkViewModel: ObservableObject {
             var all = results
             // Unbekannte E-Mail-Adresse: externen Nutzer einladen anbieten
             // (Federation, falls serverseitig aktiv, sonst Gast per E-Mail).
-            if trimmed.contains("@"),
-               !results.contains(where: { $0.id.lowercased() == trimmed.lowercased() }) {
-                let source = await api.isFederationOutgoingEnabled() ? "federated" : "email_guest"
-                all.append(LinkSuggestion(
-                    id: trimmed,
-                    label: String(format: NSLocalizedString("_link_chat_external_", comment: ""), trimmed),
-                    source: source
-                ))
-            }
-            self.userResults = all
+            // Run 15.09.: KEINE E-Mail-/Federation-Vorschlaege mehr im
+            // Teilnehmer-Sheet - Hinzufuegen erfolgt ausschliesslich als
+            // interner User (sonst landen Adds bei aktiver Lobby in der
+            // Lobby, Feedback des Testers).
+            self.userResults = all.filter { $0.source == "users" || $0.source == "groups" }
         }
     }
 
@@ -2044,6 +2039,8 @@ final class LinkViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 self.loadConversations()
+                // Presence in der Raumliste aktuell halten (Run 15.09.).
+                self.loadUserStatuses()
             }
         }
     }

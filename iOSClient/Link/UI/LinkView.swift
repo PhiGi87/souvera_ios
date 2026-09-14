@@ -349,17 +349,30 @@ struct LinkView: View {
                 },
                 trailing: {
                     SouveraHeaderPill {
-                        SouveraHeaderButton(icon: "person.2") {
-                            viewModel.loadParticipants()
-                            showParticipants = true
-                        }
-                        .accessibilityLabel(NSLocalizedString("_link_participants_", comment: ""))
-                        if viewModel.currentRoom?.canManage == true {
-                            SouveraHeaderButton(icon: "gearshape",
-                                                accessibilityLabel: NSLocalizedString("_link_room_settings_", comment: "")) {
-                                settingsRoom = viewModel.currentRoom
+                        // Zahnrad mit Submenü (Run 15.09., Feedback):
+                        // Teilnehmer + Raum-Einstellungen wie vorher.
+                        Menu {
+                            Button {
+                                viewModel.loadParticipants()
+                                showParticipants = true
+                            } label: {
+                                Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
                             }
+                            if viewModel.currentRoom?.canManage == true {
+                                Button {
+                                    settingsRoom = viewModel.currentRoom
+                                } label: {
+                                    Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "gearshape")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color.primary)
+                                .frame(width: 44, height: 44)
+                                .modifier(SouveraHeaderGlass(shape: Circle()))
                         }
+                        .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         if viewModel.currentRoom?.canManage == true,
                            viewModel.currentRoom?.lobbyState == 1 {
                             SouveraHeaderButton(icon: "clock.arrow.circlepath",
@@ -918,10 +931,12 @@ private struct LinkConversationRow: View {
                     .font(.caption2).fontWeight(.bold).foregroundStyle(.white)
                     .padding(.horizontal, 6).padding(.vertical, 2)
                     .background(Capsule().fill(Color.red))
-                    .offset(x: 3, y: 3)
-            } else if room.isOneToOne, let status = peerStatus {
+                    .offset(x: 3, y: room.isOneToOne && peerStatus != nil ? -14 : 3)
+            }
+            if room.isOneToOne, let status = peerStatus {
                 // Status-Pill am Gegenueber von 1:1-Chats (Run 15.09.) -
-                // volle Farben, opak-weisser Ring, voll sichtbar.
+                // IMMER sichtbar (unabhaengig vom Unread-Badge, der ggf.
+                // oben rechts erscheint), volle Farben, opak-weisser Ring.
                 LinkPresence.statusPill(for: status, size: 15)
                     .offset(x: 2, y: 2)
             }
@@ -2284,6 +2299,7 @@ struct LinkParticipantsSheet: View {
                                 Button {
                                     viewModel.addParticipant(suggestion)
                                     viewModel.loadParticipants()
+                                    query = ""
                                 } label: {
                                     Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
                                 }
@@ -2302,13 +2318,20 @@ struct LinkParticipantsSheet: View {
                                     .foregroundStyle(.secondary)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(participant.displayName).font(.subheadline)
-                                    if participant.participantType == 1 || participant.participantType == 2 {
-                                        Text(NSLocalizedString("_link_participant_moderator_", comment: ""))
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
+                                    Text(roleLabel(participant))
+                                        .font(.caption2)
+                                        .foregroundStyle(.secondary)
                                 }
                                 Spacer()
+                                // Status-Pill am Teilnehmer (Run 15.09.).
+                                if participant.actorType == "users" {
+                                    LinkPresence.statusPill(
+                                        for: participant.status
+                                            ?? viewModel.userStatuses[participant.actorId]
+                                            ?? "offline",
+                                        size: 13
+                                    )
+                                }
                             }
                             .swipeActions(edge: .trailing) {
                                 if canRemove(participant) {
@@ -2325,12 +2348,15 @@ struct LinkParticipantsSheet: View {
             }
             .navigationTitle(NSLocalizedString("_link_participants_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
-            .sheet(item: $viewModel.externalInviteContext) { context in
-                ExternalInviteSheet(context: context)
-            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
+                    // X statt Abbrechen (Konsistenz zu Raum-Einstellungen).
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                    .accessibilityLabel(NSLocalizedString("_close_", comment: ""))
                 }
             }
             .confirmationDialog(
@@ -2375,6 +2401,16 @@ struct LinkParticipantsSheet: View {
         let isOwn = participant.actorType == "users" && participant.actorId == viewModel.currentUserId
         let isOwner = participant.participantType == 1
         return !isOwn && !isOwner
+    }
+
+    /// Rolle des Teilnehmers (Owner/Moderator/Mitglied) - fuer ALLE
+    /// Teilnehmer sichtbar (Run 15.09., Feedback "Namen und Rolle").
+    private func roleLabel(_ participant: LinkParticipant) -> String {
+        switch participant.participantType {
+        case 1: return NSLocalizedString("_link_participant_owner_", comment: "")
+        case 2: return NSLocalizedString("_link_participant_moderator_", comment: "")
+        default: return NSLocalizedString("_link_participant_member_", comment: "")
+        }
     }
 
     private func participantIcon(_ actorType: String) -> String {

@@ -1227,3 +1227,5 @@ _mail_sort_flagged_ = "Flagged first";
 "_souvera_about_license_text_" = "Souvera Workspace is free software licensed under the GNU General Public License (GPLv3) with the Apple App Store exception – like the underlying Nextcloud iOS project.";
 "_souvera_about_open_website_" = "souvera.eu";
 "_souvera_about_open_source_" = "View source code";
+"_link_participant_owner_" = "Owner";
+"_link_participant_member_" = "Member";

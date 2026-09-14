@@ -1288,9 +1288,24 @@ final class MailViewModel: ObservableObject {
             // 1) Incremental refresh via Email/queryChanges when a previous
             //    query state and a cached snapshot are known.
             if !forceFullRefresh,
-               let state = queryStates[cacheKey],
-               let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
+               let state = queryStates[cacheKey] {
                 do {
+                    // Basis: der frische Roh-Spiegel (Speicherstand); der
+                    // Cache-Snapshot nur als Fallback beim Erst-Eintritt.
+                    let baseRaw: [String: [String: Any]]
+                    if let mirror = rawMailboxEmails[cacheKey], !mirror.isEmpty {
+                        baseRaw = mirror
+                    } else if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
+                        baseRaw = Dictionary(
+                            snapshot.emails.compactMap { email -> (String, [String: Any])? in
+                                guard let id = email.optString("id"), !id.isEmpty else { return nil }
+                                return (id, email)
+                            },
+                            uniquingKeysWith: { a, _ in a }
+                        )
+                    } else {
+                        baseRaw = [:]
+                    }
                     let changes = try await api.queryEmailChanges(accountId: accId, sinceState: state, inMailboxId: jmapMailboxId)
                     let removed = Set((changes["removed"] as? [String]) ?? [])
                     // Stalwart returns `added` as objects [{id, index}] (RFC
@@ -1307,7 +1322,7 @@ final class MailViewModel: ObservableObject {
                     // Server gewinnt): deckt externe Löschungen (removed),
                     // Flag-/Status-Änderungen und Zusätze ab.
                     let dirty = Array(dirtyFlagIds[cacheKey] ?? [])
-                    var emails = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
+                    var emails = baseRaw.values.filter { !removed.contains($0.optString("id") ?? "") }
                     // LIVE-Befund 15.09.: Stalwart meldet reine KEYWORD-
                     // Aenderungen als "removed" (Mail existiert weiter, nur
                     // Flags neu). removed-IDs darum MIT-refetchen - Email/get
@@ -1351,6 +1366,13 @@ final class MailViewModel: ObservableObject {
                     if !fetchedAll.isEmpty {
                         emails = mergeEmails(existing: emails, incoming: fetchedAll)
                     }
+                    rawMailboxEmails[cacheKey] = Dictionary(
+                        emails.compactMap { email -> (String, [String: Any])? in
+                            guard let id = email.optString("id"), !id.isEmpty else { return nil }
+                            return (id, email)
+                        },
+                        uniquingKeysWith: { a, _ in a }
+                    )
                     // Run 15.09.: Flag-Aenderungen/Loeschungen vom Server
                     // -> Pills autoritativ nachziehen (debounced).
                     if !dirty.isEmpty || !removed.isEmpty || !(dirtyFlagIds[cacheKey] ?? []).isEmpty {
@@ -1386,7 +1408,12 @@ final class MailViewModel: ObservableObject {
             // Scroll geladene ältere Mails bleiben erhalten, frische Seiten
             // überschreiben überlappende Einträge.
             var byId: [String: [String: Any]] = [:]
-            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
+            // Basis: zuerst der frische Roh-Spiegel (Speicherstand), dann
+            // der Cache - verhindert, dass ein Voll-Refresh den gelesenen
+            // Stand mit einem aelteren Cache ueberschreibt (Run 15.09.).
+            if let mirror = rawMailboxEmails[cacheKey], !mirror.isEmpty {
+                byId = mirror
+            } else if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
                 for email in snapshot.emails {
                     if let id = email.optString("id") { byId[id] = email }
                 }
@@ -1476,6 +1503,7 @@ final class MailViewModel: ObservableObject {
                 let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
                 guard generation == listGeneration else { return }
                 queryStates[cacheKey] = state
+                rawMailboxEmails[cacheKey] = byId
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
                 let collectedFiltered = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
@@ -1958,10 +1986,12 @@ final class MailViewModel: ObservableObject {
     /// für mail@arrt-it.de) blieb dadurch dauerhaft stehen.
     func refreshPerInboxUnreadCounts() async {
         guard let api = jmapApi else { return }
-        let inboxes = allMailboxes.filter { $0.kind == .inbox && $0.jmapId != nil }
-        guard !inboxes.isEmpty else { return }
+        // Run 15.09. (2. Runde): ALLE Ordner - Unterordner-Pills (z. B.
+        // INBOX/Inkasso) wurden vorher nie autoritativ aktualisiert.
+        let targets = allMailboxes.filter { $0.jmapId != nil }
+        guard !targets.isEmpty else { return }
         var counts: [String: Int] = [:]
-        for box in inboxes {
+        for box in targets {
             guard let jmapId = box.jmapId else { continue }
             if let resp = try? await api.queryEmails(accountId: box.accountId,
                                                      inMailboxId: jmapId,
@@ -1973,7 +2003,12 @@ final class MailViewModel: ObservableObject {
             }
         }
         guard !counts.isEmpty else { return }
+        let changed = counts.filter { box in
+            guard let existing = allMailboxes.first(where: { $0.id == box.key }) else { return false }
+            return existing.unreadCount != box.value
+        }
         applyUnreadCounts(counts)
+        JmapLog.write("Mail unread refresh (per mailbox): \(counts.count) queried, \(changed.count) updated")
     }
 
     /// Setzt absolute Ungelesen-Zahlen auf die betroffenen Ordnerzeilen
@@ -1992,6 +2027,14 @@ final class MailViewModel: ObservableObject {
             mailboxes = .success(apply(boxes))
         }
     }
+
+    /// Run 15.09.: Roh-Spiegel der sichtbaren Listen pro Mailbox
+    /// (cacheKey -> emailId -> raw JSON). Der Inkremental-Sync basierte
+    /// vorher auf dem CACHE-Snapshot - nach setRead/Voll-Refresh
+    /// divergierten Cache und Speicher, die Liste flappte (alte
+    /// ungelesene Duplikate kamen zurueck). Ein gemeinsamer Spiegel
+    /// macht beide Pfade zu einer Quelle der Wahrheit.
+    private var rawMailboxEmails: [String: [String: [String: Any]]] = [:]
 
     /// Debounced autoritativer Refresh nach Lese-/Sync-Aktionen (Run 15.09.).
     private var unreadRefreshTask: Task<Void, Never>?
@@ -2353,8 +2396,16 @@ final class MailViewModel: ObservableObject {
         dirtyFlagIds[message.mailboxId, default: []].insert(message.emailId)
         updateLocalMessage(updated)
 
-        // Mirror the change into the cached snapshot.
+        // Mirror the change into the cached snapshot UND den Roh-Spiegel
+        // (Run 15.09.): ohne Spiegel-Update wuerde der naechste
+        // Inkremental-Sync den ungelesenen Lokalstand zurueckpublishen.
         let accountName = mailAccount?.account ?? ""
+        if var mirror = rawMailboxEmails[message.mailboxId], mirror[message.emailId] != nil {
+            var keywords = mirror[message.emailId]?["keywords"] as? [String: Any] ?? [:]
+            keywords[keyword] = value
+            mirror[message.emailId]?["keywords"] = keywords
+            rawMailboxEmails[message.mailboxId] = mirror
+        }
         guard let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: message.mailboxId) else { return }
         var emails = snapshot.emails
         for i in emails.indices where emails[i].optString("id") == message.emailId {

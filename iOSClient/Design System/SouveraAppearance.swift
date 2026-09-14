@@ -78,38 +78,60 @@ enum SouveraAppearance {
 
 import SwiftUI
 
-/// Einzelner Header-Button: weiße, opake Capsule mit dunklem Icon (1:1 mit
-/// Mehr/Dateien). Optionale freie Icon-Farbe (z. B. grüner Telefon-Button).
+/// Einzelner Header-Button: Liquid-Glass-Kreis mit adaptivem Icon
+/// (hell = dunkles Icon, dunkel = helles Icon) - 1:1 die Optik der
+/// System-Bar-Buttons im Mehr-Menü/Dateien (Run 15.09., Apple-Doku:
+/// glassEffect(_:in:) + GlassEffectContainer, iOS 26).
 struct SouveraHeaderButton: View {
     let icon: String
-    var iconColor: Color = Color(red: 0.1, green: 0.1, blue: 0.1)
+    var iconColor: Color? = nil
     var accessibilityLabel: String = ""
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(iconColor)
-                .frame(width: 40, height: 40)
-                .background(Color.white, in: Circle())
+                .font(.system(size: 18, weight: .medium))
+                .foregroundStyle(iconColor ?? Color.primary)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
+                .modifier(SouveraHeaderGlass(shape: Circle()))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
     }
 }
 
-/// Pill, die mehrere Header-Buttons in EINER weißen Capsule gruppiert
-/// (wie die Doppel-Pills in Dateien/Mehr).
+/// Mehrere Header-Buttons in einem GlassEffectContainer: iOS 26 verschmilzt
+/// die Kreise automatisch zu einer gemeinsamen Pill (wie die Doppel-Pills
+/// in Dateien/Mehr). Fallback < iOS 26: eine Material-Capsule.
 struct SouveraHeaderPill<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        HStack(spacing: 2) { content }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(Color.white, in: Capsule())
+        if #available(iOS 26.0, *) {
+            GlassEffectContainer(spacing: 8) {
+                HStack(spacing: 8) { content }
+            }
+        } else {
+            HStack(spacing: 2) { content }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.regularMaterial, in: Capsule())
+        }
+    }
+}
+
+/// Liquid-Glass-Effekt mit Fallback für iOS 17/18.
+struct SouveraHeaderGlass<S: Shape>: ViewModifier {
+    let shape: S
+
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.glassEffect(.regular.interactive(), in: shape)
+        } else {
+            content.background(.regularMaterial, in: shape)
+        }
     }
 }
 
@@ -149,7 +171,7 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
             HStack(spacing: 8) { trailing }
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .frame(height: 44)
         .frame(maxWidth: .infinity)
         .background(
             LinearGradient(colors: SouveraAppearance.gradientColors,

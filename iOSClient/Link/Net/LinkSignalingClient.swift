@@ -204,6 +204,13 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
             sessionObjects.append(contentsOf: update)
         }
         guard !sessionObjects.isEmpty else { return }
+        // Diagnose (Run 15.09.): Roh-Struktur der Backend-User-Daten
+        // loggen, damit Name/E-Mail-Feldnamen verifizierbar sind.
+        if let first = sessionObjects.first,
+           let data = try? JSONSerialization.data(withJSONObject: first, options: [.sortedKeys]),
+           let text = String(data: data, encoding: .utf8) {
+            CallDebugLog.log("Signaling", "session object (\(sessionObjects.count)): \(String(text.prefix(400)))")
+        }
         for session in sessionObjects {
             // Schluessel: roomsessionid (Nextcloud-Talk-Session, deckt
             // sich mit sessionIds aus der OCS-Teilnehmerliste).
