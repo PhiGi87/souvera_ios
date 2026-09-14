@@ -386,7 +386,14 @@ actor LinkOcsApi {
     /// Teilnehmer einer Konversation auflisten.
     func listParticipants(token: String) async -> [LinkParticipant] {
         guard let body = await get("\(base)/api/v4/room/\(token)/participants") else { return [] }
-        return decodeList(body)
+        let list = decodeList(body)
+        // Diagnose (Run 15.09.): leere Anzeigenamen ("Unbekannter
+        // Teilnehmer") herleiten - Rohdaten-Zusammenfassung loggen.
+        let summary = list.prefix(8).map {
+            "\($0.attendeeId):type=\($0.participantType),call=\($0.inCall),ping=\(Int($0.lastPing)),name=\($0.displayName.isEmpty ? "<leer>" : $0.displayName)"
+        }.joined(separator: " | ")
+        CallDebugLog.log("OcsApi", "participants \(token) (\(list.count)): \(summary)")
+        return list
     }
 
     /// Teilnehmer entfernen (erfordert Moderator-Recht; attendeeId aus der
@@ -399,6 +406,57 @@ actor LinkOcsApi {
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         CallDebugLog.log("OcsApi", "removeParticipant \(token) attendee=\(attendeeId) -> \(status)")
         return (200..<300).contains(status)
+    }
+
+    // MARK: - Presence (User-Status, Run 15.09.)
+
+    /// Bulk-Abfrage der Nextcloud-Benutzer-Status (Online/Abwesend/DND/
+    /// Invisible): userId -> status. Fuer Presence-Punkte in der Lobby-
+    /// Verwaltung und der Teilnehmerliste.
+    func listUserStatuses() async -> [String: String] {
+        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return [:] }
+        guard let data = body.data(using: .utf8),
+              let env = try? decoder.decode(OcsEnvelope<[LinkUserStatus]>.self, from: data) else { return [:] }
+        var map: [String: String] = [:]
+        for entry in env.ocs.data ?? [] where !entry.userId.isEmpty {
+            map[entry.userId] = entry.status
+        }
+        return map
+    }
+
+    // MARK: - Lobby-Zulassen (Run 15.09.)
+
+    enum LobbyAdmitResult {
+        case admitted
+        case notSupported
+        case failed
+    }
+
+    /// Einzelnen Wartenden zulassen. Die Talk-24-REST-API dokumentiert
+    /// keinen Einzel-Admit-Endpunkt (nur webinary/lobby an/aus) - es wird
+    /// live gegen plausible Endpunkte probeziert; gefunden = .admitted,
+    /// sonst .notSupported (Aufrufer faehrt den Lobby-Toggle-Fallback).
+    func admitParticipant(token: String, attendeeId: Int) async -> LobbyAdmitResult {
+        let candidates: [(method: String, url: String)] = [
+            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)/admit"),
+            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)/accept"),
+            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)")
+        ]
+        for candidate in candidates {
+            var req = signed(url: candidate.url, method: candidate.method)
+            req.setValue("application/json", forHTTPHeaderField: "Accept")
+            guard let (_, response) = try? await session.data(for: req),
+                  let http = response as? HTTPURLResponse else {
+                CallDebugLog.log("OcsApi", "admit probe \(candidate.url) -> transport FAILED")
+                continue
+            }
+            CallDebugLog.log("OcsApi", "admit probe \(candidate.path) -> \(http.statusCode)")
+            if (200..<300).contains(http.statusCode) { return .admitted }
+            // Endpunkt existiert nicht -> naechsten Kandidaten probieren.
+            if [404, 405, 501].contains(http.statusCode) { continue }
+            return .failed
+        }
+        return .notSupported
     }
 
     /// Erstellt eine (öffentliche) Gruppenkonversation für externe Teilnehmer.

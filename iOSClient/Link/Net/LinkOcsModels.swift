@@ -391,6 +391,7 @@ struct LinkParticipant: Decodable, Identifiable {
         actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
         actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
         displayName = (try? c.decode(String.self, forKey: .displayName)) ?? actorId
+        if displayName.isEmpty { displayName = actorId }
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
         // Lobby-Verwaltung (Run 15.09.): Call-Status + Ping; alte Server
         // liefern die Felder evtl. nicht -> tolerant Defaults.
@@ -579,4 +580,23 @@ struct LinkPendingReaction: Codable, Equatable {
     var removes: [String]
     var createdAt: TimeInterval
     var state: LinkPendingMessage.PendingState
+}
+
+/// Nextcloud-Benutzer-Status (Presence, Run 15.09.): Ergebnis der Bulk-
+/// Abfrage /user_status/api/v1/statuses - Grundlage fuer die Presence-
+/// Punkte in Lobby-Verwaltung und Online-Status-Button.
+struct LinkUserStatus: Decodable {
+    let userId: String
+    let status: String
+
+    enum CodingKeys: String, CodingKey {
+        case userId
+        case status
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        userId = (try? c.decode(String.self, forKey: .userId)) ?? ""
+        status = (try? c.decode(String.self, forKey: .status)) ?? "offline"
+    }
 }

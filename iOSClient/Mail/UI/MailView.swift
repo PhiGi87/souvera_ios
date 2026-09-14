@@ -10,6 +10,7 @@ import UniformTypeIdentifiers
 import WebKit
 
 struct MailView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel = MailViewModel()
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
@@ -75,6 +76,14 @@ struct MailView: View {
             // P62g: JEDER Modul-Eintritt zieht die offene Mailbox nach -
             // neue Mails erscheinen sofort statt erst mit dem Auto-Refresh.
             viewModel.refreshOnEntry()
+        }
+        // Run 15.09.: Rueckkehr aus dem Hintergrund = Refresh (onAppear
+        // feuert beim Foreground-Wechsel nicht). refreshOnEntry throttled
+        // intern auf 8 s.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active {
+                viewModel.refreshOnEntry()
+            }
         }
         .overlay(alignment: .bottom) {
             if viewModel.isSending {

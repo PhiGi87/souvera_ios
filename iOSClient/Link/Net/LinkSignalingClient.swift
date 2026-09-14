@@ -28,6 +28,9 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
 
     /// Wird mit der aktuellen Liste tippender Anzeigenamen aufgerufen.
     var onTypingChanged: (([String]) -> Void)?
+    /// Teilnehmer-Events (Join/Leave/usersInRoom, Run 15.09.) - triggert
+    /// den Sofort-Refresh der Lobby-Verwaltung/Teilnehmerliste.
+    var onParticipantsChanged: (() -> Void)?
 
     // MARK: - Verbindung
 
@@ -157,8 +160,15 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
     }
 
     private func handleEvent(_ event: [String: Any]) {
-        guard let type = event["type"] as? String,
-              type.hasPrefix("signalingTyping") else { return }
+        guard let type = event["type"] as? String else { return }
+        // Teilnehmer-Events (Run 15.09.): sofortiger Refresh, damit Namen
+        // (auch nachgeruestete externe) und Anwesenheit ohne Poll-Delay
+        // in der Lobby-Verwaltung ankommen.
+        if type.contains("participants") || type.contains("usersInRoom")
+            || type == "join" || type == "leave" {
+            onParticipantsChanged?()
+        }
+        guard type.hasPrefix("signalingTyping") else { return }
         let typing = event["typing"] as? [String: Any]
         let user = typing?["user"] as? [String: Any]
         let name = user?["displayName"] as? String

@@ -625,6 +625,53 @@ final class LinkViewModel: ObservableObject {
         _ = await toggleLobby(token: token, enabled: enabled)
     }
 
+    /// Bulk-Status der bekannten User (userId -> online/away/dnd/offline),
+    /// gepflegt fuer die Presence-Punkte in Lobby-Verwaltung/Teilnehmerliste.
+    @Published var userStatuses: [String: String] = [:]
+    private var lastUserStatusFetch = Date.distantPast
+    private var userStatusFetchTask: Task<Void, Never>?
+
+    /// Presence-Status laden (gecacht ~10 s, Run 15.09.).
+    func loadUserStatuses(force: Bool = false) {
+        guard force || Date().timeIntervalSince(lastUserStatusFetch) > 10 else { return }
+        guard userStatusFetchTask == nil else { return }
+        lastUserStatusFetch = Date()
+        userStatusFetchTask = Task { [weak self] in
+            guard let self, let api = self.api else { return }
+            let map = await api.listUserStatuses()
+            await MainActor.run {
+                self.userStatusFetchTask = nil
+                if !map.isEmpty { self.userStatuses = map }
+            }
+        }
+    }
+
+    /// Einzelnen wartenden Teilnehmer zulassen (Run 15.09.): Probe auf
+    /// einen Einzel-Admit-Endpunkt; ohne Server-Unterstuetzung
+    /// Lobby-aus/sofort-wieder-an (Talk-Standard: alle Wartenden kommen
+    /// rein) - wird klar geloggt.
+    func admitParticipant(_ participant: LinkParticipant, token: String) async -> Bool {
+        guard let api else { return false }
+        let result = await api.admitParticipant(token: token, attendeeId: participant.attendeeId)
+        switch result {
+        case .admitted:
+            loadParticipants()
+            return true
+        case .notSupported:
+            CallDebugLog.log("LinkVM", "admit: no per-attendee endpoint - lobby toggle fallback (admits ALL waiting)")
+            guard await api.setLobby(token: token, enabled: false) else { return false }
+            if currentRoom?.token == token { currentRoom?.lobbyState = 0 }
+            let reenabled = await api.setLobby(token: token, enabled: true)
+            if currentRoom?.token == token { currentRoom?.lobbyState = reenabled ? 1 : 0 }
+            loadConversations()
+            loadParticipants()
+            return true
+        case .failed:
+            CallDebugLog.log("LinkVM", "admit failed for attendee \(participant.attendeeId)")
+            return false
+        }
+    }
+
     func toggleLobby(token: String, enabled: Bool) async -> Bool {
         guard let api else { return false }
         let ok = await api.setLobby(token: token, enabled: enabled)
@@ -1221,15 +1268,6 @@ final class LinkViewModel: ObservableObject {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
         let outgoing = mentionAwareMessage(trimmed)
-        // Lobby aktiv: Hinweis einblenden (Run-Feedback 15.09.) - die
-        // Nachricht geht trotzdem in die Queue und wird nach dem
-        // Lobby-Ende zugestellt.
-        if currentRoom?.lobbyState == 1 {
-            actionFeedback = LinkActionFeedback(
-                success: true,
-                message: NSLocalizedString("_link_lobby_active_note_", comment: "")
-            )
-        }
         // Offline: in die persistente Warteschlange - die UI leitet die
         // pendent Nachricht direkt aus der Queue ab (Marker inklusive).
         guard isOnline else {
@@ -1946,6 +1984,12 @@ final class LinkViewModel: ObservableObject {
     private func connectSignaling(token: String) {
         signaling.disconnect()
         typingNames = []
+        // Run 15.09.: Teilnehmer-Events (Join/Leave/usersInRoom) triggern
+        // einen sofortigen Teilnehmer-Refresh - Lobby-Ansicht und Namen
+        // (auch externer Teilnehmer) ohne Poll-Delay aktuell.
+        signaling.onParticipantsChanged = { [weak self] in
+            self?.loadParticipants()
+        }
         signaling.onTypingChanged = { [weak self] names in
             self?.typingNames = names
         }

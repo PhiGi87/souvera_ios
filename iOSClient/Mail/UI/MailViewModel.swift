@@ -1308,6 +1308,28 @@ final class MailViewModel: ObservableObject {
                     for email in emails {
                         if let id = email.optString("id"), !id.isEmpty { refetchIds.insert(id) }
                     }
+                    // Run 15.09. (Log d2zaaaa3gj): Stalwart bumpt den
+                    // queryChanges-State, liefert added[] aber IMMER leer
+                    // (8x live belegt) - neue Mails waeren damit nie im
+                    // Refetch-Set und erschienen nur per manuellem Pull.
+                    // Fix: frisches Email/query (Top-IDs, newest first)
+                    // gegen den Snapshot diffen und neue IDs mit-laden.
+                    var newCount = 0
+                    do {
+                        let topQuery = try await api.queryEmails(accountId: accId,
+                                                                 inMailboxId: jmapMailboxId,
+                                                                 limit: 50,
+                                                                 position: 0)
+                        let topIds = (topQuery["ids"] as? [String]) ?? []
+                        let knownIds = Set(emails.compactMap { $0.optString("id") }.filter { !$0.isEmpty })
+                        let newIds = topIds.filter { !knownIds.contains($0) }
+                        if !newIds.isEmpty {
+                            refetchIds.formUnion(newIds)
+                        }
+                        newCount = newIds.count
+                    } catch {
+                        JmapLog.write("top-query diff failed - continuing without new-mail detection: \(error)")
+                    }
                     let refetch = Array(refetchIds)
                     var fetchedAll: [[String: Any]] = []
                     var cursor = 0
@@ -1333,7 +1355,7 @@ final class MailViewModel: ObservableObject {
                     messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
-                    JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
+                    JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) new=\(newCount) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
                     return
                 } catch {
                     // Incremental path failed - fall through to a full refresh.
