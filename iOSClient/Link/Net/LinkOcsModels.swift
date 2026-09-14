@@ -390,8 +390,10 @@ struct LinkParticipant: Decodable, Identifiable {
         attendeeId = (try? c.decode(Int.self, forKey: .attendeeId)) ?? 0
         actorType = (try? c.decode(String.self, forKey: .actorType)) ?? ""
         actorId = (try? c.decode(String.self, forKey: .actorId)) ?? ""
-        displayName = (try? c.decode(String.self, forKey: .displayName)) ?? actorId
-        if displayName.isEmpty { displayName = actorId }
+        let decodedName = (try? c.decode(String.self, forKey: .displayName)) ?? ""
+        // Namens-Fallback (Run 15.09.): leerer Anzeigename -> actorId
+        // (sonst "Unbekannter Teilnehmer", obwohl die ID bekannt ist).
+        displayName = decodedName.isEmpty ? actorId : decodedName
         participantType = (try? c.decode(Int.self, forKey: .participantType)) ?? 0
         // Lobby-Verwaltung (Run 15.09.): Call-Status + Ping; alte Server
         // liefern die Felder evtl. nicht -> tolerant Defaults.
