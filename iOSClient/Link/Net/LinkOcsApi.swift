@@ -386,11 +386,12 @@ actor LinkOcsApi {
     /// Teilnehmer einer Konversation auflisten.
     func listParticipants(token: String) async -> [LinkParticipant] {
         guard let body = await get("\(base)/api/v4/room/\(token)/participants") else { return [] }
-        let list = decodeList(body)
+        let list: [LinkParticipant] = decodeList(body)
         // Diagnose (Run 15.09.): leere Anzeigenamen ("Unbekannter
         // Teilnehmer") herleiten - Rohdaten-Zusammenfassung loggen.
-        let summary = list.prefix(8).map {
-            "\($0.attendeeId):type=\($0.participantType),call=\($0.inCall),ping=\(Int($0.lastPing)),name=\($0.displayName.isEmpty ? "<leer>" : $0.displayName)"
+        let summary = list.prefix(8).map { participant -> String in
+            let name = participant.displayName.isEmpty ? "<leer>" : participant.displayName
+            return "id=\(participant.attendeeId) type=\(participant.participantType) call=\(participant.inCall) ping=\(Int(participant.lastPing)) name=\(name)"
         }.joined(separator: " | ")
         CallDebugLog.log("OcsApi", "participants \(token) (\(list.count)): \(summary)")
         return list
@@ -450,7 +451,7 @@ actor LinkOcsApi {
                 CallDebugLog.log("OcsApi", "admit probe \(candidate.url) -> transport FAILED")
                 continue
             }
-            CallDebugLog.log("OcsApi", "admit probe \(candidate.path) -> \(http.statusCode)")
+            CallDebugLog.log("OcsApi", "admit probe \(candidate.url) -> \(http.statusCode)")
             if (200..<300).contains(http.statusCode) { return .admitted }
             // Endpunkt existiert nicht -> naechsten Kandidaten probieren.
             if [404, 405, 501].contains(http.statusCode) { continue }
