@@ -1352,7 +1352,7 @@ final class MailViewModel: ObservableObject {
                     }
                     // Run 15.09.: Flag-Aenderungen/Loeschungen vom Server
                     // -> Pills autoritativ nachziehen (debounced).
-                    if dirty > 0 || !removed.isEmpty || !(dirtyFlagIds[cacheKey] ?? []).isEmpty {
+                    if !dirty.isEmpty || !removed.isEmpty || !(dirtyFlagIds[cacheKey] ?? []).isEmpty {
                         scheduleUnreadRefresh()
                     }
                     dirtyFlagIds[cacheKey] = nil
@@ -1969,11 +1969,6 @@ final class MailViewModel: ObservableObject {
                                                      notKeyword: "$seen"),
                let total = resp["total"] as? Int {
                 counts[box.id] = total
-                if box.namespace == .personal && box.accountId == session?.primaryAccountId {
-                    JmapLog.write("Mail unread count (Email/query) -> \(total)")
-                    hasAuthoritativeBadgeCount = true
-                    postUnreadBadge(total)
-                }
             }
         }
         guard !counts.isEmpty else { return }
@@ -2782,6 +2777,7 @@ final class MailViewModel: ObservableObject {
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,
                     namespace: .personal, ownerIdentity: nil, parentId: nil,
+                    isSubscribed: true,
                     mayRename: false, mayDelete: false, mayCreateChild: false
                 ))
                 await syncMessages()

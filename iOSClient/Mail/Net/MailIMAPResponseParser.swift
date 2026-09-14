@@ -33,6 +33,7 @@ enum MailIMAPResponseParser {
                 namespace: .personal,
                 ownerIdentity: nil,
                 parentId: nil,
+                isSubscribed: true,
                 mayRename: true,
                 mayDelete: true,
                 mayCreateChild: true
