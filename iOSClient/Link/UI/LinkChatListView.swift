@@ -194,12 +194,18 @@ final class LinkChatListController: NSObject, ObservableObject {
             // eintreffende Reactions aendern NICHT ids/count - ohne diesen
             // Anteil blieben Reaktions-Bubbles unsichtbar (Run 12.09.).
             var reactionSum = 0
+            var textLengthSum = 0
             for m in msgs {
                 reactionSum &+= m.reactions.count
                 reactionSum &+= m.reactionsSelf.count
                 for (_, count) in m.reactions { reactionSum &+= count }
+                // Textlaenge (Run 15.09.): der Poll kann eine Nachricht
+                // mit gleicher ID durch einen anderen Text ersetzen - ohne
+                // diesen Anteil blieb die Zelle auf dem alten Inhalt.
+                textLengthSum &+= m.message.count
             }
             hash = hash &* 31 &+ reactionSum
+            hash = hash &* 31 &+ textLengthSum
         }
         hash = hash &* 31 &+ viewModel.chatImageCache.count
         hash = hash &* 31 &+ viewModel.chatImageFailed.count
@@ -231,6 +237,14 @@ final class LinkChatListController: NSObject, ObservableObject {
         var snapshot = dataSource.snapshot()
         snapshot.reconfigureItems(visibleIds)
         dataSource.apply(snapshot, animatingDifferences: false)
+        // Run 15.09. ("Nachrichten werden abgeschnitten"): reconfigureItems
+        // aktualisiert den Zellinhalt, misst aber nicht immer neu - die
+        // Zelle behielt die Hoehe der ERSTEN Messung (z. B. kurze Pending-
+        // Zeile) und laengerer Text wurde beschnitten. Explizite Layout-
+        // Invalidierung der sichtbaren Items erzwingt die Neumessung.
+        let context = UICollectionViewLayoutInvalidationContext()
+        context.invalidateItems(at: collectionView.indexPathsForVisibleItems)
+        collectionView.collectionViewLayout.invalidateLayout(with: context)
         SouveraLog.write("LinkChat", "reconfigure visible cells: \(visibleIds.count)")
     }
 

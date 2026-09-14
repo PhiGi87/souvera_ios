@@ -1668,7 +1668,13 @@ struct LinkChatView: View {
                 .padding(.trailing, 10)
                 .padding(.vertical, 5)
                 .frame(minHeight: 44)
-                .background(Capsule().fill(Color(.systemBackground)))
+                // Run 15.09.: RoundedRectangle(22) statt Capsule - bei
+                // einer Zeile (Höhe 44) pixelidentisch zur Capsule, bei
+                // mehreren Zeilen bleiben die Ecken konstant rund (kein
+                // deformierter Stadium-Look). Das Höhenwachstum morpht
+                // weich über den Spring unten (kein harter Shape-Wechsel).
+                .background(RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color(.systemBackground)))
                 .shadow(color: .black.opacity(0.12), radius: 4, y: 1)
                 if !draft.trimmingCharacters(in: .whitespaces).isEmpty {
                     // Sendeknopf RECHTS NEBEN der Pille (Run-Feedback 15.09.):
@@ -1698,7 +1704,10 @@ struct LinkChatView: View {
             .padding(.horizontal, 10)
             .padding(.top, 6)
             .padding(.bottom, 14)
-            .animation(.easeInOut(duration: 0.2), value: draft.trimmingCharacters(in: .whitespaces).isEmpty)
+            // Flüssiger Composer (Run 15.09.): Höhenwachstum (Mehrzeiler)
+            // und Send-Button-Einblendung teilen sich einen Spring - das
+            // Feld wächst weich, der Button gleitet, kein Layout-Sprung.
+            .animation(.spring(response: 0.3, dampingFraction: 0.8), value: draft)
         }
     }
 }

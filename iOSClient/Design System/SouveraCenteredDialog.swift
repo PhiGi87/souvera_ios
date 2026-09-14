@@ -56,13 +56,16 @@ struct SouveraCenteredDialog: View {
                                 .font(.body.weight(.semibold))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
-                                .foregroundStyle(action.role == .cancel ? Color.primary : (action.role == .destructive ? Color.white : Color.white))
+                                .foregroundStyle(action.role == .cancel ? Color.primary : (action.role == .destructive ? Color.white : Color.Souvera.brandOnPrimary))
                                 .background(
                                     Capsule().fill(action.role == .destructive
                                         ? Color.red.opacity(0.9)
                                         : (action.role == .cancel
                                             ? Color(.tertiarySystemFill)
-                                            : Color(NCBrandColor.shared.customer)))
+                                            // Souvera-Design (Run 15.09.):
+                                            // dunkles Markenblau statt dem
+                                            // fremden hellen NC-Blau.
+                                            : Color.Souvera.brandPrimaryDeep))
                                 )
                         }
                         .buttonStyle(.plain)

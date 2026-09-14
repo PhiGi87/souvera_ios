@@ -426,8 +426,28 @@ class NCMainTabBarController: UITabBarController {
     }
 
     /// Punkt-Icon für den Mehr-Tab (Canvas = Original-Symbolgröße, Punkt
-    /// voll deckend rechts überlappend).
+    /// voll deckend rechts überlappend). Trait-bewusst (Run 15.09.): das
+    /// bisher fest weiß vorgerenderte, unselektierte Icon war im Light-
+    /// Mode unsichtbar bzw. falsch getönt - jetzt werden Light- und
+    /// Dark-Variante über ein UIImageAsset registriert, damit das Icon
+    /// wie die System-Icons dem Erscheinungsbild folgt.
     private static func badgedIcon(baseName: String, count: Int?, dot: Bool, selected: Bool) -> UIImage? {
+        let light = renderBadgedIcon(baseName: baseName, dot: dot, selected: selected, dark: false)
+        let dark = renderBadgedIcon(baseName: baseName, dot: dot, selected: selected, dark: true)
+        guard light != nil || dark != nil else { return nil }
+        let asset = UIImageAsset()
+        if let light {
+            asset.register(light, with: UITraitCollection(userInterfaceStyle: .light))
+        }
+        if let dark {
+            asset.register(dark, with: UITraitCollection(userInterfaceStyle: .dark))
+        }
+        // Das asset-getragene Image liefert pro Trait-Collection die
+        // passende Variante (gleiches Verhalten wie SF Symbols).
+        return asset.image(with: UITraitCollection(userInterfaceStyle: .light))
+    }
+
+    private static func renderBadgedIcon(baseName: String, dot: Bool, selected: Bool, dark: Bool) -> UIImage? {
         let base = UIImage(systemName: baseName)
         var canvasSize = base?.size ?? CGSize(width: 25, height: 25)
         if canvasSize.width < 10 || canvasSize.height < 10 {
@@ -436,11 +456,14 @@ class NCMainTabBarController: UITabBarController {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3
         format.opaque = false
+        let traits = UITraitCollection(userInterfaceStyle: dark ? .dark : .light)
         let renderer = UIGraphicsImageRenderer(size: canvasSize, format: format)
         return renderer.image { _ in
+            // Wie die normalen Tabs (configureTabBarAppearance):
+            // unselektiert schwarz/secondaryLabel, selektiert Markenfarbe.
             let iconColor: UIColor = selected
                 ? NCBrandColor.shared.customer
-                : UIColor.white
+                : (dark ? .secondaryLabel : .black)
             if let base {
                 base.withTintColor(iconColor, renderingMode: .alwaysOriginal)
                     .draw(in: CGRect(origin: .zero, size: canvasSize))

@@ -46,8 +46,9 @@ struct LinkConversation: Decodable, Identifiable {
     /// Numerische Raum-ID (Signaling-"roomid" für WebSocket/Typing).
     let roomId: Int
     /// Lobby-Status des Raums (0 = aus, 1 = an) - Grundlage für den
-    /// Lobby-Toggle in den Raum-Einstellungen (Run 15.09.).
-    let lobbyState: Int
+    /// Lobby-Toggle in den Raum-Einstellungen (Run 15.09.); var, damit
+    /// toggleLobby den Stand sofort am currentRoom spiegeln kann.
+    var lobbyState: Int
 
     var id: String { token }
 

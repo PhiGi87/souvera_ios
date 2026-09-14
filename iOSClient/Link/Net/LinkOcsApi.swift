@@ -131,6 +131,11 @@ actor LinkOcsApi {
         /// erstellt hat (Talk meldet nach Erstellung einen 400 mit
         /// error="message" - live verifiziert 15.09.).
         var likelyCreated: Bool { ok || httpCode == 400 }
+        /// Die vom Server erstellte Nachricht (aus dem 201-Body) - Allows
+        /// die UI, sie DIREKT einzufuegen statt aufs Poll-Echo zu warten
+        /// (Run 15.09.: sonst blieb die Pending-Zeile stehen, bis der
+        /// Nutzer den Chat verliess und wieder betrat).
+        let created: LinkChatMessage?
     }
 
     func sendMessage(token: String, message: String, replyTo: Int64? = nil) async -> SendResult {
@@ -140,13 +145,21 @@ actor LinkOcsApi {
         var req = signed(url: "\(base)/api/v1/chat/\(token)", method: "POST")
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
         req.httpBody = payload
-        guard let (_, response) = try? await session.data(for: req) else {
+        guard let (data, response) = try? await session.data(for: req) else {
             CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> transport FAILED")
-            return SendResult(httpCode: -1, ok: false)
+            return SendResult(httpCode: -1, ok: false, created: nil)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> \(status)")
-        return SendResult(httpCode: status, ok: (200..<300).contains(status))
+        // 201-Body enthaelt die erstellte Nachricht (OCS-Envelope).
+        var created: LinkChatMessage?
+        if (200..<300).contains(status), let env = try? decoder.decode(OcsEnvelope<LinkChatMessage>.self, from: data) {
+            created = env.ocs.data
+            if created != nil {
+                CallDebugLog.log("LinkOcsApi", "sendMessage \(token) -> created message id=\(created!.id)")
+            }
+        }
+        return SendResult(httpCode: status, ok: (200..<300).contains(status), created: created)
     }
 
     /// Talk-Standard: Read-Marker für den Raum setzen (POST chat/{token}/read).
@@ -630,7 +643,15 @@ actor LinkOcsApi {
             do {
                 let (data, response) = try await used.data(for: req)
                 guard let http = response as? HTTPURLResponse else { return nil }
-                if http.statusCode == Self.notModified { return nil }
+                if http.statusCode == Self.notModified {
+                    // Run 15.09.: 304 beim Lang-Poll heißt "Timeout ohne
+                    // neue Nachrichten" - ein ERFOLG, kein Fehler. Als
+                    // leerer Body zurückgeben (decodeList -> []), damit
+                    // der Poll keinen Backoff fährt. Bei der Historie
+                    // (longPoll=false) bleibt es beim nil-Fehlerpfad.
+                    if longPoll { return "" }
+                    return nil
+                }
                 guard (200..<300).contains(http.statusCode) else {
                     if attempt + 1 < maxAttempts, Self.isTransient(status: http.statusCode) {
                         try? await Task.sleep(nanoseconds: Self.retryDelay(attempt))

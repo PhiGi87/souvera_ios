@@ -642,6 +642,12 @@ final class LinkViewModel: ObservableObject {
                 return false
             }
         }
+        // currentRoom SOFORT aktualisieren (Run 15.09.): der Header-Button
+        // und das Settings-Sheet sonst erst nach dem naechsten Listen-
+        // Reload - der Tester sah den Toggle "nicht aktiv".
+        if currentRoom?.token == token {
+            currentRoom?.lobbyState = enabled ? 1 : 0
+        }
         loadConversations()
         return true
     }
@@ -692,7 +698,12 @@ final class LinkViewModel: ObservableObject {
     /// Signatur der Konversationsliste (Redundanz-Guard gegen identische
     /// SwiftUI-Updates, die List-Diff-Crashes auslösen können).
     private func conversationSignature(_ list: [LinkConversation]) -> String {
-        list.map { "\($0.token):\($0.unreadMessages):\(Int($0.lastActivity)):\($0.lastMessage?.id ?? 0)" }
+        // lobbyState/participantType in der Signatur (Run 15.09.): ohne
+        // sie wurde der neue Listenstand nach einem Lobby-Toggle als
+        // "unverändert" verworfen - der Header-Button erschien nie und
+        // das Settings-Sheet sprang zurück, obwohl der Server lobbyState=1
+        // bestätigt hatte.
+        list.map { "\($0.token):\($0.unreadMessages):\(Int($0.lastActivity)):\($0.lastMessage?.id ?? 0):\($0.lobbyState):\($0.participantType)" }
             .joined(separator: ",")
     }
     private var conversationsSignature = ""
@@ -1342,15 +1353,42 @@ final class LinkViewModel: ObservableObject {
                     return
                 }
                 await MainActor.run {
-                    // 2. Haken: Server hat angenommen. Die Zeile bleibt
-                    // bestehen, bis die echte Nachricht per Poll eintrifft
-                    // (Match in pollNewMessages) - kein Flackern.
+                    // Run 15.09.: der Server liefert im 201-Body die echte
+                    // Nachricht - DIREKT einfuegen und die Pending-Zeile
+                    // entfernen. Warten aufs Poll-Echo bedeutete: die
+                    // Nachricht erschien erst nach Chat-Wechsel, wenn der
+                    // Lang-Poll zauderte oder 304te.
+                    if let created = result.created, created.token == pending.token {
+                        self.insertOwnEcho(created)
+                        self.pendingMessages.removeAll { $0.id == pending.id }
+                        self.persistPendingMessages()
+                        CallDebugLog.log("LinkVM", "flush: inserted server message id=\(created.id), pending removed")
+                        return
+                    }
+                    // Fallback (400-Quirk ohne Body): 2. Haken, Echo per
+                    // Poll raeumt die Zeile ab.
                     if let idx = self.pendingMessages.firstIndex(where: { $0.id == pending.id }) {
                         self.pendingMessages[idx].state = .sent
                         self.persistPendingMessages()
                     }
                 }
             }
+        }
+    }
+
+    /// Eigene Nachricht aus der SendMessage-Response in die Liste mergen
+    /// (server-truth statt Echo-Warten, Run 15.09.).
+    @MainActor
+    private func insertOwnEcho(_ message: LinkChatMessage) {
+        guard case let .chat(token, _) = route, token == message.token else { return }
+        guard case let .success(current0) = messages else { return }
+        var current = current0
+        guard !current.contains(where: { $0.id == message.id }) else { return }
+        current.append(message)
+        current.sort { $0.timestamp < $1.timestamp }
+        messages = .success(current)
+        if message.id > lastMessageId {
+            lastMessageId = message.id
         }
     }
 
