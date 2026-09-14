@@ -1085,7 +1085,7 @@ private struct MailMessageListView: View {
     /// in der Einzelansicht erscheinen.
     var toolbarActive: Bool = true
     @Binding var editing: Bool
-    @Binding var selected: Set<String>()
+    @Binding var selected: Set<String>
     @Binding var moveTarget: ([MailMessage], [Mailbox])?
     @State private var showScrollTop = false
     @State private var scrollOffset: CGFloat = 0
