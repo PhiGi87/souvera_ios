@@ -81,6 +81,7 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
 
     /// Hello ueber den WS (HPB-Pfad).
     private func sendHello(ticket: String) {
+        guard let account else { return }
         let authUrl = "\(account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/ocs/v2.php/apps/spreed/api/v3/signaling/\(token)"
         let hello: [String: Any] = [
             "type": "hello",
@@ -100,7 +101,7 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
     /// (usersInRoom/join) mit den Backend-User-Daten.
     private func startInternalPolling() {
         internalPollTask?.cancel()
-        let accountValue = account
+        guard let accountValue = account else { return }
         let tokenValue = token
         internalPollTask = Task { [weak self] in
             let base = accountValue.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
