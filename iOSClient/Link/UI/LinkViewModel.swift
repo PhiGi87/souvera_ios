@@ -244,6 +244,7 @@ final class LinkViewModel: ObservableObject {
                 return
             }
             currentUserId = account.username
+            loadEditedIds()
             api = LinkOcsApi(account: account)
         }
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
@@ -1271,6 +1272,14 @@ final class LinkViewModel: ObservableObject {
                         deletedIds.insert(parentId)
                     }
                 }
+                // Run 15.09.: Fremd-Edits erkennen — gleiche ID mit
+                // anderem Text = bearbeitet (Marker "bearbeitet").
+                let currentById = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+                for message in fresh where currentById[message.id] != nil {
+                    if currentById[message.id]?.message != message.message {
+                        markEdited(message.id)
+                    }
+                }
                 let deduped = mergeServerFirst(current: current, fresh: fresh)
                     .filter { !$0.isHiddenSystemMessage }
                     .filter { !deletedIds.contains($0.id) }
@@ -1607,14 +1616,38 @@ final class LinkViewModel: ObservableObject {
         }
     }
 
-    func editMessage(_ message: LinkChatMessage, text: String) {
+    /// Bearbeitete Nachrichten (Run 15.09.): Marker für "bearbeitet"
+    /// unter der Bubble — eigene Edits per Erfolg, Fremd-Edits per
+    /// Text-Änderung im Poll. Persistiert je Account (UserDefaults).
+    @Published var editedIds: Set<Int64> = []
+
+    private var editedIdsKey: String { "link_edited_ids_\(currentUserId)" }
+
+    func markEdited(_ id: Int64) {
+        editedIds.insert(id)
+        UserDefaults.standard.set(Array(editedIds), forKey: editedIdsKey)
+    }
+
+    func loadEditedIds() {
+        editedIds = Set(UserDefaults.standard.array(forKey: editedIdsKey)?
+            .compactMap { $0 as? Int64 } ?? [])
+    }
+
+    /// Bearbeiten abschließen (Run 15.09.): API-Edit, Marker setzen,
+    /// Verlauf frisch laden — die Nachricht bleibt an Position/Zeitstempel.
+    func commitEdit(_ message: LinkChatMessage, text: String) {
         guard let api else { return }
         guard case let .chat(token, _) = route else { return }
         Task {
             if await api.editMessage(token: token, messageId: message.id, text: text) {
+                markEdited(message.id)
                 reloadMessages(token: token)
             }
         }
+    }
+
+    func editMessage(_ message: LinkChatMessage, text: String) {
+        commitEdit(message, text: text)
     }
 
     /// Removes messages locally (own deletions and `message_deleted`

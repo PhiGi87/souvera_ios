@@ -1230,3 +1230,7 @@ _mail_sort_flagged_ = "Flagged first";
 "_link_participant_owner_" = "Owner";
 "_link_participant_member_" = "Member";
 "_calendar_search_hint_" = "Search events";
+"_link_message_edited_" = "edited";
+"_mail_unavailable_" = "Your Souvera is currently unavailable.";
+"_mail_unavailable_maintenance_" = "Your Souvera is currently under maintenance.";
+"_mail_not_found_" = "This message is no longer available.";

@@ -39,6 +39,19 @@ final class SouveraMaintenanceMonitor: ObservableObject {
         await check()
     }
 
+    /// Run 15.09.: Sofort-Probe für Fehlerpfade — unterscheidet
+    /// "nicht erreichbar" von "in Wartung" (status.php).
+    func probeNow() async -> (reachable: Bool, maintenance: Bool) {
+        guard let account = NCManageDatabase.shared.getActiveTableAccount() else { return (false, false) }
+        let result = await NextcloudKit.shared.getServerStatusAsync(serverUrl: account.urlBase) { _ in }
+        switch result.result {
+        case .success(let serverInfo):
+            return (true, serverInfo.maintenance)
+        case .failure:
+            return (false, false)
+        }
+    }
+
     private func check() async {
         guard let account = NCManageDatabase.shared.getActiveTableAccount() else { return }
         let result = await NextcloudKit.shared.getServerStatusAsync(serverUrl: account.urlBase) { _ in }

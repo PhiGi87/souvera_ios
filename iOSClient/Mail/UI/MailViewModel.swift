@@ -1235,8 +1235,13 @@ final class MailViewModel: ObservableObject {
         guard let api = jmapApi else { return }
         let accountGen = self.generation
         // Run-Diagnose "Mail-Cache nach Neustart": Sync-Start loggen, um
-        // Wiederhol-Trigger im Log exakt zählen zu können.
-        JmapLog.write("sync \(mailbox.name) started (forceFullRefresh=\(forceFullRefresh))")
+        // Wiederhol-Trigger im Log exakt zählen zu können. Queued-Syncs
+        // kenntlich machen (die laufen ja NICHT parallel).
+        if mailboxSyncInFlight {
+            JmapLog.write("sync \(mailbox.name) QUEUED (forceFullRefresh=\(forceFullRefresh))")
+        } else {
+            JmapLog.write("sync \(mailbox.name) started (forceFullRefresh=\(forceFullRefresh))")
+        }
         // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync dieser
         // Mailbox, wird der neue Wunsch nur vorgemerkt und danach EINMAL
         // nachgezogen (keine parallelen Publishes, die sich überschreiben).
@@ -1400,6 +1405,7 @@ final class MailViewModel: ObservableObject {
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) new=\(newCount) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
+                JmapLog.write("publish \(mailbox.name): \(emails.count) mails (incremental)")
                     return
                 } catch {
                     // Incremental path failed - fall through to a full refresh.
@@ -1517,6 +1523,7 @@ final class MailViewModel: ObservableObject {
                 let collectedFiltered = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
+                JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                 if !pageHasMore {
                     break
@@ -2130,7 +2137,9 @@ final class MailViewModel: ObservableObject {
             body = .success(b)
             // P62e: Read-Marking läuft bereits zentral in openMessage.
         case let .failure(m):
-            body = .error(errorText(m))
+            // Run 15.09.: freundlicher Fehlertext statt Technik-Block.
+            _ = m
+            body = .error(NSLocalizedString("_mail_unavailable_", comment: ""))
         }
     }
 
@@ -2146,7 +2155,17 @@ final class MailViewModel: ObservableObject {
             if case .success = body {
                 return // Cache-Stand bleibt sichtbar
             }
-            body = .error(errorText("Message not found"))
+            // Run 15.09.: freundliche Fehlertexte statt Technik-Block -
+            // Wartung (status.php) / nicht erreichbar / Nachricht weg.
+            await SouveraMaintenanceMonitor.shared.checkNow()
+            let probe = await SouveraMaintenanceMonitor.shared.probeNow()
+            if probe.maintenance {
+                body = .error(NSLocalizedString("_mail_unavailable_maintenance_", comment: ""))
+            } else if !probe.reachable {
+                body = .error(NSLocalizedString("_mail_unavailable_", comment: ""))
+            } else {
+                body = .error(NSLocalizedString("_mail_not_found_", comment: ""))
+            }
             return
         }
         var mapped = JmapMapper.mapBody(json: json)

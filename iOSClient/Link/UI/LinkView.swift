@@ -1637,30 +1637,34 @@ struct LinkChatView: View {
                 }
                 .background(Color(.secondarySystemBackground))
             }
+
+            // Run 15.09.: Bearbeiten-Chip (ersetzt die alte Speichern/
+            // Abbrechen-Leiste) - der Composer-Text wird per Senden
+            // gespeichert (commitEdit).
             if editingMessage != nil {
-                HStack {
-                    Text(NSLocalizedString("_link_edit_message_", comment: ""))
+                HStack(spacing: 8) {
+                    Image(systemName: "pencil")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Text(NSLocalizedString("_link_edit_message_", comment: ""))
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.secondary)
                     Spacer()
-                    Button(NSLocalizedString("_cancel_", comment: "")) {
+                    Button {
                         editingMessage = nil
                         draft = ""
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                     }
-                    .font(.caption)
-                    Button(NSLocalizedString("_contact_save_", comment: "")) {
-                        if let message = editingMessage {
-                            viewModel.editMessage(message, text: draft)
-                            editingMessage = nil
-                            draft = ""
-                        }
-                    }
-                    .font(.caption).bold()
+                    .buttonStyle(.plain)
                 }
                 .padding(.horizontal, 12)
                 .padding(.top, 6)
-                Divider()
             }
+
             if let replyingTo {
                 HStack(spacing: 8) {
                     Image(systemName: "arrowshape.turn.up.left")
@@ -1739,12 +1743,19 @@ struct LinkChatView: View {
                     // Pille verkürzt sich animiert, Knopf blendet ein/aus.
                     Button {
                         let text = draft
-                        let replyTarget = replyingTo?.id
+                        if let editing = editingMessage {
+                            // Run 15.09.: Bearbeiten - die NACHRICHT wird an
+                            // Position/Zeitstempel geändert, nicht neu gesendet.
+                            viewModel.commitEdit(editing, text: text)
+                        } else {
+                            let replyTarget = replyingTo?.id
+                            // P68n: Nach dem Senden automatisch ans Ende scrollen.
+                            scrollToNewestPending = true
+                            viewModel.send(text: text, replyTo: replyTarget)
+                        }
                         draft = ""
+                        editingMessage = nil
                         replyingTo = nil
-                        // P68n: Nach dem Senden automatisch ans Ende scrollen.
-                        scrollToNewestPending = true
-                        viewModel.send(text: text, replyTo: replyTarget)
                     } label: {
                         Image(systemName: "paperplane.fill")
                             .font(.system(size: 15, weight: .semibold))
@@ -1978,6 +1989,14 @@ private struct LinkMessageRow: View {
                     if !isOwn { Spacer(minLength: 40) }
                 }
                 // Mit Reaktionen hängen die Pills über die Unterkante - der
+                // Run 15.09.: "bearbeitet" klein/zart unter der Bubble
+                // (eigene Edits per Erfolg, Fremd-Edits per Text-Änderung).
+                if viewModel.editedIds.contains(message.id), !message.isHiddenSystemMessage {
+                    Text(NSLocalizedString("_link_message_edited_", comment: ""))
+                        .font(.system(size: 10))
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
+                }
                 // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
                 .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
                 .contextMenu {
