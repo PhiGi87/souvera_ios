@@ -37,6 +37,10 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
     /// SHA-256-Hash der E-Mail als actorId).
     var onUserInfoChanged: (([String: LinkSignalingUserInfo]) -> Void)?
     private var userInfoBySessionId: [String: LinkSignalingUserInfo] = [:]
+    /// Interner Signaling-Long-Poll (Run 15.09.): ohne HPB liefert
+    /// `signaling/settings` keinen WS-Server - dann zieht der OCS-Pull
+    /// die Teilnehmer-/User-Nachrichten (usersInRoom/join).
+    private var internalPollTask: Task<Void, Never>?
 
     // MARK: - Verbindung
 
@@ -50,9 +54,19 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
         sessionId = UUID().uuidString
         ownUserId = settings["userId"] as? String ?? ""
 
-        guard let server = settings["server"] as? String,
-              let ticket = settings["ticket"] as? String,
-              !server.isEmpty else { return }
+        guard let ticket = settings["ticket"] as? String, !ticket.isEmpty else { return }
+        if let server = settings["server"] as? String, !server.isEmpty {
+            startWebSocket(server: server)
+        } else {
+            // Kein HPB: interner Signaling-Long-Poll (OCS-Auth).
+            startInternalPolling()
+            return
+        }
+        receiveLoop()
+        sendHello(ticket: ticket)
+    }
+
+    private func startWebSocket(server: String) {
         let host = server
             .replacingOccurrences(of: "https://", with: "")
             .replacingOccurrences(of: "http://", with: "")
@@ -63,8 +77,10 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
         session = s
         webSocket = s.webSocketTask(with: url)
         webSocket?.resume()
-        receiveLoop()
+    }
 
+    /// Hello ueber den WS (HPB-Pfad).
+    private func sendHello(ticket: String) {
         let authUrl = "\(account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")))/ocs/v2.php/apps/spreed/api/v3/signaling/\(token)"
         let hello: [String: Any] = [
             "type": "hello",
@@ -79,7 +95,109 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
         send(json: hello)
     }
 
+    /// Interner Signaling-Long-Poll (ohne HPB): POST /signaling/{token}
+    /// mit messages=[] - die Antwort enthaelt JSON-Nachrichten
+    /// (usersInRoom/join) mit den Backend-User-Daten.
+    private func startInternalPolling() {
+        internalPollTask?.cancel()
+        let accountValue = account
+        let tokenValue = token
+        internalPollTask = Task { [weak self] in
+            let base = accountValue.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            guard let url = URL(string: "\(base)/ocs/v2.php/apps/spreed/api/v3/signaling/\(tokenValue)") else { return }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue(accountValue.basicAuthHeader, forHTTPHeaderField: "Authorization")
+            req.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            while !Task.isCancelled {
+                req.httpBody = "messages=[]".data(using: .utf8)
+                if let (data, response) = try? await URLSession.shared.data(for: req),
+                   let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) {
+                    await self?.parseInternalSignaling(data: data)
+                    // Bei sofort-leeren Antworten nicht schleifen.
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                } else {
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                }
+            }
+        }
+    }
+
+    /// Interne Signaling-Nachrichten: ocs.data = [ { "message": "<json>" } ]
+    /// (oder direkt Objekte) - sessions extrahieren und melden.
+    private func parseInternalSignaling(data: Data) {
+        guard let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = env["ocs"] as? [String: Any],
+              let payload = ocs["data"] as? [Any] else { return }
+        var sessionObjects: [[String: Any]] = []
+        var hadMessages = false
+        for entry in payload {
+            let messageDict: [String: Any]?
+            if let dict = entry as? [String: Any] {
+                if let messageString = dict["message"] as? String,
+                   let inner = try? JSONSerialization.jsonObject(with: Data(messageString.utf8)) as? [String: Any] {
+                    messageDict = inner
+                } else {
+                    messageDict = dict
+                }
+            } else {
+                messageDict = nil
+            }
+            guard let msg = messageDict else { continue }
+            hadMessages = true
+            let type = msg["type"] as? String ?? ""
+            if type == "usersInRoom", let users = msg["usersInRoom"] as? [[String: Any]] {
+                sessionObjects.append(contentsOf: users)
+            }
+            if type == "join", let join = msg["join"] as? [[String: Any]] {
+                sessionObjects.append(contentsOf: join)
+            }
+            if type == "participantsUpdate", let update = msg["update"] as? [[String: Any]] {
+                sessionObjects.append(contentsOf: update)
+            }
+        }
+        guard hadMessages, !sessionObjects.isEmpty else { return }
+        let extracted = extractSessionObjects(from: sessionObjects)
+        applyUserInfo(extracted)
+        onParticipantsChanged?()
+    }
+
+    /// Session-Objekte (WS oder intern) -> User-Infos.
+    private func extractSessionObjects(from sessionObjects: [[String: Any]]) -> [String: LinkSignalingUserInfo] {
+        var result: [String: LinkSignalingUserInfo] = [:]
+        for session in sessionObjects {
+            let key = session["roomsessionid"] as? String
+                ?? session["sessionId"] as? String
+                ?? session["sessionid"] as? String
+                ?? ""
+            guard !key.isEmpty else { continue }
+            let user = session["user"] as? [String: Any] ?? session
+            let name = (user["displayName"] as? String)
+                ?? (user["displayname"] as? String)
+            let email = (user["email"] as? String)
+                ?? (user["emailAddress"] as? String)
+                ?? (user["emailaddress"] as? String)
+            result[key] = LinkSignalingUserInfo(sessionId: key, displayName: name, email: email)
+        }
+        return result
+    }
+
+    private func applyUserInfo(_ infos: [String: LinkSignalingUserInfo]) {
+        for (key, info) in infos {
+            userInfoBySessionId[key] = info
+            if let name = info.displayName, !name.isEmpty {
+                CallDebugLog.log("Signaling", "user info session=\(key.prefix(10))... name=\(name) email=\(info.email ?? "-")")
+            }
+        }
+        if !infos.isEmpty {
+            onUserInfoChanged?(userInfoBySessionId)
+        }
+    }
+
     func disconnect() {
+        internalPollTask?.cancel()
+        internalPollTask = nil
         webSocket?.cancel(with: .normalClosure, reason: nil)
         webSocket = nil
         session = nil
@@ -211,31 +329,10 @@ final class LinkSignalingClient: NSObject, URLSessionWebSocketDelegate {
            let text = String(data: data, encoding: .utf8) {
             CallDebugLog.log("Signaling", "session object (\(sessionObjects.count)): \(String(text.prefix(400)))")
         }
-        for session in sessionObjects {
-            // Schluessel: roomsessionid (Nextcloud-Talk-Session, deckt
-            // sich mit sessionIds aus der OCS-Teilnehmerliste).
-            let key = session["roomsessionid"] as? String
-                ?? session["sessionId"] as? String
-                ?? session["sessionid"] as? String
-                ?? ""
-            guard !key.isEmpty else { continue }
-            let user = session["user"] as? [String: Any] ?? [:]
-            let name = (user["displayName"] as? String)
-                ?? (user["displayname"] as? String)
-            let email = (user["email"] as? String)
-                ?? (user["emailAddress"] as? String)
-                ?? (user["emailaddress"] as? String)
-            userInfoBySessionId[key] = LinkSignalingUserInfo(
-                sessionId: key,
-                displayName: name,
-                email: email
-            )
-            if let name, !name.isEmpty {
-                CallDebugLog.log("Signaling", "user info session=\(key.prefix(10))... name=\(name) email=\(email ?? "-")")
-            }
-        }
-        onUserInfoChanged?(userInfoBySessionId)
+        applyUserInfo(extractSessionObjects(from: sessionObjects))
     }
+
+
 
     private func publishTypers() {
         let names = activeTypers.sorted { $0.value < $1.value }.map(\.key)

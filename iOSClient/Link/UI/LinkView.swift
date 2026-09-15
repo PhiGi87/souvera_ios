@@ -368,7 +368,7 @@ struct LinkView: View {
                         } label: {
                             Image(systemName: "gearshape")
                                 .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(Color.primary)
+                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
                                 .frame(width: 44, height: 44)
                                 .modifier(SouveraHeaderGlass(shape: Circle()))
                         }
@@ -2312,33 +2312,41 @@ struct LinkParticipantsSheet: View {
                         Text(NSLocalizedString("_link_no_participants_", comment: ""))
                             .foregroundStyle(.secondary)
                     } else {
-                        ForEach(viewModel.participants.filter { $0.actorType != "deleted_users" }) { participant in
-                            HStack(spacing: 10) {
-                                Image(systemName: participantIcon(participant.actorType))
-                                    .foregroundStyle(.secondary)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(participant.displayName).font(.subheadline)
-                                    Text(roleLabel(participant))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                // Status-Pill am Teilnehmer (Run 15.09.).
-                                if participant.actorType == "users" {
-                                    LinkPresence.statusPill(
-                                        for: participant.status
-                                            ?? viewModel.userStatuses[participant.actorId]
-                                            ?? "offline",
-                                        size: 13
-                                    )
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                if canRemove(participant) {
-                                    Button(role: .destructive) {
+                        // Run 15.09.: Teilnehmer ohne anzeigbaren Namen
+                        // (E-Mail-Platzhalter) ausblenden - sonst leere
+                        // "Mitglied"-Zeilen.
+                        ForEach(viewModel.participants.filter {
+                            $0.actorType != "deleted_users"
+                                && !$0.displayName.trimmingCharacters(in: .whitespaces).isEmpty
+                        }) { participant in
+                            SouveraSwipeActionRow(
+                                role: .destructive,
+                                icon: "person.crop.circle.badge.minus",
+                                label: NSLocalizedString("_link_participant_remove_", comment: ""),
+                                onTrigger: {
+                                    if canRemove(participant) {
                                         removeCandidate = participant
-                                    } label: {
-                                        Label(NSLocalizedString("_link_participant_remove_", comment: ""), systemImage: "person.crop.circle.badge.minus")
+                                    }
+                                }
+                            ) {
+                                HStack(spacing: 10) {
+                                    Image(systemName: participantIcon(participant.actorType))
+                                        .foregroundStyle(.secondary)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(participant.displayName).font(.subheadline)
+                                        Text(roleLabel(participant))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    // Status-Pill am Teilnehmer (Run 15.09.).
+                                    if participant.actorType == "users" {
+                                        LinkPresence.statusPill(
+                                            for: participant.status
+                                                ?? viewModel.userStatuses[participant.actorId]
+                                                ?? "offline",
+                                            size: 13
+                                        )
                                     }
                                 }
                             }
@@ -2791,24 +2799,36 @@ private struct LinkLobbyManagementView: View {
     @State private var refreshTask: Task<Void, Never>?
     @State private var workingAttendee: Int?
 
-    /// Interne Teilnehmer: Owner/Moderator/User (eingeladen/zugeordnet).
-    private static let internalTypes: Set<Int> = [1, 2, 3]
+    /// Klassifizierung nach Talk-Konstanten (Run 15.09., verified gegen
+    /// nextcloud/spreed constants.md): participantType 1 Owner, 2 Moderator,
+    /// 3 User, 4 Guest, 5 User following a public link, 6 Guest with
+    /// moderator permissions.
+    private static func isModerator(_ p: LinkParticipant) -> Bool {
+        [1, 2, 6].contains(p.participantType)
+    }
+
+    /// Intern: eingeladene Konten der Instanz (Owner/Moderator/User) und
+    /// registrierte User, die per Link beigetreten sind (type 5).
+    private static func isInternal(_ p: LinkParticipant) -> Bool {
+        [1, 2, 3].contains(p.participantType)
+            || (p.participantType == 5 && p.actorType == "users")
+    }
 
     private var internalParticipants: [LinkParticipant] {
-        viewModel.participants.filter { Self.internalTypes.contains($0.participantType) }
+        viewModel.participants.filter { Self.isInternal($0) || Self.isModerator($0) }
     }
 
     /// Zugelassene externe Teilnehmer (nicht mehr wartend).
     private var admittedExternals: [LinkParticipant] {
         viewModel.participants.filter {
-            !Self.internalTypes.contains($0.participantType) && $0.inCall != 0
+            !Self.isInternal($0) && !Self.isModerator($0) && $0.inCall != 0
         }
     }
 
-    /// Wartende externe Lobby-Teilnehmer.
+    /// Wartende externe Lobby-Teilnehmer - NIE Moderatoren oder interne.
     private var waitingExternals: [LinkParticipant] {
         viewModel.participants.filter {
-            !Self.internalTypes.contains($0.participantType) && $0.inCall == 0
+            !Self.isInternal($0) && !Self.isModerator($0) && $0.inCall == 0
         }
     }
 
@@ -2829,7 +2849,16 @@ private struct LinkLobbyManagementView: View {
                 if !waitingExternals.isEmpty {
                     Section(NSLocalizedString("_lobby_section_waiting_", comment: "")) {
                         ForEach(waitingExternals) { participant in
-                            participantRow(participant, waiting: true)
+                            SouveraSwipeActionRow(
+                                role: .destructive,
+                                icon: "person.crop.circle.badge.minus",
+                                label: NSLocalizedString("_link_participant_remove_", comment: ""),
+                                onTrigger: {
+                                    removeParticipant(participant)
+                                }
+                            ) {
+                                participantRow(participant, waiting: true)
+                            }
                         }
                         Button {
                             Task { await viewModel.setLobbyEnabled(false, token: room.token) }
@@ -2922,31 +2951,18 @@ private struct LinkLobbyManagementView: View {
             Spacer()
             if workingAttendee == participant.attendeeId {
                 ProgressView()
-            } else {
-                HStack(spacing: 12) {
-                    if waiting {
-                        Button {
-                            admit(participant)
-                        } label: {
-                            // Gueltiges SF-Symbol (person.badge.checkmark
-                            // existiert nicht - der Button war unsichtbar).
-                            Image(systemName: "person.crop.circle.badge.checkmark")
-                                .foregroundStyle(.green)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_lobby_admit_one_", comment: ""))
-                    }
-                    // Entfernen nur fuer externe Teilnehmer (guests/emails)
-                    // - interne Nutzer sind nicht entfernbar (Run 15.09.).
-                    if isExternal(participant) {
-                        Button {
-                            removeParticipant(participant)
-                        } label: {
-                            Image(systemName: "person.crop.circle.badge.minus")
-                                .foregroundStyle(.red)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_link_remove_participant_", comment: ""))
-                    }
+            } else if waiting {
+                // Run 15.09.: nur der gruene "Zulassen"-Button - Entfernen
+                // kommt als Swipe-Geste (volles Design).
+                Button {
+                    admit(participant)
+                } label: {
+                    // Gueltiges SF-Symbol (person.badge.checkmark
+                    // existiert nicht - der Button war unsichtbar).
+                    Image(systemName: "person.crop.circle.badge.checkmark")
+                        .foregroundStyle(.green)
                 }
+                .accessibilityLabel(NSLocalizedString("_lobby_admit_one_", comment: ""))
             }
         }
     }

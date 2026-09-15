@@ -51,6 +51,9 @@ class NCFilesNavigationController: NCMainNavigationController {
         navigationBar.compactScrollEdgeAppearance = appearance
         navigationBar.isTranslucent = false
         navigationBar.tintColor = .white
+        // 1:1 mit dem Mehr-Menue: helles Glas mit dunklen Icons, auch im
+        // Dark Mode (Run 15.09.).
+        navigationBar.overrideUserInterfaceStyle = .light
     }
 
     // MARK: - Right

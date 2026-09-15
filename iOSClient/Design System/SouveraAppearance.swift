@@ -88,11 +88,17 @@ struct SouveraHeaderButton: View {
     var accessibilityLabel: String = ""
     let action: () -> Void
 
+    /// Fest dunkel - der Header erzwingt das Light-Schema (1:1 mit
+    /// Mehr-Menue, das overrideUserInterfaceStyle = .light setzt).
+    private var resolvedIconColor: Color {
+        iconColor ?? Color(red: 0.1, green: 0.1, blue: 0.1)
+    }
+
     var body: some View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
-                .foregroundStyle(iconColor ?? Color.primary)
+                .foregroundStyle(resolvedIconColor)
                 .frame(width: 44, height: 44)
                 .contentShape(Circle())
                 .modifier(SouveraHeaderGlass(shape: Circle()))
@@ -110,9 +116,12 @@ struct SouveraHeaderPill<Content: View>: View {
 
     var body: some View {
         if #available(iOS 26.0, *) {
-            GlassEffectContainer(spacing: 8) {
-                HStack(spacing: 8) { content }
-            }
+            // EINE gemeinsame Glass-Capsule fuer die ganze Gruppe - so
+            // entstehen die zusammengefassten Doppel-Pills wie in
+            // Dateien/Mehr (Einzel-Kreise verschmelzen im Container nicht).
+            HStack(spacing: 2) { content }
+                .padding(.horizontal, 4)
+                .glassEffect(.regular.interactive(), in: Capsule())
         } else {
             HStack(spacing: 2) { content }
                 .padding(.horizontal, 6)
@@ -172,11 +181,116 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity)
+        .environment(\.colorScheme, .light)
         .background(
+            // Wie der Mehr-Verlauf: oben hell, unten dunkel
+            // (Run 15.09., Feedback: Richtung war falsch herum).
             LinearGradient(colors: SouveraAppearance.gradientColors,
-                           startPoint: .bottom, endPoint: .top)
+                           startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(edges: .top)
         )
+    }
+}
+
+// MARK: - SouveraSwipeActionRow (Run 15.09.)
+//
+// Eigene Swipe-Geste statt List-swipeActions: volle Zeilenhöhe, flache
+// Farffläche, Icon + Text INNERHALB der Fläche (iOS 26 rendert die
+// System-Variante als Oval mit Text darunter). Die Farbe folgt der
+// Funktion - Farbschema angelehnt an Apples Mail-App (blau = Aktionen
+// wie Verschieben, grün = Annahme/Antworten, orange = Flaggen,
+// rot = destruktiv, grau = neutral).
+
+import SwiftUI
+
+enum SouveraSwipeRole {
+    case destructive   // rot - Entfernen/Löschen
+    case positive      // grün - Zulassen/Accept
+    case action        // blau - Verschieben/Weiterleiten
+    case flag          // orange - Flaggen/Später
+    case neutral       // grau - sonstiges
+
+    var color: Color {
+        switch self {
+        case .destructive: return Color(red: 0.86, green: 0.16, blue: 0.16)   // #DB2929
+        case .positive: return Color(red: 0.18, green: 0.72, blue: 0.27)     // #2EB845
+        case .action: return Color(red: 0.20, green: 0.48, blue: 0.94)       // #337AEF
+        case .flag: return Color(red: 0.96, green: 0.65, blue: 0.14)         // #F5A623
+        case .neutral: return Color(red: 0.55, green: 0.57, blue: 0.60)      // grau
+        }
+    }
+}
+
+/// Zeile mit Swipe-Geste: der Inhalt bleibt fix, beim Ziehen nach links
+/// deckt eine farbige Fläche (volle Zeilenhöhe) die Zeile ab; Icon + Text
+/// stehen IN der Fläche. Überschreiten der Schwelle löst `onTrigger` aus
+/// und die Zeile federt zurück.
+struct SouveraSwipeActionRow<Content: View>: View {
+    let role: SouveraSwipeRole
+    let icon: String
+    let label: String
+    let onTrigger: () -> Void
+    @ViewBuilder var content: Content
+
+    @State private var offsetX: CGFloat = 0
+    @State private var triggered = false
+
+    private let revealWidth: CGFloat = 132
+    private let triggerThreshold: CGFloat = 100
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // Farbfläche in voller Zeilenhöhe.
+            HStack(spacing: 8) {
+                Spacer(minLength: 0)
+                VStack(spacing: 3) {
+                    Image(systemName: icon)
+                        .font(.system(size: 17, weight: .semibold))
+                    Text(label)
+                        .font(.system(size: 11, weight: .semibold))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(.white)
+                .padding(.trailing, 18)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(role.color)
+            .opacity(offsetX > 0 ? 1 : 0)
+
+            content
+                .background(Color(.systemBackground))
+                .offset(x: offsetX)
+                .simultaneousGesture(
+                    DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                        .onChanged { value in
+                            guard value.translation.width < 0 else {
+                                offsetX = 0
+                                return
+                            }
+                            offsetX = max(value.translation.width, -revealWidth - 40)
+                        }
+                        .onEnded { value in
+                            if value.translation.width < -triggerThreshold, !triggered {
+                                triggered = true
+                                onTrigger()
+                                // Kurzes Feedback, dann zurückfedern.
+                                Task { @MainActor in
+                                    try? await Task.sleep(nanoseconds: 350_000_000)
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                        offsetX = 0
+                                    }
+                                    triggered = false
+                                }
+                            } else {
+                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                    offsetX = 0
+                                }
+                            }
+                        }
+                )
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
