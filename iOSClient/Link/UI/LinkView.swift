@@ -1988,16 +1988,9 @@ private struct LinkMessageRow: View {
                         }
                     if !isOwn { Spacer(minLength: 40) }
                 }
-                // Mit Reaktionen hängen die Pills über die Unterkante - der
-                // Run 15.09.: "bearbeitet" klein/zart unter der Bubble
-                // (eigene Edits per Erfolg, Fremd-Edits per Text-Änderung).
-                if viewModel.editedIds.contains(message.id), !message.isHiddenSystemMessage {
-                    Text(NSLocalizedString("_link_message_edited_", comment: ""))
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
-                }
-                // Zeitstempel der nächsten Nachricht braucht dann mehr Abstand.
+                // Mit Reaktionen hängen die Pills über die Unterkante -
+                // der Zeitstempel der nächsten Nachricht braucht dann mehr
+                // Abstand (Run-Feedback 13.09.).
                 .padding(.bottom, message.reactions.isEmpty ? 0 : 10)
                 .contextMenu {
                     Button {
@@ -2071,6 +2064,14 @@ private struct LinkMessageRow: View {
                 }
                 .tint(.blue)
             }
+        }
+        // Run 15.09.: "bearbeitet" klein/zart unter der Bubble (eigene
+        // Edits per Erfolg, Fremd-Edits per Text-Änderung im Poll).
+        if viewModel.editedIds.contains(message.id), !message.isHiddenSystemMessage {
+            Text(NSLocalizedString("_link_message_edited_", comment: ""))
+                .font(.system(size: 10))
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: isOwn ? .trailing : .leading)
         }
     }
 }

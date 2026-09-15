@@ -315,10 +315,11 @@ final class CalendarViewModel: ObservableObject {
         // die Gesamtladezeit ist jetzt die langsamste Einzelquery statt
         // der Summe aller Kalender.
         let selectedCalendars = calendars.filter { selectedCalendarHrefs.contains($0.href) }
+        let calClient = client
         let results: [(String, [CalDavEventEntry])] = await withTaskGroup(of: (String, [CalDavEventEntry]).self) { group in
             for cal in selectedCalendars {
                 group.addTask {
-                    let fetched = await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
+                    let fetched = await calClient.fetchEvents(calendarHref: cal.href, start: start, end: end)
                     return (cal.href, fetched)
                 }
             }
