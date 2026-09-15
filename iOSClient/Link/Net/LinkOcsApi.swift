@@ -423,7 +423,7 @@ actor LinkOcsApi {
     /// Bearbeiten-Menü-Eintrag wird nur angezeigt, wenn der Server
     /// Nachrichten-Bearbeitung unterstützt.
     func supportsMessageEditing() async -> Bool {
-        guard let body = await get("\(base)/ocs/v2.php/cloud/capabilities"),
+        guard let body = await get("\(root)/ocs/v2.php/cloud/capabilities"),
               let data = body.data(using: .utf8),
               let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ocs = env["ocs"] as? [String: Any],
@@ -443,7 +443,10 @@ actor LinkOcsApi {
     /// von NCService gepflegt - der Header-Button blieb sonst solange
     /// stehen, bis man den Picker öffnete.
     func fetchOwnUserStatus() async -> String? {
-        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/user_status") else { return nil }
+        // Run 15.09.: root statt base — base enthält bereits
+        // /ocs/v2.php/apps/spreed, der alte Pfad war doppelt verschachtelt
+        // und schlug immer fehl (Status-Pille stale, kein Bearbeiten).
+        guard let body = await get("\(root)/ocs/v2.php/apps/user_status/api/v1/user_status") else { return nil }
         guard let data = body.data(using: .utf8),
               let env = try? decoder.decode(OcsEnvelope<LinkUserStatus>.self, from: data) else { return nil }
         let status = env.ocs.data?.status
@@ -452,7 +455,7 @@ actor LinkOcsApi {
     }
 
     func listUserStatuses() async -> (byId: [String: String], byName: [String: String]) {
-        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return ([:], [:]) }
+        guard let body = await get("\(root)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return ([:], [:]) }
         guard let data = body.data(using: .utf8),
               let env = try? decoder.decode(OcsEnvelope<[LinkUserStatus]>.self, from: data) else { return ([:], [:]) }
         var byId: [String: String] = [:]

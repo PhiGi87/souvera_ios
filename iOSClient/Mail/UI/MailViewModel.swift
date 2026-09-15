@@ -1297,7 +1297,7 @@ final class MailViewModel: ObservableObject {
                 do {
                     // Basis: der frische Roh-Spiegel (Speicherstand); der
                     // Cache-Snapshot nur als Fallback beim Erst-Eintritt.
-                    let baseRaw: [String: [String: Any]]
+                    var baseRaw: [String: [String: Any]]
                     if let mirror = rawMailboxEmails[cacheKey], !mirror.isEmpty {
                         baseRaw = mirror
                     } else if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
@@ -1310,6 +1310,12 @@ final class MailViewModel: ObservableObject {
                         )
                     } else {
                         baseRaw = [:]
+                    }
+                    // Defensive: Base ohne Fremd-Mailbox-Einträge (Run 15.09.
+                    // final — verschobene Mails kehren nicht zurück).
+                    baseRaw = baseRaw.filter { entry in
+                        guard let ids = entry.value["mailboxIds"] as? [String: Any] else { return true }
+                        return ids[jmapMailboxId] != nil
                     }
                     let changes = try await api.queryEmailChanges(accountId: accId, sinceState: state, inMailboxId: jmapMailboxId)
                     let removed = Set((changes["removed"] as? [String]) ?? [])
@@ -1423,12 +1429,20 @@ final class MailViewModel: ObservableObject {
             // überschreiben überlappende Einträge.
             var byId: [String: [String: Any]] = [:]
             // Basis: zuerst der frische Roh-Spiegel (Speicherstand), dann
-            // der Cache - verhindert, dass ein Voll-Refresh den gelesenen
-            // Stand mit einem aelteren Cache ueberschreibt (Run 15.09.).
+            // der Cache. Run 15.09. (final): Seed MIT
+            // Mailbox-Mitgliedschafts-Filter — Einträge, die inzwischen in
+            // einen anderen Ordner verschoben wurden (mailboxIds ohne
+            // diesen Ordner), fliegen VOR den per-Page-Publishes raus.
+            // Sonst flappt die Liste bei Löschen/Verschieben + gleichzeitig
+            // eingehender Mail (Log d0ruaaa3mo 22:03/22:00).
+            func inThisMailbox(_ email: [String: Any]) -> Bool {
+                guard let mailboxIds = email["mailboxIds"] as? [String: Any] else { return false }
+                return mailboxIds[jmapMailboxId] != nil
+            }
             if let mirror = rawMailboxEmails[cacheKey], !mirror.isEmpty {
-                byId = mirror
+                byId = mirror.filter { inThisMailbox($0.value) }
             } else if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: cacheKey) {
-                for email in snapshot.emails {
+                for email in snapshot.emails where inThisMailbox(email) {
                     if let id = email.optString("id") { byId[id] = email }
                 }
             }

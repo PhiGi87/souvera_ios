@@ -2097,6 +2097,11 @@ final class LinkViewModel: ObservableObject {
                 self.loadConversations()
                 // Presence in der Raumliste aktuell halten (Run 15.09.).
                 self.loadUserStatuses()
+                // Eigenen Status ad hoc auffrischen (Run 15.09., Feedback:
+                // die Pille blieb stehen, bis man sie antippte).
+                Task { @MainActor in
+                    await self.refreshOwnStatus()
+                }
             }
         }
     }
