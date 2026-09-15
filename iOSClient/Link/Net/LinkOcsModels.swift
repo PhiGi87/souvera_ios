@@ -119,9 +119,13 @@ struct LinkChatMessage: Codable, Identifiable {
     /// Elternteil bei Antworten (Talk liefert die volle Nachricht mit; als
     /// eigener Typ, um die Struct-Rekursion zu vermeiden).
     let parent: LinkParent?
+    /// Bearbeitungs-Metadaten (Run 15.09., capability `edit-messages`):
+    /// lastEditTimestamp > 0 = Nachricht wurde bearbeitet. Default 0,
+    /// damit makePending-JSON ohne den Key dekodiert.
+    var lastEditTimestamp: TimeInterval = 0
 
     enum CodingKeys: String, CodingKey {
-        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf, parent
+        case id, token, actorId, actorDisplayName, actorType, timestamp, message, systemMessage, messageParameters, reactions, reactionsSelf, parent, lastEditTimestamp
     }
 
     /// Offline-Warteschlange (Run 11.09.): Temporaere Nachricht mit
@@ -170,6 +174,7 @@ struct LinkChatMessage: Codable, Identifiable {
         self.reactions = [:]
         self.reactionsSelf = []
         self.parent = nil
+        self.lastEditTimestamp = 0
     }
 
     init(from decoder: Decoder) throws {

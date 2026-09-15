@@ -2005,9 +2005,9 @@ private struct LinkMessageRow: View {
                     }
                     if isOwn {
                         // Bearbeiten (Run 15.09.): eigene, echte Nachrichten
-                        // im Lang-Touch-Menü editieren - die Swipe-Variante
-                        // wird in der UIKit-CollectionView nicht gerendert.
-                        if message.id > 0 {
+                        // im Lang-Touch-Menü editieren — NUR wenn der Server
+                        // `edit-messages` unterstützt (sonst 400er).
+                        if message.id > 0, viewModel.supportsMessageEditing {
                             Button {
                                 onStartEdit()
                             } label: {
@@ -2065,9 +2065,10 @@ private struct LinkMessageRow: View {
                 .tint(.blue)
             }
         }
-        // Run 15.09.: "bearbeitet" klein/zart unter der Bubble (eigene
-        // Edits per Erfolg, Fremd-Edits per Text-Änderung im Poll).
-        if viewModel.editedIds.contains(message.id), !message.isHiddenSystemMessage {
+        // Run 15.09.: "bearbeitet" klein/zart unter der Bubble —
+        // SERVERBASIERT (lastEditTimestamp aus der Poll-Antwort, gilt für
+        // eigene UND fremde Edits) mit editedIds-Fallback.
+        if isMessageEdited(message), !message.isHiddenSystemMessage {
             Text(NSLocalizedString("_link_message_edited_", comment: ""))
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -2453,6 +2454,13 @@ struct LinkParticipantsSheet: View {
         let isOwn = participant.actorType == "users" && participant.actorId == viewModel.currentUserId
         let isOwner = participant.participantType == 1
         return !isOwn && !isOwner
+    }
+
+    /// Nachricht bearbeitet? Serverbasiert (lastEditTimestamp) oder
+    /// lokaler Fallback (eigene Edits, Run 15.09.).
+    private func isMessageEdited(_ message: LinkChatMessage) -> Bool {
+        if message.lastEditTimestamp > 0 { return true }
+        return message.id > 0 && viewModel.editedIds.contains(message.id)
     }
 
     /// Rolle des Teilnehmers (Owner/Moderator/Mitglied) - fuer ALLE

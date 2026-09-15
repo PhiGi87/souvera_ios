@@ -2504,6 +2504,12 @@ final class MailViewModel: ObservableObject {
             for id in removed { mirror.removeValue(forKey: id) }
             rawMailboxEmails[mailbox.id] = mirror
         }
+        // FINALE Flapping-Fix (Log d0reaaa3mk): jede Mutation bricht
+        // LAUFENDE Syncs an den Generations-Guards ab und queued EINEN
+        // frischen Sync mit dem sauberen Spiegel — ein Sync kann nie
+        // einen vor der Mutation liegenden Stand publizieren.
+        listGeneration += 1
+        syncMessages()
     }
 
     func delete(_ messagesToDelete: [MailMessage]) {

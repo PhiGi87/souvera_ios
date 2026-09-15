@@ -246,6 +246,10 @@ final class LinkViewModel: ObservableObject {
             currentUserId = account.username
             loadEditedIds()
             api = LinkOcsApi(account: account)
+            Task { [weak self] in
+                let supported = await self?.api?.supportsMessageEditing() ?? false
+                await MainActor.run { self?.supportsMessageEditing = supported }
+            }
         }
         // Bei jedem Erscheinen des Tabs frisch laden, damit aus dem Kalender
         // erstellte Channels sofort sichtbar sind.
@@ -632,6 +636,9 @@ final class LinkViewModel: ObservableObject {
     /// Eigener Benutzer-Status für den Header-Button (Run 15.09.):
     /// FRISCH vom Server gezogen (DB-Stand ist nur bei App-Start aktuell).
     @Published var ownStatus: String?
+    /// Server unterstützt Nachrichten-Bearbeitung (capability
+    /// `edit-messages`) — Gate für den Bearbeiten-Menü-Eintrag.
+    @Published var supportsMessageEditing = false
     private var lastUserStatusFetch = Date.distantPast
     private var userStatusFetchTask: Task<Void, Never>?
 

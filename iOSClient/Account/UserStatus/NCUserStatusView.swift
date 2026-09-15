@@ -44,7 +44,9 @@ struct NCUserStatusView: View {
                 }
                 .contentShape(Rectangle()) // make the whole row tappable
                 .onTapGesture {
-                    model.selectedStatus = (model.selectedStatus == item.name) ? nil : item.name
+                    // Run 15.09.: KEIN Toggle-zu-nil - nil erzeugt einen
+                    // leeren statusType ("Status-type '' is not supported").
+                    model.selectedStatus = item.name
                     model.setStatus(account: account)
                 }
                 .onChange(of: model.canDismiss) { _, newValue in

@@ -59,8 +59,11 @@ import NextcloudKit
     }
 
     func setStatus(account: String) {
+        // Run 15.09.: leerer Status nie senden (Server: "Status-type ''
+        // is not supported").
+        guard let status = selectedStatus, !status.isEmpty else { return }
         Task {
-            let result = await NextcloudKit.shared.setUserStatusAsync(status: selectedStatus ?? "", account: account) { task in
+            let result = await NextcloudKit.shared.setUserStatusAsync(status: status, account: account) { task in
                 Task {
                     let identifier = await NCNetworking.shared.networkingTasks.createIdentifier(account: self.account, name: "setUserStatus")
                     await NCNetworking.shared.networkingTasks.track(identifier: identifier, task: task)

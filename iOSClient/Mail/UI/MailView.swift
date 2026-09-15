@@ -248,7 +248,7 @@ struct MailView: View {
                 if isFolders || landscapeLayout {
                     if !(focusReaderActive && viewModel.route.isDetail) {
                         AutoRefreshRingView(viewModel: viewModel)
-                            .frame(width: 40, height: 40)
+                            .frame(width: 44, height: 44)
                             .modifier(SouveraHeaderGlass(shape: Circle()))
                     }
                 }

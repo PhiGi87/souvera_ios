@@ -403,7 +403,9 @@ actor LinkOcsApi {
     /// Teilnehmer entfernen (erfordert Moderator-Recht; attendeeId aus der
     /// Teilnehmerliste).
     func removeParticipant(token: String, attendeeId: Int) async -> Bool {
-        var req = signed(url: "\(base)/api/v4/room/\(token)/participants", method: "DELETE")
+        // Run 15.09.: korrekter Talk-Endpunkt ist /attendees (nicht
+        // /participants — dort 405, Log d0reaaa3mk belegt).
+        var req = signed(url: "\(base)/api/v4/room/\(token)/attendees", method: "DELETE")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         req.httpBody = "attendeeId=\(attendeeId)".data(using: .utf8)
         guard let (_, response) = try? await session.data(for: req) else { return false }
@@ -417,6 +419,25 @@ actor LinkOcsApi {
     /// Bulk-Abfrage der Nextcloud-Benutzer-Status (Online/Abwesend/DND/
     /// Invisible): userId -> status. Fuer Presence-Punkte in der Lobby-
     /// Verwaltung und der Teilnehmerliste.
+    /// Run 15.09.: Spreed-Capability `edit-messages` prüfen — der
+    /// Bearbeiten-Menü-Eintrag wird nur angezeigt, wenn der Server
+    /// Nachrichten-Bearbeitung unterstützt.
+    func supportsMessageEditing() async -> Bool {
+        guard let body = await get("\(base)/ocs/v2.php/cloud/capabilities"),
+              let data = body.data(using: .utf8),
+              let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let ocs = env["ocs"] as? [String: Any],
+              let caps = ocs["data"] as? [String: Any],
+              let spreed = caps["spreed"] as? [String: Any],
+              let features = spreed["features"] as? [String] else {
+            CallDebugLog.log("OcsApi", "capabilities: edit-messages check FAILED (no caps)")
+            return false
+        }
+        let supported = features.contains("edit-messages")
+        CallDebugLog.log("OcsApi", "capabilities: edit-messages supported=\(supported)")
+        return supported
+    }
+
     /// Eigenen Benutzer-Status FRISCH vom Server holen (Run 15.09.):
     /// der DB-Stand (tableAccount.userStatusStatus) wird nur bei App-Start
     /// von NCService gepflegt - der Header-Button blieb sonst solange
@@ -642,9 +663,11 @@ actor LinkOcsApi {
 
     /// Edits a chat message (own messages).
     func editMessage(token: String, messageId: Int64, text: String) async -> Bool {
+        // Run 15.09.: JSON-Body (wie sendMessage, das mit 201 funktioniert) —
+        // das percent-encoded Form-Encoding produzierte 400er.
         var req = signed(url: "\(base)/api/v1/chat/\(token)/\(messageId)", method: "PUT")
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = "message=\(text.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? text)".data(using: .utf8)
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try? JSONSerialization.data(withJSONObject: ["message": text])
         guard let (_, response) = try? await session.data(for: req) else { return false }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         CallDebugLog.log("OcsApi", "editMessage \(messageId) http=\(status)")

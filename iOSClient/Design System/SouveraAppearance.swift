@@ -103,7 +103,7 @@ struct SouveraHeaderButton: View {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(resolvedIconColor)
-                .frame(width: 48, height: 48)
+                .frame(width: 44, height: 44)
                 .contentShape(Circle())
                 .modifier(SouveraHeaderGlass(shape: Circle(), active: glass))
         }
@@ -179,9 +179,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
             HStack(spacing: 8) { trailing }
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
+        .frame(height: 44, alignment: .top)
         // Run 15.09.: Gradient läuft unter den Buttons weiter; Höhe an
-        // die Mehr/Dateien-Bar angepasst (Feedback: "wenige pt zu hoch").
+        // die Mehr/Dateien-Bar angepasst (Feedback: "wenige pt zu hoch",
+        // dann "Unterkunde höher": Buttons top-aligned, 44pt hoch).
         .padding(.bottom, 8)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
