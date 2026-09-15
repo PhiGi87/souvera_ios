@@ -267,19 +267,19 @@ final class CalendarViewModel: ObservableObject {
         let start = calendar.date(byAdding: .day, value: -1, to: monthInterval.start) ?? monthInterval.start
         let end = calendar.date(byAdding: .day, value: 1, to: (calendar.date(byAdding: .month, value: 1, to: monthInterval.start) ?? monthInterval.start.addingTimeInterval(31 * 86400))) ?? Date.distantFuture
 
-        // P68s: Sofortige Anzeige aus dem Monats-Cache (kein leerer
-        // Lade-Screen) + gecachte Kalenderliste VOR dem Server-Abruf.
-        if case .loading = events {
-            if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
-                let cachedSorted = Self.parseEntries(cached).sorted { $0.start < $1.start }
-                if eventsSignature != "cached-\(cached.count)" {
-                    eventsSignature = "cached-\(cached.count)"
-                    events = .success(cachedSorted)
-                }
-                JmapLog.write("Calendar cache hit: \(cached.count) entries")
-            } else {
-                JmapLog.write("Calendar cache miss for visible month")
+        // P68s + Run 15.09.: Sofortige Anzeige aus dem Monats-Cache —
+        // JETZT IMMER (auch bei .success: Monatswechsel/Re-Entry zeigen
+        // den Cache ad hoc, der Netz-Fetch aktualisiert danach).
+        if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
+            let cachedSorted = Self.parseEntries(cached).sorted { $0.start < $1.start }
+            let cachedSignature = cached.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
+            if eventsSignature != "cached-\(cachedSignature)" {
+                eventsSignature = "cached-\(cachedSignature)"
+                events = .success(cachedSorted)
+                JmapLog.write("Calendar cache hit: \(cached.count) entries (ad hoc)")
             }
+        } else {
+            JmapLog.write("Calendar cache miss for visible month")
         }
         if calendars.isEmpty, let cachedCalendars = Self.loadCachedCalendars(), !cachedCalendars.isEmpty {
             calendars = cachedCalendars
@@ -311,18 +311,33 @@ final class CalendarViewModel: ObservableObject {
             previousByHref[entry.calendarHref, default: 0] += 1
         }
 
+        // Run 15.09.: Queries PARALLEL (TaskGroup) statt sequenziell —
+        // die Gesamtladezeit ist jetzt die langsamste Einzelquery statt
+        // der Summe aller Kalender.
+        let selectedCalendars = calendars.filter { selectedCalendarHrefs.contains($0.href) }
+        let results: [(String, [CalDavEventEntry])] = await withTaskGroup(of: (String, [CalDavEventEntry]).self) { group in
+            for cal in selectedCalendars {
+                group.addTask {
+                    let fetched = await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
+                    return (cal.href, fetched)
+                }
+            }
+            var collected: [(String, [CalDavEventEntry])] = []
+            for await result in group { collected.append(result) }
+            return collected
+        }
+
         var entries: [CalDavEventEntry] = []
         var suspiciousEmpty: [String] = []
-        for cal in calendars where selectedCalendarHrefs.contains(cal.href) {
-            let fetched = await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
-            if fetched.isEmpty, let previous = previousByHref[cal.href], previous > 0 {
-                suspiciousEmpty.append(cal.href)
+        for (href, fetched) in results {
+            if fetched.isEmpty, let previous = previousByHref[href], previous > 0 {
+                suspiciousEmpty.append(href)
                 // Diagnose: Request-Body des Queries mitschreiben, um die
                 // 239-Byte-207er-Anomalie (time-range?) zu verifizieren.
-                if let body = await client.lastCalendarQueryBody(href: cal.href) {
-                    JmapLog.write("Calendar SUSPICIOUS empty result for \(cal.href) (previous=\(previous)) query=\(String(body.prefix(300)))")
+                if let body = await client.lastCalendarQueryBody(href: href) {
+                    JmapLog.write("Calendar SUSPICIOUS empty result for \(href) (previous=\(previous)) query=\(String(body.prefix(300)))")
                 } else {
-                    JmapLog.write("Calendar SUSPICIOUS empty result for \(cal.href) (previous=\(previous))")
+                    JmapLog.write("Calendar SUSPICIOUS empty result for \(href) (previous=\(previous))")
                 }
                 continue
             }
