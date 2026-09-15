@@ -436,8 +436,6 @@ struct LinkView: View {
         }
     }
 
-    @Environment(\.scenePhase) private var scenePhase
-
     private var navigationTitle: String {
         if case let .chat(token, title) = viewModel.route {
             // Echter Raumname, sobald der Raum geladen ist - der Titel aus

@@ -1348,6 +1348,14 @@ private struct MailMessageListView: View {
             // trailing: rot "Löschen" -> tiefer blau "Verschieben";
             // leading: grün "Antworten" -> tiefer orange "Markieren".
             SouveraSwipeActionRow(
+                leadingActions: [
+                    SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
+                                       label: NSLocalizedString("_mail_reply_", comment: ""),
+                                       handler: { viewModel.startCompose(mode: .reply, message: message) }),
+                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
+                                       label: NSLocalizedString("_mail_flag_", comment: ""),
+                                       handler: { viewModel.toggleFlagged(message) })
+                ],
                 trailingActions: [
                     SouveraSwipeAction(role: .destructive, icon: "trash",
                                        label: NSLocalizedString("_delete_", comment: ""),
@@ -1357,14 +1365,6 @@ private struct MailMessageListView: View {
                                        handler: {
                                            moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
                                        })
-                ],
-                leadingActions: [
-                    SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
-                                       label: NSLocalizedString("_mail_reply_", comment: ""),
-                                       handler: { viewModel.startCompose(mode: .reply, message: message) }),
-                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
-                                       label: NSLocalizedString("_mail_flag_", comment: ""),
-                                       handler: { viewModel.toggleFlagged(message) })
                 ]
             ) {
             Button { viewModel.openMessage(message) } label: {
@@ -2570,6 +2570,11 @@ struct MailSearchSwipeModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         SouveraSwipeActionRow(
+            leadingActions: [
+                SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
+                                   label: NSLocalizedString("_mail_reply_", comment: ""),
+                                   handler: onReply)
+            ],
             trailingActions: [
                 SouveraSwipeAction(role: .destructive, icon: "trash",
                                    label: NSLocalizedString("_delete_", comment: ""),
@@ -2578,11 +2583,6 @@ struct MailSearchSwipeModifier: ViewModifier {
                                    icon: isFlagged ? "flag.slash" : "flag",
                                    label: NSLocalizedString("_mail_flag_", comment: ""),
                                    handler: onFlag)
-            ],
-            leadingActions: [
-                SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
-                                   label: NSLocalizedString("_mail_reply_", comment: ""),
-                                   handler: onReply)
             ]
         ) { content }
     }
