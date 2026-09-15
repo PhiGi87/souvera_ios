@@ -549,13 +549,13 @@ struct MailView: View {
                                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                                 }
                             }
+                            .modifier(MailSearchSwipeModifier(
+                                onDelete: { viewModel.delete([message]) },
+                                onFlag: { viewModel.toggleFlagged(message) },
+                                onReply: { viewModel.startCompose(mode: .reply, message: message) },
+                                isFlagged: message.isFlagged
+                            ))
                         }
-                        .modifier(MailSearchSwipeModifier(
-                            onDelete: { viewModel.delete([message]) },
-                            onFlag: { viewModel.toggleFlagged(message) },
-                            onReply: { viewModel.startCompose(mode: .reply, message: message) },
-                            isFlagged: message.isFlagged
-                        ))
                     } footer: {
                         Text(NSLocalizedString("_mail_search_includes_attachments_", comment: ""))
                             .font(.caption)
@@ -1052,7 +1052,7 @@ private struct MailboxTreeRow: View {
         )
         .modifier(MailFolderSwipeModifier(
             onRename: { onRename(node.mailbox) },
-            onDelete: { onDelete(node.mailbox, removeEmails: false) },
+            onDelete: { onDelete(node.mailbox) },
             mayRename: node.mailbox.mayRename,
             mayDelete: node.mailbox.mayDelete
         ))
