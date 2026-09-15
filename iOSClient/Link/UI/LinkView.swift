@@ -20,9 +20,6 @@ struct LinkView: View {
     @State private var lobbyManagementRoom: LinkConversation?
     /// Online-Status-Button (Run 15.09.): Status-Picker-Sheet.
     @State private var showUserStatus = false
-    /// Aktueller Benutzerstatus des aktiven Kontos (DB-Pflege via
-    /// Kontoeinstellungen/NCService).
-    @State private var onlineStatus: String?
     @State private var showCallBanner = false
     @State private var returnToCall = false
     @State private var showCreateChannel = false
@@ -74,15 +71,32 @@ struct LinkView: View {
                 moduleHeader
             }
         }
+        .onChange(of: scenePhase) { _, phase in
+            // Foreground (Run 15.09.): Status + Presence automatisch
+            // auffrischen - NICHT erst nach Klick auf den Status-Button.
+            if phase == .active {
+                viewModel.loadUserStatuses()
+                Task { @MainActor in
+                    await viewModel.refreshOwnStatus()
+                }
+            }
+        }
         .onAppear {
             viewModel.start()
             viewModel.reconnectSignalingIfNeeded()
             viewModel.startRoomPolling()
             viewModel.loadUserStatuses()
-            onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            // Run 15.09.: eigener Status FRISCH vom Server (der DB-Stand
+            // wird nur bei App-Start gepflegt - der Button blieb sonst
+            // stehen, bis man ihn anklickte).
+            let dbStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            viewModel.ownStatus = dbStatus
+            Task { @MainActor in
+                await viewModel.refreshOwnStatus()
+            }
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+                viewModel.loadUserStatuses()
             }
             // Ein von außen angeforderter Raum wird nur geöffnet, wenn der
             // Nutzer nicht bereits in einem Chat navigiert (sonst würde die
@@ -90,6 +104,9 @@ struct LinkView: View {
             if let pending = LinkViewModel.pendingOpenRoom, case .home = viewModel.route {
                 LinkViewModel.pendingOpenRoom = nil
                 viewModel.openConversation(token: pending.token, title: pending.title)
+            }
+            Task { @MainActor in
+                await viewModel.refreshOwnStatus()
             }
         }
         .onDisappear {
@@ -200,14 +217,12 @@ struct LinkView: View {
             LinkLobbyManagementView(viewModel: viewModel, room: lobbyRoom)
         }
         .sheet(isPresented: $showUserStatus, onDismiss: {
-            // Status-Picker geschlossen: Button-Status aus der DB
-            // nachziehen. Der Picker schreibt die DB erst in seinem
-            // onDisappear - darum sofort UND nach 1 s erneut lesen
-            // (Run 15.09., Feedback: Status erschien erst beim 2. Tap).
-            onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+            // Status-Picker geschlossen: eigenen Status frisch vom Server
+            // holen (der Picker schreibt die DB in seinem onDisappear -
+            // der Server ist die Wahrheit).
             Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                onlineStatus = NCManageDatabase.shared.getActiveTableAccount()?.userStatusStatus
+                try? await Task.sleep(nanoseconds: 600_000_000)
+                await viewModel.refreshOwnStatus()
             }
         }) {
             if let account = NCManageDatabase.shared.getActiveTableAccount()?.account {
@@ -407,7 +422,7 @@ struct LinkView: View {
                 },
                 trailing: {
                     SouveraHeaderPill {
-                        LinkOnlineStatusButton(status: onlineStatus) {
+                        LinkOnlineStatusButton(status: viewModel.ownStatus) {
                             showUserStatus = true
                         }
                         SouveraHeaderButton(icon: "plus", glass: false) {
@@ -420,6 +435,8 @@ struct LinkView: View {
             )
         }
     }
+
+    @Environment(\.scenePhase) private var scenePhase
 
     private var navigationTitle: String {
         if case let .chat(token, title) = viewModel.route {

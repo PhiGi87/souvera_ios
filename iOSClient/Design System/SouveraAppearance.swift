@@ -223,22 +223,6 @@ enum SouveraSwipeRole {
     }
 }
 
-/// Zeile mit Swipe-Geste: der Inhalt bleibt fix, beim Ziehen nach links
-/// deckt eine farbige Fläche (volle Zeilenhöhe) die Zeile ab; Icon + Text
-/// stehen IN der Fläche. Überschreiten der Schwelle löst `onTrigger` aus
-/// und die Zeile federt zurück.
-/// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
-struct SouveraSwipeAction: Identifiable {
-    let role: SouveraSwipeRole
-    let icon: String
-    let label: String
-    let handler: () -> Void
-    var id: String { icon + label }
-}
-
-/// Zeile mit Custom-Swipe (Run 15.09.): volle Zeilenhöhe, Icon + Text
-/// INNERHALB der Farffläche, mehrere Aktionen seitlich, tappbar wenn
-/// aufgedeckt; horizontal-dominante Geste (vertikales Scrollen gewinnt).
 /// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
 struct SouveraSwipeAction: Identifiable {
     let role: SouveraSwipeRole
@@ -254,15 +238,6 @@ struct SouveraSwipeAction: Identifiable {
 /// Segments, das der aktuellen Swipe-Tiefe entspricht (Segmentbreite
 /// ~90 pt). Loslassen löst die Aktion des aktuellen Segments aus
 /// (Schwelle ~70 % Segmentbreite). Volle Zeilenhöhe, Label bis 2 Zeilen.
-/// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
-struct SouveraSwipeAction: Identifiable {
-    let role: SouveraSwipeRole
-    let icon: String
-    let label: String
-    let handler: () -> Void
-    var id: String { icon + label }
-}
-
 /// Zeile mit Custom-Swipe (Run 15.09., Neubau): Zwei Kanten in EINER
 /// Zeile - trailingActions (revealed durch Swipe nach LINKS) und
 /// leadingActions (revealed durch Swipe nach RECHTS). PROGRESSIVE

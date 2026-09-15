@@ -417,6 +417,19 @@ actor LinkOcsApi {
     /// Bulk-Abfrage der Nextcloud-Benutzer-Status (Online/Abwesend/DND/
     /// Invisible): userId -> status. Fuer Presence-Punkte in der Lobby-
     /// Verwaltung und der Teilnehmerliste.
+    /// Eigenen Benutzer-Status FRISCH vom Server holen (Run 15.09.):
+    /// der DB-Stand (tableAccount.userStatusStatus) wird nur bei App-Start
+    /// von NCService gepflegt - der Header-Button blieb sonst solange
+    /// stehen, bis man den Picker öffnete.
+    func fetchOwnUserStatus() async -> String? {
+        guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/user_status") else { return nil }
+        guard let data = body.data(using: .utf8),
+              let env = try? decoder.decode(OcsEnvelope<LinkUserStatus>.self, from: data) else { return nil }
+        let status = env.ocs.data?.status
+        CallDebugLog.log("OcsApi", "own user status -> \(status ?? "nil")")
+        return status
+    }
+
     func listUserStatuses() async -> (byId: [String: String], byName: [String: String]) {
         guard let body = await get("\(base)/ocs/v2.php/apps/user_status/api/v1/statuses") else { return ([:], [:]) }
         guard let data = body.data(using: .utf8),

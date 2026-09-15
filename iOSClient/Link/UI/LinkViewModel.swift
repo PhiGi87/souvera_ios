@@ -628,8 +628,19 @@ final class LinkViewModel: ObservableObject {
     @Published var userStatusesByName: [String: String] = [:]
     /// Signaling-User-Daten (sessionId -> Name/E-Mail), Run 15.09.
     @Published var signalingUsers: [String: LinkSignalingUserInfo] = [:]
+    /// Eigener Benutzer-Status für den Header-Button (Run 15.09.):
+    /// FRISCH vom Server gezogen (DB-Stand ist nur bei App-Start aktuell).
+    @Published var ownStatus: String?
     private var lastUserStatusFetch = Date.distantPast
     private var userStatusFetchTask: Task<Void, Never>?
+
+    /// Eigenen Status frisch vom Server holen (Run 15.09.).
+    func refreshOwnStatus() async {
+        guard let api else { return }
+        if let fresh = await api.fetchOwnUserStatus() {
+            ownStatus = fresh
+        }
+    }
 
     /// Presence-Status laden (gecacht ~10 s, Run 15.09.).
     func loadUserStatuses(force: Bool = false) {
@@ -647,6 +658,11 @@ final class LinkViewModel: ObservableObject {
                     // 1:1-Konversation heisst in der Raumliste genau wie
                     // sein Benutzerkonto.
                     self.userStatusesByName = maps.byName
+                    // Eigener Status als Fallback ( falls der Einzel-Fetch
+                    // noch nicht lief).
+                    if self.ownStatus == nil, let own = self.currentUserId.isEmpty ? nil : maps.byId[self.currentUserId] {
+                        self.ownStatus = own
+                    }
                 }
             }
         }
