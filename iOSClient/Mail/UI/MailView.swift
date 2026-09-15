@@ -1365,10 +1365,6 @@ private struct MailMessageListView: View {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
             .buttonStyle(.plain)
-            Button { viewModel.openMessage(message) } label: {
-                MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
-            }
-            .buttonStyle(.plain)
             // P68m: Langer Druck = Detail-"..."-Menü (ohne Antworten):
             // Weiterleiten, Gelesen/Ungelesen, Markieren, Absender-Blacklist.
             // Blacklist nutzt den vorhandenen Bestätigungsdialog.

@@ -180,6 +180,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         }
         .padding(.horizontal, 12)
         .frame(height: 44)
+        // Run 15.09.: Gradient läuft ~14pt UNTER den Buttons weiter
+        // (1:1 mit dem Mehr-Menü - vorher endete er bündig an der
+        // Button-Unterkante, Feedback "abgeschnitten").
+        .padding(.bottom, 14)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(

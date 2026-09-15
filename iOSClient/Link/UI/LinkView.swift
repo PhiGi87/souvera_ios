@@ -1992,6 +1992,16 @@ private struct LinkMessageRow: View {
                         Label(NSLocalizedString("_link_react_message_", comment: ""), systemImage: "face.smiling")
                     }
                     if isOwn {
+                        // Bearbeiten (Run 15.09.): eigene, echte Nachrichten
+                        // im Lang-Touch-Menü editieren - die Swipe-Variante
+                        // wird in der UIKit-CollectionView nicht gerendert.
+                        if message.id > 0 {
+                            Button {
+                                onStartEdit()
+                            } label: {
+                                Label(NSLocalizedString("_contact_edit_", comment: ""), systemImage: "pencil")
+                            }
+                        }
                         // Löschen gehört ins Lang-Touch-Menü, nicht in den
                         // Swipe (Run-Feedback 13.09. - versehentliches
                         // Löschen beim Wischen).
