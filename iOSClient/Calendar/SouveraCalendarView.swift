@@ -502,7 +502,7 @@ struct SouveraCalendarView: View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
+                TextField(NSLocalizedString("_calendar_search_hint_", comment: ""), text: $searchQuery)
                     .textFieldStyle(.plain)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
@@ -1797,7 +1797,7 @@ extension SouveraCalendarView {
                     SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
                         searchActive = true
                     }
-                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                    .accessibilityLabel(NSLocalizedString("_calendar_search_hint_", comment: ""))
                     SouveraHeaderButton(icon: "calendar.badge.checkmark", glass: false) {
                         showCalendarPicker = true
                     }

@@ -355,9 +355,8 @@ struct MailView: View {
                         } label: {
                             Image(systemName: "ellipsis.circle")
                                 .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(Color.primary)
+                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
                                 .frame(width: 44, height: 44)
-                                .modifier(SouveraHeaderGlass(shape: Circle()))
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
                         SouveraHeaderButton(icon: "square.and.pencil", glass: false) {
@@ -549,12 +548,20 @@ struct MailView: View {
                                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                                 }
                             }
-                            .modifier(MailSearchSwipeModifier(
-                                onDelete: { viewModel.delete([message]) },
-                                onFlag: { viewModel.toggleFlagged(message) },
-                                onReply: { viewModel.startCompose(mode: .reply, message: message) },
-                                isFlagged: message.isFlagged
-                            ))
+                            .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) { viewModel.delete([message]) } label: {
+                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                                }
+                                Button { viewModel.toggleFlagged(message) } label: {
+                                    Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
+                                }.tint(.orange)
+                            }
+                            .swipeActions(edge: .leading) {
+                                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
+                                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+                                }
+                                .tint(.green)
+                            }
                         }
                     } footer: {
                         Text(NSLocalizedString("_mail_search_includes_attachments_", comment: ""))
@@ -1050,12 +1057,23 @@ private struct MailboxTreeRow: View {
             },
             onTap: { viewModel.openMailbox(node.mailbox) }
         )
-        .modifier(MailFolderSwipeModifier(
-            onRename: { onRename(node.mailbox) },
-            onDelete: { onDelete(node.mailbox) },
-            mayRename: node.mailbox.mayRename,
-            mayDelete: node.mailbox.mayDelete
-        ))
+        .swipeActions(edge: .trailing) {
+            if node.mailbox.mayRename {
+                Button {
+                    onRename(node.mailbox)
+                } label: {
+                    Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
+                }
+                .tint(.blue)
+            }
+            if node.mailbox.mayDelete {
+                Button(role: .destructive) {
+                    onDelete(node.mailbox)
+                } label: {
+                    Label(NSLocalizedString("_mail_delete_folder_", comment: ""), systemImage: "trash")
+                }
+            }
+        }
     }
 }
 
@@ -1343,30 +1361,6 @@ private struct MailMessageListView: View {
             }
             .buttonStyle(.plain)
         } else {
-            // Run 15.09.: Custom-Swipe (Apple-Farbkonvention) statt
-            // System-swipeActions - appweit einheitliches Design.
-            // trailing: rot "Löschen" -> tiefer blau "Verschieben";
-            // leading: grün "Antworten" -> tiefer orange "Markieren".
-            SouveraSwipeActionRow(
-                leadingActions: [
-                    SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
-                                       label: NSLocalizedString("_mail_reply_", comment: ""),
-                                       handler: { viewModel.startCompose(mode: .reply, message: message) }),
-                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
-                                       label: NSLocalizedString("_mail_flag_", comment: ""),
-                                       handler: { viewModel.toggleFlagged(message) })
-                ],
-                trailingActions: [
-                    SouveraSwipeAction(role: .destructive, icon: "trash",
-                                       label: NSLocalizedString("_delete_", comment: ""),
-                                       handler: { viewModel.delete([message]) }),
-                    SouveraSwipeAction(role: .action, icon: "folder",
-                                       label: NSLocalizedString("_mail_move_", comment: ""),
-                                       handler: {
-                                           moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
-                                       })
-                ]
-            ) {
             Button { viewModel.openMessage(message) } label: {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
@@ -1409,6 +1403,22 @@ private struct MailMessageListView: View {
                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                 }
             }
+            .swipeActions(edge: .trailing) {
+                Button(role: .destructive) { viewModel.delete([message]) } label: {
+                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                }
+                Button {
+                    moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                } label: {
+                    Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                }
+                .tint(.blue)
+            }
+            .swipeActions(edge: .leading) {
+                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
+                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+                }
+                .tint(.green)
             }
         }
     }
@@ -2524,66 +2534,5 @@ extension View {
         } else {
             self
         }
-    }
-}
-
-// MARK: - Mail-Swipes (Run 15.09.): Custom-Design, Apple-Farbkonvention
-
-/// Ordner-Zeilen: Umbenennen (blau) / Löschen (rot) als Custom-Swipe.
-struct MailFolderSwipeModifier: ViewModifier {
-    let onRename: () -> Void
-    let onDelete: () -> Void
-    let mayRename: Bool
-    let mayDelete: Bool
-
-    func body(content: Content) -> some View {
-        // Reihenfolge: Löschen (rot) edge-nah, tiefer Umbenennen (blau).
-        var actions: [SouveraSwipeAction] = []
-        if mayRename {
-            actions.append(SouveraSwipeAction(
-                role: .action, icon: "pencil",
-                label: NSLocalizedString("_mail_rename_folder_", comment: ""),
-                handler: onRename))
-        }
-        if mayDelete {
-            actions.insert(SouveraSwipeAction(
-                role: .destructive, icon: "trash",
-                label: NSLocalizedString("_mail_delete_folder_", comment: ""),
-                handler: onDelete), at: 0)
-        }
-        return Group {
-            if actions.isEmpty {
-                content
-            } else {
-                SouveraSwipeActionRow(trailingActions: actions) { content }
-            }
-        }
-    }
-}
-
-/// Suchergebnis-Zeilen: Löschen (rot), Flaggen (orange), Antworten (grün).
-struct MailSearchSwipeModifier: ViewModifier {
-    let onDelete: () -> Void
-    let onFlag: () -> Void
-    let onReply: () -> Void
-    let isFlagged: Bool
-
-    func body(content: Content) -> some View {
-        SouveraSwipeActionRow(
-            leadingActions: [
-                SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
-                                   label: NSLocalizedString("_mail_reply_", comment: ""),
-                                   handler: onReply)
-            ],
-            trailingActions: [
-                SouveraSwipeAction(role: .destructive, icon: "trash",
-                                   label: NSLocalizedString("_delete_", comment: ""),
-                                   handler: onDelete),
-                SouveraSwipeAction(role: .flag,
-                                   icon: isFlagged ? "flag.slash" : "flag",
-                                   label: NSLocalizedString("_mail_flag_", comment: ""),
-                                   handler: onFlag)
-            ]
-        ) { content }
     }
 }

@@ -1229,3 +1229,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_souvera_about_open_source_" = "View source code";
 "_link_participant_owner_" = "Owner";
 "_link_participant_member_" = "Member";
+"_calendar_search_hint_" = "Search events";
