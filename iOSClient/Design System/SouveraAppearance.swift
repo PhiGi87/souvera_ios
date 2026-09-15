@@ -103,7 +103,7 @@ struct SouveraHeaderButton: View {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(resolvedIconColor)
-                .frame(width: 40, height: 40)
+                .frame(width: 48, height: 48)
                 .contentShape(Circle())
                 .modifier(SouveraHeaderGlass(shape: Circle(), active: glass))
         }
@@ -179,8 +179,9 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
             HStack(spacing: 8) { trailing }
         }
         .padding(.horizontal, 12)
-        .frame(height: 44)
-        .padding(.vertical, 6)
+        .frame(height: 48)
+        .padding(.top, 6)
+        .padding(.bottom, 10)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(
@@ -238,86 +239,123 @@ struct SouveraSwipeAction: Identifiable {
 /// Zeile mit Custom-Swipe (Run 15.09.): volle Zeilenhöhe, Icon + Text
 /// INNERHALB der Farffläche, mehrere Aktionen seitlich, tappbar wenn
 /// aufgedeckt; horizontal-dominante Geste (vertikales Scrollen gewinnt).
+/// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
+struct SouveraSwipeAction: Identifiable {
+    let role: SouveraSwipeRole
+    let icon: String
+    let label: String
+    let handler: () -> Void
+    var id: String { icon + label }
+}
+
+/// Zeile mit Custom-Swipe (Run 15.09., Neubau): Zwei Kanten (leading =
+/// Swipe nach rechts, trailing = Swipe nach links), PROGRESSIVE Farb-/
+/// Label-Logik - die aufgedeckte Fläche zeigt Farbe + Icon + Text des
+/// Segments, das der aktuellen Swipe-Tiefe entspricht (Segmentbreite
+/// ~90 pt). Loslassen löst die Aktion des aktuellen Segments aus
+/// (Schwelle ~70 % Segmentbreite). Volle Zeilenhöhe, Label bis 2 Zeilen.
+/// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
+struct SouveraSwipeAction: Identifiable {
+    let role: SouveraSwipeRole
+    let icon: String
+    let label: String
+    let handler: () -> Void
+    var id: String { icon + label }
+}
+
+/// Zeile mit Custom-Swipe (Run 15.09., Neubau): Zwei Kanten in EINER
+/// Zeile - trailingActions (revealed durch Swipe nach LINKS) und
+/// leadingActions (revealed durch Swipe nach RECHTS). PROGRESSIVE
+/// Farb-/Label-Logik: die aufgedeckte Fläche zeigt Farbe + Icon + Text
+/// des Segments, das der aktuellen Swipe-Tiefe entspricht (Segmentbreite
+/// ~90 pt). Loslassen löst die Aktion des aktuellen Segments aus
+/// (Schwelle ~70 % Segmentbreite). Volle Zeilenhöhe, Label bis 2 Zeilen.
 struct SouveraSwipeActionRow<Content: View>: View {
-    let actions: [SouveraSwipeAction]
-    /// Kante, aus der die Aktionen erscheinen.
-    var edge: Edge = .trailing
+    var leadingActions: [SouveraSwipeAction] = []
+    var trailingActions: [SouveraSwipeAction] = []
     @ViewBuilder var content: Content
 
     @State private var offsetX: CGFloat = 0
     @State private var engaged = false
 
-    private let buttonWidth: CGFloat = 86
-    private var totalReveal: CGFloat { CGFloat(actions.count) * buttonWidth + 16 }
+    private let segmentWidth: CGFloat = 90
+    private var trailingTotal: CGFloat { CGFloat(trailingActions.count) * segmentWidth + 8 }
+    private var leadingTotal: CGFloat { CGFloat(leadingActions.count) * segmentWidth + 8 }
+
+    private var trailingReveal: CGFloat { max(0, -offsetX) }
+    private var leadingReveal: CGFloat { max(0, offsetX) }
+
+    private func currentAction(_ actions: [SouveraSwipeAction], _ reveal: CGFloat) -> SouveraSwipeAction? {
+        guard !actions.isEmpty, reveal > 1 else { return nil }
+        let depth = min(max(0, Int((reveal - 1) / segmentWidth)), actions.count - 1)
+        return actions.indices.contains(depth) ? actions[depth] : nil
+    }
 
     var body: some View {
         ZStack {
-            actionLayer
+            // Trailing (Swipe nach links): rot "Löschen" -> tiefer blau ...
+            if offsetX < -1, let action = currentAction(trailingActions, trailingReveal) {
+                actionLayer(action)
+                    .frame(width: trailingReveal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+            }
+            // Leading (Swipe nach rechts): grün "Antworten" -> tiefer ...
+            if offsetX > 1, let action = currentAction(leadingActions, leadingReveal) {
+                actionLayer(action)
+                    .frame(width: leadingReveal)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            }
+
             content
                 .background(Color(.systemBackground))
                 .offset(x: offsetX)
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 15, coordinateSpace: .local)
+                    DragGesture(minimumDistance: 10, coordinateSpace: .local)
                         .onChanged { value in
                             if !engaged {
-                                guard abs(value.translation.width) > 14,
-                                      abs(value.translation.width) > abs(value.translation.height) * 1.4 else { return }
+                                guard abs(value.translation.width) > 10,
+                                      abs(value.translation.width) > abs(value.translation.height) else { return }
                                 engaged = true
                             }
                             guard engaged else { return }
-                            let limit = totalReveal + 40
-                            let raw = edge == .trailing
-                                ? min(0, max(value.translation.width, -limit))
-                                : max(0, min(value.translation.width, limit))
-                            offsetX = raw
+                            offsetX = min(max(value.translation.width,
+                                              -trailingTotal - 40),
+                                          leadingTotal + 40)
                         }
                         .onEnded { _ in
                             guard engaged else { return }
                             engaged = false
-                            let shouldTrigger = edge == .trailing
-                                ? offsetX <= -totalReveal
-                                : offsetX >= totalReveal
+                            var handler: (() -> Void)?
+                            if offsetX <= -segmentWidth * 0.7,
+                               let action = currentAction(trailingActions, trailingReveal) {
+                                handler = action.handler
+                            } else if offsetX >= segmentWidth * 0.7,
+                                      let action = currentAction(leadingActions, leadingReveal) {
+                                handler = action.handler
+                            }
                             withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
                                 offsetX = 0
                             }
-                            if shouldTrigger, let first = actions.first {
-                                first.handler()
-                            }
+                            handler?()
                         }
                 )
         }
         .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
-    /// Farbfläche mit den Aktionen (voller Zeilenhöhe).
-    @ViewBuilder
-    private var actionLayer: some View {
-        let alignment: Alignment = edge == .trailing ? .trailing : .leading
-        HStack(spacing: 8) {
-            if edge == .leading { Spacer(minLength: 0) }
-            ForEach(actions) { action in
-                Button {
-                    action.handler()
-                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { offsetX = 0 }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: action.icon)
-                            .font(.system(size: 17, weight: .semibold))
-                        Text(action.label)
-                            .font(.system(size: 10, weight: .semibold))
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.8)
-                    }
-                    .foregroundStyle(.white)
-                    .frame(width: buttonWidth - 14)
-                    .frame(maxHeight: .infinity)
-                }
-                .buttonStyle(.plain)
-            }
-            if edge == .trailing { Spacer(minLength: 0) }
+    /// Farffläche des aktuellen Segments (volle Höhe, Text innen).
+    private func actionLayer(_ action: SouveraSwipeAction) -> some View {
+        VStack(spacing: 3) {
+            Image(systemName: action.icon)
+                .font(.system(size: 17, weight: .semibold))
+            Text(action.label)
+                .font(.system(size: 11, weight: .semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
         }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(actions.first?.role.color ?? Color.gray, alignment: alignment)
-        .opacity(offsetX == 0 ? 0 : 1)
+        .background(action.role.color)
     }
 }

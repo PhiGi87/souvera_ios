@@ -249,7 +249,7 @@ struct MailView: View {
                     if !(focusReaderActive && viewModel.route.isDetail) {
                         AutoRefreshRingView(viewModel: viewModel)
                             .frame(width: 40, height: 40)
-                            .background(Color.white, in: Circle())
+                            .modifier(SouveraHeaderGlass(shape: Circle()))
                     }
                 }
             },
@@ -301,11 +301,11 @@ struct MailView: View {
                             }
                         } label: {
                             Image(systemName: "ellipsis.circle")
-                                .font(.system(size: 17, weight: .medium))
+                                .font(.system(size: 18, weight: .medium))
                                 .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                                .frame(width: 40, height: 40)
+                                .frame(width: 44, height: 44)
+                                // (Glass liefert die Pill - kein Eigen-Effekt)
                         }
-                        // (Glass liefert die Pill - kein Eigen-Effekt)
                     }
                 } else if isFolders || landscapeLayout {
                     SouveraHeaderPill {
@@ -1345,8 +1345,10 @@ private struct MailMessageListView: View {
         } else {
             // Run 15.09.: Custom-Swipe (Apple-Farbkonvention) statt
             // System-swipeActions - appweit einheitliches Design.
+            // trailing: rot "Löschen" -> tiefer blau "Verschieben";
+            // leading: grün "Antworten" -> tiefer orange "Markieren".
             SouveraSwipeActionRow(
-                actions: [
+                trailingActions: [
                     SouveraSwipeAction(role: .destructive, icon: "trash",
                                        label: NSLocalizedString("_delete_", comment: ""),
                                        handler: { viewModel.delete([message]) }),
@@ -1354,15 +1356,21 @@ private struct MailMessageListView: View {
                                        label: NSLocalizedString("_mail_move_", comment: ""),
                                        handler: {
                                            moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
-                                       }),
-                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
-                                       label: NSLocalizedString("_mail_flag_", comment: ""),
-                                       handler: { viewModel.toggleFlagged(message) }),
+                                       })
+                ],
+                leadingActions: [
                     SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
                                        label: NSLocalizedString("_mail_reply_", comment: ""),
-                                       handler: { viewModel.startCompose(mode: .reply, message: message) })
+                                       handler: { viewModel.startCompose(mode: .reply, message: message) }),
+                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
+                                       label: NSLocalizedString("_mail_flag_", comment: ""),
+                                       handler: { viewModel.toggleFlagged(message) })
                 ]
             ) {
+            Button { viewModel.openMessage(message) } label: {
+                MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
+            }
+            .buttonStyle(.plain)
             Button { viewModel.openMessage(message) } label: {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
@@ -2529,24 +2537,25 @@ struct MailFolderSwipeModifier: ViewModifier {
     let mayDelete: Bool
 
     func body(content: Content) -> some View {
+        // Reihenfolge: Löschen (rot) edge-nah, tiefer Umbenennen (blau).
         var actions: [SouveraSwipeAction] = []
-        if mayDelete {
-            actions.append(SouveraSwipeAction(
-                role: .destructive, icon: "trash",
-                label: NSLocalizedString("_mail_delete_folder_", comment: ""),
-                handler: onDelete))
-        }
         if mayRename {
             actions.append(SouveraSwipeAction(
                 role: .action, icon: "pencil",
                 label: NSLocalizedString("_mail_rename_folder_", comment: ""),
                 handler: onRename))
         }
+        if mayDelete {
+            actions.insert(SouveraSwipeAction(
+                role: .destructive, icon: "trash",
+                label: NSLocalizedString("_mail_delete_folder_", comment: ""),
+                handler: onDelete), at: 0)
+        }
         return Group {
             if actions.isEmpty {
                 content
             } else {
-                SouveraSwipeActionRow(actions: actions) { content }
+                SouveraSwipeActionRow(trailingActions: actions) { content }
             }
         }
     }
@@ -2561,14 +2570,16 @@ struct MailSearchSwipeModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         SouveraSwipeActionRow(
-            actions: [
+            trailingActions: [
                 SouveraSwipeAction(role: .destructive, icon: "trash",
                                    label: NSLocalizedString("_delete_", comment: ""),
                                    handler: onDelete),
                 SouveraSwipeAction(role: .flag,
                                    icon: isFlagged ? "flag.slash" : "flag",
                                    label: NSLocalizedString("_mail_flag_", comment: ""),
-                                   handler: onFlag),
+                                   handler: onFlag)
+            ],
+            leadingActions: [
                 SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
                                    label: NSLocalizedString("_mail_reply_", comment: ""),
                                    handler: onReply)

@@ -370,7 +370,7 @@ struct LinkView: View {
                                 .font(.system(size: 18, weight: .medium))
                                 .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
                                 .frame(width: 44, height: 44)
-                                .modifier(SouveraHeaderGlass(shape: Circle()))
+                                // (Glass liefert die Pill - kein Eigen-Effekt)
                         }
                         .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         if viewModel.currentRoom?.canManage == true,
@@ -2338,7 +2338,7 @@ struct LinkParticipantsSheet: View {
                                     && !$0.displayName.trimmingCharacters(in: .whitespaces).isEmpty
                             }) { participant in
                                 SouveraSwipeActionRow(
-                                    actions: [SouveraSwipeAction(
+                                    trailingActions: [SouveraSwipeAction(
                                         role: .destructive,
                                         icon: "person.crop.circle.badge.minus",
                                         label: NSLocalizedString("_link_participant_remove_", comment: ""),
@@ -2885,7 +2885,7 @@ private struct LinkLobbyManagementView: View {
                         VStack(spacing: 0) {
                             ForEach(waitingExternals) { participant in
                                 SouveraSwipeActionRow(
-                                    actions: [SouveraSwipeAction(
+                                    trailingActions: [SouveraSwipeAction(
                                         role: .destructive,
                                         icon: "person.crop.circle.badge.minus",
                                         label: NSLocalizedString("_link_participant_remove_", comment: ""),

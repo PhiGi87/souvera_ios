@@ -1361,7 +1361,15 @@ final class MailViewModel: ObservableObject {
                         let batch = Array(refetch[cursor..<min(cursor + 500, refetch.count)])
                         cursor += 500
                         let fetched = try await api.getEmails(accountId: accId, ids: batch, properties: JmapApi.listSyncProperties)
-                        fetchedAll.append(contentsOf: fetched)
+                        // Run 15.09.: Mailbox-Mitgliedschafts-Filter - der
+                        // Server liefert per ID auch Mails, die inzwischen
+                        // VERSCHOBEN wurden (z. B. Papierkorb). Ohne Filter
+                        // resurrecten sie in der alten Ordnerliste (Log
+                        // d0jeaaa3kk: Bulk-Löschen -> Flapping).
+                        fetchedAll.append(contentsOf: fetched.filter { email in
+                            guard let mailboxIds = email["mailboxIds"] as? [String: Any] else { return false }
+                            return mailboxIds[jmapMailboxId] != nil
+                        })
                     }
                     if !fetchedAll.isEmpty {
                         emails = mergeEmails(existing: emails, incoming: fetchedAll)
@@ -1572,7 +1580,16 @@ final class MailViewModel: ObservableObject {
                         byId.removeValue(forKey: id)
                     }
                     for email in resp {
-                        if let id = email.optString("id"), !id.isEmpty { byId[id] = email }
+                        guard let id = email.optString("id"), !id.isEmpty else { continue }
+                        // Run 15.09.: Mitgliedschafts-Filter - verschobene
+                        // Mails (mailboxIds ohne diesen Ordner) kehren NICHT
+                        // in die Liste zurueck (Flapping-Fix).
+                        if let mailboxIds = email["mailboxIds"] as? [String: Any],
+                           mailboxIds[jmapMailboxId] != nil {
+                            byId[id] = email
+                        } else {
+                            byId.removeValue(forKey: id)
+                        }
                     }
                 }
                 JmapLog.write("sync \(mailbox.name): outside-window refetch: \(refetchIds.count) ids, \(refetched) on server")
@@ -2460,6 +2477,13 @@ final class MailViewModel: ObservableObject {
         if case var .success(results) = searchResults {
             results.removeAll { removed.contains($0.emailId) }
             searchResults = .success(results)
+        }
+        // Run 15.09.: AUCH den Roh-Spiegel säubern - sonst reint der
+        // nächste Inkremental-Sync die (verschobenen/gelöschten) Einträge
+        // aus dem Spiegel in die Liste zurück (Flapping-Fix).
+        if let mailbox = currentMailbox, var mirror = rawMailboxEmails[mailbox.id] {
+            for id in removed { mirror.removeValue(forKey: id) }
+            rawMailboxEmails[mailbox.id] = mirror
         }
     }
 
