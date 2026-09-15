@@ -85,6 +85,10 @@ import SwiftUI
 struct SouveraHeaderButton: View {
     let icon: String
     var iconColor: Color? = nil
+    /// false = ohne eigenen Glass-Effekt (innerhalb einer Header-Pill -
+    /// die Pill traegt DIE einzige Glass-Capsule, sonst verschachtelte
+    /// Kreise, Run 15.09.).
+    var glass: Bool = true
     var accessibilityLabel: String = ""
     let action: () -> Void
 
@@ -99,9 +103,9 @@ struct SouveraHeaderButton: View {
             Image(systemName: icon)
                 .font(.system(size: 18, weight: .medium))
                 .foregroundStyle(resolvedIconColor)
-                .frame(width: 44, height: 44)
+                .frame(width: 40, height: 40)
                 .contentShape(Circle())
-                .modifier(SouveraHeaderGlass(shape: Circle()))
+                .modifier(SouveraHeaderGlass(shape: Circle(), active: glass))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -115,28 +119,23 @@ struct SouveraHeaderPill<Content: View>: View {
     @ViewBuilder var content: Content
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            // EINE gemeinsame Glass-Capsule fuer die ganze Gruppe - so
-            // entstehen die zusammengefassten Doppel-Pills wie in
-            // Dateien/Mehr (Einzel-Kreise verschmelzen im Container nicht).
-            HStack(spacing: 2) { content }
-                .padding(.horizontal, 4)
-                .glassEffect(.regular.interactive(), in: Capsule())
-        } else {
-            HStack(spacing: 2) { content }
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.regularMaterial, in: Capsule())
-        }
+        // Die Gruppe traegt DIE einzige Glass-Capsule - die Buttons darin
+        // sind reine Icons (keine verschachtelten Kreise).
+        HStack(spacing: 2) { content }
+            .padding(.horizontal, 4)
+            .modifier(SouveraHeaderGlass(shape: Capsule()))
     }
 }
 
 /// Liquid-Glass-Effekt mit Fallback für iOS 17/18.
 struct SouveraHeaderGlass<S: Shape>: ViewModifier {
     let shape: S
+    var active: Bool = true
 
     func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
+        if !active {
+            content
+        } else if #available(iOS 26.0, *) {
             content.glassEffect(.regular.interactive(), in: shape)
         } else {
             content.background(.regularMaterial, in: shape)
@@ -227,70 +226,98 @@ enum SouveraSwipeRole {
 /// deckt eine farbige Fläche (volle Zeilenhöhe) die Zeile ab; Icon + Text
 /// stehen IN der Fläche. Überschreiten der Schwelle löst `onTrigger` aus
 /// und die Zeile federt zurück.
-struct SouveraSwipeActionRow<Content: View>: View {
+/// Eine Swipe-Aktion: Rolle bestimmt die Farbe (Apple-Mail-Konvention).
+struct SouveraSwipeAction: Identifiable {
     let role: SouveraSwipeRole
     let icon: String
     let label: String
-    let onTrigger: () -> Void
+    let handler: () -> Void
+    var id: String { icon + label }
+}
+
+/// Zeile mit Custom-Swipe (Run 15.09.): volle Zeilenhöhe, Icon + Text
+/// INNERHALB der Farffläche, mehrere Aktionen seitlich, tappbar wenn
+/// aufgedeckt; horizontal-dominante Geste (vertikales Scrollen gewinnt).
+struct SouveraSwipeActionRow<Content: View>: View {
+    let actions: [SouveraSwipeAction]
+    /// Kante, aus der die Aktionen erscheinen.
+    var edge: Edge = .trailing
     @ViewBuilder var content: Content
 
     @State private var offsetX: CGFloat = 0
-    @State private var triggered = false
+    @State private var engaged = false
 
-    private let revealWidth: CGFloat = 132
-    private let triggerThreshold: CGFloat = 100
+    private let buttonWidth: CGFloat = 86
+    private var totalReveal: CGFloat { CGFloat(actions.count) * buttonWidth + 16 }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            // Farbfläche in voller Zeilenhöhe.
-            HStack(spacing: 8) {
-                Spacer(minLength: 0)
-                VStack(spacing: 3) {
-                    Image(systemName: icon)
-                        .font(.system(size: 17, weight: .semibold))
-                    Text(label)
-                        .font(.system(size: 11, weight: .semibold))
-                        .lineLimit(1)
-                }
-                .foregroundStyle(.white)
-                .padding(.trailing, 18)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(role.color)
-            .opacity(offsetX > 0 ? 1 : 0)
-
+        ZStack {
+            actionLayer
             content
                 .background(Color(.systemBackground))
                 .offset(x: offsetX)
                 .simultaneousGesture(
-                    DragGesture(minimumDistance: 20, coordinateSpace: .local)
+                    DragGesture(minimumDistance: 15, coordinateSpace: .local)
                         .onChanged { value in
-                            guard value.translation.width < 0 else {
-                                offsetX = 0
-                                return
+                            if !engaged {
+                                guard abs(value.translation.width) > 14,
+                                      abs(value.translation.width) > abs(value.translation.height) * 1.4 else { return }
+                                engaged = true
                             }
-                            offsetX = max(value.translation.width, -revealWidth - 40)
+                            guard engaged else { return }
+                            let limit = totalReveal + 40
+                            let raw = edge == .trailing
+                                ? min(0, max(value.translation.width, -limit))
+                                : max(0, min(value.translation.width, limit))
+                            offsetX = raw
                         }
-                        .onEnded { value in
-                            if value.translation.width < -triggerThreshold, !triggered {
-                                triggered = true
-                                onTrigger()
-                                // Kurzes Feedback, dann zurückfedern.
-                                Task { @MainActor in
-                                    try? await Task.sleep(nanoseconds: 350_000_000)
-                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                        offsetX = 0
-                                    }
-                                    triggered = false
-                                }
-                            } else {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
-                                    offsetX = 0
-                                }
+                        .onEnded { _ in
+                            guard engaged else { return }
+                            engaged = false
+                            let shouldTrigger = edge == .trailing
+                                ? offsetX <= -totalReveal
+                                : offsetX >= totalReveal
+                            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                                offsetX = 0
+                            }
+                            if shouldTrigger, let first = actions.first {
+                                first.handler()
                             }
                         }
                 )
         }
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    /// Farbfläche mit den Aktionen (voller Zeilenhöhe).
+    @ViewBuilder
+    private var actionLayer: some View {
+        let alignment: Alignment = edge == .trailing ? .trailing : .leading
+        HStack(spacing: 8) {
+            if edge == .leading { Spacer(minLength: 0) }
+            ForEach(actions) { action in
+                Button {
+                    action.handler()
+                    withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { offsetX = 0 }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: action.icon)
+                            .font(.system(size: 17, weight: .semibold))
+                        Text(action.label)
+                            .font(.system(size: 10, weight: .semibold))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: buttonWidth - 14)
+                    .frame(maxHeight: .infinity)
+                }
+                .buttonStyle(.plain)
+            }
+            if edge == .trailing { Spacer(minLength: 0) }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(actions.first?.role.color ?? Color.gray, alignment: alignment)
+        .opacity(offsetX == 0 ? 0 : 1)
     }
 }

@@ -256,7 +256,7 @@ struct MailView: View {
             trailing: {
                 if case let .detail(message) = viewModel.route {
                     SouveraHeaderPill {
-                        SouveraHeaderButton(icon: "arrowshape.turn.up.left") {
+                        SouveraHeaderButton(icon: "arrowshape.turn.up.left", glass: false) {
                             viewModel.startCompose(mode: .reply, message: message)
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
@@ -305,14 +305,15 @@ struct MailView: View {
                                 .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
                                 .frame(width: 40, height: 40)
                         }
+                        // (Glass liefert die Pill - kein Eigen-Effekt)
                     }
                 } else if isFolders || landscapeLayout {
                     SouveraHeaderPill {
-                        SouveraHeaderButton(icon: "magnifyingglass") {
+                        SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
                             searchActive = true
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                        SouveraHeaderButton(icon: "folder.badge.plus") {
+                        SouveraHeaderButton(icon: "folder.badge.plus", glass: false) {
                             showNewFolderSheet = true
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
@@ -359,7 +360,7 @@ struct MailView: View {
                                 .modifier(SouveraHeaderGlass(shape: Circle()))
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
-                        SouveraHeaderButton(icon: "square.and.pencil") {
+                        SouveraHeaderButton(icon: "square.and.pencil", glass: false) {
                             viewModel.startCompose(mode: .new)
                         }
                         .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
@@ -548,21 +549,13 @@ struct MailView: View {
                                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                                 }
                             }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) { viewModel.delete([message]) } label: {
-                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                                }
-                                Button { viewModel.toggleFlagged(message) } label: {
-                                    Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
-                                }.tint(.orange)
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
-                                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
-                                }
-                                .tint(.green)
-                            }
                         }
+                        .modifier(MailSearchSwipeModifier(
+                            onDelete: { viewModel.delete([message]) },
+                            onFlag: { viewModel.toggleFlagged(message) },
+                            onReply: { viewModel.startCompose(mode: .reply, message: message) },
+                            isFlagged: message.isFlagged
+                        ))
                     } footer: {
                         Text(NSLocalizedString("_mail_search_includes_attachments_", comment: ""))
                             .font(.caption)
@@ -1057,23 +1050,12 @@ private struct MailboxTreeRow: View {
             },
             onTap: { viewModel.openMailbox(node.mailbox) }
         )
-        .swipeActions(edge: .trailing) {
-            if node.mailbox.mayRename {
-                Button {
-                    onRename(node.mailbox)
-                } label: {
-                    Label(NSLocalizedString("_mail_rename_folder_", comment: ""), systemImage: "pencil")
-                }
-                .tint(.blue)
-            }
-            if node.mailbox.mayDelete {
-                Button(role: .destructive) {
-                    onDelete(node.mailbox)
-                } label: {
-                    Label(NSLocalizedString("_mail_delete_folder_", comment: ""), systemImage: "trash")
-                }
-            }
-        }
+        .modifier(MailFolderSwipeModifier(
+            onRename: { onRename(node.mailbox) },
+            onDelete: { onDelete(node.mailbox, removeEmails: false) },
+            mayRename: node.mailbox.mayRename,
+            mayDelete: node.mailbox.mayDelete
+        ))
     }
 }
 
@@ -1361,6 +1343,26 @@ private struct MailMessageListView: View {
             }
             .buttonStyle(.plain)
         } else {
+            // Run 15.09.: Custom-Swipe (Apple-Farbkonvention) statt
+            // System-swipeActions - appweit einheitliches Design.
+            SouveraSwipeActionRow(
+                actions: [
+                    SouveraSwipeAction(role: .destructive, icon: "trash",
+                                       label: NSLocalizedString("_delete_", comment: ""),
+                                       handler: { viewModel.delete([message]) }),
+                    SouveraSwipeAction(role: .action, icon: "folder",
+                                       label: NSLocalizedString("_mail_move_", comment: ""),
+                                       handler: {
+                                           moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                                       }),
+                    SouveraSwipeAction(role: .flag, icon: message.isFlagged ? "flag.slash" : "flag",
+                                       label: NSLocalizedString("_mail_flag_", comment: ""),
+                                       handler: { viewModel.toggleFlagged(message) }),
+                    SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
+                                       label: NSLocalizedString("_mail_reply_", comment: ""),
+                                       handler: { viewModel.startCompose(mode: .reply, message: message) })
+                ]
+            ) {
             Button { viewModel.openMessage(message) } label: {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
@@ -1399,22 +1401,6 @@ private struct MailMessageListView: View {
                     Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
                 }
             }
-            .swipeActions(edge: .trailing) {
-                Button(role: .destructive) { viewModel.delete([message]) } label: {
-                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                }
-                Button {
-                    moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
-                } label: {
-                    Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
-                }
-                .tint(.blue)
-            }
-            .swipeActions(edge: .leading) {
-                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
-                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
-                }
-                .tint(.green)
             }
         }
     }
@@ -2530,5 +2516,63 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+// MARK: - Mail-Swipes (Run 15.09.): Custom-Design, Apple-Farbkonvention
+
+/// Ordner-Zeilen: Umbenennen (blau) / Löschen (rot) als Custom-Swipe.
+struct MailFolderSwipeModifier: ViewModifier {
+    let onRename: () -> Void
+    let onDelete: () -> Void
+    let mayRename: Bool
+    let mayDelete: Bool
+
+    func body(content: Content) -> some View {
+        var actions: [SouveraSwipeAction] = []
+        if mayDelete {
+            actions.append(SouveraSwipeAction(
+                role: .destructive, icon: "trash",
+                label: NSLocalizedString("_mail_delete_folder_", comment: ""),
+                handler: onDelete))
+        }
+        if mayRename {
+            actions.append(SouveraSwipeAction(
+                role: .action, icon: "pencil",
+                label: NSLocalizedString("_mail_rename_folder_", comment: ""),
+                handler: onRename))
+        }
+        return Group {
+            if actions.isEmpty {
+                content
+            } else {
+                SouveraSwipeActionRow(actions: actions) { content }
+            }
+        }
+    }
+}
+
+/// Suchergebnis-Zeilen: Löschen (rot), Flaggen (orange), Antworten (grün).
+struct MailSearchSwipeModifier: ViewModifier {
+    let onDelete: () -> Void
+    let onFlag: () -> Void
+    let onReply: () -> Void
+    let isFlagged: Bool
+
+    func body(content: Content) -> some View {
+        SouveraSwipeActionRow(
+            actions: [
+                SouveraSwipeAction(role: .destructive, icon: "trash",
+                                   label: NSLocalizedString("_delete_", comment: ""),
+                                   handler: onDelete),
+                SouveraSwipeAction(role: .flag,
+                                   icon: isFlagged ? "flag.slash" : "flag",
+                                   label: NSLocalizedString("_mail_flag_", comment: ""),
+                                   handler: onFlag),
+                SouveraSwipeAction(role: .positive, icon: "arrowshape.turn.up.left",
+                                   label: NSLocalizedString("_mail_reply_", comment: ""),
+                                   handler: onReply)
+            ]
+        ) { content }
     }
 }

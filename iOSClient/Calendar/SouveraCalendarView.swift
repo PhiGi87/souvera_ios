@@ -1794,11 +1794,11 @@ extension SouveraCalendarView {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
-                    SouveraHeaderButton(icon: "magnifyingglass") {
+                    SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
                         searchActive = true
                     }
                     .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                    SouveraHeaderButton(icon: "calendar.badge.checkmark") {
+                    SouveraHeaderButton(icon: "calendar.badge.checkmark", glass: false) {
                         showCalendarPicker = true
                     }
                 }
@@ -1828,7 +1828,7 @@ extension SouveraCalendarView {
                         .frame(height: 34)
                     }
                     .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
-                    SouveraHeaderButton(icon: "plus") {
+                    SouveraHeaderButton(icon: "plus", glass: false) {
                         editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(3600)), existing: nil)
                     }
                 }

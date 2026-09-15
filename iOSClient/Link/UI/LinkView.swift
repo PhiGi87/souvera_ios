@@ -375,20 +375,20 @@ struct LinkView: View {
                         .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
                         if viewModel.currentRoom?.canManage == true,
                            viewModel.currentRoom?.lobbyState == 1 {
-                            SouveraHeaderButton(icon: "clock.arrow.circlepath",
+                            SouveraHeaderButton(icon: "clock.arrow.circlepath", glass: false,
                                                 accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")) {
                                 lobbyManagementRoom = viewModel.currentRoom
                             }
                         }
                         if viewModel.currentRoom?.hasCall == true {
                             SouveraHeaderButton(icon: "phone.fill",
-                                                iconColor: .green,
+                                                iconColor: .green, glass: false,
                                                 accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
                                 callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
                             }
                         } else {
                             SouveraHeaderButton(icon: "phone.fill",
-                                                iconColor: .green,
+                                                iconColor: .green, glass: false,
                                                 accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
                                 startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
                             }
@@ -410,7 +410,7 @@ struct LinkView: View {
                         LinkOnlineStatusButton(status: onlineStatus) {
                             showUserStatus = true
                         }
-                        SouveraHeaderButton(icon: "plus") {
+                        SouveraHeaderButton(icon: "plus", glass: false) {
                             channelName = ""
                             showCreateChannel = true
                         }
@@ -2283,76 +2283,101 @@ struct LinkParticipantsSheet: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if viewModel.currentRoom?.canManage == true {
-                    Section {
+            // ScrollView statt List (Run 15.09.): die Custom-Swipe-Geste
+            // kaempft im List-Kontext mit dem Scrollen - hier haben wir
+            // volle Layout-Kontrolle.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if viewModel.currentRoom?.canManage == true {
                         HStack(spacing: 8) {
                             Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                             TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $query)
                                 .textFieldStyle(.plain)
                                 .autocorrectionDisabled()
                         }
-                    }
-                    if !viewModel.userResults.isEmpty {
-                        Section(NSLocalizedString("_link_add_participant_", comment: "")) {
-                            ForEach(viewModel.userResults) { suggestion in
-                                Button {
-                                    viewModel.addParticipant(suggestion)
-                                    viewModel.loadParticipants()
-                                    query = ""
-                                } label: {
-                                    Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
+                        .padding(.horizontal, 12)
+                        .frame(height: 44)
+                        .background(Color(.secondarySystemGroupedBackground), in: Capsule())
+
+                        if !viewModel.userResults.isEmpty {
+                            VStack(spacing: 0) {
+                                ForEach(viewModel.userResults) { suggestion in
+                                    Button {
+                                        viewModel.addParticipant(suggestion)
+                                        viewModel.loadParticipants()
+                                        query = ""
+                                    } label: {
+                                        Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                            .padding(12)
+                                    }
+                                    .buttonStyle(.plain)
+                                    Divider()
                                 }
                             }
+                            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                         }
                     }
-                }
-                Section(NSLocalizedString("_link_participants_", comment: "")) {
-                    if viewModel.participants.isEmpty {
-                        Text(NSLocalizedString("_link_no_participants_", comment: ""))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        // Run 15.09.: Teilnehmer ohne anzeigbaren Namen
-                        // (E-Mail-Platzhalter) ausblenden - sonst leere
-                        // "Mitglied"-Zeilen.
-                        ForEach(viewModel.participants.filter {
-                            $0.actorType != "deleted_users"
-                                && !$0.displayName.trimmingCharacters(in: .whitespaces).isEmpty
-                        }) { participant in
-                            SouveraSwipeActionRow(
-                                role: .destructive,
-                                icon: "person.crop.circle.badge.minus",
-                                label: NSLocalizedString("_link_participant_remove_", comment: ""),
-                                onTrigger: {
-                                    if canRemove(participant) {
-                                        removeCandidate = participant
-                                    }
-                                }
-                            ) {
-                                HStack(spacing: 10) {
-                                    Image(systemName: participantIcon(participant.actorType))
-                                        .foregroundStyle(.secondary)
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(participant.displayName).font(.subheadline)
-                                        Text(roleLabel(participant))
-                                            .font(.caption2)
+
+                    Text(NSLocalizedString("_link_participants_", comment: ""))
+                        .font(.headline)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+
+                    VStack(spacing: 0) {
+                        if viewModel.participants.isEmpty {
+                            Text(NSLocalizedString("_link_no_participants_", comment: ""))
+                                .foregroundStyle(.secondary)
+                                .padding(12)
+                        } else {
+                            // Run 15.09.: Teilnehmer ohne anzeigbaren Namen
+                            // (E-Mail-Platzhalter) ausblenden - sonst leere
+                            // "Mitglied"-Zeilen.
+                            ForEach(viewModel.participants.filter {
+                                $0.actorType != "deleted_users"
+                                    && !$0.displayName.trimmingCharacters(in: .whitespaces).isEmpty
+                            }) { participant in
+                                SouveraSwipeActionRow(
+                                    actions: [SouveraSwipeAction(
+                                        role: .destructive,
+                                        icon: "person.crop.circle.badge.minus",
+                                        label: NSLocalizedString("_link_participant_remove_", comment: ""),
+                                        handler: {
+                                            if canRemove(participant) {
+                                                removeCandidate = participant
+                                            }
+                                        }
+                                    )]
+                                ) {
+                                    HStack(spacing: 10) {
+                                        Image(systemName: participantIcon(participant.actorType))
                                             .foregroundStyle(.secondary)
+                                        VStack(alignment: .leading, spacing: 1) {
+                                            Text(participant.displayName).font(.subheadline)
+                                            Text(roleLabel(participant))
+                                                .font(.caption2)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        // Status-Pill am Teilnehmer (Run 15.09.).
+                                        if participant.actorType == "users" {
+                                            LinkPresence.statusPill(
+                                                for: participant.status
+                                                    ?? viewModel.userStatuses[participant.actorId]
+                                                    ?? "offline",
+                                                size: 13
+                                            )
+                                        }
                                     }
-                                    Spacer()
-                                    // Status-Pill am Teilnehmer (Run 15.09.).
-                                    if participant.actorType == "users" {
-                                        LinkPresence.statusPill(
-                                            for: participant.status
-                                                ?? viewModel.userStatuses[participant.actorId]
-                                                ?? "offline",
-                                            size: 13
-                                        )
-                                    }
+                                    .padding(12)
                                 }
+                                Divider().padding(.leading, 54)
                             }
                         }
                     }
+                    .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                 }
+                .padding(.horizontal, 16)
             }
             .navigationTitle(NSLocalizedString("_link_participants_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
@@ -2776,7 +2801,7 @@ private struct LinkOnlineStatusButton: View {
                     .frame(width: 30, height: 30)
                 LinkPresence.statusPill(for: status, size: 13)
             }
-            .frame(width: 32, height: 32)
+            .frame(width: 36, height: 36)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -2834,39 +2859,56 @@ private struct LinkLobbyManagementView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                if !internalParticipants.isEmpty || !admittedExternals.isEmpty {
-                    Section(NSLocalizedString("_lobby_section_participants_", comment: "")) {
-                        ForEach(internalParticipants) { participant in
-                            participantRow(participant)
-                        }
-                        ForEach(admittedExternals) { participant in
-                            participantRow(participant)
-                        }
-                    }
-                }
-
-                if !waitingExternals.isEmpty {
-                    Section(NSLocalizedString("_lobby_section_waiting_", comment: "")) {
-                        ForEach(waitingExternals) { participant in
-                            SouveraSwipeActionRow(
-                                role: .destructive,
-                                icon: "person.crop.circle.badge.minus",
-                                label: NSLocalizedString("_link_participant_remove_", comment: ""),
-                                onTrigger: {
-                                    removeParticipant(participant)
-                                }
-                            ) {
-                                participantRow(participant, waiting: true)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if !internalParticipants.isEmpty || !admittedExternals.isEmpty {
+                        Text(NSLocalizedString("_lobby_section_participants_", comment: ""))
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 0) {
+                            ForEach(internalParticipants) { participant in
+                                participantRow(participant).padding(12)
+                                Divider().padding(.leading, 54)
+                            }
+                            ForEach(admittedExternals) { participant in
+                                participantRow(participant).padding(12)
+                                Divider().padding(.leading, 54)
                             }
                         }
-                        Button {
-                            Task { await viewModel.setLobbyEnabled(false, token: room.token) }
-                        } label: {
-                            Label(NSLocalizedString("_lobby_admit_all_", comment: ""), systemImage: "person.checkmark")
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                    }
+
+                    if !waitingExternals.isEmpty {
+                        Text(NSLocalizedString("_lobby_section_waiting_", comment: ""))
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                        VStack(spacing: 0) {
+                            ForEach(waitingExternals) { participant in
+                                SouveraSwipeActionRow(
+                                    actions: [SouveraSwipeAction(
+                                        role: .destructive,
+                                        icon: "person.crop.circle.badge.minus",
+                                        label: NSLocalizedString("_link_participant_remove_", comment: ""),
+                                        handler: { removeParticipant(participant) }
+                                    )]
+                                ) {
+                                    participantRow(participant, waiting: true)
+                                        .padding(12)
+                                }
+                            }
+                            Button {
+                                Task { await viewModel.setLobbyEnabled(false, token: room.token) }
+                            } label: {
+                                Label(NSLocalizedString("_lobby_admit_all_", comment: ""), systemImage: "person.checkmark")
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(12)
+                            }
+                            .buttonStyle(.plain)
                         }
+                        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                     }
                 }
+                .padding(.horizontal, 16)
             }
             .navigationTitle(NSLocalizedString("_link_lobby_title_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)

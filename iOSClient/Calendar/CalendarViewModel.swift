@@ -299,11 +299,36 @@ final class CalendarViewModel: ObservableObject {
             cacheBannerActive = cacheBannerGate.shouldTrigger()
         }
 
-        var entries: [CalDavEventEntry] = []
-        for cal in calendars where selectedCalendarHrefs.contains(cal.href) {
-            entries += await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
+        // Vorheriger Stand je Kalender (Run 15.09.): der Server lieferte
+        // im Log (d0gmaaa3ju) sekundenversetzt mal 13163-Byte-Antworten
+        // (10 Events) und mal 239-Byte-LEER-Antworten fuer DENSELBEN
+        // calendar-query - die Monatsansicht verlor dadurch kurzzeitig
+        // alle Termine. Ein leeres Ergebnis fuer einen Kalender, der
+        // vorher Events hatte, wird darum VERWORFEN (der vorherige Stand
+        // bleibt; der naechste 30-s-Sync korrigiert).
+        var previousByHref: [String: Int] = [:]
+        for entry in cachedEntries {
+            previousByHref[entry.calendarHref, default: 0] += 1
         }
-        JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched")
+
+        var entries: [CalDavEventEntry] = []
+        var suspiciousEmpty: [String] = []
+        for cal in calendars where selectedCalendarHrefs.contains(cal.href) {
+            let fetched = await client.fetchEvents(calendarHref: cal.href, start: start, end: end)
+            if fetched.isEmpty, let previous = previousByHref[cal.href], previous > 0 {
+                suspiciousEmpty.append(cal.href)
+                // Diagnose: Request-Body des Queries mitschreiben, um die
+                // 239-Byte-207er-Anomalie (time-range?) zu verifizieren.
+                if let body = await client.lastCalendarQueryBody(href: cal.href) {
+                    JmapLog.write("Calendar SUSPICIOUS empty result for \(cal.href) (previous=\(previous)) query=\(String(body.prefix(300)))")
+                } else {
+                    JmapLog.write("Calendar SUSPICIOUS empty result for \(cal.href) (previous=\(previous))")
+                }
+                continue
+            }
+            entries += fetched
+        }
+        JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched\(suspiciousEmpty.isEmpty ? "" : ", SUSPICIOUS-EMPTY: \(suspiciousEmpty.count)")")
         JmapLog.write("Calendar selection: \(selectedCalendarHrefs.sorted().joined(separator: ", "))")
 
         if entries.isEmpty, let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
@@ -331,7 +356,14 @@ final class CalendarViewModel: ObservableObject {
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")
         }
-        SouveraReminderScheduler.schedule(for: all, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "")
+        // Run 15.09.: nie mit einer "verdächtig leeren" Liste planen -
+        // schedule() ersetzt geplante Erinnerungen und wuerde sie sonst
+        // löschen.
+        if !all.isEmpty || previousByHref.values.allSatisfy({ $0 == 0 }) {
+            SouveraReminderScheduler.schedule(for: all, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "")
+        } else {
+            JmapLog.write("Calendar reminders: skipped suspicious-empty schedule (all=\(all.count))")
+        }
     }
 
     // MARK: - Mutations

@@ -32,6 +32,12 @@ struct CalDavEventEntry {
 }
 
 final class CalDavClient {
+    /// Letzter REPORT-Body je Kalender (Diagnose leerer 207er).
+    private(set) var lastQueryBodies: [String: String] = [:]
+
+    func lastCalendarQueryBody(href: String) async -> String? {
+        lastQueryBodies[href]
+    }
 
     /// Account für die Authentifizierung; nil = aktiver Account
     /// (Vordergrund). Hintergrund-Sync übergibt den Account explizit.
@@ -136,7 +142,11 @@ final class CalDavClient {
         // VEVENT. Ein kombinierter Filter wäre laut Sabre eine UND-Bedingung
         // und würde überall 0 Objekte liefern - daher je Kalender wählen.
         let todoOnly = calendarHref.contains("deck")
-        req.httpBody = Self.reportBody(start: start, end: end, todoOnly: todoOnly).data(using: .utf8)
+        let queryBody = Self.reportBody(start: start, end: end, todoOnly: todoOnly)
+        req.httpBody = queryBody.data(using: .utf8)
+        // Letzten Query-Body pro Kalender merken (Diagnose Run 15.09.:
+        // 239-Byte-Leer-207er bei identischem Query).
+        lastQueryBodies[calendarHref] = queryBody
         guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 207,
