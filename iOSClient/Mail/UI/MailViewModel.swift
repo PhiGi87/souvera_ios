@@ -2509,7 +2509,9 @@ final class MailViewModel: ObservableObject {
         // frischen Sync mit dem sauberen Spiegel — ein Sync kann nie
         // einen vor der Mutation liegenden Stand publizieren.
         listGeneration += 1
-        syncMessages()
+        Task { [weak self] in
+            await self?.syncMessages()
+        }
     }
 
     func delete(_ messagesToDelete: [MailMessage]) {

@@ -1822,6 +1822,13 @@ private struct LinkMessageRow: View {
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
+
+    /// Nachricht bearbeitet? Serverbasiert (lastEditTimestamp aus der
+    /// Poll-Antwort) oder lokaler Fallback (eigene Edits, Run 15.09.).
+    private func isMessageEdited(_ message: LinkChatMessage) -> Bool {
+        if message.lastEditTimestamp > 0 { return true }
+        return message.id > 0 && viewModel.editedIds.contains(message.id)
+    }
     /// "Teilen…" aus dem Kontextmenü (iOS-Teilen-Sheet).
     var onShare: (LinkChatMessage) -> Void = { _ in }
 
@@ -2454,13 +2461,6 @@ struct LinkParticipantsSheet: View {
         let isOwn = participant.actorType == "users" && participant.actorId == viewModel.currentUserId
         let isOwner = participant.participantType == 1
         return !isOwn && !isOwner
-    }
-
-    /// Nachricht bearbeitet? Serverbasiert (lastEditTimestamp) oder
-    /// lokaler Fallback (eigene Edits, Run 15.09.).
-    private func isMessageEdited(_ message: LinkChatMessage) -> Bool {
-        if message.lastEditTimestamp > 0 { return true }
-        return message.id > 0 && viewModel.editedIds.contains(message.id)
     }
 
     /// Rolle des Teilnehmers (Owner/Moderator/Mitglied) - fuer ALLE
