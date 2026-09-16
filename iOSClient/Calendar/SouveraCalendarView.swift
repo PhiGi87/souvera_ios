@@ -156,11 +156,11 @@ struct SouveraCalendarView: View {
         .sheet(isPresented: $showInvitationSheet) {
             SouveraInvitationSheetView(
                 center: SouveraInvitationCenter.shared,
-                mailInteractionEnabled: false,
                 respondCalendar: { event, rsvp in
                     await viewModel.respondToInvitation(event, status: rsvp)
                 },
-                respondMail: { _, _ in false }
+                respondMail: { _, _ in false },
+                mailInteractionEnabled: false
             )
         }
         .sheet(isPresented: $showCalendarPicker) {

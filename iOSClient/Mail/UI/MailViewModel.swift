@@ -1225,7 +1225,7 @@ final class MailViewModel: ObservableObject {
     /// den Organisator senden und die Einladungsmail gelesen markieren.
     func respondToMailInvitation(_ invitation: SouveraMailInvitation,
                                  status: CalendarViewModel.CalendarRSVP) async -> Bool {
-        guard let outgoing = SouveraInvitationCenter.shared.makeReplyMail(
+        guard let outgoing = SouveraInvitationCenter.makeReplyMail(
             for: invitation, status: status.rawValue) else { return false }
         let result: Result<Void, Error> = useJmap ? await sendJmap(outgoing) : await sendImap(outgoing)
         guard case .success = result else { return false }
