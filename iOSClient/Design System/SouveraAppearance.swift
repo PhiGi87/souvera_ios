@@ -318,43 +318,157 @@ private struct SouveraBridgeBarActive: ViewModifier {
             }
     }
 
+    // Run 16.09.: ToolbarContentBuilder akzeptiert hier kein ForEach
+    // (buildExpression-Fehler) - daher feste, per if geschaltete Slots
+    // (bis zu 6 Items + 4 Customs + 4 Menues je Seite).
     @ToolbarContentBuilder
     private var leadingBarContent: some ToolbarContent {
-        ForEach(bridge.leadingCustoms) { (custom: SouveraHeaderBridge.Custom) in
+        if bridge.leadingCustoms.indices.contains(0) {
             ToolbarItem(placement: .topBarLeading) {
-                UIKitViewWrapper(view: custom.view)
+                UIKitViewWrapper(view: bridge.leadingCustoms[0].view)
             }
         }
-        ForEach(bridge.leadingItems) { (item: SouveraHeaderBridge.Item) in
+        if bridge.leadingCustoms.indices.contains(1) {
             ToolbarItem(placement: .topBarLeading) {
-                SouveraBridgeBarButton(item: item)
+                UIKitViewWrapper(view: bridge.leadingCustoms[1].view)
             }
         }
-        ForEach(bridge.leadingMenus) { (group: SouveraHeaderBridge.MenuGroup) in
+        if bridge.leadingCustoms.indices.contains(2) {
             ToolbarItem(placement: .topBarLeading) {
-                SouveraBridgeMenuButton(group: group)
+                UIKitViewWrapper(view: bridge.leadingCustoms[2].view)
+            }
+        }
+        if bridge.leadingCustoms.indices.contains(3) {
+            ToolbarItem(placement: .topBarLeading) {
+                UIKitViewWrapper(view: bridge.leadingCustoms[3].view)
+            }
+        }
+        if bridge.leadingItems.indices.contains(0) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[0])
+            }
+        }
+        if bridge.leadingItems.indices.contains(1) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[1])
+            }
+        }
+        if bridge.leadingItems.indices.contains(2) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[2])
+            }
+        }
+        if bridge.leadingItems.indices.contains(3) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[3])
+            }
+        }
+        if bridge.leadingItems.indices.contains(4) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[4])
+            }
+        }
+        if bridge.leadingItems.indices.contains(5) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: bridge.leadingItems[5])
+            }
+        }
+        if bridge.leadingMenus.indices.contains(0) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeMenuButton(group: bridge.leadingMenus[0])
+            }
+        }
+        if bridge.leadingMenus.indices.contains(1) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeMenuButton(group: bridge.leadingMenus[1])
+            }
+        }
+        if bridge.leadingMenus.indices.contains(2) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeMenuButton(group: bridge.leadingMenus[2])
+            }
+        }
+        if bridge.leadingMenus.indices.contains(3) {
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeMenuButton(group: bridge.leadingMenus[3])
             }
         }
     }
 
     @ToolbarContentBuilder
     private var trailingBarContent: some ToolbarContent {
-        ForEach(bridge.trailingCustoms) { (custom: SouveraHeaderBridge.Custom) in
+        if bridge.trailingCustoms.indices.contains(0) {
             ToolbarItem(placement: .topBarTrailing) {
-                UIKitViewWrapper(view: custom.view)
+                UIKitViewWrapper(view: bridge.trailingCustoms[0].view)
             }
         }
-        ForEach(bridge.trailingItems) { (item: SouveraHeaderBridge.Item) in
+        if bridge.trailingCustoms.indices.contains(1) {
             ToolbarItem(placement: .topBarTrailing) {
-                SouveraBridgeBarButton(item: item)
+                UIKitViewWrapper(view: bridge.trailingCustoms[1].view)
             }
         }
-        ForEach(bridge.trailingMenus) { (group: SouveraHeaderBridge.MenuGroup) in
+        if bridge.trailingCustoms.indices.contains(2) {
             ToolbarItem(placement: .topBarTrailing) {
-                SouveraBridgeMenuButton(group: group)
+                UIKitViewWrapper(view: bridge.trailingCustoms[2].view)
+            }
+        }
+        if bridge.trailingCustoms.indices.contains(3) {
+            ToolbarItem(placement: .topBarTrailing) {
+                UIKitViewWrapper(view: bridge.trailingCustoms[3].view)
+            }
+        }
+        if bridge.trailingItems.indices.contains(0) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[0])
+            }
+        }
+        if bridge.trailingItems.indices.contains(1) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[1])
+            }
+        }
+        if bridge.trailingItems.indices.contains(2) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[2])
+            }
+        }
+        if bridge.trailingItems.indices.contains(3) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[3])
+            }
+        }
+        if bridge.trailingItems.indices.contains(4) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[4])
+            }
+        }
+        if bridge.trailingItems.indices.contains(5) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: bridge.trailingItems[5])
+            }
+        }
+        if bridge.trailingMenus.indices.contains(0) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeMenuButton(group: bridge.trailingMenus[0])
+            }
+        }
+        if bridge.trailingMenus.indices.contains(1) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeMenuButton(group: bridge.trailingMenus[1])
+            }
+        }
+        if bridge.trailingMenus.indices.contains(2) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeMenuButton(group: bridge.trailingMenus[2])
+            }
+        }
+        if bridge.trailingMenus.indices.contains(3) {
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeMenuButton(group: bridge.trailingMenus[3])
             }
         }
     }
+
 }
 
 /// Einzelner Glas-Kreis-Button in der System-Bar (iOS 26 rendert
