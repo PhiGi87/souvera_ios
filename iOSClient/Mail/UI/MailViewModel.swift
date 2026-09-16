@@ -1204,7 +1204,7 @@ final class MailViewModel: ObservableObject {
             guard generation == listGeneration else { return }
             // P62f: Cache-first-Publish filtern (optimistisch entfernte Mails
             // dürfen nicht wieder auftauchen).
-            let filteredSnapshot = snapshot.emails.filter { !pendingRemovedIds.contains($0.optString("id") ?? "") }
+            let filteredSnapshot = snapshot.emails.filter { !pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
             messages = .success(filteredSnapshot.map {
                 JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
             })
@@ -1378,8 +1378,11 @@ final class MailViewModel: ObservableObject {
                         baseRaw = [:]
                     }
                     // Defensive: Base ohne Fremd-Mailbox-Einträge (Run 15.09.
-                    // final — verschobene Mails kehren nicht zurück).
+                    // final — verschobene Mails kehren nicht zurück) und ohne
+                    // kuerzlich geloeschte IDs (Run 16.09., Race-Fix).
+                    let recentlyRemoved = activeRecentlyRemovedIds
                     baseRaw = baseRaw.filter { entry in
+                        if let id = entry.value.optString("id"), recentlyRemoved.contains(id) { return false }
                         guard let ids = entry.value["mailboxIds"] as? [String: Any] else { return true }
                         return ids[jmapMailboxId] != nil
                     }
@@ -1471,7 +1474,7 @@ final class MailViewModel: ObservableObject {
                     // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
                     // inkrementelle Sync (Snapshot von VOR der Löschung) die
                     // gelöschten Mails in den Cache (Reappear-Muster).
-                    let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                    let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                     MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                     messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
@@ -1616,7 +1619,7 @@ final class MailViewModel: ObservableObject {
                 rawMailboxEmails[cacheKey] = byId
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
-                let collectedFiltered = collected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                let collectedFiltered = collected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
                 JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
@@ -1709,7 +1712,7 @@ final class MailViewModel: ObservableObject {
             pageState = (lastId: lastId, hasMore: hasMore)
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
-            let savedCollected = finalCollected.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+            let savedCollected = finalCollected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
             MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
@@ -1744,7 +1747,7 @@ final class MailViewModel: ObservableObject {
                 let removedSet = Set(missing)
                 JmapLog.write("P64 stale verification removed \(removedSet.count) of \(cachedIds.count) cached mails")
                 var kept = finalSnapshot.filter { !removedSet.contains($0.optString("id") ?? "") }
-                kept = kept.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                kept = kept.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 // Live-Liste ebenfalls bereinigen: auf einem anderen Gerät /
                 // im Web gelöschte Mails entfernen. NUR Entfernen auf Basis des
@@ -1828,7 +1831,7 @@ final class MailViewModel: ObservableObject {
                 guard generation == listGeneration else { return }
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
-                let keptEmails = emails.filter { !self.pendingRemovedIds.contains($0.optString("id") ?? "") }
+                let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                 MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(keptEmails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })))
                 prefetchBodies(mailbox: mailbox)
@@ -1870,6 +1873,45 @@ final class MailViewModel: ObservableObject {
     /// Verhindert das Wiederauftauchen gelöschter Mails durch parallel
     /// laufende Syncs (log-belegter Reappear).
     private var pendingRemovedIds: Set<String> = []
+
+    /// Run 16.09.: Persistente "kuerzlich entfernt"-IDs (Grace 10 min).
+    /// Grund: der parallele Auto-Sync refetchet den kompletten Snapshot
+    /// (Log d1cmaaa3qu: refetched=314) und kann eine geloeschte Mail,
+    /// gelesen VOR dem Commit der Move-Mutation, zurueck in Spiegel und
+    /// Disk-Cache schreiben -> nach Neustart "wieder da". Diese Liste
+    /// filtert Cache-first-Publish UND Mirror-Seed deterministisch.
+    private static let recentlyRemovedKey = "mail_recently_removed_ids"
+    private static let recentlyRemovedGrace: TimeInterval = 600
+    private var recentlyRemoved: [String: Date] {
+        get {
+            (UserDefaults.standard.dictionary(forKey: Self.recentlyRemovedKey) as? [String: Double])?
+                .mapValues { Date(timeIntervalSince1970: $0) } ?? [:]
+        }
+        set {
+            let dict = newValue.mapValues { $0.timeIntervalSince1970 }
+            UserDefaults.standard.set(dict, forKey: Self.recentlyRemovedKey)
+        }
+    }
+
+    private func markRecentlyRemoved(_ ids: [String]) {
+        guard !ids.isEmpty else { return }
+        var store = recentlyRemoved
+        let now = Date()
+        for id in ids { store[id] = now }
+        // Abgelaufene Eintraege aufräumen.
+        store = store.filter { now.timeIntervalSince($0.value) < Self.recentlyRemovedGrace }
+        recentlyRemoved = store
+    }
+
+    private func pruneRecentlyRemoved() -> Set<String> {
+        let now = Date()
+        let store = recentlyRemoved
+        let active = Set(store.filter { now.timeIntervalSince($0.value) < Self.recentlyRemovedGrace }.keys)
+        if active.count != store.count { recentlyRemoved = store.filter { now.timeIntervalSince($0.value) < Self.recentlyRemovedGrace } }
+        return active
+    }
+
+    private var activeRecentlyRemovedIds: Set<String> { pruneRecentlyRemoved() }
     /// P62f: FIFO für Lösch-/Move-Tasks (keine parallelen Session-Races
     /// zwischen Folge-Löschungen).
     private var deleteWorkTask: Task<Void, Never>?
@@ -1909,8 +1951,9 @@ final class MailViewModel: ObservableObject {
 
     /// P62f: Filtert optimistisch entfernte IDs aus einer Publish-Liste.
     private func filterPendingRemoved(_ published: [MailMessage]) -> [MailMessage] {
-        guard !pendingRemovedIds.isEmpty else { return published }
-        return published.filter { !pendingRemovedIds.contains($0.emailId) }
+        let removed = pendingRemovedIds.union(activeRecentlyRemovedIds)
+        guard !removed.isEmpty else { return published }
+        return published.filter { !removed.contains($0.emailId) }
     }
 
     /// IMAP-artiger Voll-Cache: lädt die Bodies der geladenen Mails im
@@ -2619,6 +2662,11 @@ final class MailViewModel: ObservableObject {
         // P62d: OPTIMISTISCH - Zeile/Badge/Cache sofort entfernen, damit der
         // Swipe nicht "flappt", während der Server-Call läuft.
         optimisticRemove(messagesToDelete.map(\.emailId))
+        // Run 16.09.: in-flight Syncs abbrechen (Guard generation) UND die
+        // IDs persistent als entfernt markieren - sonst kann der parallele
+        // Auto-Sync die geloeschte Mail in Cache zurueckschreiben.
+        listGeneration += 1
+        markRecentlyRemoved(messagesToDelete.map(\.emailId))
         // P62f: FIFO - Folge-Löschungen laufen nicht parallel (Session-Races).
         let ids = messagesToDelete.map(\.emailId)
         let work = { [weak self] in
@@ -2702,6 +2750,8 @@ final class MailViewModel: ObservableObject {
     func move(_ messagesToMove: [MailMessage], to target: Mailbox) {
         // P62d: auch Verschieben optimistisch (kein Flappen beim Move).
         optimisticRemove(messagesToMove.map(\.emailId))
+        listGeneration += 1
+        markRecentlyRemoved(messagesToMove.map(\.emailId))
         Task {
             guard let first = messagesToMove.first else { return }
             if useJmap {

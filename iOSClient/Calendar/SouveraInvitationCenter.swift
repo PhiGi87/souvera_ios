@@ -57,6 +57,33 @@ final class SouveraInvitationCenter: ObservableObject {
         self.accountKey = accountKey
     }
 
+    /// Run 16.09.: Anzeige-Termin fuer Einladungsmails OHNE ICS -
+    /// nur Betreff/Absender als Detail-Information.
+    static func placeholderEvent(for invite: SouveraMailInvitation) -> CalendarEventModel {
+        CalendarEventModel(
+            id: invite.id,
+            uid: "",
+            sequence: 0,
+            title: invite.displayTitle,
+            start: Date(),
+            end: Date(),
+            allDay: false,
+            location: nil,
+            description: nil,
+            attendees: [],
+            talkRoomToken: nil,
+            talkRoomName: nil,
+            calendarHref: "",
+            href: invite.id,
+            etag: nil,
+            reminders: [],
+            isTask: false,
+            organizerName: "",
+            organizerEmail: invite.organizerEmail,
+            ownPartstat: ""
+        )
+    }
+
     // MARK: - Mail-iMIP-Scan
 
     /// Scannt die uebergebenen Posteingang-Kandidaten nach Einladungsmails.

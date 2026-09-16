@@ -39,6 +39,7 @@ struct SouveraCalendarView: View {
     @State private var showMonthYearPicker = false
     @State private var showInvitationSheet = false
     @State private var rsvpBusyForHref: String?
+    @State private var openedMailInvite: SouveraMailInvitation?
 
     enum CalendarViewMode: String, CaseIterable, Identifiable {
         case day, threeDay, month
@@ -150,8 +151,8 @@ struct SouveraCalendarView: View {
             SouveraInvitationFAB(center: .shared) {
                 showInvitationSheet = true
             }
-            .padding(.trailing, 20)
-            .padding(.bottom, 96)
+            .padding(.trailing, 16)
+            .padding(.bottom, 72)
         }
         .sheet(isPresented: $showInvitationSheet) {
             SouveraInvitationSheetView(
@@ -160,7 +161,20 @@ struct SouveraCalendarView: View {
                     await viewModel.respondToInvitation(event, status: rsvp)
                 },
                 respondMail: { _, _ in false },
-                mailInteractionEnabled: false
+                mailInteractionEnabled: false,
+                onOpenCalendarEvent: { event in
+                    showInvitationSheet = false
+                    selectedDay = event.start
+                    viewModel.visibleMonth = event.start
+                    viewMode = .day
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        detailEvent = event
+                    }
+                },
+                onOpenMailInvite: { invite in
+                    showInvitationSheet = false
+                    openedMailInvite = invite
+                }
             )
         }
         .sheet(isPresented: $showCalendarPicker) {
@@ -169,6 +183,34 @@ struct SouveraCalendarView: View {
         .sheet(isPresented: $showMonthYearPicker) {
             MonthYearPickerSheet(initial: viewModel.visibleMonth) { date in
                 viewModel.jumpToMonth(date)
+            }
+        }
+        .sheet(item: $openedMailInvite) { invite in
+            if let event = invite.event {
+                SouveraInvitationDetailView(
+                    event: event,
+                    organizerFallback: invite.displayOrganizer,
+                    respond: { rsvp in
+                        // Aus dem Kalender geoeffnet: der Termin existiert
+                        // moeglicherweise als CalDAV-Entry - RSVP zuerst
+                        // per CalDAV versuchen, sonst Mail-Pfad-Hinweis.
+                        let ok = await viewModel.respondToInvitation(event, status: rsvp)
+                        return ok
+                    },
+                    overlapCheck: { candidate in
+                        if case let .success(list) = viewModel.events {
+                            return list.contains { $0.href != candidate.href && !$0.allDay && $0.start < candidate.end && candidate.start < $0.end }
+                        }
+                        return false
+                    }
+                )
+            } else {
+                SouveraInvitationDetailView(
+                    event: SouveraInvitationCenter.placeholderEvent(for: invite),
+                    organizerFallback: invite.displayOrganizer,
+                    respond: { _ in nil },
+                    answerInMailHint: true
+                )
             }
         }
         .sheet(item: $detailEvent) { event in

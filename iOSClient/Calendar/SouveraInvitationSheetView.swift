@@ -14,6 +14,10 @@ struct SouveraInvitationSheetView: View {
     /// false im Kalender-Kontext: Mail-Einladungen koennen hier nicht
     /// beantwortet werden (kein Mail-Client) - Hinweis statt Buttons.
     var mailInteractionEnabled = true
+    /// Run 16.09.: Tap auf die Zeile oeffnet die Termin-Detailansicht
+    /// (Ueberschneidungen etc. pruefen, dort auch antworten).
+    var onOpenCalendarEvent: (CalendarEventModel) -> Void = { _ in }
+    var onOpenMailInvite: (SouveraMailInvitation) -> Void = { _ in }
 
     @State private var busyId: String?
     @State private var processedIds: Set<String> = []
@@ -109,6 +113,8 @@ struct SouveraInvitationSheetView: View {
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenCalendarEvent(event) }
     }
 
     @ViewBuilder
@@ -150,6 +156,8 @@ struct SouveraInvitationSheetView: View {
             }
         }
         .padding(.vertical, 2)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenMailInvite(invite) }
     }
 
     // MARK: - Helfer
@@ -181,5 +189,115 @@ struct SouveraInvitationSheetView: View {
                 && !other.allDay
                 && other.start < event.end && event.start < other.end
         }
+    }
+}
+
+
+// Run 16.09.: Termin-Detailansicht einer Einladung - zeigt alle Details
+// (Zeit, Organisator, Teilnehmer, Ueberschneidung) und direkt die
+// RSVP-Buttons. `respond` liefert nil, wenn Antworten in diesem Kontext
+// nicht moeglich ist (z. B. Mail-Einladung ohne Mail-Client).
+struct SouveraInvitationDetailView: View {
+    let event: CalendarEventModel
+    let organizerFallback: String
+    /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
+    let respond: (CalendarViewModel.CalendarRSVP) async -> Bool?
+    /// Ueberschneidungspruefung gegen den geladenen Kalenderstand
+    /// (nil = keine Pruefung moeglich, z. B. im Mail-Modul).
+    var overlapCheck: ((CalendarEventModel) -> Bool)? = nil
+    var answerInMailHint: Bool = false
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var busy = false
+    @State private var answeredText: String?
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text(event.title).font(.title3).fontWeight(.semibold)
+                }
+                Section(NSLocalizedString("_calendar_when_", comment: "")) {
+                    Text(timeLine)
+                }
+                Section(NSLocalizedString("_invitations_organizer_", comment: "")) {
+                    Text(event.organizerName.isEmpty
+                         ? (event.organizerEmail.isEmpty ? organizerFallback : event.organizerEmail)
+                         : event.organizerName)
+                }
+                if let overlapCheck, overlapCheck(event) {
+                    Section {
+                        Label(NSLocalizedString("_invitations_overlap_", comment: ""), systemImage: "exclamationmark.triangle")
+                            .foregroundStyle(.orange)
+                    }
+                }
+                if !event.attendees.isEmpty {
+                    Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
+                        ForEach(event.attendees, id: \.self) { attendee in
+                            Text(attendee).font(.subheadline)
+                        }
+                    }
+                }
+                Section {
+                    if let answeredText {
+                        Label(answeredText, systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    } else if let respond {
+                        HStack(spacing: 10) {
+                            ForEach(CalendarViewModel.CalendarRSVP.allCases, id: \.rawValue) { rsvp in
+                                Button {
+                                    busy = true
+                                    Task {
+                                        let ok = await respond(rsvp)
+                                        busy = false
+                                        if ok == true {
+                                            answeredText = NSLocalizedString(rsvp.titleKey, comment: "")
+                                        }
+                                    }
+                                } label: {
+                                    VStack(spacing: 3) {
+                                        Image(systemName: rsvp.icon)
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundStyle(rsvp.color)
+                                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
+                                            .font(.caption2)
+                                            .foregroundStyle(.primary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(busy)
+                            }
+                        }
+                    } else {
+                        Text(NSLocalizedString(answerInMailHint
+                            ? "_invitations_answer_in_mail_"
+                            : "_invitations_no_ics_hint_", comment: ""))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
+                }
+            }
+            .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
+                }
+            }
+        }
+        .preferredColorScheme(.light)
+    }
+
+    private var timeLine: String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = event.allDay ? .none : .short
+        if event.allDay {
+            return DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .none)
+        }
+        return "\(formatter.string(from: event.start)) - \(formatter.string(from: event.end))"
     }
 }

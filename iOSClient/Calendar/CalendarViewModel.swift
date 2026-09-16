@@ -680,9 +680,16 @@ final class CalendarViewModel: ObservableObject {
     /// ATTENDEE in der originalen ICS umschreiben und per PUT (If-Match)
     /// zurueckschreiben. Der Server verschickt die iTIP-Antwort selbst.
     func respondToInvitation(_ event: CalendarEventModel, status: CalendarRSVP) async -> Bool {
-        guard let entry = cachedEntries.first(where: { $0.href == event.href }),
-              !entry.ics.isEmpty else {
-            JmapLog.write("Invitation RSVP: no ics for \(event.href)")
+        var entry = cachedEntries.first(where: { $0.href == event.href })
+        if entry == nil, !event.uid.isEmpty {
+            // Run 16.09.: Mail-Einladung - der Server-Sync hat den Termin
+            // vielleicht bereits unter anderer href eingespielt (UID-Match).
+            entry = cachedEntries.first(where: {
+                $0.ics.uppercased().contains("UID:\(event.uid.uppercased())")
+            })
+        }
+        guard let entry, !entry.ics.isEmpty else {
+            JmapLog.write("Invitation RSVP: no ics for \(event.href) uid=\(event.uid)")
             return false
         }
         let me = Self.ownAttendeeEmail()
@@ -707,11 +714,21 @@ final class CalendarViewModel: ObservableObject {
         let target = attendeeEmail.lowercased()
         var found = false
         var lines: [String] = []
-        // Explizit \r\n -> \n normalisieren (CharacterSet-Split haette
-        // Leerzeilen zwischen \r und \n produziert).
+        // Run 16.09. (Feedback: "own attendee not found"): ICS ZUERST
+        // entfalten - lange ATTENDEE-Zeilen sind RFC-5545-gefoldet
+        // (Fortsetzung mit Leerzeichen/Tab), ohne Entfalten schlaegt der
+        // mailto-Match fehl.
+        var unfolded: [String] = []
         for raw in ics
             .replacingOccurrences(of: "\r\n", with: "\n")
             .components(separatedBy: "\n") {
+            if (raw.hasPrefix(" ") || raw.hasPrefix("\t")), !unfolded.isEmpty {
+                unfolded[unfolded.count - 1] += String(raw.dropFirst())
+            } else {
+                unfolded.append(raw)
+            }
+        }
+        for raw in unfolded {
             var line = raw
             if line.uppercased().hasPrefix("ATTENDEE"),
                line.lowercased().contains("mailto:\(target)") {

@@ -1250,3 +1250,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_answer_in_mail_" = "Answer in the Mail module.";
 "_invitations_reply_body_" = "%@: %@";
 "_invitations_rsvp_" = "Your reply";
+"_calendar_when_" = "When";

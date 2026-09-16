@@ -28,7 +28,8 @@ struct MailView: View {
     @State private var listShowEmptyTrashConfirm = false
     @State private var listMoveTarget: ([MailMessage], [Mailbox])?
     @State private var listBlacklistTarget: [MailMessage]?
-    @State private var showInvitationSheet = false
+    @State private var showInvitationDetail: SouveraMailInvitation?
+    @ObservedObject private var invitationCenter = SouveraInvitationCenter.shared
 
     var body: some View {
         NavigationStack {
@@ -137,27 +138,44 @@ struct MailView: View {
                 .padding(.bottom, 24)
                 .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let feedback = viewModel.actionFeedback ?? viewModel.sendFeedback {
-                MailSendBanner(feedback: feedback)
-                    .padding(.horizontal)
-                    .padding(.bottom, 24)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                MailSendBanner(feedback: feedback, dismiss: {
+                    viewModel.actionFeedback = nil
+                    viewModel.sendFeedback = nil
+                })
+                .padding(.horizontal)
+                .padding(.bottom, 24)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
-        // Run 16.09.: Einladungs-FAB (unten rechts, ueber der Tab-Bar).
+        // Run 16.09.: Einladungs-Button nur in der geoeffneten
+        // Einladungsmail (ohne Badge), oeffnet NUR den Termin dieser Mail.
         .overlay(alignment: .bottomTrailing) {
-            SouveraInvitationFAB(center: .shared) {
-                showInvitationSheet = true
-            }
-            .padding(.trailing, 20)
-            .padding(.bottom, 96)
-        }
-        .sheet(isPresented: $showInvitationSheet) {
-            SouveraInvitationSheetView(
-                center: SouveraInvitationCenter.shared,
-                respondCalendar: { _, _ in false },
-                respondMail: { invite, rsvp in
-                    await viewModel.respondToMailInvitation(invite, status: rsvp)
+            if case let .detail(message) = viewModel.route,
+               let invite = invitationCenter.mailInvites.first(where: { $0.messageId == message.emailId }) {
+                Button {
+                    showInvitationDetail = invite
+                } label: {
+                    Image(systemName: "calendar.badge.exclamationmark")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                        .frame(width: 56, height: 56)
+                        .modifier(SouveraHeaderGlass(shape: Circle()))
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel(Text(NSLocalizedString("_invitations_title_", comment: "")))
+                .padding(.trailing, 16)
+                .padding(.bottom, 72)
+            }
+        }
+        .sheet(item: $showInvitationDetail) { invite in
+            SouveraInvitationDetailView(
+                event: invite.event ?? SouveraInvitationCenter.placeholderEvent(for: invite),
+                organizerFallback: invite.displayOrganizer,
+                respond: { rsvp in
+                    guard invite.event != nil else { return nil }
+                    return await viewModel.respondToMailInvitation(invite, status: rsvp)
+                },
+                answerInMailHint: invite.event == nil
             )
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
@@ -728,6 +746,7 @@ struct MailView: View {
 /// Transient overlay shown after sending a message (success or failure).
 struct MailSendBanner: View {
     let feedback: MailSendFeedback
+    var dismiss: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -741,6 +760,14 @@ struct MailSendBanner: View {
         .padding(.vertical, 12)
         .background(.regularMaterial, in: Capsule())
         .shadow(radius: 6)
+        .task(id: feedback) {
+            // Run 16.09.: Banner-Dismiss ist an den Banner selbst gebunden
+            // (statt an onChange des ViewModels) - Feedback-Updates waehrend
+            // laufender Deletes triggern einen frischen Timer, das Banner
+            // bleibt nie haengen.
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            dismiss?()
+        }
     }
 }
 

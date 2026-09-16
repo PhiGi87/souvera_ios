@@ -13,7 +13,7 @@ struct SouveraInvitationFAB: View {
         if center.totalCount > 0 {
             Button(action: action) {
                 ZStack(alignment: .topTrailing) {
-                    Image(systemName: "person.crop.circle.badge.questionmark")
+                    Image(systemName: "calendar.badge.exclamationmark")
                         .font(.system(size: 22, weight: .medium))
                         .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
                         .frame(width: 56, height: 56)
