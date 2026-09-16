@@ -30,6 +30,7 @@ struct LinkView: View {
     @State private var showAddParticipant = false
     @State private var startCallRequest: CallStartRequest?
     @State private var showParticipants = false
+    @State private var shareRoomLink: SouveraSharePayload?
     @State private var settingsRoom: LinkConversation?
     @State private var searchActive = false
     @State private var searchQuery = ""
@@ -216,6 +217,9 @@ struct LinkView: View {
                 )
                 .ignoresSafeArea()
             }
+        }
+        .sheet(item: $shareRoomLink) { payload in
+            SouveraShareSheet(items: payload.items)
         }
         .sheet(isPresented: $showParticipants) {
             LinkParticipantsSheet(viewModel: viewModel)
@@ -2417,6 +2421,7 @@ private struct LinkSystemMessageRow: View {
 private struct ExternalInviteSheet: View {
     let context: LinkViewModel.ExternalInviteContext
     @Environment(\.dismiss) private var dismiss
+    @State private var sharePayload: SouveraSharePayload?
 
     var body: some View {
         VStack(spacing: 14) {
@@ -2436,14 +2441,17 @@ private struct ExternalInviteSheet: View {
                 .multilineTextAlignment(.center)
 
             Button {
-                UIPasteboard.general.string = context.link
+                sharePayload = SouveraSharePayload(items: [context.link])
                 dismiss()
             } label: {
-                Label(NSLocalizedString("_link_copy_room_link_", comment: ""), systemImage: "doc.on.doc")
+                Label(NSLocalizedString("_link_share_room_link_", comment: ""), systemImage: "square.and.arrow.up")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .tint(Color(NCBrandColor.shared.customer))
+            .sheet(item: $sharePayload) { payload in
+                SouveraShareSheet(items: payload.items)
+            }
 
             HStack(spacing: 8) {
                 Image(systemName: "door.left.hand.open")
@@ -2633,6 +2641,7 @@ struct LinkRoomSettingsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isPublic: Bool
     @State private var working = false
+    @State private var sharePayload: SouveraSharePayload?
     @State private var copied = false
     @State private var lobbyEnabled = false
 
@@ -2695,10 +2704,9 @@ struct LinkRoomSettingsSheet: View {
                 if isPublic {
                     Section {
                         Button {
-                            UIPasteboard.general.string = viewModel.guestURL(for: room)
-                            copied = true
+                            sharePayload = SouveraSharePayload(items: [viewModel.guestURL(for: room)])
                         } label: {
-                            Label(NSLocalizedString("_link_copy_room_link_", comment: ""), systemImage: "link")
+                            Label(NSLocalizedString("_link_share_room_link_", comment: ""), systemImage: "square.and.arrow.up")
                         }
                         if copied {
                             Text(NSLocalizedString("_link_guest_link_copied_", comment: ""))
@@ -2710,6 +2718,9 @@ struct LinkRoomSettingsSheet: View {
             }
             .navigationTitle(NSLocalizedString("_link_room_settings_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
+            .sheet(item: $sharePayload) { payload in
+                SouveraShareSheet(items: payload.items)
+            }
             .toolbar {
                 // Run 15.09.: Schließen über X-Symbol statt "Abbrechen"-Text.
                 ToolbarItem(placement: .cancellationAction) {

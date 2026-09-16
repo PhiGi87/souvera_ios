@@ -299,15 +299,28 @@ final class SouveraBarCoordinator {
     func rebuild() {
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
         item.title = bridge.title.isEmpty ? nil : bridge.title
-        item.leftBarButtonItems = Self.build(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
-        item.rightBarButtonItems = Self.build(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
+        item.leftBarButtonItems = Self.build(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms, atLeadingEdge: true)
+        item.rightBarButtonItems = Self.build(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms, atLeadingEdge: false)
+    }
+
+    /// Run 16.09.: Aussenkanten-Abstand wie bei Mehr/Dateien - ein fixer
+    /// Spacer an der jeweiligen Displaykante, damit die Glas-Pills nicht
+    /// direkt am Rand kleben.
+    private static func edgeSpacer() -> UIBarButtonItem {
+        let spacer = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
+        spacer.width = 10
+        return spacer
     }
 
     private static func build(_ items: [SouveraHeaderBridge.Item],
                               _ menus: [SouveraHeaderBridge.MenuGroup],
-                              _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItem] {
-        var bars: [UIBarButtonItem] = []
-        for item in items {
+                              _ customs: [SouveraHeaderBridge.Custom],
+                              atLeadingEdge: Bool) -> [UIBarButtonItem] {
+        // rightBarButtonItems rendert das ERSTE Element am rechten Rand -
+        // der Kanten-Spacer gehoert dort an den Anfang, bei der linken
+        // Seite ans Ende.
+        var bars: [UIBarButtonItem] = atLeadingEdge ? [] : [edgeSpacer()]
+        for item in items where !item.icon.isEmpty {
             bars.append(UIBarButtonItem(
                 image: UIImage(systemName: item.icon)?
                     .applyingSymbolConfiguration(.init(weight: .medium)),
@@ -320,7 +333,7 @@ final class SouveraBarCoordinator {
                 bar.accessibilityLabel = item.accessibilityLabel
             })
         }
-        for menu in menus {
+        for menu in menus where !menu.icon.isEmpty {
             bars.append(UIBarButtonItem(
                 image: UIImage(systemName: menu.icon)?
                     .applyingSymbolConfiguration(.init(weight: .medium)),
@@ -338,6 +351,9 @@ final class SouveraBarCoordinator {
         }
         for custom in customs {
             bars.append(UIBarButtonItem(customView: custom.view))
+        }
+        if atLeadingEdge {
+            bars.append(edgeSpacer())
         }
         return bars
     }

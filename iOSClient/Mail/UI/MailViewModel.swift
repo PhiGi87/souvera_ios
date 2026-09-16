@@ -1214,6 +1214,72 @@ final class MailViewModel: ObservableObject {
         } else {
             await syncMessagesImap(mailbox)
         }
+        // Run 16.09.: Einladungs-Scan (iMIP) im Posteingang - best-effort,
+        // parallel zum Listenaufbau; feuert das Einladungs-FAB.
+        if mailbox.kind == .inbox, useJmap {
+            Task { await scanInvitations(mailbox: mailbox) }
+        }
+    }
+
+    /// Beantwortet eine per Mail erhaltene Einladung: iTIP-REPLY-Mail an
+    /// den Organisator senden und die Einladungsmail gelesen markieren.
+    func respondToMailInvitation(_ invitation: SouveraMailInvitation,
+                                 status: CalendarViewModel.CalendarRSVP) async -> Bool {
+        guard let outgoing = SouveraInvitationCenter.shared.makeReplyMail(
+            for: invitation, status: status.rawValue) else { return false }
+        let result: Result<Void, Error> = useJmap ? await sendJmap(outgoing) : await sendImap(outgoing)
+        guard case .success = result else { return false }
+        if useJmap, let api = jmapApi,
+           let session = try? await jmapClient?.refreshSession() {
+            _ = try? await api.setEmailFlags(
+                accountId: session.primaryAccountId,
+                emailIds: [invitation.messageId],
+                keywordsToAdd: ["$seen": true]
+            )
+        }
+        await MainActor.run {
+            SouveraInvitationCenter.shared.removeMailInvitation(invitation.id)
+        }
+        return true
+    }
+
+    /// Liest die neuesten Posteingangs-Mails und meldet iMIP-Einladungen
+    /// (text/calendar-Part oder Einladungs-Betreff) ans InvitationCenter.
+    func scanInvitations(mailbox: Mailbox) async {
+        guard let api = jmapApi, let client = jmapClient else { return }
+        guard let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty else { return }
+        guard let session = try? await client.refreshSession() else { return }
+        let accId = session.primaryAccountId
+        guard !accId.isEmpty else { return }
+        do {
+            let resp = try await api.queryEmails(
+                accountId: accId,
+                inMailboxId: jmapMailboxId,
+                limit: 40,
+                position: 0
+            )
+            let ids = (resp["ids"] as? [String]) ?? []
+            guard !ids.isEmpty else {
+                await SouveraInvitationCenter.shared.setMailInvites([], accountKey: cacheAccountKey)
+                return
+            }
+            let detailed = try await api.getEmails(
+                accountId: accId,
+                ids: ids,
+                bodyProperties: ["subject", "from", "keywords", "attachments"],
+                fetchAllBodyValues: false
+            )
+            await SouveraInvitationCenter.shared.scanMailInvites(
+                accountId: accId,
+                accountKey: cacheAccountKey,
+                ownEmail: fromAddress,
+                candidates: detailed,
+                client: client,
+                api: api
+            )
+        } catch {
+            SouveraLog.write("Invitations", "scan failed: \(error)")
+        }
     }
 
     private func syncMessagesImap(_ mailbox: Mailbox) async {

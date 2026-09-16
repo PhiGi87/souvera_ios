@@ -28,6 +28,7 @@ struct MailView: View {
     @State private var listShowEmptyTrashConfirm = false
     @State private var listMoveTarget: ([MailMessage], [Mailbox])?
     @State private var listBlacklistTarget: [MailMessage]?
+    @State private var showInvitationSheet = false
 
     var body: some View {
         NavigationStack {
@@ -141,6 +142,23 @@ struct MailView: View {
                     .padding(.bottom, 24)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
+        }
+        // Run 16.09.: Einladungs-FAB (unten rechts, ueber der Tab-Bar).
+        .overlay(alignment: .bottomTrailing) {
+            SouveraInvitationFAB(center: .shared) {
+                showInvitationSheet = true
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 96)
+        }
+        .sheet(isPresented: $showInvitationSheet) {
+            SouveraInvitationSheetView(
+                center: SouveraInvitationCenter.shared,
+                respondCalendar: { _, _ in false },
+                respondMail: { invite, rsvp in
+                    await viewModel.respondToMailInvitation(invite, status: rsvp)
+                }
+            )
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
             guard feedback != nil else { return }
@@ -383,7 +401,7 @@ struct MailView: View {
         let showBack = !isFolders && !(landscapeLayout && !viewModel.route.isDetail)
         var leading: [SouveraHeaderBridge.Item] = []
         var trailing: [SouveraHeaderBridge.Item] = []
-        var menus: [SouveraHeaderBridge.MenuGroup] = []
+        var menus: [SouveraHeaderBridge.MenuGroup] = []  // alle im trailing-Bereich
 
         if showBack {
             leading.append(SouveraHeaderBridge.Item(
@@ -391,22 +409,17 @@ struct MailView: View {
                 accessibilityLabel: NSLocalizedString("_back_", comment: "")
             ) { viewModel.back() })
         }
+        var leadingCustoms: [SouveraHeaderBridge.Custom] = []
         if isFolders || landscapeLayout {
             if !(focusReaderActive && viewModel.route.isDetail) {
                 // Ring als Custom-View (SwiftUI-Ring in der UIKit-Bar).
                 let ring = UIHostingController(
                     rootView: AutoRefreshRingView(viewModel: viewModel)
                         .frame(width: 34, height: 34)
+                        .padding(.trailing, 6)
                 ).view!
                 ring.backgroundColor = .clear
-                leading.append(SouveraHeaderBridge.Item(
-                    id: "ring", icon: "", accessibilityLabel: ""
-                ) {})
-                menus.append(SouveraHeaderBridge.MenuGroup(
-                    id: "ring-custom", icon: "",
-                    accessibilityLabel: "", entries: []
-                ))
-                // Platzhalter durch Custom ersetzen: unten via customs
+                leadingCustoms.append(SouveraHeaderBridge.Custom(id: "ring", view: ring))
             }
         }
 
@@ -486,8 +499,10 @@ struct MailView: View {
         bridge.title = mailboxTitle
         bridge.leadingItems = leading
         bridge.trailingItems = trailing
-        bridge.leadingMenus = menus
-        bridge.trailingMenus = menus.contains(where: { $0.id == "detail-more" }) ? [] : menus.filter { $0.id == "messages-more" }
+        bridge.leadingMenus = []
+        bridge.leadingCustoms = leadingCustoms
+        bridge.trailingMenus = menus
+        bridge.trailingCustoms = []
     }
 
     /// Messages-Route: die System-Toolbar-Items galten nur bei aktiver

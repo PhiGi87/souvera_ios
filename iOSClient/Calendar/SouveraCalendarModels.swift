@@ -75,7 +75,8 @@ enum CalendarReminderText {
 
 enum ICSParser {
 
-    static func parseEvents(_ ics: String, calendarHref: String, href: String, etag: String?) -> [CalendarEventModel] {
+    static func parseEvents(_ ics: String, calendarHref: String, href: String, etag: String?,
+                            ownEmail: String? = nil) -> [CalendarEventModel] {
         var events: [CalendarEventModel] = []
         // Deck-Kalender speichern Karten/Stacks als VTODO - beide Objekttypen
         // einsammeln und VTODO als Aufgaben (read-only) markieren.
@@ -172,7 +173,11 @@ enum ICSParser {
                     }
                     // Run 16.09.: PARTSTAT des eigenen ATTENDEE erfassen
                     // (Einladungs-Erkennung: NEEDS-ACTION = unbeantwortet).
-                    if keyPart.contains("PARTSTAT=") {
+                    // Abgleich mit ownEmail - fremde Teilnehmer duerfen den
+                    // eigenen Status nicht ueberschreiben.
+                    if let own = ownEmail?.lowercased(), !own.isEmpty,
+                       email.lowercased() == own,
+                       keyPart.contains("PARTSTAT=") {
                         let parts = keyPart.components(separatedBy: "PARTSTAT=")
                         if parts.count > 1 {
                             ownPartstat = parts[1].components(separatedBy: ";").first?

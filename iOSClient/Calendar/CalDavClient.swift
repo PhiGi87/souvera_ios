@@ -33,10 +33,16 @@ struct CalDavEventEntry {
 
 final class CalDavClient {
     /// Letzter REPORT-Body je Kalender (Diagnose leerer 207er).
-    private(set) var lastQueryBodies: [String: String] = [:]
+    /// Run 16.09.: NSLock statt bare Dictionary — fetchEvents laeuft
+    /// parallel pro Kalender (TaskGroup), ein ungeschuetztes Dictionary
+    /// ist ein Data Race (SIGSEGV in swift_isUniquelyReferenced).
+    private let queryBodiesLock = NSLock()
+    private var lastQueryBodies: [String: String] = [:]
 
     func lastCalendarQueryBody(href: String) async -> String? {
-        lastQueryBodies[href]
+        queryBodiesLock.lock()
+        defer { queryBodiesLock.unlock() }
+        return lastQueryBodies[href]
     }
 
     /// Account für die Authentifizierung; nil = aktiver Account
@@ -146,7 +152,9 @@ final class CalDavClient {
         req.httpBody = queryBody.data(using: .utf8)
         // Letzten Query-Body pro Kalender merken (Diagnose Run 15.09.:
         // 239-Byte-Leer-207er bei identischem Query).
+        queryBodiesLock.lock()
         lastQueryBodies[calendarHref] = queryBody
+        queryBodiesLock.unlock()
         guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard status == 207,

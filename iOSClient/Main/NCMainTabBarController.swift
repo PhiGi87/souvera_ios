@@ -200,6 +200,12 @@ class NCMainTabBarController: UITabBarController {
         appearance.inlineLayoutAppearance.normal.iconColor = appearance.stackedLayoutAppearance.normal.iconColor
         appearance.inlineLayoutAppearance.normal.titleTextAttributes = appearance.stackedLayoutAppearance.normal.titleTextAttributes
 
+        // Run 16.09.: Badge leicht nach rechts oben versetzen - im
+        // iOS-26-Glass-Pill ueberlappte das Badge sonst das Tab-Label
+        // (Feedback-Screenshot "Mail 31").
+        appearance.stackedLayoutAppearance.normal.badgePositionAdjustment = UIOffset(horizontal: 6, vertical: -2)
+        appearance.stackedLayoutAppearance.selected.badgePositionAdjustment = UIOffset(horizontal: 6, vertical: -2)
+
         tabBar.standardAppearance = appearance
         tabBar.scrollEdgeAppearance = appearance
     }

@@ -271,7 +271,7 @@ final class CalendarViewModel: ObservableObject {
         // JETZT IMMER (auch bei .success: Monatswechsel/Re-Entry zeigen
         // den Cache ad hoc, der Netz-Fetch aktualisiert danach).
         if let cached = Self.loadCachedEntries(month: visibleMonth), !cached.isEmpty {
-            let cachedSorted = Self.parseEntries(cached).sorted { $0.start < $1.start }
+            let cachedSorted = Self.parseEntries(cached, ownEmail: Self.ownAttendeeEmail()).sorted { $0.start < $1.start }
             let cachedSignature = cached.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
             if eventsSignature != "cached-\(cachedSignature)" {
                 eventsSignature = "cached-\(cachedSignature)"
@@ -358,8 +358,12 @@ final class CalendarViewModel: ObservableObject {
         loadedStart = start
         loadedEnd = end
 
-        let all = Self.parseEntries(entries)
+        let all = Self.parseEntries(entries, ownEmail: Self.ownAttendeeEmail())
         let sortedAll = all.sorted { $0.start < $1.start }
+        // Run 16.09.: offene Einladungen (ownPartstat = needs-action) an
+        // den zentralen InvitationCenter melden (FAB-Badge + Sheet).
+        let pending = sortedAll.filter { $0.ownPartstat == "needs-action" }
+        await SouveraInvitationCenter.shared.setCalendarInvites(pending, accountKey: Self.stableAccountKey())
         // Redundanz-Guard: identische Event-Stände nicht erneut setzen.
         let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
         if signature != eventsSignature {
@@ -427,7 +431,7 @@ final class CalendarViewModel: ObservableObject {
         let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
         if signature != eventsSignature {
             eventsSignature = signature
-            events = .success(Self.parseEntries(entries).sorted { $0.start < $1.start })
+            events = .success(Self.parseEntries(entries, ownEmail: Self.ownAttendeeEmail()).sorted { $0.start < $1.start })
         }
         JmapLog.write("Calendar ensureDayCovered \(day): entries=\(entries.count)")
     }
@@ -642,12 +646,110 @@ final class CalendarViewModel: ObservableObject {
         }
     }
 
-    private static func parseEntries(_ entries: [CalDavEventEntry]) -> [CalendarEventModel] {
+    // MARK: - Einladungen (Run 16.09.)
+
+    enum CalendarRSVP: String, CaseIterable {
+        case accepted = "ACCEPTED"
+        case tentative = "TENTATIVE"
+        case declined = "DECLINED"
+
+        var titleKey: String {
+            switch self {
+            case .accepted: return "_invitations_accept_"
+            case .tentative: return "_invitations_tentative_"
+            case .declined: return "_invitations_decline_"
+            }
+        }
+        var icon: String {
+            switch self {
+            case .accepted: return "checkmark.circle.fill"
+            case .tentative: return "questionmark.circle"
+            case .declined: return "xmark.circle.fill"
+            }
+        }
+        var color: Color {
+            switch self {
+            case .accepted: return .green
+            case .tentative: return .orange
+            case .declined: return .red
+            }
+        }
+    }
+
+    /// Beantwortet eine Kalender-Einladung: PARTSTAT des eigenen
+    /// ATTENDEE in der originalen ICS umschreiben und per PUT (If-Match)
+    /// zurueckschreiben. Der Server verschickt die iTIP-Antwort selbst.
+    func respondToInvitation(_ event: CalendarEventModel, status: CalendarRSVP) async -> Bool {
+        guard let entry = cachedEntries.first(where: { $0.href == event.href })
+                ?? CalDavEventEntry(calendarHref: event.calendarHref, href: event.href,
+                                    etag: event.etag, ics: ""),
+              !entry.ics.isEmpty else {
+            JmapLog.write("Invitation RSVP: no ics for \(event.href)")
+            return false
+        }
+        let me = Self.ownAttendeeEmail()
+        guard !me.isEmpty, let updated = Self.updatePartstat(ics: entry.ics, attendeeEmail: me, status: status.rawValue) else {
+            JmapLog.write("Invitation RSVP: own attendee \(me) not found in \(event.href)")
+            return false
+        }
+        let ok = await client.updateEvent(entry, ics: updated)
+        if ok {
+            JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
+            actionFeedback = CalendarActionFeedback(
+                success: true,
+                message: "\(NSLocalizedString(status.titleKey, comment: "")): \(event.title)")
+            await load()
+        }
+        return ok
+    }
+
+    /// Schreibt PARTSTAT im eigenen ATTENDEE um (Case-insensitiver
+    /// mailto:-Match, bestehenden PARTSTAT-Parameter ersetzen).
+    static func updatePartstat(ics: String, attendeeEmail: String, status: String) -> String? {
+        let target = attendeeEmail.lowercased()
+        var found = false
+        var lines: [String] = []
+        // Explizit \r\n -> \n normalisieren (CharacterSet-Split haette
+        // Leerzeilen zwischen \r und \n produziert).
+        for raw in ics
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n") {
+            var line = raw
+            if line.uppercased().hasPrefix("ATTENDEE"),
+               line.lowercased().contains("mailto:\(target)") {
+                found = true
+                // Bestehenden PARTSTAT-Parameter entfernen
+                if let range = line.range(of: "PARTSTAT=[A-Z-]+;", options: [.regularExpression, .caseInsensitive]) {
+                    line = line.replacingCharacters(in: range, with: "")
+                } else if let range = line.range(of: ";PARTSTAT=[A-Z-]+", options: [.regularExpression, .caseInsensitive]) {
+                    line = line.replacingCharacters(in: range, with: "")
+                }
+                // Neuen PARTSTAT direkt nach ATTENDEE einfuegen
+                if line.uppercased().hasPrefix("ATTENDEE;") {
+                    line = "ATTENDEE;PARTSTAT=\(status);" + line.dropFirst("ATTENDEE;".count)
+                } else {
+                    line = "ATTENDEE;PARTSTAT=\(status):" + (line.split(separator: ":").dropFirst().joined(separator: ":"))
+                }
+            }
+            lines.append(line)
+        }
+        guard found else { return nil }
+        return lines.joined(separator: "\r\n")
+    }
+
+    private static func parseEntries(_ entries: [CalDavEventEntry],
+                                     ownEmail: String? = nil) -> [CalendarEventModel] {
         var all: [CalendarEventModel] = []
         for entry in entries {
-            all += ICSParser.parseEvents(entry.ics, calendarHref: entry.calendarHref, href: entry.href, etag: entry.etag)
+            all += ICSParser.parseEvents(entry.ics, calendarHref: entry.calendarHref, href: entry.href,
+                                         etag: entry.etag, ownEmail: ownEmail)
         }
         return all
+    }
+
+    /// Eigene Adresse (Account-User) - Match fuer den eigenen ATTENDEE.
+    static func ownAttendeeEmail() -> String {
+        NCManageDatabase.shared.getActiveTableAccount()?.user.lowercased() ?? ""
     }
 
     private static var calendarListCacheKey: String { "calendar_list_" + stableAccountKey() }

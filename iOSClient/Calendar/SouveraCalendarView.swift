@@ -37,6 +37,8 @@ struct SouveraCalendarView: View {
     @State private var editState: EditSheetState?
     @State private var showCalendarPicker = false
     @State private var showMonthYearPicker = false
+    @State private var showInvitationSheet = false
+    @State private var rsvpBusyForHref: String?
 
     enum CalendarViewMode: String, CaseIterable, Identifiable {
         case day, threeDay, month
@@ -88,7 +90,7 @@ struct SouveraCalendarView: View {
                         searchResults
                     }
                 }
-                .padding(.top, 8)
+                .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 8)
             }
             .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
             .souveraOfflineBanner()
@@ -141,6 +143,25 @@ struct SouveraCalendarView: View {
                 try? await Task.sleep(nanoseconds: 2_500_000_000)
                 viewModel.actionFeedback = nil
             }
+        }
+        // Run 16.09.: Einladungs-FAB (unten rechts, ueber der Tab-Bar)
+        // + Sheet - nur solange offene Einladungen vorliegen.
+        .overlay(alignment: .bottomTrailing) {
+            SouveraInvitationFAB(center: .shared) {
+                showInvitationSheet = true
+            }
+            .padding(.trailing, 20)
+            .padding(.bottom, 96)
+        }
+        .sheet(isPresented: $showInvitationSheet) {
+            SouveraInvitationSheetView(
+                center: SouveraInvitationCenter.shared,
+                mailInteractionEnabled: false,
+                respondCalendar: { event, rsvp in
+                    await viewModel.respondToInvitation(event, status: rsvp)
+                },
+                respondMail: { _, _ in false }
+            )
         }
         .sheet(isPresented: $showCalendarPicker) {
             CalendarPickerSheet(viewModel: viewModel)
@@ -1155,6 +1176,55 @@ private struct CalendarEventDetailSheet: View {
                         }
                     }
                 }
+                // Run 16.09.: Organisator-Zeile (Name, sonst E-Mail -
+                // bei externen Einladungen zumindest die Adresse).
+                if !event.organizerName.isEmpty || !event.organizerEmail.isEmpty {
+                    Section {
+                        Label(
+                            event.organizerName.isEmpty
+                                ? event.organizerEmail
+                                : "\(event.organizerName) (\(event.organizerEmail))",
+                            systemImage: "person.badge.shield.checkmark")
+                    } header: {
+                        Text(NSLocalizedString("_invitations_organizer_", comment: ""))
+                    }
+                }
+                // RSVP: eigene Einladung noch unbeantwortet (oder erneut
+                // antworten) -> Annehmen/Vielleicht/Ablehnen via CalDAV-PUT.
+                if !event.ownPartstat.isEmpty {
+                    Section {
+                        if event.ownPartstat == "needs-action" {
+                            HStack(spacing: 10) {
+                                ForEach(CalendarViewModel.CalendarRSVP.allCases, id: \.rawValue) { rsvp in
+                                    Button {
+                                        Task {
+                                            rsvpBusyForHref = event.href
+                                            _ = await viewModel.respondToInvitation(event, status: rsvp)
+                                            rsvpBusyForHref = nil
+                                        }
+                                    } label: {
+                                        VStack(spacing: 3) {
+                                            Image(systemName: rsvp.icon)
+                                                .font(.system(size: 18, weight: .medium))
+                                                .foregroundStyle(rsvp.color)
+                                            Text(NSLocalizedString(rsvp.titleKey, comment: ""))
+                                                .font(.caption2)
+                                                .foregroundStyle(.primary)
+                                        }
+                                        .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .disabled(rsvpBusyForHref == event.href)
+                                }
+                            }
+                        } else {
+                            Label(rsvpStatusText(event.ownPartstat), systemImage: "checkmark.circle")
+                                .foregroundStyle(.secondary)
+                        }
+                    } header: {
+                        Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
+                    }
+                }
                 if !event.attendees.isEmpty {
                     Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
                         ForEach(event.attendees, id: \.self) { attendee in
@@ -1822,6 +1892,15 @@ private struct MonthYearPickerSheet: View {
 extension SouveraCalendarView {
     /// Header 1:1 wie Mehr/Dateien: Verlauf, weisse Pills, dunkle Icons.
         /// Run 16.09.: Header-Aktionen als Bridge-Items (hosting UIKit-Bar).
+    private func rsvpStatusText(_ partstat: String) -> String {
+        switch partstat {
+        case "accepted": return NSLocalizedString("_invitations_accept_", comment: "")
+        case "tentative": return NSLocalizedString("_invitations_tentative_", comment: "")
+        case "declined": return NSLocalizedString("_invitations_decline_", comment: "")
+        default: return partstat
+        }
+    }
+
     /// Klassischer Glas-Header (iPhone, Portrait + Landscape); das iPad
     /// rendert stattdessen die blaue UIKit-Bar via populateHeaderBridge().
     fileprivate var calendarHeader: some View {
