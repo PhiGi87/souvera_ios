@@ -299,7 +299,7 @@ struct SouveraInvitationDetailView: View {
                     .foregroundStyle(.green)
             } else if declineProposalMode {
                 declineProposalView
-            } else if let respond {
+            } else if respond != nil {
                 if let key = currentStatusKey {
                     Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)

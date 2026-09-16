@@ -257,6 +257,7 @@ enum SouveraAltProposal {
     static func proposals(for event: CalendarEventModel,
                           in all: [CalendarEventModel],
                           maxCount: Int = 3) -> [Date] {
+        let duration = event.end.timeIntervalSince(event.start)
         guard !event.allDay, duration > 0 else { return [] }
         let calendar = Calendar.current
         // Belegte Zeiträume: alle nicht-ganztägigen Termine.
