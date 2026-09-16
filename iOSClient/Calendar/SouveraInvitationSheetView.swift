@@ -201,7 +201,7 @@ struct SouveraInvitationDetailView: View {
     let event: CalendarEventModel
     let organizerFallback: String
     /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
-    let respond: (CalendarViewModel.CalendarRSVP) async -> Bool?
+    let respond: ((CalendarViewModel.CalendarRSVP) async -> Bool?)?
     /// Ueberschneidungspruefung gegen den geladenen Kalenderstand
     /// (nil = keine Pruefung moeglich, z. B. im Mail-Modul).
     var overlapCheck: ((CalendarEventModel) -> Bool)? = nil
