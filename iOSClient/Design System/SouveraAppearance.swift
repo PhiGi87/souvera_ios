@@ -313,36 +313,34 @@ private struct SouveraBridgeBarActive: ViewModifier {
                                startPoint: .top, endPoint: .bottom),
                 for: .navigationBar)
             .toolbar {
-                if SouveraAppearance.useBridgeHeader {
-                    ForEach(bridge.leadingItems) { item in
-                        ToolbarItem(placement: .topBarLeading) {
-                            SouveraBridgeBarButton(item: item)
-                        }
+                ForEach(bridge.leadingItems) { item in
+                    ToolbarItem(placement: .topBarLeading) {
+                        SouveraBridgeBarButton(item: item)
                     }
-                    ForEach(bridge.leadingMenus) { group in
-                        ToolbarItem(placement: .topBarLeading) {
-                            SouveraBridgeMenuButton(group: group)
-                        }
+                }
+                ForEach(bridge.leadingMenus) { group in
+                    ToolbarItem(placement: .topBarLeading) {
+                        SouveraBridgeMenuButton(group: group)
                     }
-                    ForEach(bridge.leadingCustoms) { custom in
-                        ToolbarItem(placement: .topBarLeading) {
-                            UIKitViewWrapper(view: custom.view)
-                        }
+                }
+                ForEach(bridge.leadingCustoms) { custom in
+                    ToolbarItem(placement: .topBarLeading) {
+                        UIKitViewWrapper(view: custom.view)
                     }
-                    ForEach(bridge.trailingCustoms) { custom in
-                        ToolbarItem(placement: .topBarTrailing) {
-                            UIKitViewWrapper(view: custom.view)
-                        }
+                }
+                ForEach(bridge.trailingCustoms) { custom in
+                    ToolbarItem(placement: .topBarTrailing) {
+                        UIKitViewWrapper(view: custom.view)
                     }
-                    ForEach(bridge.trailingItems) { item in
-                        ToolbarItem(placement: .topBarTrailing) {
-                            SouveraBridgeBarButton(item: item)
-                        }
+                }
+                ForEach(bridge.trailingItems) { item in
+                    ToolbarItem(placement: .topBarTrailing) {
+                        SouveraBridgeBarButton(item: item)
                     }
-                    ForEach(bridge.trailingMenus) { group in
-                        ToolbarItem(placement: .topBarTrailing) {
-                            SouveraBridgeMenuButton(group: group)
-                        }
+                }
+                ForEach(bridge.trailingMenus) { group in
+                    ToolbarItem(placement: .topBarTrailing) {
+                        SouveraBridgeMenuButton(group: group)
                     }
                 }
             }
@@ -353,16 +351,19 @@ private struct SouveraBridgeBarActive: ViewModifier {
 /// ToolbarItems automatisch als Liquid Glass - wie bei Mehr/Dateien).
 struct SouveraBridgeBarButton: View {
     let item: SouveraHeaderBridge.Item
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        Button {
-            item.handler()
-        } label: {
-            Image(systemName: item.icon)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(item.isGreen ? Color.green : (item.isDestructive ? Color.red : .white))
+        if SouveraAppearance.useBridgeHeader {
+            Button {
+                item.handler()
+            } label: {
+                Image(systemName: item.icon)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(item.isGreen ? Color.green : (item.isDestructive ? Color.red : .white))
+            }
+            .accessibilityLabel(Text(item.accessibilityLabel.isEmpty ? item.icon : item.accessibilityLabel))
         }
-        .accessibilityLabel(Text(item.accessibilityLabel.isEmpty ? item.icon : item.accessibilityLabel))
     }
 }
 
@@ -371,20 +372,22 @@ struct SouveraBridgeMenuButton: View {
     let group: SouveraHeaderBridge.MenuGroup
 
     var body: some View {
-        Menu {
-            ForEach(group.entries) { entry in
-                Button {
-                    entry.handler()
-                } label: {
-                    Label(entry.title, systemImage: entry.icon)
+        if SouveraAppearance.useBridgeHeader {
+            Menu {
+                ForEach(group.entries) { entry in
+                    Button {
+                        entry.handler()
+                    } label: {
+                        Label(entry.title, systemImage: entry.icon ?? "ellipsis.circle")
+                    }
                 }
+            } label: {
+                Image(systemName: group.icon)
+                    .font(.system(size: 17, weight: .medium))
+                    .foregroundStyle(.white)
             }
-        } label: {
-            Image(systemName: group.icon)
-                .font(.system(size: 17, weight: .medium))
-                .foregroundStyle(.white)
+            .accessibilityLabel(Text(group.accessibilityLabel.isEmpty ? group.icon : group.accessibilityLabel))
         }
-        .accessibilityLabel(Text(group.accessibilityLabel.isEmpty ? group.icon : group.accessibilityLabel))
     }
 }
 
