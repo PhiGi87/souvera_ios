@@ -412,6 +412,8 @@ class NCMainTabBarController: UITabBarController {
     // MARK: - Badges
 
     private weak var moreTabBarItem: UITabBarItem?
+    /// Run 16.09.: Coordinator der Bridge-Bars (Mail/Kalender/Link).
+    private var headerCoordinators: [SouveraBarCoordinator] = []
 
     /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
     /// deckend, korrekt in Portrait UND Landscape).

@@ -72,10 +72,18 @@ struct SouveraInvitationSheetView: View {
                         busyId = nil
                     }
                 } label: {
-                    Label(NSLocalizedString(rsvp.titleKey, comment: ""), systemImage: rsvp.icon)
-                        .labelStyle(.iconOnly)
-                        .foregroundStyle(rsvp.color)
-                        .frame(width: 34, height: 34)
+                    // Run 16.09. (Feedback): grosse, klar getrennte Tasten -
+                    // Icon UND Text in farbig getoenter Kapsel, 40pt hoch.
+                    HStack(spacing: 6) {
+                        Image(systemName: rsvp.icon)
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(rsvp.color)
+                    .padding(.horizontal, 14)
+                    .frame(minWidth: 96, minHeight: 40)
+                    .background(Capsule().fill(rsvp.color.opacity(0.14)))
                 }
                 .buttonStyle(.borderless)
                 .disabled(busyId == id)
@@ -133,10 +141,6 @@ struct SouveraInvitationSheetView: View {
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
-            } else {
-                Text(NSLocalizedString("_invitations_no_ics_hint_", comment: ""))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             if processedIds.contains(invite.id) {
                 Text(NSLocalizedString("_invitations_answered_", comment: ""))
@@ -149,10 +153,6 @@ struct SouveraInvitationSheetView: View {
                     }
                     Spacer()
                 }
-            } else {
-                Text(NSLocalizedString("_invitations_answer_in_mail_", comment: ""))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
         .padding(.vertical, 2)
@@ -183,12 +183,8 @@ struct SouveraInvitationSheetView: View {
     /// true, wenn der Termin zeitlich mit einem anderen Termin im
     /// geladenen Fenster kollidiert (Grob-Heuristik wie besprochen).
     private func overlapHint(_ event: CalendarEventModel) -> Bool {
-        guard !event.allDay else { return false }
-        return center.calendarInvites.contains { other in
-            other.href != event.href
-                && !other.allDay
-                && other.start < event.end && event.start < other.end
-        }
+        // Run 17.09.: zentraler Rechner (inkl. invalide Zeiträume-Filter).
+        return !SouveraOverlapCalculator.overlaps(of: event, in: center.calendarInvites).isEmpty
     }
 }
 
@@ -205,7 +201,7 @@ struct SouveraInvitationDetailView: View {
     let event: CalendarEventModel
     let organizerFallback: String
     /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
-    let respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?
+    let respond: ((CalendarViewModel.CalendarRSVP, [Int]?, String?, String?) async -> Bool?)?
     /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
     var overlapEvents: [CalendarEventModel] = []
 
@@ -217,6 +213,13 @@ struct SouveraInvitationDetailView: View {
     @State private var dayPreview: SouveraOverlap?
     @State private var declineProposalMode = false
     @State private var altProposalDate: Date?
+    /// Run 17.09.: Kalender-Auswahl pro Einladung (Default: persoenlich).
+    @State private var calendars: [CalDavCalendar] = []
+    @State private var selectedCalendarHref: String?
+    /// Run 17.09. (3.2): kein Zeitslot erkannt -> manuell setzbar.
+    @State private var manualStart: Date = Date()
+    @State private var manualEnd: Date = Date().addingTimeInterval(1800)
+    @State private var manualTimesSet = false
 
     /// Eigene Rollen-Optionen je nach bisherigem PARTSTAT (B6).
     private var allowedOptions: [CalendarViewModel.CalendarRSVP] {
@@ -244,7 +247,34 @@ struct SouveraInvitationDetailView: View {
                     Text(event.title).font(.title3).fontWeight(.semibold)
                 }
                 Section(NSLocalizedString("_calendar_when_", comment: "")) {
-                    Text(timeLine)
+                    if event.uid.isEmpty {
+                        // Run 17.09. (3.2): kein Zeitslot erkannt ->
+                        // manuell setzen wie im normalen Termin.
+                        DatePicker(NSLocalizedString("_calendar_start_", comment: ""),
+                                   selection: $manualStart,
+                                   displayedComponents: [.date, .hourAndMinute])
+                        DatePicker(NSLocalizedString("_calendar_end_", comment: ""),
+                                   selection: $manualEnd,
+                                   in: manualStart...,
+                                   displayedComponents: [.date, .hourAndMinute])
+                            .onChange(of: manualEnd) { _, newValue in
+                                manualTimesSet = true
+                                SouveraInvitationCenter.shared.setManualTimes(
+                                    inviteId: event.href,
+                                    title: event.title,
+                                    start: manualStart, end: max(newValue, manualStart.addingTimeInterval(300)),
+                                    organizerEmail: event.organizerEmail)
+                            }
+                            .onChange(of: manualStart) { _, newValue in
+                                SouveraInvitationCenter.shared.setManualTimes(
+                                    inviteId: event.href,
+                                    title: event.title,
+                                    start: newValue, end: max(manualEnd, newValue.addingTimeInterval(300)),
+                                    organizerEmail: event.organizerEmail)
+                            }
+                    } else {
+                        Text(timeLine)
+                    }
                 }
                 Section(NSLocalizedString("_invitations_organizer_", comment: "")) {
                     Text(event.organizerName.isEmpty
@@ -270,6 +300,21 @@ struct SouveraInvitationDetailView: View {
                     SouveraReminderEditor(minutes: $reminderMinutes)
                         .onChange(of: reminderMinutes) { _, _ in remindersTouched = true }
                 }
+                // Run 17.09.: Kalender-Auswahl pro Einladung.
+                Section(NSLocalizedString("_calendar_", comment: "")) {
+                    if calendars.isEmpty {
+                        Text(NSLocalizedString("_loading_", comment: ""))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Picker(NSLocalizedString("_calendar_", comment: ""),
+                               selection: $selectedCalendarHref) {
+                            ForEach(calendars.filter { $0.canWrite }) { calendar in
+                                Text(calendar.displayName).tag(calendar.href as String?)
+                            }
+                        }
+                    }
+                }
                 rsvpSection
             }
             .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
@@ -279,15 +324,29 @@ struct SouveraInvitationDetailView: View {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
                 }
             }
+            .onAppear {
+                Task {
+                    let client = CalDavClient(account: nil)
+                    let fetched = await client.fetchCalendars()
+                    calendars = fetched
+                    if selectedCalendarHref == nil {
+                        selectedCalendarHref = (fetched.first(where: { $0.canWrite && $0.isPersonal })
+                            ?? fetched.first(where: { $0.canWrite }))?.href
+                    }
+                }
+            }
         }
         .preferredColorScheme(.light)
-        .sheet(item: $dayPreview) { overlap in
-            SouveraDayPreviewPopup(
-                day: overlap.event.start,
-                highlightEvent: event,
-                collidingEvent: overlap.event,
-                allEvents: overlapEvents,
-                onDismiss: { dayPreview = nil })
+        // Run 17.09. (Feedback): echtes Popup-Overlay statt Sheet.
+        .overlay {
+            if let overlap = dayPreview {
+                SouveraDayPreviewPopup(
+                    day: overlap.event.start,
+                    highlightEvent: event,
+                    collidingEvent: overlap.event,
+                    allEvents: overlapEvents,
+                    onDismiss: { dayPreview = nil })
+            }
         }
     }
 
@@ -310,15 +369,17 @@ struct SouveraInvitationDetailView: View {
                         Button {
                             handle(rsvp, respond: respond)
                         } label: {
-                            VStack(spacing: 3) {
+                            // Run 16.09. (Feedback): grosse Tasten.
+                            HStack(spacing: 6) {
                                 Image(systemName: rsvp.icon)
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(rsvp.color)
+                                    .font(.system(size: 15, weight: .semibold))
                                 Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                    .font(.caption2)
-                                    .foregroundStyle(.primary)
+                                    .font(.subheadline.weight(.semibold))
                             }
-                            .frame(maxWidth: .infinity)
+                            .foregroundStyle(rsvp.color)
+                            .padding(.horizontal, 14)
+                            .frame(minWidth: 96, minHeight: 40)
+                            .background(Capsule().fill(rsvp.color.opacity(0.14)))
                         }
                         .buttonStyle(.borderless)
                         .disabled(busy)
@@ -345,7 +406,7 @@ struct SouveraInvitationDetailView: View {
     /// DAUER der Einladung.
     @ViewBuilder
     private var declineProposalView: some View {
-        let slots = SouveraAltProposal.proposals(for: event, in: overlapEvents)
+        let slots = SouveraAltProposal.proposals(for: effectiveEvent, in: overlapEvents)
         Text(NSLocalizedString("_invitations_propose_alternative_", comment: ""))
             .font(.subheadline)
         if !slots.isEmpty {
@@ -368,11 +429,18 @@ struct SouveraInvitationDetailView: View {
                 }
             }
         }
+        // Run 17.09.: manuelle Alternativzeit (beliebig, wie beim Termin).
+        DatePicker(NSLocalizedString("_calendar_when_", comment: ""),
+                   selection: Binding(
+                    get: { altProposalDate ?? (slots.first ?? effectiveEvent.end) },
+                    set: { altProposalDate = $0 }),
+                   displayedComponents: [.date, .hourAndMinute])
+            .font(.subheadline)
         HStack(spacing: 10) {
             Button {
                 sendDecline(proposal: altProposalDate)
             } label: {
-                Text(NSLocalizedString("_invitations_send_", comment: ""))
+                Text(NSLocalizedString("_invitations_send_proposal_", comment: ""))
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -395,7 +463,7 @@ struct SouveraInvitationDetailView: View {
     }
 
     private func handle(_ rsvp: CalendarViewModel.CalendarRSVP,
-                        respond: @escaping (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?) {
+                        respond: @escaping (CalendarViewModel.CalendarRSVP, [Int]?, String?, String?) async -> Bool?) {
         if rsvp == .declined {
             // B9: erst der optionale Alternativvorschlag.
             declineProposalMode = true
@@ -404,7 +472,7 @@ struct SouveraInvitationDetailView: View {
         busy = true
         Task {
             let reminders = remindersTouched ? reminderMinutes : nil
-            let ok = await respond(rsvp, reminders, nil)
+            let ok = await respond(rsvp, reminders, nil, selectedCalendarHref)
             busy = false
             if ok == true {
                 answeredText = NSLocalizedString(rsvp.titleKey, comment: "")
@@ -430,7 +498,7 @@ struct SouveraInvitationDetailView: View {
         }
         Task {
             let reminders = remindersTouched ? reminderMinutes : nil
-            let ok = await respond(.declined, reminders, proposalText)
+            let ok = await respond(.declined, reminders, proposalText, selectedCalendarHref)
             busy = false
             if ok == true {
                 answeredText = NSLocalizedString("_invitations_decline_", comment: "")

@@ -29,6 +29,11 @@ enum SouveraOverlapCalculator {
         }
         return all.compactMap { other in
             guard other.href != event.href else { return nil }
+            // Run 17.09. (Feedback): fehlgeparste Zeiträume (Ende vor
+            // Anfang, "28.08 14:00 - 10:30") und Multitages-Übrigbleibsel
+            // (> 7 Tage) überschatten alles - ignorieren.
+            guard other.end > other.start else { return nil }
+            guard other.end.timeIntervalSince(other.start) < 7 * 86400 else { return nil }
             let overlapsTime = other.start < event.end && event.start < other.end
             guard overlapsTime else { return nil }
             if event.allDay != other.allDay {
@@ -99,19 +104,39 @@ struct SouveraOverlapListView: View {
     }
 }
 
-// MARK: - B8: Tages-Popup (Mini-Tagesansicht)
+// MARK: - B8: Tages-Popup (Run 17.09. Neubau)
+//
+// Echtes Popup-Overlay (kein Sheet): kompakte Karte ueber dem Dialog mit
+// scrollbarem Stundenraster wie der Tagesansicht - positioniert am
+// Zeitslot +/- 4 Stunden.
 
 struct SouveraDayPreviewPopup: View {
-    /// Der Tag, der angezeigt wird (Starttag der Kollision).
     let day: Date
-    /// Der eingeladene Termin (Akzent-Rahmen).
     let highlightEvent: CalendarEventModel
-    /// Der kollidierende Termin (orange).
     let collidingEvent: CalendarEventModel
     let allEvents: [CalendarEventModel]
     let onDismiss: () -> Void
 
-    @State private var scrolledToBlock = false
+    /// Fenster: Zeitslot-Start - 4 h bis Zeitslot-Ende + 4 h.
+    private let hourHeight: CGFloat = 52
+
+    private var windowStart: Date {
+        Calendar.current.date(byAdding: .hour, value: -4,
+                              to: max(highlightEvent.start, collidingEvent.start)) ?? day
+    }
+    private var windowEnd: Date {
+        Calendar.current.date(byAdding: .hour, value: 4,
+                              to: max(highlightEvent.end, collidingEvent.end)) ?? day
+    }
+    private var hours: [Date] {
+        var result: [Date] = []
+        var cursor = Calendar.current.startOfDay(for: windowStart)
+        while cursor <= windowEnd {
+            result.append(cursor)
+            cursor = Calendar.current.date(byAdding: .hour, value: 1, to: cursor) ?? cursor
+        }
+        return result
+    }
 
     private var dayEvents: [CalendarEventModel] {
         allEvents
@@ -120,84 +145,129 @@ struct SouveraDayPreviewPopup: View {
     }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if dayEvents.isEmpty {
-                    Text(NSLocalizedString("_invitations_day_empty_", comment: ""))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    ScrollViewReader { proxy in
-                        ScrollView {
-                            VStack(spacing: 0) {
-                                ForEach(dayEvents) { event in
-                                    block(for: event)
-                                }
-                            }
-                            .padding(.vertical, 10)
-                        }
-                        .onAppear {
-                            guard !scrolledToBlock else { return }
-                            scrolledToBlock = true
-                            let anchor = dayEvents.first {
-                                $0.href == highlightEvent.href || $0.href == collidingEvent.href
-                            } ?? dayEvents.first
-                            if let anchor { proxy.scrollTo(anchor.href, anchor: .center) }
-                        }
-                    }
-                }
-            }
-            .navigationTitle(Text(dayTitle))
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(NSLocalizedString("_done_", comment: "")) { onDismiss() }
-                }
-            }
+        // Abdunklung + Tap-Aussen schliesst das Popup.
+        ZStack {
+            Color.black.opacity(0.35)
+                .ignoresSafeArea()
+                .onTapGesture { onDismiss() }
+            card
+                .padding(.horizontal, 28)
         }
-        .preferredColorScheme(.light)
     }
 
-    /// Zeitblock eines Termins im Tagesraster (Dauer-proportional,
-    /// Mindesthöhe für kurze Termine).
+    private var card: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(dayTitle)
+                    .font(.headline)
+                    .lineLimit(1)
+                Spacer()
+                Button(NSLocalizedString("_done_", comment: "")) { onDismiss() }
+                    .font(.subheadline.weight(.semibold))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 12)
+
+            Divider()
+
+            if dayEvents.isEmpty {
+                Text(NSLocalizedString("_invitations_day_empty_", comment: ""))
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
+                    .padding(.vertical, 30)
+                    .frame(maxWidth: .infinity)
+            } else {
+                ScrollViewReader { proxy in
+                    ScrollView {
+                        ZStack(alignment: .topLeading) {
+                            // Stundenraster
+                            VStack(spacing: 0) {
+                                ForEach(hours, id: \.timeIntervalSince1970) { hour in
+                                    HStack(spacing: 8) {
+                                        Text(hourText(hour))
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                            .frame(width: 44, alignment: .leading)
+                                        Rectangle()
+                                            .fill(Color(.systemGray5))
+                                            .frame(height: 0.5)
+                                    }
+                                    .frame(height: hourHeight, alignment: .top)
+                                }
+                            }
+                            // Terminblöcke
+                            ForEach(dayEvents) { event in
+                                if let y = offsetY(for: event),
+                                   let height = blockHeight(for: event) {
+                                    block(for: event)
+                                        .frame(height: height)
+                                        .offset(y: y)
+                                        .padding(.leading, 52)
+                                        .padding(.trailing, 10)
+                                        .id(event.href)
+                                }
+                            }
+                        }
+                        .padding(.vertical, 6)
+                    }
+                    .onAppear {
+                        proxy.scrollTo(highlightEvent.href, anchor: .top)
+                    }
+                }
+                .frame(height: min(420, hourHeight * 10))
+            }
+        }
+        .background(RoundedRectangle(cornerRadius: 16).fill(Color(.systemBackground)))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.systemGray4), lineWidth: 1))
+        .shadow(color: .black.opacity(0.25), radius: 18)
+    }
+
+    /// Y-Position relativ zum Fensterstart (Slot - 4 h).
+    private func offsetY(for event: CalendarEventModel) -> CGFloat? {
+        let start = max(event.start, windowStart)
+        guard let delta = Calendar.current.dateComponents([.minute],
+                                                          from: windowStart, to: start).minute else { return nil }
+        return CGFloat(max(0, delta)) / 60 * hourHeight
+    }
+
+    private func blockHeight(for event: CalendarEventModel) -> CGFloat? {
+        let visibleStart = max(event.start, windowStart)
+        let visibleEnd = min(event.end, windowEnd)
+        guard visibleEnd > visibleStart,
+              let minutes = Calendar.current.dateComponents([.minute],
+                                                            from: visibleStart, to: visibleEnd).minute else { return nil }
+        return max(26, CGFloat(minutes) / 60 * hourHeight)
+    }
+
     private func block(for event: CalendarEventModel) -> some View {
         let isInvite = event.href == highlightEvent.href
         let isCollision = event.href == collidingEvent.href
         let formatter = DateFormatter()
         formatter.dateStyle = .none
         formatter.timeStyle = .short
-        let duration = max(0, event.end.timeIntervalSince(event.start))
-        let minutes = min(240, max(20, duration / 60))
-        let border: Color = isInvite ? Color.blue : (isCollision ? .orange : .clear)
-        let fill: Color = isInvite ? Color.blue.opacity(0.10) : (isCollision ? Color.orange.opacity(0.12) : Color(.systemGray6))
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack {
-                if event.allDay {
-                    Text(NSLocalizedString("_calendar_all_day_", comment: ""))
-                        .font(.caption.weight(.medium))
-                } else {
-                    Text("\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))")
-                        .font(.caption.weight(.medium))
-                }
-                Spacer()
-                if isCollision {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
+        let border: Color = isInvite ? .blue : (isCollision ? .orange : .clear)
+        let fill: Color = isInvite ? Color.blue.opacity(0.10) : (isCollision ? Color.orange.opacity(0.14) : Color(.systemGray6))
+        return VStack(alignment: .leading, spacing: 2) {
+            if !event.allDay {
+                Text("\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .foregroundStyle(.secondary)
             Text(event.title)
-                .font(.subheadline.weight(isInvite || isCollision ? .semibold : .regular))
-                .lineLimit(1)
+                .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
+                .lineLimit(2)
         }
-        .padding(8)
-        .frame(maxWidth: .infinity, minHeight: minutes, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(fill))
-        .overlay(RoundedRectangle(cornerRadius: 8).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0.5))
-        .padding(.horizontal, 12)
-        .padding(.vertical, 2)
-        .id(event.href)
+        .padding(6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(RoundedRectangle(cornerRadius: 7).fill(fill))
+        .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0))
+    }
+
+    private func hourText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .none
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
     }
 
     private var dayTitle: String {
@@ -252,15 +322,16 @@ struct SouveraReminderEditor: View {
 // MARK: - B9: Alternativvorschlag
 
 enum SouveraAltProposal {
-    /// Freie Zeitslots in der DAUER der Einladung (nicht pauschal 30/60):
-    /// erste Lücken am selben Tag, sonst nächster Tag gleiche Uhrzeit.
+    /// Run 17.09. (Feedback): Vorschläge NUR Mo-Fr 08:00-17:00 Uhr, in
+    /// der DAUER der Einladung; erste freie Lücken laut Kalenderstand.
+    /// Manuelle Auswahl kommt über den DatePicker im Detail.
     static func proposals(for event: CalendarEventModel,
                           in all: [CalendarEventModel],
                           maxCount: Int = 3) -> [Date] {
+        guard !event.allDay else { return [] }
         let duration = event.end.timeIntervalSince(event.start)
-        guard !event.allDay, duration > 0 else { return [] }
+        guard duration > 0 else { return [] }
         let calendar = Calendar.current
-        // Belegte Zeiträume: alle nicht-ganztägigen Termine.
         let busy: [(Date, Date)] = all.filter { !$0.allDay }.map { ($0.start, $0.end) }
 
         func isFree(_ start: Date, end: Date) -> Bool {
@@ -268,26 +339,27 @@ enum SouveraAltProposal {
         }
 
         var slots: [Date] = []
-        // Lücken am selben Tag: ab Ende der Einladung bis 21:00 - die
-        // Slots haben DIE DAUER DER EINLADUNG (nicht pauschal 30/60).
-        var candidate = event.end
-        let dayEnd = calendar.date(bySettingHour: 21, minute: 0, second: 0,
-                                   of: event.start) ?? event.end
-        while candidate.addingTimeInterval(duration) <= dayEnd, slots.count < maxCount {
-            if isFree(candidate, end: candidate.addingTimeInterval(duration)) {
-                slots.append(candidate)
-                candidate = candidate.addingTimeInterval(duration)
-            } else {
-                candidate = candidate.addingTimeInterval(900)
+        var day = calendar.startOfDay(for: event.start)
+        for _ in 0..<10 where slots.count < maxCount {
+            // Werktag?
+            if calendar.isDateInWeekend(day) {
+                day = calendar.date(byAdding: .day, value: 1, to: day) ?? day
+                continue
             }
-        }
-        // Nächster Tag, gleiche Uhrzeit (bis zu 2 Slots).
-        for dayOffset in 1...2 where slots.count < maxCount {
-            if let next = calendar.date(byAdding: .day, value: dayOffset, to: event.start),
-               isFree(next, end: next.addingTimeInterval(duration)) {
-                slots.append(next)
+            guard let windowStart = calendar.date(bySettingHour: 8, minute: 0, second: 0, of: day),
+                  let windowEnd = calendar.date(bySettingHour: 17, minute: 0, second: 0, of: day) else { continue }
+            var candidate = max(windowStart, day == calendar.startOfDay(for: event.start) ? event.end : windowStart)
+            while candidate.addingTimeInterval(duration) <= windowEnd, slots.count < maxCount {
+                if isFree(candidate, end: candidate.addingTimeInterval(duration)) {
+                    slots.append(candidate)
+                    candidate = candidate.addingTimeInterval(duration)
+                } else {
+                    candidate = candidate.addingTimeInterval(900)
+                }
             }
+            day = calendar.date(byAdding: .day, value: 1, to: day) ?? day
         }
         return Array(slots.prefix(maxCount))
     }
 }
+

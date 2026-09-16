@@ -46,8 +46,7 @@ struct MailView: View {
                         updateLandscapeLayout(newSize)
                     }
             }
-            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
-            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
@@ -161,22 +160,27 @@ struct MailView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(NSLocalizedString("_invitations_title_", comment: "")))
                 .padding(.trailing, 16)
-                .padding(.bottom, 72)
+                .padding(.bottom, 52)
             }
         }
         .sheet(item: $showInvitationDetail) { invite in
+            // Run 17.09.: Live-Stand aus dem Center (Lazy-Resolve aktualisiert
+            // die Einladung; Zeitraum erscheint ohne Nein-Oeffnen).
+            let live = invitationCenter.mailInvites.first(where: { $0.id == invite.id }) ?? invite
             SouveraInvitationDetailView(
-                event: invite.event ?? SouveraInvitationCenter.placeholderEvent(for: invite),
-                organizerFallback: invite.displayOrganizer,
-                respond: { rsvp, reminders, altProposal in
-                    guard invite.event != nil else { return nil }
+                event: live.event ?? SouveraInvitationCenter.placeholderEvent(for: live),
+                organizerFallback: live.displayOrganizer,
+                respond: { rsvp, reminders, altProposal, calendarHref in
                     return await viewModel.respondToMailInvitation(
-                        invite, status: rsvp,
-                        calendarHref: nil,
+                        live, status: rsvp,
+                        calendarHref: calendarHref,
                         reminderMinutes: reminders,
                         altProposal: altProposal)
                 }
             )
+            .task {
+                _ = await invitationCenter.resolveInvitation(live)
+            }
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
             guard feedback != nil else { return }

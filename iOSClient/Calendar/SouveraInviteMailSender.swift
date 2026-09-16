@@ -76,3 +76,123 @@ final class SouveraInviteMailSender {
         }
     }
 }
+
+
+// MARK: - Run 16.09.: Lazy-Fetch der Einladungsdaten
+
+extension SouveraInviteMailSender {
+
+    struct InvitationDetails {
+        let ics: String?
+        let plainText: String?
+    }
+
+    /// Laedt die Einladungsmail VOLLstaendig (wie openMessage): alle
+    /// Body-Parts mit Disposition/Type - der text/calendar-Part kommt
+    /// je nach Sender als Attachment ODER Inline-Part.
+    static func fetchInvitationDetails(messageId: String) async -> InvitationDetails? {
+        do {
+            let manager = SouveraMailCredentialManager()
+            guard let account = await manager.renewCredential() else { return nil }
+            let login = account.saslUser
+            let client = JmapClient(
+                baseUrl: account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                username: login,
+                password: account.mailPassword
+            )
+            let api = JmapApi(client: client)
+            let session = try await client.refreshSession()
+            let accId = session.primaryAccountId
+            let emails = try await api.getEmails(
+                accountId: accId,
+                ids: [messageId],
+                bodyProperties: ["partId", "blobId", "size", "type", "name", "disposition", "cid"],
+                fetchAllBodyValues: true
+            )
+            guard let json = emails.first else { return nil }
+
+            // 1) text/calendar-Part (Attachment ODER Inline).
+            var ics: String?
+            let parts = (json["attachments"] as? [[String: Any]]) ?? []
+                + (json["inlineAttachments"] as? [[String: Any]]) ?? []
+            if let calPart = parts.first(where: {
+                ($0["type"] as? String)?.lowercased().contains("calendar") == true
+                    || (($0["name"] as? String)?.lowercased().hasSuffix(".ics") == true)
+            }), let blobId = calPart["blobId"] as? String {
+                let data = try? await client.downloadBlob(accountId: accId, blobId: blobId, mimeType: "text/calendar")
+                ics = String(data: data ?? Data(), encoding: .utf8)
+            }
+
+            // 2) Plain-Text (fuer den Text-Fallback ohne ICS).
+            var plain: String?
+            if let bodyValues = json["bodyValues"] as? [String: Any],
+               let textParts = json["textBody"] as? [[String: Any]],
+               let first = textParts.first,
+               let partId = first.optString("partId"),
+               let value = bodyValues[partId] as? [String: Any] {
+                plain = value.optString("value")
+            }
+            SouveraLog.write("Invitations", "lazy fetch \(messageId): ics=\(ics != nil) text=\(plain != nil)")
+            return InvitationDetails(ics: ics, plainText: plain)
+        } catch {
+            SouveraLog.write("Invitations", "lazy fetch failed: \(error)")
+            return nil
+        }
+    }
+
+    /// Text-Fallback ohne ICS: parst das Nextcloud/iTIP-Einladungsformat
+    /// ("Wann: ... am Donnerstag, 17. September 2026 zwischen 14:00 -
+    /// 14:30 (Europe/Berlin)" bzw. englisch "When: ... from 2:00 PM to
+    /// 2:30 PM..."). Liefert Titel + Zeitraum oder nil - NIEMALS eine
+    /// Jetzt-Zeit als Platzhalter.
+    static func parseTimeFromText(subject: String, plainText: String?) -> (title: String, start: Date, end: Date)? {
+        guard let text = plainText, !text.isEmpty else { return nil }
+        // Erst die Zeilen mit Wann/When, sonst der Textanfang.
+        let lines = text.split(separator: "\n")
+        let relevant = lines.filter { $0.lowercased().contains("wann:") || $0.lowercased().contains("when:") }
+        let haystack = relevant.isEmpty ? String(text.prefix(1500)) : relevant.joined(separator: " ") + " " + String(text.prefix(1500))
+
+        // Titel: "moegchte Sie zu "X" einladen" oder Betreff nach Praefix.
+        var title = subject
+        for prefix in ["Einladung: ", "Invitation: ", "Einladung ", "Invitation "] where title.hasPrefix(prefix) {
+            title = String(title.dropFirst(prefix.count))
+        }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "de_DE")
+        let enFormatter = DateFormatter()
+        enFormatter.locale = Locale(identifier: "en_US_POSIX")
+
+        // Datum: "17. September 2026" / "September 17, 2026" / "17.09.2026"
+        var day: Date?
+        let germanDate = "\\d{1,2}\\. (?:Januar|Februar|März|April|Mai|Juni|Juli|August|September|Oktober|November|Dezember) \\d{4}"
+        let numericDate = "\\d{2}\\.\\d{2}\\.\\d{4}"
+        let englishDate = "(?:January|February|March|April|May|June|July|August|September|October|November|December) \\d{1,2}, \\d{4}"
+        for (pattern, fmt) in [(germanDate, "d. MMMM yyyy"), (englishDate, "MMMM d, yyyy"), (numericDate, "dd.MM.yyyy")] {
+            if let range = haystack.range(of: pattern, options: [.regularExpression]) {
+                let candidate = String(haystack[range])
+                formatter.dateFormat = fmt
+                enFormatter.dateFormat = fmt
+                if let d = formatter.date(from: candidate) ?? enFormatter.date(from: candidate) {
+                    day = Calendar.current.startOfDay(for: d)
+                    break
+                }
+            }
+        }
+        guard let day else { return nil }
+
+        // Zeiten: HH:MM - HH:MM (auch "zwischen 14:00 - 14:30").
+        let timePattern = "\\d{1,2}:\\d{2}"
+        let times = haystack.ranges(of: timePattern).compactMap { range -> (Int, Int)? in
+            let parts = haystack[range].split(separator: ":")
+            guard parts.count == 2, let h = Int(parts[0]), let m = Int(parts[1]), h < 24, m < 60 else { return nil }
+            return (h, m)
+        }
+        guard times.count >= 2 else { return nil }
+        let calendar = Calendar.current
+        var start = calendar.date(bySettingHour: times[0].0, minute: times[0].1, second: 0, of: day) ?? day
+        var end = calendar.date(bySettingHour: times[1].0, minute: times[1].1, second: 0, of: day) ?? day
+        if end <= start { end = start.addingTimeInterval(1800) }
+        return (title, start, end)
+    }
+}

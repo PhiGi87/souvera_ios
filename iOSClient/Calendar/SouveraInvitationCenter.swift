@@ -193,23 +193,130 @@ final class SouveraInvitationCenter: ObservableObject {
     static func respondViaMail(_ invitation: SouveraMailInvitation,
                                _ status: CalendarViewModel.CalendarRSVP,
                                _ reminderMinutes: [Int]?,
-                               _ altProposal: String?) async -> Bool {
-        if status != .declined, let ics = invitation.rawICS {
+                               _ altProposal: String?,
+                               calendarHref: String? = nil) async -> Bool {
+        // Run 17.09.: erst echte Termindaten (Lazy-Fetch + Text-Fallback).
+        let resolved = await SouveraInvitationCenter.shared.resolveInvitation(invitation)
+        var createICS = resolved.rawICS
+        if createICS == nil, let event = resolved.event {
+            createICS = synthesizeICS(title: event.title, start: event.start, end: event.end,
+                                      organizerEmail: resolved.organizerEmail)
+        }
+        if status != .declined, let ics = createICS {
             _ = await SouveraInvitationCenter.shared.createCalendarEvent(
-                from: invitation, ics: ics, status: status.rawValue,
-                calendarHref: nil, reminderMinutes: reminderMinutes)
+                from: resolved, ics: ics, status: status.rawValue,
+                calendarHref: calendarHref, reminderMinutes: reminderMinutes)
         }
         let statusWord = NSLocalizedString(status.titleKey, comment: "")
-        if let event = invitation.event {
+        if let event = resolved.event {
             let sent = await sendReply(event: event, statusWord: statusWord,
                                        altProposal: altProposal)
             if !sent { return false }
         }
-        markAnswered(messageId: invitation.messageId)
+        markAnswered(messageId: resolved.messageId)
         await MainActor.run {
-            SouveraInvitationCenter.shared.removeMailInvitation(invitation.id)
+            SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }
         return true
+    }
+
+    // MARK: - Lazy-Auflösung der Einladungsdaten (Run 17.09.)
+
+    /// Stellt sicher, dass die Einladung echte Termindaten hat:
+    /// 1) rohe ICS (bereits im Scan ODER Lazy-Fetch), 2) Text-Fallback.
+    /// Aktualisiert die Einladung im Center und liefert den Stand zurück.
+    @discardableResult
+    func resolveInvitation(_ invitation: SouveraMailInvitation) async -> SouveraMailInvitation {
+        if invitation.resolved == true { return invitation }
+        if invitation.event != nil, invitation.rawICS != nil { return invitation }
+        guard let details = await SouveraInviteMailSender.fetchInvitationDetails(messageId: invitation.messageId) else {
+            return invitation
+        }
+        let ownEmail = CalendarViewModel.ownAttendeeEmail()
+        var event: CalendarEventModel?
+        var rawICS: String?
+        if let ics = details.ics {
+            rawICS = ics
+            event = ICSParser.parseEvents(ics, calendarHref: "", href: invitation.messageId,
+                                          etag: nil, ownEmail: ownEmail.lowercased()).first
+            if event == nil {
+                SouveraLog.write("Invitations", "ICS \(invitation.messageId) konnte nicht geparst werden - Text-Fallback")
+            }
+        }
+        if event == nil, let parsed = SouveraInviteMailSender.parseTimeFromText(
+            subject: invitation.subject, plainText: details.plainText) {
+            // Text-Termin: eigener ICS wird beim Create synthetisiert.
+            event = CalendarEventModel(
+                id: invitation.messageId, uid: invitation.messageId, sequence: 0,
+                title: parsed.title, start: parsed.start, end: parsed.end, allDay: false,
+                location: nil, description: nil, attendees: [], talkRoomToken: nil,
+                talkRoomName: nil, calendarHref: "", href: invitation.messageId, etag: nil,
+                reminders: [], isTask: false, organizerName: "", organizerEmail: invitation.organizerEmail,
+                ownPartstat: "needs-action")
+            SouveraLog.write("Invitations", "Text-Fallback \(invitation.messageId): \(parsed.start)-\(parsed.end)")
+        }
+        let resolved = SouveraMailInvitation(
+            id: invitation.id, messageId: invitation.messageId, accountId: invitation.accountId,
+            subject: invitation.subject, from: invitation.from,
+            organizerEmail: event?.organizerEmail ?? invitation.organizerEmail,
+            event: event, rawICS: rawICS, receivedAt: invitation.receivedAt,
+            resolved: true)
+        updateInvite(resolved)
+        return resolved
+    }
+
+    /// Run 17.09. (3.2): manueller Zeitraum (UI) - ersetzt den
+    /// Platzhalter-Termin durch echte Zeiten; die Einladung gilt als
+    /// aufgeloest (kein erneuter Fetch).
+    @MainActor
+    func setManualTimes(inviteId: String, title: String,
+                        start: Date, end: Date, organizerEmail: String) {
+        guard let idx = mailInvites.firstIndex(where: { $0.id == inviteId }) else { return }
+        let invitation = mailInvites[idx]
+        if invitation.resolved { return } // einmal manuell gesetzt bleibt gesetzt
+        let event = CalendarEventModel(
+            id: invitation.messageId, uid: "", sequence: 0,
+            title: title, start: start, end: end, allDay: false,
+            location: nil, description: nil, attendees: [], talkRoomToken: nil,
+            talkRoomName: nil, calendarHref: "", href: invitation.messageId, etag: nil,
+            reminders: [], isTask: false, organizerName: "",
+            organizerEmail: invitation.organizerEmail.isEmpty ? organizerEmail : invitation.organizerEmail,
+            ownPartstat: "needs-action")
+        mailInvites[idx] = SouveraMailInvitation(
+            id: invitation.id, messageId: invitation.messageId, accountId: invitation.accountId,
+            subject: invitation.subject, from: invitation.from,
+            organizerEmail: event.organizerEmail,
+            event: event, rawICS: nil, receivedAt: invitation.receivedAt, resolved: true)
+    }
+
+    func updateInvite(_ invitation: SouveraMailInvitation) {
+        if let idx = mailInvites.firstIndex(where: { $0.id == invitation.id }) {
+            mailInvites[idx] = invitation
+        }
+    }
+
+    /// Synthetisiert eine minimale VEVENT-ICS (fuer Text-Fallback-Termine).
+    static func synthesizeICS(title: String, start: Date, end: Date,
+                              organizerEmail: String) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//Souvera//Invite//DE",
+            "METHOD:REQUEST",
+            "BEGIN:VEVENT",
+            "UID:\(UUID().uuidString.lowercased())",
+            "DTSTAMP:\(formatter.string(from: Date()))",
+            "DTSTART:\(formatter.string(from: start))",
+            "DTEND:\(formatter.string(from: end))",
+            "SUMMARY:\(escapeICS(title))",
+            organizerEmail.contains("@") ? "ORGANIZER:mailto:\(organizerEmail)" : "",
+            "END:VEVENT",
+            "END:VCALENDAR"
+        ].filter { !$0.isEmpty }.joined(separator: "\r\n")
     }
 
     // MARK: - Kalender-Create aus Mail-Einladung (B1)

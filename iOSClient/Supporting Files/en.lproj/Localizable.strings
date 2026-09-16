@@ -1259,3 +1259,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_no_proposal_" = "No proposal";
 "_invitations_propose_alternative_" = "Propose an alternative time? (optional)";
 "_invitations_send_" = "Send";
+"_invitations_send_proposal_" = "Send proposal";

@@ -70,8 +70,7 @@ struct LinkView: View {
             // "Liquid Glass" flattet toolbarBackground-Verlaeufe und tintet
             // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
             // mit dunklen Icons); System-Navigationbar komplett versteckt.
-            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
-            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
+            .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
@@ -619,6 +618,9 @@ struct LinkView: View {
                     callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
                 }
                 .frame(width: roomWidth)
+                // Run 16.09.: Die linke Spalte laeuft wie die rechte bis
+                // an die Tab-Bar-Kante (Feedback Landscape).
+                .ignoresSafeArea(.container, edges: .bottom)
                 Divider()
                 ZStack {
                     if case let .chat(token, title) = viewModel.route {
@@ -3056,6 +3058,16 @@ private struct LinkLobbyManagementView: View {
                         }
                         ForEach(admittedExternals) { participant in
                             participantRow(participant)
+                                // Run 17.09. (Feedback): zugelassene Gaeste
+                                // bleiben entfernbar (gleicher Pfad wie
+                                // bei Wartenden).
+                                .swipeActions(edge: .trailing) {
+                                    Button(role: .destructive) {
+                                        removeParticipant(participant)
+                                    } label: {
+                                        Label(NSLocalizedString("_link_participant_remove_", comment: ""), systemImage: "person.crop.circle.badge.minus")
+                                    }
+                                }
                         }
                     }
                 }

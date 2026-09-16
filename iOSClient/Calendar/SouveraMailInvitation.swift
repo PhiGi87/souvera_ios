@@ -21,6 +21,8 @@ struct SouveraMailInvitation: Identifiable {
     /// Original-ICS der Einladung (fuer Kalender-Create mit PARTSTAT-
     /// Aenderung und VALARM-Ergaenzung).
     let rawICS: String?
+    /// Run 17.09.: Lazy-Aufloesung bereits versucht (kein doppelter Fetch).
+    var resolved: Bool = false
     /// Zeitraum, in dem die Mail gesehen wurde (fuer Duplikat-Gate).
     let receivedAt: Date
 }

@@ -1228,28 +1228,37 @@ final class MailViewModel: ObservableObject {
                                  calendarHref: String? = nil,
                                  reminderMinutes: [Int]? = nil,
                                  altProposal: String? = nil) async -> Bool {
+        // Run 17.09.: ZUERST echte Termindaten beschaffen (ICS oder
+        // Text-Fallback) - die Buttons funktionieren dadurch immer.
+        let resolved = await SouveraInvitationCenter.shared.resolveInvitation(invitation)
         // B1: Bei Annehmen/Vielleicht den Termin in den gewaehlten
         // Kalender (Default: persoenlich) eintragen.
-        if status != .declined, let ics = invitation.rawICS {
+        var createICS = resolved.rawICS
+        if createICS == nil, let event = resolved.event {
+            createICS = SouveraInvitationCenter.synthesizeICS(
+                title: event.title, start: event.start, end: event.end,
+                organizerEmail: resolved.organizerEmail)
+        }
+        if status != .declined, let ics = createICS {
             await SouveraInvitationCenter.shared.createCalendarEvent(
-                from: invitation, ics: ics, status: status.rawValue,
+                from: resolved, ics: ics, status: status.rawValue,
                 calendarHref: calendarHref, reminderMinutes: reminderMinutes)
         }
         // B1: Moderne Antwort-Mail (Eckdaten + Absender + optionaler
         // Alternativvorschlag) - unabhaengig vom eigenen Send-Pfad.
-        let event = invitation.event
-        if event != nil || invitation.organizerEmail.contains("@") {
+        let event = resolved.event
+        if event != nil || resolved.organizerEmail.contains("@") {
             let statusWord = NSLocalizedString(status.titleKey, comment: "")
             let reply = await SouveraInvitationCenter.makeReplyMail(
                 event: event,
-                title: invitation.displayTitle,
-                organizerEmail: invitation.organizerEmail,
+                title: resolved.displayTitle,
+                organizerEmail: resolved.organizerEmail,
                 statusWord: statusWord,
                 altProposal: altProposal)
             if !reply.to.isEmpty {
                 _ = await SouveraInviteMailSender.shared.send(
                     to: reply.to,
-                    subject: "Re: \(invitation.displayTitle)",
+                    subject: "Re: \(resolved.displayTitle)",
                     html: reply.html,
                     text: reply.text,
                     icsAttachmentURL: reply.icsURL)
@@ -1264,9 +1273,9 @@ final class MailViewModel: ObservableObject {
                 keywordsToAdd: ["$seen": true]
             )
         }
-        SouveraInvitationCenter.markAnswered(messageId: invitation.messageId)
+        SouveraInvitationCenter.markAnswered(messageId: resolved.messageId)
         await MainActor.run {
-            SouveraInvitationCenter.shared.removeMailInvitation(invitation.id)
+            SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }
         return true
     }

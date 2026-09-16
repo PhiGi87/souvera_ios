@@ -93,8 +93,7 @@ struct SouveraCalendarView: View {
                 }
                 .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 8)
             }
-            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
-            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
+            .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
@@ -153,7 +152,7 @@ struct SouveraCalendarView: View {
                 showInvitationSheet = true
             }
             .padding(.trailing, 16)
-            .padding(.bottom, 72)
+            .padding(.bottom, 52)
         }
         .sheet(isPresented: $showInvitationSheet) {
             SouveraInvitationSheetView(
@@ -161,8 +160,10 @@ struct SouveraCalendarView: View {
                 respondCalendar: { event, rsvp in
                     await viewModel.respondToInvitation(event, status: rsvp)
                 },
-                respondMail: { _, _ in false },
-                mailInteractionEnabled: false,
+                respondMail: { invite, rsvp in
+                    await SouveraInvitationCenter.respondViaMail(invite, rsvp, nil, nil)
+                },
+                mailInteractionEnabled: true,
                 onOpenCalendarEvent: { event in
                     showInvitationSheet = false
                     selectedDay = event.start
@@ -187,27 +188,24 @@ struct SouveraCalendarView: View {
             }
         }
         .sheet(item: $openedMailInvite) { invite in
-            if let event = invite.event {
-                SouveraInvitationDetailView(
-                    event: event,
-                    organizerFallback: invite.displayOrganizer,
-                    respond: { rsvp, reminders, altProposal in
-                        if await viewModel.respondToInvitation(event, status: rsvp,
-                                                               reminderMinutes: reminders) {
-                            return true
-                        }
-                        // Kein CalDAV-Entry (noch nicht synchronisiert): Mail-Pfad.
-                        return await SouveraInvitationCenter.respondViaMail(invite, rsvp, reminders, altProposal)
-                    },
-                    overlapEvents: overlapBasis(event)
-                )
-            } else {
-                SouveraInvitationDetailView(
-                    event: SouveraInvitationCenter.placeholderEvent(for: invite),
-                    organizerFallback: invite.displayOrganizer,
-                    respond: { _, _, _ in nil },
-                    overlapEvents: []
-                )
+            // Run 17.09.: Live-Stand (Lazy-Resolve) + echter Mail-Pfad.
+            let live = SouveraInvitationCenter.shared.mailInvites.first(where: { $0.id == invite.id }) ?? invite
+            SouveraInvitationDetailView(
+                event: live.event ?? SouveraInvitationCenter.placeholderEvent(for: live),
+                organizerFallback: live.displayOrganizer,
+                respond: { rsvp, reminders, altProposal, calendarHref in
+                    if let event = live.event,
+                       await viewModel.respondToInvitation(event, status: rsvp,
+                                                           reminderMinutes: reminders) {
+                        return true
+                    }
+                    return await SouveraInvitationCenter.respondViaMail(
+                        live, rsvp, reminders, altProposal, calendarHref: calendarHref)
+                },
+                overlapEvents: live.event != nil ? overlapBasis(live.event!) : []
+            )
+            .task {
+                _ = await SouveraInvitationCenter.shared.resolveInvitation(live)
             }
         }
         .sheet(item: $detailEvent) { event in
@@ -1296,15 +1294,17 @@ private struct CalendarEventDetailSheet: View {
                                         rsvpBusyForHref = nil
                                     }
                                 } label: {
-                                    VStack(spacing: 3) {
+                                    // Run 16.09. (Feedback): grosse Tasten.
+                                    HStack(spacing: 6) {
                                         Image(systemName: rsvp.icon)
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundStyle(rsvp.color)
+                                            .font(.system(size: 15, weight: .semibold))
                                         Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                            .font(.caption2)
-                                            .foregroundStyle(.primary)
+                                            .font(.subheadline.weight(.semibold))
                                     }
-                                    .frame(maxWidth: .infinity)
+                                    .foregroundStyle(rsvp.color)
+                                    .padding(.horizontal, 14)
+                                    .frame(minWidth: 96, minHeight: 40)
+                                    .background(Capsule().fill(rsvp.color.opacity(0.14)))
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(rsvpBusyForHref == event.href)
@@ -1340,7 +1340,9 @@ private struct CalendarEventDetailSheet: View {
                         }
                     }
                 }
-                if !event.isTask {
+                // Run 17.09. (Feedback): KEIN Bearbeiten/Loeschen bei
+                // Einladungsterminen (Fremd-Organisator) - nur Antworten.
+                if !event.isTask && !CalendarViewModel.isForeignOrganizer(event) {
                     Section {
                         Button {
                             onEdit(viewModel.draft(from: event))
@@ -1357,13 +1359,16 @@ private struct CalendarEventDetailSheet: View {
                     }
                 }
             }
-        .sheet(item: $dayPreviewOverlap) { overlap in
-            SouveraDayPreviewPopup(
-                day: overlap.event.start,
-                highlightEvent: event,
-                collidingEvent: overlap.event,
-                allEvents: overlapBasis(event),
-                onDismiss: { dayPreviewOverlap = nil })
+        // Run 17.09. (Feedback): Popup-Overlay statt Sheet.
+        .overlay {
+            if let overlap = dayPreviewOverlap {
+                SouveraDayPreviewPopup(
+                    day: overlap.event.start,
+                    highlightEvent: event,
+                    collidingEvent: overlap.event,
+                    allEvents: overlapBasis(event),
+                    onDismiss: { dayPreviewOverlap = nil })
+            }
         }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
