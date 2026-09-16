@@ -383,7 +383,8 @@ final class SouveraInvitationCenter: ObservableObject {
             "ATTENDEE;PARTSTAT=\(status):mailto:\(me)"
         ]
         if let altProposal, !altProposal.isEmpty {
-            lines.append("DESCRIPTION:\(escapeICS(NSLocalizedString("_invitations_alt_proposal_", comment: "")): \(altProposal))")
+            let label = NSLocalizedString("_invitations_alt_proposal_", comment: "")
+            lines.append("DESCRIPTION:\(escapeICS("\(label): \(altProposal)"))")
         }
         lines += ["END:VEVENT", "END:VCALENDAR"]
         return lines.joined(separator: "\r\n")
