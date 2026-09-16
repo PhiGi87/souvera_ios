@@ -1119,6 +1119,16 @@ private struct CalendarEventDetailSheet: View {
     let event: CalendarEventModel
     let onEdit: (EventDraft) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var rsvpBusyForHref: String?
+
+    private func rsvpStatusText(_ partstat: String) -> String {
+        switch partstat {
+        case "accepted": return NSLocalizedString("_invitations_accept_", comment: "")
+        case "tentative": return NSLocalizedString("_invitations_tentative_", comment: "")
+        case "declined": return NSLocalizedString("_invitations_decline_", comment: "")
+        default: return partstat
+        }
+    }
     var body: some View {
         NavigationStack {
             List {
@@ -1180,11 +1190,10 @@ private struct CalendarEventDetailSheet: View {
                 // bei externen Einladungen zumindest die Adresse).
                 if !event.organizerName.isEmpty || !event.organizerEmail.isEmpty {
                     Section {
-                        Label(
-                            event.organizerName.isEmpty
-                                ? event.organizerEmail
-                                : "\(event.organizerName) (\(event.organizerEmail))",
-                            systemImage: "person.badge.shield.checkmark")
+                        let organizerText: String = event.organizerName.isEmpty
+                            ? event.organizerEmail
+                            : event.organizerName + " (" + event.organizerEmail + ")"
+                        Label(organizerText, systemImage: "person.badge.shield.checkmark")
                     } header: {
                         Text(NSLocalizedString("_invitations_organizer_", comment: ""))
                     }

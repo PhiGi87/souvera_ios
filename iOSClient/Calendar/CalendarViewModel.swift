@@ -680,9 +680,7 @@ final class CalendarViewModel: ObservableObject {
     /// ATTENDEE in der originalen ICS umschreiben und per PUT (If-Match)
     /// zurueckschreiben. Der Server verschickt die iTIP-Antwort selbst.
     func respondToInvitation(_ event: CalendarEventModel, status: CalendarRSVP) async -> Bool {
-        guard let entry = cachedEntries.first(where: { $0.href == event.href })
-                ?? CalDavEventEntry(calendarHref: event.calendarHref, href: event.href,
-                                    etag: event.etag, ics: ""),
+        guard let entry = cachedEntries.first(where: { $0.href == event.href }),
               !entry.ics.isEmpty else {
             JmapLog.write("Invitation RSVP: no ics for \(event.href)")
             return false
