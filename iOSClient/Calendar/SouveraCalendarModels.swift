@@ -26,6 +26,12 @@ struct CalendarEventModel: Identifiable {
     let reminders: [Int]
     /// Deck-Kalender liefern VTODO-Aufgaben (Karten/Stacks): read-only.
     let isTask: Bool
+    /// Run 16.09.: Organisator (CN + E-Mail) — Anzeige im Termin-Detail.
+    let organizerName: String
+    let organizerEmail: String
+    /// PARTSTAT des eigenen ATTENDEE (NEEDS-ACTION = unbeantwortete
+    /// Einladung; leer = kein Teilnehmer-Kontext / bereits beantwortet).
+    let ownPartstat: String
 }
 
 struct EventDraft {
@@ -86,6 +92,10 @@ enum ICSParser {
             var location: String?
             var notes: String?
             var attendees: [String] = []
+            var organizerName = ""
+            var organizerEmail = ""
+            var ownPartstat = ""
+            var hasOrganizer = false
             var talkRoomToken: String?
             var talkRoomName: String?
             var start: Date?
@@ -159,6 +169,32 @@ enum ICSParser {
                         .trimmingCharacters(in: .whitespaces)
                     if email.contains("@") && !attendees.contains(email.lowercased()) {
                         attendees.append(email.lowercased())
+                    }
+                    // Run 16.09.: PARTSTAT des eigenen ATTENDEE erfassen
+                    // (Einladungs-Erkennung: NEEDS-ACTION = unbeantwortet).
+                    if keyPart.contains("PARTSTAT=") {
+                        let parts = keyPart.components(separatedBy: "PARTSTAT=")
+                        if parts.count > 1 {
+                            ownPartstat = parts[1].components(separatedBy: ";").first?
+                                .trimmingCharacters(in: .whitespaces).lowercased() ?? ""
+                        }
+                    }
+                } else if keyPart.hasPrefix("ORGANIZER") {
+                    // Run 16.09.: ORGANIZER parsen (CN + mailto) —
+                    // Organisator-Anzeige im Termin-Detail.
+                    hasOrganizer = true
+                    if let cnRange = keyPart.range(of: "CN=") {
+                        let cn = keyPart[cnRange.upperBound...]
+                            .components(separatedBy: ":").first?
+                            .trimmingCharacters(in: .whitespaces) ?? ""
+                        if !cn.isEmpty { organizerName = cn }
+                    }
+                    if let mailRange = value.range(of: "mailto:") {
+                        organizerEmail = String(value[mailRange.upperBound...])
+                            .trimmingCharacters(in: .whitespaces)
+                    }
+                    if organizerEmail.isEmpty {
+                        organizerEmail = value.trimmingCharacters(in: .whitespaces)
                     }
                 } else if keyPart == "X-SOUVERA-TALK-ROOM" {
                     talkRoomToken = value
@@ -240,7 +276,10 @@ enum ICSParser {
                 href: href,
                 etag: etag,
                 reminders: reminders.sorted(),
-                isTask: isTask
+                isTask: isTask,
+                organizerName: organizerName,
+                organizerEmail: organizerEmail,
+                ownPartstat: ownPartstat
             ))
         }
         return events

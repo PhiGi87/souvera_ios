@@ -82,6 +82,15 @@ struct LinkView: View {
                 }
             }
         }
+        .onChange(of: viewModel.route) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: viewModel.currentRoom?.hasCall) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: viewModel.currentRoom?.lobbyState) { _, _ in
+            populateHeaderBridge()
+        }
         .onAppear {
             viewModel.start()
             viewModel.reconnectSignalingIfNeeded()
@@ -349,100 +358,101 @@ struct LinkView: View {
         .padding(.top, 4)
     }
 
-    /// Souvera-Modul-Header (Run 15.09.): Route-abhaengig Home oder
-    /// Chat-Raum. Ersetzt die System-Toolbar komplett.
-    @ViewBuilder
-    private var moduleHeader: some View {
+    /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
+    /// UIKit-Bar rendert sie (1:1 wie Mehr/Dateien, inkl. Flanking auf
+    /// dem iPad). Route-abhängig: Home oder Chat-Raum.
+    private func populateHeaderBridge() {
+        guard let bridge = headerBridge else { return }
         if case let .chat(token, title) = viewModel.route {
-            SouveraModuleHeader(
-                title: navigationTitle,
-                leading: {
-                    if !landscapeLayout {
-                        SouveraHeaderButton(icon: "chevron.backward") {
-                            viewModel.back()
-                        }
+            let roomTitle = viewModel.currentRoom?.displayName ?? title
+            var trailing: [SouveraHeaderBridge.Item] = []
+            var trailingMenus: [SouveraHeaderBridge.MenuGroup] = []
+
+            trailingMenus.append(SouveraHeaderBridge.MenuGroup(
+                id: "gear", icon: "gearshape",
+                accessibilityLabel: NSLocalizedString("_link_room_settings_", comment: ""),
+                entries: [
+                    .init(id: "participants", title: NSLocalizedString("_link_participants_", comment: ""), icon: "person.2") {
+                        viewModel.loadParticipants()
+                        showParticipants = true
+                    },
+                    .init(id: "settings", title: NSLocalizedString("_link_room_settings_", comment: ""), icon: "gearshape") {
+                        settingsRoom = viewModel.currentRoom
                     }
-                },
-                trailing: {
-                    SouveraHeaderPill {
-                        // Zahnrad mit Submenü (Run 15.09., Feedback):
-                        // Teilnehmer + Raum-Einstellungen wie vorher.
-                        Menu {
+                ]
+            ))
+            if viewModel.currentRoom?.canManage == true,
+               viewModel.currentRoom?.lobbyState == 1 {
+                trailing.append(SouveraHeaderBridge.Item(
+                    id: "lobby", icon: "clock.arrow.circlepath",
+                    accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")
+                ) {
+                    lobbyManagementRoom = viewModel.currentRoom
+                })
+            }
+            if viewModel.currentRoom?.hasCall == true {
+                trailing.append(SouveraHeaderBridge.Item(
+                    id: "call", icon: "phone.fill", isGreen: true,
+                    accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")
+                ) {
+                    callContext = CallContext(token: token, title: roomTitle, withVideo: false, silent: false)
+                })
+            } else {
+                trailing.append(SouveraHeaderBridge.Item(
+                    id: "call", icon: "phone.fill", isGreen: true,
+                    accessibilityLabel: NSLocalizedString("_link_start_call_", comment: "")
+                ) {
+                    startCallRequest = CallStartRequest(token: token, title: roomTitle, withVideo: false)
+                })
+            }
+
+            bridge.title = roomTitle
+            bridge.leadingItems = landscapeLayout ? [] : [
+                .init(id: "back", icon: "chevron.backward",
+                      accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
+                    viewModel.back()
+                }
+            ]
+            bridge.trailingItems = trailing
+            bridge.trailingMenus = trailingMenus
+            bridge.leadingCustoms = []
+            bridge.trailingCustoms = []
+        } else {
+            // Home: Suche links, Status + "+" rechts.
+            bridge.title = NSLocalizedString("_link_", comment: "")
+            bridge.leadingItems = [
+                .init(id: "search", icon: "magnifyingglass",
+                      accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
+                    searchActive = true
+                }
+            ]
+            bridge.trailingItems = []
+            bridge.trailingMenus = []
+            bridge.leadingCustoms = []
+            bridge.trailingCustoms = [SouveraHeaderBridge.Custom(
+                id: "status-plus", view: {
+                    let host = UIHostingController(rootView:
+                        HStack(spacing: 2) {
+                            LinkOnlineStatusButton(status: viewModel.ownStatus) {
+                                showUserStatus = true
+                            }
                             Button {
-                                viewModel.loadParticipants()
-                                showParticipants = true
+                                channelName = ""
+                                showCreateChannel = true
                             } label: {
-                                Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
-                            }
-                            if viewModel.currentRoom?.canManage == true {
-                                Button {
-                                    settingsRoom = viewModel.currentRoom
-                                } label: {
-                                    Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
-                                }
-                            }
-                        } label: {
-                            Image(systemName: "gearshape")
-                                .font(.system(size: 18, weight: .medium))
-                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                                .frame(width: 44, height: 44)
-                                // (Glass liefert die Pill - kein Eigen-Effekt)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
-                        if viewModel.currentRoom?.canManage == true,
-                           viewModel.currentRoom?.lobbyState == 1 {
-                            SouveraHeaderButton(icon: "clock.arrow.circlepath", glass: false,
-                                                accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")) {
-                                lobbyManagementRoom = viewModel.currentRoom
-                            }
-                        }
-                        if viewModel.currentRoom?.hasCall == true {
-                            // Run 15.09.: pulsierender Hörer — das ICON
-                            // pulsiert (symbolEffect, iOS 17), kein Kreis.
-                            Button {
-                                callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
-                            } label: {
-                                Image(systemName: "phone.fill")
+                                Image(systemName: "plus")
                                     .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(Color.green)
-                                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Circle())
+                                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                    .frame(width: 36, height: 36)
                             }
                             .buttonStyle(.plain)
-                            .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
-                        } else {
-                            SouveraHeaderButton(icon: "phone.fill",
-                                                iconColor: .green, glass: false,
-                                                accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
-                                startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
-                            }
                         }
-                    }
-                }
-            )
-        } else {
-            SouveraModuleHeader(
-                title: NSLocalizedString("_link_", comment: ""),
-                leading: {
-                    SouveraHeaderButton(icon: "magnifyingglass") {
-                        searchActive = true
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                },
-                trailing: {
-                    SouveraHeaderPill {
-                        LinkOnlineStatusButton(status: viewModel.ownStatus) {
-                            showUserStatus = true
-                        }
-                        SouveraHeaderButton(icon: "plus", glass: false) {
-                            channelName = ""
-                            showCreateChannel = true
-                        }
-                        .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
-                    }
-                }
-            )
+                        .padding(.trailing, 4)
+                    )
+                    host.view.backgroundColor = .clear
+                    return host.view
+                }()
+            )]
         }
     }
 

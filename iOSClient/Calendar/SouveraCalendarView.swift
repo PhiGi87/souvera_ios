@@ -22,6 +22,9 @@ enum SouveraCalendarSettings {
 }
 
 struct SouveraCalendarView: View {
+    /// Run 16.09.: UIKit-Bar-Bridge (Landscape/iPad 1:1 Files/More).
+    var headerBridge: SouveraHeaderBridge? = nil
+    @State private var calendarPopulateToken = 0
     @StateObject private var viewModel = CalendarViewModel()
     @State private var selectedDay = Date()
     @State private var viewMode: CalendarViewMode = CalendarViewMode(
@@ -87,20 +90,21 @@ struct SouveraCalendarView: View {
                 }
                 .padding(.top, 8)
             }
-            // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
-            // "Liquid Glass" flattet toolbarBackground-Verlaeufe. Header
-            // 1:1 wie Mehr/Dateien; System-Navigationbar versteckt.
             .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
-            .safeAreaInset(edge: .top, spacing: 0) {
-                calendarHeader
-            }
         }
         .onAppear {
             selectedDay = Date()
             scrollToNowTrigger += 1
             Task { await viewModel.load() }
             viewModel.startAutoRefresh()
+            populateHeaderBridge()
+        }
+        .onChange(of: viewMode) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: searchActive) { _, _ in
+            populateHeaderBridge()
         }
         .onReceive(NotificationCenter.default.publisher(for: SouveraPushDeepLink.opened)) { notification in
             guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
@@ -1810,66 +1814,38 @@ private struct MonthYearPickerSheet: View {
 
 extension SouveraCalendarView {
     /// Header 1:1 wie Mehr/Dateien: Verlauf, weisse Pills, dunkle Icons.
-    fileprivate var calendarHeader: some View {
-        SouveraModuleHeader(
-            leading: {
-                SouveraHeaderPill {
-                    // "Heute": springt in ALLEN Ansichten auf den
-                    // aktuellen Tag zurueck.
-                    Button {
-                        selectedDay = Date()
-                        viewModel.visibleMonth = Date()
-                        scrollToNowTrigger += 1
-                    } label: {
-                        Text(NSLocalizedString("_calendar_today_", comment: ""))
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                            .padding(.horizontal, 8)
-                            .frame(height: 34)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
-                    SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
-                        searchActive = true
-                    }
-                    .accessibilityLabel(NSLocalizedString("_calendar_search_hint_", comment: ""))
-                    SouveraHeaderButton(icon: "calendar.badge.checkmark", glass: false) {
-                        showCalendarPicker = true
-                    }
-                }
+        /// Run 16.09.: Header-Aktionen als Bridge-Items (hosting UIKit-Bar).
+    fileprivate func populateHeaderBridge() {
+        guard let bridge = headerBridge else { return }
+        bridge.title = ""
+        bridge.leadingItems = [
+            .init(id: "today", icon: "", accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")) {
+                selectedDay = Date()
+                viewModel.visibleMonth = Date()
+                scrollToNowTrigger += 1
             },
-            trailing: {
-                SouveraHeaderPill {
-                    // Ansichts-Menue: aktueller Modus + Haeckchen.
-                    Menu {
-                        ForEach(CalendarViewMode.allCases) { mode in
-                            Button {
-                                viewMode = mode
-                            } label: {
-                                if viewMode == mode {
-                                    Label(mode.title, systemImage: "checkmark")
-                                } else {
-                                    Text(mode.title)
-                                }
-                            }
-                        }
-                    } label: {
-                        HStack(spacing: 3) {
-                            Text(viewMode.title).font(.subheadline)
-                            Image(systemName: "chevron.down").font(.caption2)
-                        }
-                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                        .padding(.horizontal, 8)
-                        .frame(height: 34)
-                    }
-                    .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
-                    SouveraHeaderButton(icon: "plus", glass: false) {
-                        // Run 15.09.: Standard-Dauer 30 min (Feedback: Terminende
-                // folgt der Startzeit mit 30 min).
-                editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
-                    }
-                }
+            .init(id: "search", icon: "magnifyingglass",
+                  accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
+                searchActive = true
+            },
+            .init(id: "picker", icon: "calendar.badge.checkmark",
+                  accessibilityLabel: NSLocalizedString("_calendar_", comment: "")) {
+                showCalendarPicker = true
             }
-        )
+        ]
+        bridge.trailingItems = [
+            .init(id: "plus", icon: "plus",
+                  accessibilityLabel: NSLocalizedString("_calendar_new_event_", comment: "")) {
+                editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
+            }
+        ]
+        // Ansichts-Menü als MenuGroup.
+        bridge.trailingMenus = [
+            .init(id: "viewmode", icon: "calendar",
+                  accessibilityLabel: NSLocalizedString("_settings_calendar_default_view_", comment: ""),
+                  entries: CalendarViewMode.allCases.map { mode in
+                      .init(id: mode.rawValue, title: mode.title) { viewMode = mode }
+                  })
+        ]
     }
 }

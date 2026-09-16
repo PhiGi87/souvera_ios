@@ -135,10 +135,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         dumpNseLogs()
         NotificationCenter.default.addObserver(forName: .linkAnswerCall, object: nil, queue: .main) { notification in
             // Die Session startet LinkVoIPManager selbst (auch bei
-            // gesperrtem Gerät); die Call-UI übernimmt der zentrale
-            // Presenter (P68e) - nur im aktiven Vordergrund. Sonst
-            // übernimmt der "In Souvera öffnen"-Flow nach dem Entsperren.
-            guard UIApplication.shared.applicationState == .active else { return }
+            // gesperrtem Gerät). Run 16.09.: die UI-Präsentation NICHT
+            // mehr skippen, wenn die App inactive ist — beim Foreground
+            // nachholen (sonst landete der Tester nur in der Raum-
+            // übersicht statt im Call, Log d09qaaa3o0).
             LinkVoIPManager.shared.presentCallUIIfNeeded()
         }
 

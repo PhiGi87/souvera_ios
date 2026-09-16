@@ -18,6 +18,13 @@ enum MailSortOrder: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
+    /// Nächste Sortierung (Zyklus) — für das kompakte Bar-Menü.
+    func next() -> MailSortOrder {
+        let all = MailSortOrder.allCases
+        let index = all.firstIndex(of: self) ?? 0
+        return all[(index + 1) % all.count]
+    }
+
     var titleKey: String {
         switch self {
         case .dateDesc: return "_mail_sort_date_desc_"

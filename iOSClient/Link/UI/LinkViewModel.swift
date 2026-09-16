@@ -2095,8 +2095,11 @@ final class LinkViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
                 guard let self, !Task.isCancelled else { return }
                 self.loadConversations()
-                // Presence in der Raumliste aktuell halten (Run 15.09.).
+                // Presence + eigener Status aktuell halten (Run 15.09.).
                 self.loadUserStatuses()
+                Task { @MainActor in
+                    await self.refreshOwnStatus()
+                }
                 // Eigenen Status ad hoc auffrischen (Run 15.09., Feedback:
                 // die Pille blieb stehen, bis man sie antippte).
                 Task { @MainActor in

@@ -101,9 +101,21 @@ final class LinkVoIPManager: NSObject {
     /// CallVC IMMER an der laufenden Session (Reattach - kein Neustart,
     /// kein Flappen). Retries, wenn das Fenster noch nicht bereit ist
     /// (App-Start aus gesperrtem Zustand). Idempotent.
-    func presentCallUIIfNeeded(retriesLeft: Int = 2) {
+    func presentCallUIIfNeeded(retriesLeft: Int = 4) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
+            // Run 16.09.: App noch nicht active (Antwort aus Sperrbildschirm/
+            // Banner) — später erneut versuchen, statt zu skippen.
+            guard UIApplication.shared.applicationState == .active else {
+                if retriesLeft > 0 {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
+                        self?.presentCallUIIfNeeded(retriesLeft: retriesLeft - 1)
+                    }
+                } else {
+                    CallDebugLog.log("LinkVoIPManager", "presentCallUI: skipped (app inactive after retries)")
+                }
+                return
+            }
             guard let session = self.activeSession, !session.hasEnded,
                   let info = self.activeCallInfo,
                   let account = LinkAccount.active() else {
@@ -675,6 +687,7 @@ final class LinkVoIPManager: NSObject {
             if let error {
                 nkLog(tag: self?.global.logTagPN ?? NCGlobal.shared.logTagPN, emoji: .error, message: "Link CallKit report failed: \(error.localizedDescription)")
             } else {
+                CallDebugLog.log("LinkVoIPManager", "reportNewIncomingCall OK (\(uuid.uuidString.prefix(8)))")
                 self?.startRingingTimeout(for: uuid)
             }
             completion()
@@ -769,6 +782,14 @@ extension LinkVoIPManager: CXProviderDelegate {
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         cancelRingingTimeout()
+        // Run 16.09. (Crash-/Suspend-Fix): Background-Assertion vom Answer
+        // bis zum abgeschlossenen Signaling-Join — sonst suspendiert iOS
+        // die App beim Antworten aus Sperrbildschirm/Banner, bevor der
+        // Call-Join fertig ist (Log d09qaaa3o0: kein Join nach didActivate).
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "link-call-answer")
+        defer {
+            if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) }
+        }
         let roomToken = activeCalls[action.callUUID] ?? ""
         activeCalls[action.callUUID] = nil
         // CallKit-UUID behalten: Der System-Call läuft weiter und wird

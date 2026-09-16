@@ -181,9 +181,9 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         .padding(.horizontal, 12)
         .frame(height: 44, alignment: .top)
         // Run 15.09.: Gradient läuft unter den Buttons weiter; Höhe an
-        // die Mehr/Dateien-Bar angepasst (Feedback: "wenige pt zu hoch",
-        // dann "Unterkunde höher": Buttons top-aligned, 44pt hoch).
-        .padding(.bottom, 8)
+        // die Mehr/Dateien-Bar angepasst (Feedback: "2-4pt fehlen unten"
+        // — nur die Unterkante, Button-Position unverändert).
+        .padding(.bottom, 12)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(
@@ -193,5 +193,151 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
                            startPoint: .top, endPoint: .bottom)
                 .ignoresSafeArea(edges: .top)
         )
+    }
+}
+
+// MARK: - SouveraHeaderBridge (Run 16.09.)
+//
+// Landscape/iPad: Mail, Kalender und Link nutzen statt der SwiftUI-Kopfzeile
+// die SICHTBARE UIKit-Bar ihres Hosting-NavigationControllers (1:1 mit
+// Mehr/Dateien: blauer Verlauf, Items flankieren die zentrierte Tab-Pill).
+// Die SwiftUI-Module befüllen die Brücke (leading/trailing), der
+// SouveraBarCoordinator baut daraus UIBarButtonItem-Gruppen.
+
+import Combine
+
+@MainActor
+final class SouveraHeaderBridge: ObservableObject {
+    struct Item: Identifiable {
+        let id: String
+        let icon: String
+        let accessibilityLabel: String
+        let isGreen: Bool
+        let isDestructive: Bool
+        let handler: () -> Void
+
+        init(id: String, icon: String, accessibilityLabel: String = "",
+             isGreen: Bool = false, isDestructive: Bool = false,
+             handler: @escaping () -> Void) {
+            self.id = id
+            self.icon = icon
+            self.accessibilityLabel = accessibilityLabel
+            self.isGreen = isGreen
+            self.isDestructive = isDestructive
+            self.handler = handler
+        }
+    }
+    /// Menü-Eintrag (UIMenu) als kompakter Deskriptor.
+    struct MenuEntry: Identifiable {
+        let id: String
+        let title: String
+        let icon: String?
+        let isDestructive: Bool
+        let handler: () -> Void
+
+        init(id: String, title: String, icon: String? = nil,
+             isDestructive: Bool = false, handler: @escaping () -> Void) {
+            self.id = id
+            self.title = title
+            self.icon = icon
+            self.isDestructive = isDestructive
+            self.handler = handler
+        }
+    }
+    struct MenuGroup: Identifiable {
+        let id: String
+        let icon: String
+        let accessibilityLabel: String
+        let entries: [MenuEntry]
+
+        init(id: String, icon: String, accessibilityLabel: String = "", entries: [MenuEntry]) {
+            self.id = id
+            self.icon = icon
+            self.accessibilityLabel = accessibilityLabel
+            self.entries = entries
+        }
+    }
+    struct Custom: Identifiable {
+        let id: String
+        let view: UIView
+    }
+
+    @Published var leadingItems: [Item] = []
+    @Published var leadingMenus: [MenuGroup] = []
+    @Published var leadingCustoms: [Custom] = []
+    @Published var trailingItems: [Item] = []
+    @Published var trailingMenus: [MenuGroup] = []
+    @Published var trailingCustoms: [Custom] = []
+    @Published var title: String = ""
+}
+
+/// Beobachtet die Brücke und baut die Bar-Items des Host-Controllers.
+@MainActor
+final class SouveraBarCoordinator {
+    private weak var navigationController: UINavigationController?
+    private let bridge: SouveraHeaderBridge
+    private var cancellables = Set<AnyCancellable>()
+
+    init(navigationController: UINavigationController, bridge: SouveraHeaderBridge) {
+        self.navigationController = navigationController
+        self.bridge = bridge
+        bridge.objectWillChange
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.rebuild() }
+            .store(in: &cancellables)
+        rebuild()
+    }
+
+    func rebuild() {
+        guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
+        item.title = bridge.title.isEmpty ? nil : bridge.title
+        item.leftBarButtonItems = Self.build(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
+        item.rightBarButtonItems = Self.build(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
+    }
+
+    private static func build(_ items: [SouveraHeaderBridge.Item],
+                              _ menus: [SouveraHeaderBridge.MenuGroup],
+                              _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItem] {
+        var bars: [UIBarButtonItem] = []
+        for item in items {
+            bars.append(UIBarButtonItem(
+                image: UIImage(systemName: item.icon)?
+                    .applyingSymbolConfiguration(.init(weight: .medium)),
+                style: .plain,
+                target: nil,
+                action: nil
+            ).then { bar in
+                bar.primaryAction = UIAction { _ in item.handler() }
+                bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : .white)
+                bar.accessibilityLabel = item.accessibilityLabel
+            })
+        }
+        for menu in menus {
+            bars.append(UIBarButtonItem(
+                image: UIImage(systemName: menu.icon)?
+                    .applyingSymbolConfiguration(.init(weight: .medium)),
+                menu: UIMenu(children: menu.entries.map { entry in
+                    UIAction(title: entry.title,
+                             image: entry.icon.flatMap { UIImage(systemName: $0) },
+                             attributes: entry.isDestructive ? .destructive : []) { _ in
+                        entry.handler()
+                    }
+                })
+            ).then { bar in
+                bar.tintColor = .white
+                bar.accessibilityLabel = menu.accessibilityLabel
+            })
+        }
+        for custom in customs {
+            bars.append(UIBarButtonItem(customView: custom.view))
+        }
+        return bars
+    }
+}
+
+private extension UIBarButtonItem {
+    func then(_ configure: (UIBarButtonItem) -> Void) -> UIBarButtonItem {
+        configure(self)
+        return self
     }
 }

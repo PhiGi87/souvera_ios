@@ -483,26 +483,23 @@ actor LinkOcsApi {
     /// live gegen plausible Endpunkte probeziert; gefunden = .admitted,
     /// sonst .notSupported (Aufrufer faehrt den Lobby-Toggle-Fallback).
     func admitParticipant(token: String, attendeeId: Int) async -> LobbyAdmitResult {
-        let candidates: [(method: String, url: String)] = [
-            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)/admit"),
-            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)/accept"),
-            ("POST", "\(base)/api/v4/room/\(token)/participants/\(attendeeId)")
-        ]
-        for candidate in candidates {
-            var req = signed(url: candidate.url, method: candidate.method)
-            req.setValue("application/json", forHTTPHeaderField: "Accept")
-            guard let (_, response) = try? await session.data(for: req),
-                  let http = response as? HTTPURLResponse else {
-                CallDebugLog.log("OcsApi", "admit probe \(candidate.url) -> transport FAILED")
-                continue
-            }
-            CallDebugLog.log("OcsApi", "admit probe \(candidate.url) -> \(http.statusCode)")
-            if (200..<300).contains(http.statusCode) { return .admitted }
-            // Endpunkt existiert nicht -> naechsten Kandidaten probieren.
-            if [404, 405, 501].contains(http.statusCode) { continue }
+        // Run 16.09. (EINZEL-ADMIT): Talk kennt keinen admit-Endpunkt,
+        // ABER die Attendee-Permission 8 ("Can ignore lobby",
+        // constants.md) hebt die Lobby für genau diesen Teilnehmer auf —
+        // der Gast kann beitreten, während die Lobby für alle anderen
+        // aktiv bleibt (GET-Probe -> PUT attendees/permissions).
+        var req = signed(url: "\(base)/api/v4/room/\(token)/attendees/permissions", method: "PUT")
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.httpBody = "attendeeId=\(attendeeId)&method=add&permissions=8".data(using: .utf8)
+        guard let (_, response) = try? await session.data(for: req),
+              let http = response as? HTTPURLResponse else {
+            CallDebugLog.log("OcsApi", "admit permissions -> transport FAILED")
             return .failed
         }
-        return .notSupported
+        CallDebugLog.log("OcsApi", "admit permissions attendee=\(attendeeId) -> \(http.statusCode)")
+        if (200..<300).contains(http.statusCode) { return .admitted }
+        if [404, 405, 501].contains(http.statusCode) { return .notSupported }
+        return .failed
     }
 
     /// Erstellt eine (öffentliche) Gruppenkonversation für externe Teilnehmer.

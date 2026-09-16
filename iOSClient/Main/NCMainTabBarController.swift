@@ -21,6 +21,8 @@ class NCMainTabBarController: UITabBarController {
     }
     var availableNotifications: Bool = false
     private weak var mailTabBarItem: UITabBarItem?
+    /// Run 16.09.: Coordinator der Mail/Kalender/Link-Bridges (Retention).
+    private var headerCoordinators: [SouveraBarCoordinator] = []
     private weak var linkTabBarItem: UITabBarItem?
     var documentPickerViewController: NCDocumentPickerViewController?
     let navigationCollectionViewCommon = ThreadSafeArray<NavigationCollectionViewCommon>()
@@ -218,11 +220,17 @@ class NCMainTabBarController: UITabBarController {
             ?? UINavigationController()
         let moreController = makeMoreNavigationController()
 
+        // Run 16.09.: Bridges für Mail/Kalender/Link — die Module befüllen
+        // sie, der Host-Controller rendert die Bar-Items (1:1 Files/More).
+        let mailBridge = SouveraHeaderBridge()
+        let calendarBridge = SouveraHeaderBridge()
+        let linkBridge = SouveraHeaderBridge()
         let mailController = makeHostedTab(
-            root: MailView(),
-            titleKey: "_mail_",
+            root: MailView(headerBridge: mailBridge),
+            bridge: mailBridge,
+            tag: 100,
             imageName: "envelope.fill",
-            tag: 100
+            titleKey: "_mail_"
         )
         mailTabBarItem = mailController.tabBarItem
         // App-Icon-Badge (nur ungelesene Mails, Summe aller Accounts) zentral
@@ -269,16 +277,18 @@ class NCMainTabBarController: UITabBarController {
             JmapLog.write("Tab badges refreshed on account switch (active=\(active))")
         }
         let calendarController = makeHostedTab(
-            root: SouveraCalendarView(),
-            titleKey: "_calendar_",
+            root: SouveraCalendarView(headerBridge: calendarBridge),
+            bridge: calendarBridge,
+            tag: 101,
             imageName: "calendar",
-            tag: 101
+            titleKey: "_calendar_"
         )
         let linkController = makeHostedTab(
-            root: LinkView(),
-            titleKey: "_link_",
+            root: LinkView(headerBridge: linkBridge),
+            bridge: linkBridge,
+            tag: 102,
             imageName: "bubble.left.and.bubble.right.fill",
-            tag: 102
+            titleKey: "_link_"
         )
         linkTabBarItem = linkController.tabBarItem
         NotificationCenter.default.addObserver(
@@ -401,13 +411,19 @@ class NCMainTabBarController: UITabBarController {
     /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
     /// deckend, korrekt in Portrait UND Landscape).
     private func updateMailBadge(_ count: Int) {
-        mailTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
-        JmapLog.write("Mail tab badge set -> \(count > 0 ? count : 0)")
+        // Run 15.09.: Badge nur bei Wertänderung setzen — Re-Setzen bei
+        // identischem Wert liess die Top-Pill auf dem iPad flackern.
+        let value = count > 0 ? "\(count)" : nil
+        guard mailTabBarItem?.badgeValue != value else { return }
+        mailTabBarItem?.badgeValue = value
+        JmapLog.write("Mail tab badge set -> \(count)")
     }
 
     /// Link-Badge als nativer System-Badge (identisch zum Mail-Badge, rot).
     private func updateLinkBadge(_ count: Int) {
-        linkTabBarItem?.badgeValue = count > 0 ? "\(count)" : nil
+        let value = count > 0 ? "\(count)" : nil
+        guard linkTabBarItem?.badgeValue != value else { return }
+        linkTabBarItem?.badgeValue = value
     }
 
     private func updateMaintenanceDot(_ maintenance: Bool) {
@@ -507,6 +523,31 @@ class NCMainTabBarController: UITabBarController {
             selectedImage: UIImage(systemName: imageName)
         )
         navigationController.tabBarItem.tag = tag
+        return navigationController
+    }
+
+    /// Run 16.09.: Variante mit SICHTBARER blauer UIKit-Bar + Bridge-Items
+    /// (1:1 wie Mehr/Dateien — auf dem iPad flankieren die Items die
+    /// zentrierte Tab-Pill automatisch). Für Mail/Kalender/Link.
+    private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
+        let hostingController = UIHostingController(rootView: root)
+        let navigationController = UINavigationController(rootViewController: hostingController)
+        navigationController.setNavigationBarHidden(false, animated: false)
+        navigationController.navigationBar.standardAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.scrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.compactAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.compactScrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.isTranslucent = false
+        navigationController.navigationBar.tintColor = .white
+        navigationController.navigationBar.overrideUserInterfaceStyle = .light
+        navigationController.tabBarItem = UITabBarItem(
+            title: NSLocalizedString(titleKey, comment: ""),
+            image: UIImage(systemName: imageName),
+            selectedImage: UIImage(systemName: imageName)
+        )
+        navigationController.tabBarItem.tag = tag
+        let coordinator = SouveraBarCoordinator(navigationController: navigationController, bridge: bridge)
+        headerCoordinators.append(coordinator)
         return navigationController
     }
 
