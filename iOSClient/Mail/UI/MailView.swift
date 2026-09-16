@@ -12,7 +12,7 @@ import WebKit
 struct MailView: View {
     @Environment(\.scenePhase) private var scenePhase
     /// Run 16.09.: UIKit-Bar-Bridge (Landscape/iPad 1:1 Files/More).
-    let headerBridge: SouveraHeaderBridge?
+    var headerBridge: SouveraHeaderBridge? = nil
     @StateObject private var viewModel = MailViewModel()
     @State private var detailMoveTarget: ([MailMessage], [Mailbox])?
     @State private var blacklistTarget: [MailMessage]?
