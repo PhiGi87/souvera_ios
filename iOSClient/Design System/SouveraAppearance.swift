@@ -8,6 +8,14 @@ import UIKit
 /// (Root mit Logo und alle gepushten Unterseiten ohne Logo).
 enum SouveraAppearance {
 
+    /// Run 16.09.: Header-Modus pro Geraet — das iPad rendert die blaue
+    /// UIKit-Bar via SouveraHeaderBridge (1:1 Dateien/Mehr, Portrait und
+    /// Landscape); iPhone (Portrait + Landscape) behalt den Glas-Header
+    /// (SouveraModuleHeader) der SwiftUI-Views.
+    static var useBridgeHeader: Bool {
+        UIDevice.current.userInterfaceIdiom == .pad
+    }
+
     /// Vertikaler Souvera-Gradient als SwiftUI-Farben.
     /// P68w: deutlich dunkleres Blau als der frühere Verlauf
     /// (#4BBFEA → #496BBF war oben fast identisch zur alten Flachfarbe).

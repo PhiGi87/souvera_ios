@@ -90,8 +90,15 @@ struct SouveraCalendarView: View {
                 }
                 .padding(.top, 8)
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
             .souveraOfflineBanner()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
+                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
+                if !SouveraAppearance.useBridgeHeader {
+                    calendarHeader
+                }
+            }
         }
         .onAppear {
             selectedDay = Date()
@@ -1815,6 +1822,71 @@ private struct MonthYearPickerSheet: View {
 extension SouveraCalendarView {
     /// Header 1:1 wie Mehr/Dateien: Verlauf, weisse Pills, dunkle Icons.
         /// Run 16.09.: Header-Aktionen als Bridge-Items (hosting UIKit-Bar).
+    /// Klassischer Glas-Header (iPhone, Portrait + Landscape); das iPad
+    /// rendert stattdessen die blaue UIKit-Bar via populateHeaderBridge().
+    fileprivate var calendarHeader: some View {
+        SouveraModuleHeader(
+            leading: {
+                SouveraHeaderPill {
+                    // "Heute": springt in ALLEN Ansichten auf den
+                    // aktuellen Tag zurueck.
+                    Button {
+                        selectedDay = Date()
+                        viewModel.visibleMonth = Date()
+                        scrollToNowTrigger += 1
+                    } label: {
+                        Text(NSLocalizedString("_calendar_today_", comment: ""))
+                            .font(.subheadline.weight(.medium))
+                            .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                            .padding(.horizontal, 8)
+                            .frame(height: 34)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
+                    SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
+                        searchActive = true
+                    }
+                    .accessibilityLabel(NSLocalizedString("_calendar_search_hint_", comment: ""))
+                    SouveraHeaderButton(icon: "calendar.badge.checkmark", glass: false) {
+                        showCalendarPicker = true
+                    }
+                }
+            },
+            trailing: {
+                SouveraHeaderPill {
+                    // Ansichts-Menue: aktueller Modus + Haeckchen.
+                    Menu {
+                        ForEach(CalendarViewMode.allCases) { mode in
+                            Button {
+                                viewMode = mode
+                            } label: {
+                                if viewMode == mode {
+                                    Label(mode.title, systemImage: "checkmark")
+                                } else {
+                                    Text(mode.title)
+                                }
+                            }
+                        }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Text(viewMode.title).font(.subheadline)
+                            Image(systemName: "chevron.down").font(.caption2)
+                        }
+                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                        .padding(.horizontal, 8)
+                        .frame(height: 34)
+                    }
+                    .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
+                    SouveraHeaderButton(icon: "plus", glass: false) {
+                        // Standard-Dauer 30 min (Terminende folgt der
+                        // Startzeit mit 30 min).
+                        editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
+                    }
+                }
+            }
+        )
+    }
+
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         bridge.title = ""

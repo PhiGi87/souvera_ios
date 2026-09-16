@@ -44,7 +44,14 @@ struct MailView: View {
                         updateLandscapeLayout(newSize)
                     }
             }
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
+                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
+                if !SouveraAppearance.useBridgeHeader {
+                    moduleHeader
+                }
+            }
             .onChange(of: searchQuery) { _, newValue in
                 scheduleSearch(newValue)
             }
@@ -222,6 +229,150 @@ struct MailView: View {
             return String(format: NSLocalizedString("_mail_blacklist_confirm_multi_", comment: ""), preview, addresses.count)
         }
         return preview
+    }
+
+    /// Klassischer Glas-Header (iPhone, Portrait + Landscape) - 1:1 der
+    /// Stand vor der Bridge-Umstellung; das iPad rendert stattdessen die
+    /// blaue UIKit-Bar via populateHeaderBridge().
+    private var moduleHeader: some View {
+        let showBack = !isFolders && !(landscapeLayout && !viewModel.route.isDetail)
+        let headerTitle: String = {
+            switch viewModel.route {
+            case .folders: return NSLocalizedString("_mail_", comment: "")
+            case .messages(let mailbox): return mailbox.displayName
+            default: return ""
+            }
+        }()
+        return SouveraModuleHeader(
+            title: headerTitle,
+            titleAfterLeading: showBack && !headerTitle.isEmpty,
+            leading: {
+                if showBack {
+                    SouveraHeaderButton(icon: "chevron.backward") {
+                        viewModel.back()
+                    }
+                }
+                if isFolders || landscapeLayout {
+                    if !(focusReaderActive && viewModel.route.isDetail) {
+                        AutoRefreshRingView(viewModel: viewModel)
+                            .frame(width: 44, height: 44)
+                            .modifier(SouveraHeaderGlass(shape: Circle()))
+                    }
+                }
+            },
+            trailing: {
+                if case let .detail(message) = viewModel.route {
+                    SouveraHeaderPill {
+                        SouveraHeaderButton(icon: "arrowshape.turn.up.left", glass: false) {
+                            viewModel.startCompose(mode: .reply, message: message)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
+                        Menu {
+                            Button {
+                                viewModel.startCompose(mode: .replyAll, message: message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_reply_all_", comment: ""), systemImage: "arrowshape.turn.up.left.2")
+                            }
+                            Button {
+                                viewModel.startCompose(mode: .forward, message: message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
+                            }
+                            Button {
+                                Task { await viewModel.setRead([message], !message.isRead) }
+                            } label: {
+                                Label(message.isRead
+                                      ? NSLocalizedString("_mail_mark_unread_", comment: "")
+                                      : NSLocalizedString("_mail_mark_read_", comment: ""),
+                                      systemImage: message.isRead ? "envelope" : "envelope.open")
+                            }
+                            Button {
+                                detailMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                            } label: {
+                                Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                            }
+                            Button {
+                                viewModel.toggleFlagged(message)
+                            } label: {
+                                Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: message.isFlagged ? "flag.slash" : "flag")
+                            }
+                            Button {
+                                blacklistTarget = [message]
+                            } label: {
+                                Label(NSLocalizedString("_mail_blacklist_sender_", comment: ""), systemImage: "exclamationmark.shield")
+                            }
+                            Button(role: .destructive) {
+                                viewModel.delete([message])
+                            } label: {
+                                Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                .frame(width: 44, height: 44)
+                                // (Glass liefert die Pill - kein Eigen-Effekt)
+                        }
+                    }
+                } else if isFolders || landscapeLayout {
+                    SouveraHeaderPill {
+                        SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
+                            searchActive = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                        SouveraHeaderButton(icon: "folder.badge.plus", glass: false) {
+                            showNewFolderSheet = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_new_folder_", comment: ""))
+                    }
+                }
+                if case .messages = viewModel.route, toolbarActiveForMessages {
+                    // "..."-Menü (Bearbeiten/Sortierung/Papierkorb leeren)
+                    // + "Neue Mail".
+                    SouveraHeaderPill {
+                        Menu {
+                            if !listMessagesEmpty {
+                                Button { listEditing = true } label: {
+                                    Label(NSLocalizedString("_edit_", comment: ""), systemImage: "checklist")
+                                }
+                            }
+                            Menu {
+                                ForEach(MailSortOrder.allCases) { order in
+                                    Button {
+                                        viewModel.sortOrder = order
+                                    } label: {
+                                        if viewModel.sortOrder == order {
+                                            Label(NSLocalizedString(order.titleKey, comment: ""), systemImage: "checkmark")
+                                        } else {
+                                            Text(NSLocalizedString(order.titleKey, comment: ""))
+                                        }
+                                    }
+                                }
+                            } label: {
+                                Label(NSLocalizedString("_mail_sort_", comment: ""), systemImage: "arrow.up.arrow.down")
+                            }
+                            if viewModel.currentMailbox?.kind == .trash {
+                                Button {
+                                    listShowEmptyTrashConfirm = true
+                                } label: {
+                                    Label(NSLocalizedString("_mail_trash_empty_", comment: ""), systemImage: "trash.slash")
+                                }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: 18, weight: .medium))
+                                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                .frame(width: 44, height: 44)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
+                        SouveraHeaderButton(icon: "square.and.pencil", glass: false) {
+                            viewModel.startCompose(mode: .new)
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
+                    }
+                }
+            }
+        )
     }
 
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting

@@ -69,7 +69,14 @@ struct LinkView: View {
             // "Liquid Glass" flattet toolbarBackground-Verlaeufe und tintet
             // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
             // mit dunklen Icons); System-Navigationbar komplett versteckt.
-            .toolbar(.hidden, for: .navigationBar)
+            .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
+                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
+                if !SouveraAppearance.useBridgeHeader {
+                    moduleHeader
+                }
+            }
         }
         .onChange(of: scenePhase) { _, phase in
             // Foreground (Run 15.09.): Status + Presence automatisch
@@ -360,6 +367,101 @@ struct LinkView: View {
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
     /// UIKit-Bar rendert sie (1:1 wie Mehr/Dateien, inkl. Flanking auf
     /// dem iPad). Route-abhängig: Home oder Chat-Raum.
+    /// Klassischer Glas-Header (iPhone, Portrait + Landscape); das iPad
+    /// rendert stattdessen die blaue UIKit-Bar via populateHeaderBridge().
+    private var moduleHeader: some View {
+        if case let .chat(token, title) = viewModel.route {
+            return AnyView(
+                SouveraModuleHeader(
+                    title: navigationTitle,
+                    leading: {
+                        if !landscapeLayout {
+                            SouveraHeaderButton(icon: "chevron.backward") {
+                                viewModel.back()
+                            }
+                        }
+                    },
+                    trailing: {
+                        SouveraHeaderPill {
+                            Menu {
+                                Button {
+                                    viewModel.loadParticipants()
+                                    showParticipants = true
+                                } label: {
+                                    Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
+                                }
+                                if viewModel.currentRoom?.canManage == true {
+                                    Button {
+                                        settingsRoom = viewModel.currentRoom
+                                    } label: {
+                                        Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
+                                    }
+                                }
+                            } label: {
+                                Image(systemName: "gearshape")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                                    .frame(width: 44, height: 44)
+                            }
+                            .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
+                            if viewModel.currentRoom?.canManage == true,
+                               viewModel.currentRoom?.lobbyState == 1 {
+                                SouveraHeaderButton(icon: "clock.arrow.circlepath", glass: false,
+                                                    accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")) {
+                                    lobbyManagementRoom = viewModel.currentRoom
+                                }
+                            }
+                            if viewModel.currentRoom?.hasCall == true {
+                                Button {
+                                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                                } label: {
+                                    Image(systemName: "phone.fill")
+                                        .font(.system(size: 18, weight: .medium))
+                                        .foregroundStyle(Color.green)
+                                        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+                                        .frame(width: 44, height: 44)
+                                        .contentShape(Circle())
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
+                            } else {
+                                SouveraHeaderButton(icon: "phone.fill",
+                                                    iconColor: .green, glass: false,
+                                                    accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
+                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
+                                }
+                            }
+                        }
+                    }
+                )
+            )
+        } else {
+            return AnyView(
+                SouveraModuleHeader(
+                    title: NSLocalizedString("_link_", comment: ""),
+                    leading: {
+                        SouveraHeaderButton(icon: "magnifyingglass") {
+                            searchActive = true
+                        }
+                        .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
+                    },
+                    trailing: {
+                        SouveraHeaderPill {
+                            LinkOnlineStatusButton(status: viewModel.ownStatus) {
+                                showUserStatus = true
+                            }
+                            SouveraHeaderButton(icon: "plus", glass: false) {
+                                channelName = ""
+                                showCreateChannel = true
+                            }
+                            .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
+                        }
+                    }
+                )
+            )
+        }
+    }
+
     private func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         if case let .chat(token, title) = viewModel.route {
