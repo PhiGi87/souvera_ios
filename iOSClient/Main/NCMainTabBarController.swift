@@ -74,7 +74,12 @@ class NCMainTabBarController: UITabBarController {
             self.timerTask?.cancel()
         }
 
-        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: nil) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in
+            // Run 15.09. (Crash-Fix): im Hintergrund übersprungene
+            // Badge-Updates hier nachholen (Realm-Zugriff nur bei active).
+            if UIApplication.shared.applicationState == .active {
+                self?.updateLinkBadge(SouveraBadgeStore.shared.unreadLink(account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""))
+            }
             if !isAppInBackground {
                 self.timerTask = Task { @MainActor [weak self = self] in
                     await self?.timerCheck()
@@ -280,6 +285,11 @@ class NCMainTabBarController: UITabBarController {
             object: nil,
             queue: .main
         ) { [weak self] notification in
+            // Run 15.09. (Crash 0xdead10cc): KEIN synchroner Realm-Zugriff,
+            // wenn die App im Hintergrund ist — der Observer blockierte auf
+            // dem Realm-File-Lock (Hintergrund-Sync hielt ihn) und das OS
+            // killte die App (SIGKILL). Badge beim Foreground aktualisieren.
+            guard UIApplication.shared.applicationState == .active else { return }
             let count = notification.object as? Int ?? 0
             let account = (notification.userInfo?["account"] as? String) ?? ""
             let active = NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""

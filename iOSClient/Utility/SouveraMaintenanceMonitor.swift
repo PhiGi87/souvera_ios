@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import Foundation
+import UIKit
 import NextcloudKit
 
 extension Notification.Name {
@@ -53,6 +54,9 @@ final class SouveraMaintenanceMonitor: ObservableObject {
     }
 
     private func check() async {
+        // Run 15.09. (Crash 0xdead10cc): im Hintergrund kein Poll (Realm/
+        // Netz-Zugriffe im Suspended killen die App).
+        guard UIApplication.shared.applicationState == .active else { return }
         guard let account = NCManageDatabase.shared.getActiveTableAccount() else { return }
         let result = await NextcloudKit.shared.getServerStatusAsync(serverUrl: account.urlBase) { _ in }
         switch result.result {

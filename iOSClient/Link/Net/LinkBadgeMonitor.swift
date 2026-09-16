@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import Foundation
+import UIKit
 
 /// Pollt die Talk-Konversationsliste im Vordergrund und hält Badge UND
 /// Übersicht aktuell (loadConversations über Refresh-Notification).
@@ -32,6 +33,9 @@ final class LinkBadgeMonitor {
     }
 
     private func tick() async {
+        // Run 15.09. (Crash 0xdead10cc): im Hintergrund kein Tick — der
+        // synchronen Realm-/Netz-Zugriff killte die App im Suspended.
+        guard UIApplication.shared.applicationState == .active else { return }
         guard let account = LinkAccount.active() else {
             // Stiller Leerlauf sichtbar machen (iPad/Mac-Blindflug, Feedback
             // 05.09.): ohne Diagnose war ein scheiternder Poll unsichtbar.

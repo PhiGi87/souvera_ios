@@ -1528,6 +1528,22 @@ final class MailViewModel: ObservableObject {
                 // verlässt den Tab -> Generation-Guard-Return), ist der
                 // frische Stand trotzdem gecacht - sonst zeigte jeder
                 // Eintritt erneut den alten Cache-Stand.
+                // Run 15.09. (final): Window-Stale-Filter PRO SEITE — die
+                // per-Page-Publishes enthalten sonst die stale Einträge aus
+                // dem Seed, bis der End-Stale-Pass sie entfernt (Flap).
+                if !serverIds.isEmpty, let windowOldest = oldestDate {
+                    let windowStale = byId.keys.filter { id in
+                        guard !serverIds.contains(id),
+                              let raw = byId[id],
+                              let dateStr = raw["receivedAt"] as? String,
+                              let date = Self.jmapDate(dateStr) else { return false }
+                        return date >= windowOldest
+                    }
+                    if !windowStale.isEmpty {
+                        for id in windowStale { byId.removeValue(forKey: id) }
+                        JmapLog.write("sync \(mailbox.name): page-level stale removal (\(windowStale.count))")
+                    }
+                }
                 let collected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
                 guard generation == listGeneration else { return }
                 queryStates[cacheKey] = state
@@ -1616,6 +1632,11 @@ final class MailViewModel: ObservableObject {
                 JmapLog.write("sync \(mailbox.name): outside-window refetch: \(refetchIds.count) ids, \(refetched) on server")
                 _ = refetchIds
             }
+            // Run 15.09. (final): Spiegel auf den FINALEN Stand setzen —
+            // vorher enthielt er die 27 stale Mails weiter und re-säte sie
+            // in jeden folgenden Sync (Flap bei jedem Full-Refresh, Log
+            // d0wuaaa3nw).
+            rawMailboxEmails[cacheKey] = byId
             let finalCollected = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
             guard generation == listGeneration else { return }
             queryStates[cacheKey] = state
