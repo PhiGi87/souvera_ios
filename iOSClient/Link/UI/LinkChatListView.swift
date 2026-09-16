@@ -279,7 +279,12 @@ final class LinkChatListController: NSObject, ObservableObject {
             oldOffsetY = collectionView.contentOffset.y
         }
 
-        dataSource?.apply(snapshot, animatingDifferences: false) { [weak self] in
+        // Run 15.09.: Appends am Listenende (neue Nachricht) ANIMIERT
+        // einblenden — Prepends/Verlauf bleiben ohne Animation (Re-Anchor
+        // oben). Vermeidet das ruckartige Erscheinen.
+        let isAppend = !isPrepend && ids.count > committedIds.count
+            && Array(ids.prefix(committedIds.count)) == committedIds
+        dataSource?.apply(snapshot, animatingDifferences: !isPrepend && isAppend) { [weak self] in
             guard let self, self.committedIds == ids, let collectionView = self.collectionView else { return }
             guard let oldContentHeight, let oldOffsetY else { return }
             collectionView.layoutIfNeeded()
@@ -423,13 +428,19 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// Offset exakt aufs reale Listenende (scrollToItem rechnet mit
     /// Schaetzhoehen unrealisierter Zellen - die neue unterste Nachricht
     /// rutschte dadurch unter die Display-Kante, Run 12.09.).
-    private func scrollToBottomExact() {
+    private func scrollToBottomExact(animated: Bool = false) {
         guard let collectionView, !items.isEmpty else { return }
         collectionView.layoutIfNeeded()
         let target = max(0, collectionView.contentSize.height
                             - collectionView.bounds.height
                             + collectionView.adjustedContentInset.bottom)
-        collectionView.contentOffset.y = target
+        if animated {
+            UIView.animate(withDuration: 0.25) {
+                collectionView.contentOffset.y = target
+            }
+        } else {
+            collectionView.contentOffset.y = target
+        }
     }
 
     /// Stabilisierungs-Loop (Muster des Eintritts-Scrolls): bis die
@@ -443,7 +454,7 @@ final class LinkChatListController: NSObject, ObservableObject {
             // Fester Tick-Plan (Run 14.09.): Exit erst nach Index 4 (~1,0s)
             // UND 2x stabiler Höhe - offline kommt kein zweiter Trigger
             // (Poll-Echo), der Loop muss selbst sicher konvergieren.
-            let ticks: [UInt64] = [0, 150_000_000, 150_000_000, 200_000_000, 250_000_000, 250_000_000, 250_000_000, 250_000_000]
+            let ticks: [UInt64] = [0, 150_000_000, 200_000_000, 250_000_000, 250_000_000]
             for (index, tick) in ticks.enumerated() {
                 if index > 0 {
                     try? await Task.sleep(nanoseconds: tick)
@@ -451,7 +462,9 @@ final class LinkChatListController: NSObject, ObservableObject {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self, !Task.isCancelled else { return }
-                    self.scrollToBottomExact()
+                    // Run 15.09.: erster Tick ANIMIERT (flüssiges Erscheinen
+                    // über dem Textfeld), Folgeticks siedeln ohne Animation.
+                    self.scrollToBottomExact(animated: index == 0)
                     let height = self.collectionView?.contentSize.height ?? 0
                     SouveraLog.write("LinkChat", "pin to bottom (tick \(index), height \(Int(height)))")
                     if index >= 4, abs(height - lastHeight) < 1 {

@@ -1234,3 +1234,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_mail_unavailable_" = "Your Souvera is currently unavailable.";
 "_mail_unavailable_maintenance_" = "Your Souvera is currently under maintenance.";
 "_mail_not_found_" = "This message is no longer available.";
+"_calendar_end_before_start_" = "The end is before the start.";

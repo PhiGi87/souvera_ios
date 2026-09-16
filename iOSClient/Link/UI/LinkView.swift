@@ -12,6 +12,7 @@ import PhotosUI
 struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
@@ -396,11 +397,20 @@ struct LinkView: View {
                             }
                         }
                         if viewModel.currentRoom?.hasCall == true {
-                            SouveraHeaderButton(icon: "phone.fill",
-                                                iconColor: .green, glass: false,
-                                                accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
+                            // Run 15.09.: pulsierender Hörer — das ICON
+                            // pulsiert (symbolEffect, iOS 17), kein Kreis.
+                            Button {
                                 callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
+                            } label: {
+                                Image(systemName: "phone.fill")
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(Color.green)
+                                    .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Circle())
                             }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
                         } else {
                             SouveraHeaderButton(icon: "phone.fill",
                                                 iconColor: .green, glass: false,
@@ -1028,6 +1038,9 @@ struct LinkChatView: View {
     @State private var pdfPreviewURL: URL?
     /// P68n: Nach dem Senden ans Listenende springen.
     @State private var scrollToNewestPending = false
+    /// Run 15.09.: Fokus-Anker für den Composer — das „+"-Menü/Emoji-
+    /// Keyboard-Wechsel dürfen den Fokus nicht verlieren (Refocus).
+    @FocusState private var composerFocused: Bool
     @State private var lastVisibleMessageId: Int64?
     @State private var draft = ""
     @State private var showFilePicker = false
@@ -1697,13 +1710,26 @@ struct LinkChatView: View {
                     } label: {
                         Label(NSLocalizedString("_link_attach_file_", comment: ""), systemImage: "doc.badge.plus")
                     }
+                    .simultaneousGesture(TapGesture().onEnded {
+                        // Run 15.09.: Keyboard beim Menü halten — Fokus kurz
+                        // nach der Menü-Öffnung zurücksetzen (Emoji-Flow).
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            composerFocused = true
+                        }
+                    })
                     Button {
                         showPhotoPicker = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            composerFocused = true
+                        }
                     } label: {
                         Label(NSLocalizedString("_link_attach_photos_", comment: ""), systemImage: "photo.on.rectangle")
                     }
                     Button {
                         showNextcloudPicker = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                            composerFocused = true
+                        }
                     } label: {
                         Label(NSLocalizedString("_link_share_file_", comment: ""), systemImage: "building.columns")
                     }
@@ -1722,6 +1748,7 @@ struct LinkChatView: View {
                 HStack(spacing: 8) {
                     TextField(NSLocalizedString("_link_message_", comment: ""), text: $draft, axis: .vertical)
                         .textFieldStyle(.plain)
+                        .focused($composerFocused)
                         .lineLimit(1...5)
                     // Reservierter Platz für den späteren Mikrofon-Button.
                     Color.clear.frame(width: 30, height: 30)

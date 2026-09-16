@@ -1365,10 +1365,19 @@ private struct MailMessageListView: View {
                 MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
             }
             .buttonStyle(.plain)
-            // P68m: Langer Druck = Detail-"..."-Menü (ohne Antworten):
-            // Weiterleiten, Gelesen/Ungelesen, Markieren, Absender-Blacklist.
-            // Blacklist nutzt den vorhandenen Bestätigungsdialog.
+            // Run 15.09.: Lang-Touch-Menü um Antworten + Verschieben
+            // erweitert (schwarz ohne Tints, konsistent mit dem Menü).
             .contextMenu {
+                Button {
+                    viewModel.startCompose(mode: .reply, message: message)
+                } label: {
+                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
+                }
+                Button {
+                    moveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
+                } label: {
+                    Label(NSLocalizedString("_mail_move_", comment: ""), systemImage: "folder")
+                }
                 Button {
                     viewModel.startCompose(mode: .forward, message: message)
                 } label: {

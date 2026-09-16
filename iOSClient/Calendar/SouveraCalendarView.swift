@@ -1233,6 +1233,9 @@ private struct CalendarEventEditSheet: View {
     }
     @State private var saving = false
     @State private var errorMessage: String?
+    /// Run 15.09.: true, sobald der User das Terminende MANUELL geändert
+    /// hat — dann folgt das Ende nicht mehr automatisch der Startzeit.
+    @State private var endManuallySet = false
 
     private var selectedCalendarName: String {
         viewModel.writableCalendars.first(where: { $0.href == draft.calendarHref })?.displayName
@@ -1290,7 +1293,29 @@ private struct CalendarEventEditSheet: View {
                 }
                 Section {
                     DatePicker(NSLocalizedString("_calendar_start_", comment: ""), selection: $draft.start, displayedComponents: draft.allDay ? .date : [.date, .hourAndMinute])
-                    DatePicker(NSLocalizedString("_calendar_end_", comment: ""), selection: $draft.end, displayedComponents: draft.allDay ? .date : [.date, .hourAndMinute])
+                        .onChange(of: draft.start) { _, newStart in
+                            // Run 15.09.: das Ende folgt der Startzeit
+                            // (+30 min), solange der User das Ende nicht
+                            // manuell gesetzt hat. Date-Arithmetik deckt
+                            // Tagesübergänge ab. Ganztägig: ausgenommen.
+                            guard !draft.allDay, !endManuallySet else { return }
+                            draft.end = newStart.addingTimeInterval(1800)
+                        }
+                    DatePicker(NSLocalizedString("_calendar_end_", comment: ""), selection: Binding(
+                        get: { draft.end },
+                        set: { newValue in
+                            endManuallySet = true
+                            draft.end = newValue
+                        }
+                    ), displayedComponents: draft.allDay ? .date : [.date, .hourAndMinute])
+                    // Run 15.09.: Hinweis, wenn das Ende vor dem Anfang liegt
+                    // (nicht-ganztägig: Datum+Uhrzeit; ganztägig: Tag).
+                    if endBeforeStart {
+                        Label(NSLocalizedString("_calendar_end_before_start_", comment: ""),
+                              systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 Section {
                     TextField(NSLocalizedString("_calendar_location_", comment: ""), text: $draft.location)
@@ -1505,11 +1530,21 @@ private struct CalendarEventEditSheet: View {
                                 }
                             }
                         }
-                        .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty)
+                        .disabled(draft.title.trimmingCharacters(in: .whitespaces).isEmpty
+                                  || endBeforeStart)
                     }
                 }
             }
         }
+    }
+
+    /// Run 15.09.: Validierung — das Ende darf nicht vor dem Anfang
+    /// liegen (Datum UND Uhrzeit betrachtet; ganztägig: Tag-Vergleich).
+    private var endBeforeStart: Bool {
+        if draft.allDay {
+            return Calendar.current.startOfDay(for: draft.end) < Calendar.current.startOfDay(for: draft.start)
+        }
+        return draft.end < draft.start
     }
 
     private func reminderLabel(_ minutes: Int) -> String {
@@ -1829,7 +1864,9 @@ extension SouveraCalendarView {
                     }
                     .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
                     SouveraHeaderButton(icon: "plus", glass: false) {
-                        editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(3600)), existing: nil)
+                        // Run 15.09.: Standard-Dauer 30 min (Feedback: Terminende
+                // folgt der Startzeit mit 30 min).
+                editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
                     }
                 }
             }
