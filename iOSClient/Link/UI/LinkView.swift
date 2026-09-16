@@ -16,6 +16,8 @@ struct LinkView: View {
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
+    /// Run 16.09.: UIKit-Header-Bridge (Landscape/iPad, 1:1 Files/Mehr).
+    var headerBridge: SouveraHeaderBridge? = nil
     @State private var callContext: CallContext?
     /// Lobby-Verwaltung (Fullscreen): Raum mit aktiver Lobby.
     @State private var lobbyManagementRoom: LinkConversation?
@@ -68,9 +70,6 @@ struct LinkView: View {
             // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
             // mit dunklen Icons); System-Navigationbar komplett versteckt.
             .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                moduleHeader
-            }
         }
         .onChange(of: scenePhase) { _, phase in
             // Foreground (Run 15.09.): Status + Presence automatisch
@@ -392,22 +391,24 @@ struct LinkView: View {
             }
             if viewModel.currentRoom?.hasCall == true {
                 trailing.append(SouveraHeaderBridge.Item(
-                    id: "call", icon: "phone.fill", isGreen: true,
-                    accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")
+                    id: "call", icon: "phone.fill",
+                    accessibilityLabel: NSLocalizedString("_link_join_call_", comment: ""),
+                    isGreen: true
                 ) {
                     callContext = CallContext(token: token, title: roomTitle, withVideo: false, silent: false)
                 })
             } else {
                 trailing.append(SouveraHeaderBridge.Item(
-                    id: "call", icon: "phone.fill", isGreen: true,
-                    accessibilityLabel: NSLocalizedString("_link_start_call_", comment: "")
+                    id: "call", icon: "phone.fill",
+                    accessibilityLabel: NSLocalizedString("_link_start_call_", comment: ""),
+                    isGreen: true
                 ) {
                     startCallRequest = CallStartRequest(token: token, title: roomTitle, withVideo: false)
                 })
             }
 
             bridge.title = roomTitle
-            bridge.leadingItems = landscapeLayout ? [] : [
+            bridge.leadingItems = landscapeLayout ? [SouveraHeaderBridge.Item]() : [
                 .init(id: "back", icon: "chevron.backward",
                       accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
                     viewModel.back()
