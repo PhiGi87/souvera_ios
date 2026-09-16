@@ -6,6 +6,8 @@ import UIKit
 
 /// Zentrale Bausteine für den blauen Souvera-Header des Mehr-Menüs
 /// (Root mit Logo und alle gepushten Unterseiten ohne Logo).
+import Combine
+
 enum SouveraAppearance {
 
     /// Run 16.09.: Header-Modus pro Geraet — das iPad rendert die blaue
