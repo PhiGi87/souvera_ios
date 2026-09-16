@@ -8,10 +8,10 @@ import SwiftUI
 /// Run 16.09. (B10): Gemeinsamer Style fuer Einladungs-Buttons (FAB und
 /// Inline-Button in der Mail) - transparentes Souvera-Blau unter dem
 /// Glas-Effekt, Icon farbfest fuer Hell- und Dunkelmodus lesbar.
-struct SouveraInvitationFABBackground: View {
+struct SouveraInvitationFABBackground: ViewModifier {
     @Environment(\.colorScheme) private var colorScheme
 
-    func body(_ content: Content) -> some View {
+    func body(content: Content) -> some View {
         content
             .background(
                 Circle().fill(

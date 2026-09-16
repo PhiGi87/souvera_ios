@@ -731,7 +731,7 @@ final class CalendarViewModel: ObservableObject {
             // B6: Externer Organisator - Server-iTIP erreicht ihn nicht,
             // deshalb zusaetzlich die normale Antwort-Mail.
             if Self.organizerIsExternal(event.organizerEmail) {
-                _ = await SouveraInviteMailSender.shared.sendReply(
+                _ = await SouveraInvitationCenter.sendReply(
                     event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
                     altProposal: nil)
             }
