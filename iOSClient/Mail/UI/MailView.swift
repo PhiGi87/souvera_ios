@@ -47,6 +47,7 @@ struct MailView: View {
                     }
             }
             .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
+            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
@@ -155,11 +156,7 @@ struct MailView: View {
                 Button {
                     showInvitationDetail = invite
                 } label: {
-                    Image(systemName: "calendar.badge.exclamationmark")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                        .frame(width: 56, height: 56)
-                        .modifier(SouveraHeaderGlass(shape: Circle()))
+                    MailInvitationButtonIcon()
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(NSLocalizedString("_invitations_title_", comment: "")))
@@ -171,11 +168,14 @@ struct MailView: View {
             SouveraInvitationDetailView(
                 event: invite.event ?? SouveraInvitationCenter.placeholderEvent(for: invite),
                 organizerFallback: invite.displayOrganizer,
-                respond: { rsvp in
+                respond: { rsvp, reminders, altProposal in
                     guard invite.event != nil else { return nil }
-                    return await viewModel.respondToMailInvitation(invite, status: rsvp)
-                },
-                answerInMailHint: invite.event == nil
+                    return await viewModel.respondToMailInvitation(
+                        invite, status: rsvp,
+                        calendarHref: nil,
+                        reminderMinutes: reminders,
+                        altProposal: altProposal)
+                }
             )
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
@@ -2702,5 +2702,20 @@ extension View {
         } else {
             self
         }
+    }
+}
+
+
+/// Icon des Inline-Einladungs-Buttons (B10): identischer Stil zum
+/// Kalender-FAB - transparentes Souvera-Blau unter Glas, Icon farbfest.
+struct MailInvitationButtonIcon: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        Image(systemName: "calendar.badge.exclamationmark")
+            .font(.system(size: 22, weight: .semibold))
+            .foregroundStyle(colorScheme == .dark ? Color.white : Color(red: 0.05, green: 0.15, blue: 0.35))
+            .frame(width: 56, height: 56)
+            .modifier(SouveraInvitationFABBackground())
     }
 }

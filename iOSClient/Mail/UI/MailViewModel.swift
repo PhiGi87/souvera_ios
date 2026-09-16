@@ -1224,11 +1224,38 @@ final class MailViewModel: ObservableObject {
     /// Beantwortet eine per Mail erhaltene Einladung: iTIP-REPLY-Mail an
     /// den Organisator senden und die Einladungsmail gelesen markieren.
     func respondToMailInvitation(_ invitation: SouveraMailInvitation,
-                                 status: CalendarViewModel.CalendarRSVP) async -> Bool {
-        guard let outgoing = SouveraInvitationCenter.makeReplyMail(
-            for: invitation, status: status.rawValue) else { return false }
-        let result: Result<Void, Error> = useJmap ? await sendJmap(outgoing) : await sendImap(outgoing)
-        guard case .success = result else { return false }
+                                 status: CalendarViewModel.CalendarRSVP,
+                                 calendarHref: String? = nil,
+                                 reminderMinutes: [Int]? = nil,
+                                 altProposal: String? = nil) async -> Bool {
+        // B1: Bei Annehmen/Vielleicht den Termin in den gewaehlten
+        // Kalender (Default: persoenlich) eintragen.
+        if status != .declined, let ics = invitation.rawICS {
+            await SouveraInvitationCenter.shared.createCalendarEvent(
+                from: invitation, ics: ics, status: status.rawValue,
+                calendarHref: calendarHref, reminderMinutes: reminderMinutes)
+        }
+        // B1: Moderne Antwort-Mail (Eckdaten + Absender + optionaler
+        // Alternativvorschlag) - unabhaengig vom eigenen Send-Pfad.
+        let event = invitation.event
+        if event != nil || invitation.organizerEmail.contains("@") {
+            let statusWord = NSLocalizedString(status.titleKey, comment: "")
+            let reply = await SouveraInvitationCenter.makeReplyMail(
+                event: event,
+                title: invitation.displayTitle,
+                organizerEmail: invitation.organizerEmail,
+                statusWord: statusWord,
+                altProposal: altProposal)
+            if !reply.to.isEmpty {
+                _ = await SouveraInviteMailSender.shared.send(
+                    to: reply.to,
+                    subject: "Re: \(invitation.displayTitle)",
+                    html: reply.html,
+                    text: reply.text,
+                    icsAttachmentURL: reply.icsURL)
+            }
+        }
+        // Einladungsmail gelesen markieren + als beantwortet merken.
         if useJmap, let api = jmapApi,
            let session = try? await jmapClient?.refreshSession() {
             _ = try? await api.setEmailFlags(
@@ -1237,6 +1264,7 @@ final class MailViewModel: ObservableObject {
                 keywordsToAdd: ["$seen": true]
             )
         }
+        SouveraInvitationCenter.markAnswered(messageId: invitation.messageId)
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(invitation.id)
         }

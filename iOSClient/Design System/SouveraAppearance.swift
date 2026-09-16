@@ -210,11 +210,8 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
 // die SICHTBARE UIKit-Bar ihres Hosting-NavigationControllers (1:1 mit
 // Mehr/Dateien: blauer Verlauf, Items flankieren die zentrierte Tab-Pill).
 // Die SwiftUI-Module befüllen die Brücke (leading/trailing), der
-// SouveraBarCoordinator baut daraus UIBarButtonItem-Gruppen.
 
-import Combine
 
-@MainActor
 final class SouveraHeaderBridge: ObservableObject {
     struct Item: Identifiable {
         let id: String
@@ -281,82 +278,122 @@ final class SouveraHeaderBridge: ObservableObject {
 
 /// Beobachtet die Brücke und baut die Bar-Items des Host-Controllers.
 @MainActor
-final class SouveraBarCoordinator {
-    private weak var navigationController: UINavigationController?
-    private let bridge: SouveraHeaderBridge
-    private var cancellables = Set<AnyCancellable>()
 
-    init(navigationController: UINavigationController, bridge: SouveraHeaderBridge) {
-        self.navigationController = navigationController
-        self.bridge = bridge
-        bridge.objectWillChange
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] _ in self?.rebuild() }
-            .store(in: &cancellables)
-        rebuild()
-    }
+// Run 16.09.: Das Bridge-Rendering laeuft jetzt ueber die INNERE
+// SwiftUI-System-Bar (ToolbarItems) - dieselbe Pipeline, die auch
+// Mehr/Dateien ihre Liquid-Glass-Kreise liefert. Die fruehere
+// UIKit-Bar (SouveraBarCoordinator) produzierte eine flache Kapsel
+// ohne Glass-Effekt und einen doppelten Header (Gap).
 
-    func rebuild() {
-        guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
-        item.title = bridge.title.isEmpty ? nil : bridge.title
-        item.leftBarButtonItems = Self.build(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms, atLeadingEdge: true)
-        item.rightBarButtonItems = Self.build(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms, atLeadingEdge: false)
-    }
+/// ViewModifier: rendert die Bridge-Items als individuelle
+/// ToolbarItems in der inneren System-Navigationbar (nur iPad).
+struct SouveraBridgeBarModifier: ViewModifier {
+    let bridge: SouveraHeaderBridge?
 
-    /// Run 16.09.: Aussenkanten-Abstand wie bei Mehr/Dateien - ein fixer
-    /// Spacer an der jeweiligen Displaykante, damit die Glas-Pills nicht
-    /// direkt am Rand kleben.
-    private static func edgeSpacer() -> UIBarButtonItem {
-        let spacer = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
-        spacer.width = 10
-        return spacer
-    }
-
-    private static func build(_ items: [SouveraHeaderBridge.Item],
-                              _ menus: [SouveraHeaderBridge.MenuGroup],
-                              _ customs: [SouveraHeaderBridge.Custom],
-                              atLeadingEdge: Bool) -> [UIBarButtonItem] {
-        // rightBarButtonItems rendert das ERSTE Element am rechten Rand -
-        // der Kanten-Spacer gehoert dort an den Anfang, bei der linken
-        // Seite ans Ende.
-        var bars: [UIBarButtonItem] = atLeadingEdge ? [] : [edgeSpacer()]
-        for item in items where !item.icon.isEmpty {
-            bars.append(UIBarButtonItem(
-                image: UIImage(systemName: item.icon)?
-                    .applyingSymbolConfiguration(.init(weight: .medium)),
-                style: .plain,
-                target: nil,
-                action: nil
-            ).then { bar in
-                bar.primaryAction = UIAction { _ in item.handler() }
-                bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : .white)
-                bar.accessibilityLabel = item.accessibilityLabel
-            })
+    func body(content: Content) -> some View {
+        if let bridge {
+            content.modifier(SouveraBridgeBarActive(bridge: bridge))
+        } else {
+            content
         }
-        for menu in menus where !menu.icon.isEmpty {
-            bars.append(UIBarButtonItem(
-                image: UIImage(systemName: menu.icon)?
-                    .applyingSymbolConfiguration(.init(weight: .medium)),
-                menu: UIMenu(children: menu.entries.map { entry in
-                    UIAction(title: entry.title,
-                             image: entry.icon.flatMap { UIImage(systemName: $0) },
-                             attributes: entry.isDestructive ? .destructive : []) { _ in
-                        entry.handler()
+    }
+}
+
+private struct SouveraBridgeBarActive: ViewModifier {
+    @ObservedObject var bridge: SouveraHeaderBridge
+
+    func body(content: Content) -> some View {
+        content
+            .navigationTitle(SouveraAppearance.useBridgeHeader ? bridge.title : "")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(SouveraAppearance.useBridgeHeader ? .visible : .hidden,
+                               for: .navigationBar)
+            .toolbarBackground(
+                LinearGradient(colors: SouveraAppearance.gradientColors,
+                               startPoint: .top, endPoint: .bottom),
+                for: .navigationBar)
+            .toolbar {
+                if SouveraAppearance.useBridgeHeader {
+                    ForEach(bridge.leadingItems) { item in
+                        ToolbarItem(placement: .topBarLeading) {
+                            SouveraBridgeBarButton(item: item)
+                        }
                     }
-                })
-            ).then { bar in
-                bar.tintColor = .white
-                bar.accessibilityLabel = menu.accessibilityLabel
-            })
-        }
-        for custom in customs {
-            bars.append(UIBarButtonItem(customView: custom.view))
-        }
-        if atLeadingEdge {
-            bars.append(edgeSpacer())
-        }
-        return bars
+                    ForEach(bridge.leadingMenus) { group in
+                        ToolbarItem(placement: .topBarLeading) {
+                            SouveraBridgeMenuButton(group: group)
+                        }
+                    }
+                    ForEach(bridge.leadingCustoms) { custom in
+                        ToolbarItem(placement: .topBarLeading) {
+                            UIKitViewWrapper(view: custom.view)
+                        }
+                    }
+                    ForEach(bridge.trailingCustoms) { custom in
+                        ToolbarItem(placement: .topBarTrailing) {
+                            UIKitViewWrapper(view: custom.view)
+                        }
+                    }
+                    ForEach(bridge.trailingItems) { item in
+                        ToolbarItem(placement: .topBarTrailing) {
+                            SouveraBridgeBarButton(item: item)
+                        }
+                    }
+                    ForEach(bridge.trailingMenus) { group in
+                        ToolbarItem(placement: .topBarTrailing) {
+                            SouveraBridgeMenuButton(group: group)
+                        }
+                    }
+                }
+            }
     }
+}
+
+/// Einzelner Glas-Kreis-Button in der System-Bar (iOS 26 rendert
+/// ToolbarItems automatisch als Liquid Glass - wie bei Mehr/Dateien).
+struct SouveraBridgeBarButton: View {
+    let item: SouveraHeaderBridge.Item
+
+    var body: some View {
+        Button {
+            item.handler()
+        } label: {
+            Image(systemName: item.icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(item.isGreen ? Color.green : (item.isDestructive ? Color.red : .white))
+        }
+        .accessibilityLabel(Text(item.accessibilityLabel.isEmpty ? item.icon : item.accessibilityLabel))
+    }
+}
+
+/// Menue-Button in der System-Bar.
+struct SouveraBridgeMenuButton: View {
+    let group: SouveraHeaderBridge.MenuGroup
+
+    var body: some View {
+        Menu {
+            ForEach(group.entries) { entry in
+                Button {
+                    entry.handler()
+                } label: {
+                    Label(entry.title, systemImage: entry.icon)
+                }
+            }
+        } label: {
+            Image(systemName: group.icon)
+                .font(.system(size: 17, weight: .medium))
+                .foregroundStyle(.white)
+        }
+        .accessibilityLabel(Text(group.accessibilityLabel.isEmpty ? group.icon : group.accessibilityLabel))
+    }
+}
+
+/// Wrapper fuer UIKit-Custom-Views (Mail-Ring, Link Status-+) in der
+/// SwiftUI-Toolbar.
+struct UIKitViewWrapper: UIViewRepresentable {
+    let view: UIView
+    func makeUIView(context: Context) -> UIView { view }
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }
 
 private extension UIBarButtonItem {

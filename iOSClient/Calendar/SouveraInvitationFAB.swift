@@ -5,19 +5,45 @@
 // offene Einladungen vorliegen. Platziert ueber der Tab-Bar unten rechts.
 import SwiftUI
 
+/// Run 16.09. (B10): Gemeinsamer Style fuer Einladungs-Buttons (FAB und
+/// Inline-Button in der Mail) - transparentes Souvera-Blau unter dem
+/// Glas-Effekt, Icon farbfest fuer Hell- und Dunkelmodus lesbar.
+struct SouveraInvitationFABBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    func body(_ content: Content) -> some View {
+        content
+            .background(
+                Circle().fill(
+                    LinearGradient(colors: SouveraAppearance.gradientColors,
+                                   startPoint: .top, endPoint: .bottom)
+                        .opacity(colorScheme == .dark ? 0.45 : 0.30)
+                )
+            )
+            .modifier(SouveraHeaderGlass(shape: Circle()))
+    }
+}
+
 struct SouveraInvitationFAB: View {
     @ObservedObject var center: SouveraInvitationCenter
     let action: () -> Void
+    @Environment(\.colorScheme) private var colorScheme
+
+    private var iconColor: Color {
+        // Dunkelblau auf hellem Glas, Weiss im Dunkelmodus - in beiden
+        // Modi kontraststark auf dem blaeulichen Glas.
+        colorScheme == .dark ? .white : Color(red: 0.05, green: 0.15, blue: 0.35)
+    }
 
     var body: some View {
         if center.totalCount > 0 {
             Button(action: action) {
                 ZStack(alignment: .topTrailing) {
                     Image(systemName: "calendar.badge.exclamationmark")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(iconColor)
                         .frame(width: 56, height: 56)
-                        .modifier(SouveraHeaderGlass(shape: Circle()))
+                        .modifier(SouveraInvitationFABBackground())
                     Text("\(min(center.totalCount, 99))")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.white)

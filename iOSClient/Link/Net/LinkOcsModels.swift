@@ -388,12 +388,21 @@ struct LinkParticipant: Decodable, Identifiable {
     /// Signaling-Session-IDs (512 Zeichen) - Schluessel fuer die Anreicherung
     /// mit Gast-Namen/E-Mails aus den Signaling-Events (Run 15.09.).
     let sessionIds: [String]
+    /// Run 16.09.: Effektive Attendee-Permissions (Bitmaske). Bit 8 =
+    /// "Darf Lobby ignorieren" - gesetzt, sobald ein wartender Gast per
+    /// Einzel-Admit zugelassen wurde (auch VOR dem Beitreten!). Klassi-
+    /// fizierung Warten/Zugelassen ueber dieses Flag, NICHT ueber
+    /// sessionIds (ein Gast hat erst beim Beitreten eine Session) oder
+    /// inCall (erst im Call gesetzt).
+    let attendeePermissions: Int
+
+    var canIgnoreLobby: Bool { attendeePermissions & 8 != 0 }
 
     var id: Int { attendeeId }
 
     enum CodingKeys: String, CodingKey {
         case attendeeId, actorType, actorId, displayName, participantType
-        case inCall, lastPing, status, sessionIds
+        case inCall, lastPing, status, sessionIds, attendeePermissions
     }
 
     init(from decoder: Decoder) throws {
@@ -413,6 +422,8 @@ struct LinkParticipant: Decodable, Identifiable {
         lastPing = (try? c.decode(Double.self, forKey: .lastPing)) ?? 0
         status = try? c.decodeIfPresent(String.self, forKey: .status)
         sessionIds = (try? c.decode([String].self, forKey: .sessionIds)) ?? []
+        // Feld fehlt auf aelteren Servern -> 0 (dann gilt weiterhin inCall).
+        attendeePermissions = (try? c.decode(Int.self, forKey: .attendeePermissions)) ?? -1
     }
 }
 

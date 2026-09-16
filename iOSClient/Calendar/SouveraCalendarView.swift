@@ -94,6 +94,7 @@ struct SouveraCalendarView: View {
                 .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 8)
             }
             .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
+            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
             .souveraOfflineBanner()
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
@@ -190,26 +191,22 @@ struct SouveraCalendarView: View {
                 SouveraInvitationDetailView(
                     event: event,
                     organizerFallback: invite.displayOrganizer,
-                    respond: { rsvp in
-                        // Aus dem Kalender geoeffnet: der Termin existiert
-                        // moeglicherweise als CalDAV-Entry - RSVP zuerst
-                        // per CalDAV versuchen, sonst Mail-Pfad-Hinweis.
-                        let ok = await viewModel.respondToInvitation(event, status: rsvp)
-                        return ok
-                    },
-                    overlapCheck: { candidate in
-                        if case let .success(list) = viewModel.events {
-                            return list.contains { $0.href != candidate.href && !$0.allDay && $0.start < candidate.end && candidate.start < $0.end }
+                    respond: { rsvp, reminders, altProposal in
+                        if await viewModel.respondToInvitation(event, status: rsvp,
+                                                               reminderMinutes: reminders) {
+                            return true
                         }
-                        return false
-                    }
+                        // Kein CalDAV-Entry (noch nicht synchronisiert): Mail-Pfad.
+                        return await SouveraInvitationCenter.respondViaMail(invite, rsvp, reminders, altProposal)
+                    },
+                    overlapEvents: overlapBasis(event)
                 )
             } else {
                 SouveraInvitationDetailView(
                     event: SouveraInvitationCenter.placeholderEvent(for: invite),
                     organizerFallback: invite.displayOrganizer,
-                    respond: { _ in nil },
-                    answerInMailHint: true
+                    respond: { _, _, _ in nil },
+                    overlapEvents: []
                 )
             }
         }
@@ -1162,6 +1159,33 @@ private struct CalendarEventDetailSheet: View {
     let onEdit: (EventDraft) -> Void
     @Environment(\.dismiss) private var dismiss
     @State private var rsvpBusyForHref: String?
+    @State private var rsvpReminderMinutes: [Int] = [15]
+    @State private var rsvpRemindersTouched = false
+    @State private var dayPreviewOverlap: SouveraOverlap?
+
+    private var currentRsvpStatusKey: String? {
+        switch event.ownPartstat {
+        case "accepted": return "_invitations_accept_"
+        case "tentative": return "_invitations_tentative_"
+        case "declined": return "_invitations_decline_"
+        default: return nil
+        }
+    }
+
+    /// B7: Überschneidungsbasis aus dem geladenen Kalenderstand.
+    private func overlapBasis(_ event: CalendarEventModel) -> [CalendarEventModel] {
+        guard case let .success(list) = viewModel.events else { return [] }
+        return list
+    }
+
+    private var allowedRsvpOptions: [CalendarViewModel.CalendarRSVP] {
+        switch event.ownPartstat {
+        case "accepted": return [.tentative, .declined]
+        case "tentative": return [.accepted, .declined]
+        case "declined": return [.accepted, .tentative]
+        default: return CalendarViewModel.CalendarRSVP.allCases
+        }
+    }
 
     private func rsvpStatusText(_ partstat: String) -> String {
         switch partstat {
@@ -1240,37 +1264,51 @@ private struct CalendarEventDetailSheet: View {
                         Text(NSLocalizedString("_invitations_organizer_", comment: ""))
                     }
                 }
-                // RSVP: eigene Einladung noch unbeantwortet (oder erneut
-                // antworten) -> Annehmen/Vielleicht/Ablehnen via CalDAV-PUT.
-                if !event.ownPartstat.isEmpty {
+                // B4: Erinnerungen bearbeiten (Standard 15 min).
+                Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
+                    SouveraReminderEditor(minutes: $rsvpReminderMinutes)
+                        .onChange(of: rsvpReminderMinutes) { _, _ in rsvpRemindersTouched = true }
+                }
+                // B7: Überschneidungen (tappbar -> Tages-Popup).
+                Section(NSLocalizedString("_invitations_overlap_", comment: "")) {
+                    SouveraOverlapListView(event: event,
+                                           allEvents: overlapBasis(event)) { overlap in
+                        dayPreviewOverlap = overlap
+                    }
+                }
+                // B6: RSVP bei Fremd-Organisator - Optionen je nach
+                // bisherigem PARTSTAT; interner Server verschickt iTIP
+                // selbst, extern zusaetzlich Antwort-Mail (im VM).
+                if CalendarViewModel.isForeignOrganizer(event) {
                     Section {
-                        if event.ownPartstat == "needs-action" {
-                            HStack(spacing: 10) {
-                                ForEach(CalendarViewModel.CalendarRSVP.allCases, id: \.rawValue) { rsvp in
-                                    Button {
-                                        Task {
-                                            rsvpBusyForHref = event.href
-                                            _ = await viewModel.respondToInvitation(event, status: rsvp)
-                                            rsvpBusyForHref = nil
-                                        }
-                                    } label: {
-                                        VStack(spacing: 3) {
-                                            Image(systemName: rsvp.icon)
-                                                .font(.system(size: 18, weight: .medium))
-                                                .foregroundStyle(rsvp.color)
-                                            Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                                .font(.caption2)
-                                                .foregroundStyle(.primary)
-                                        }
-                                        .frame(maxWidth: .infinity)
-                                    }
-                                    .buttonStyle(.borderless)
-                                    .disabled(rsvpBusyForHref == event.href)
-                                }
-                            }
-                        } else {
-                            Label(rsvpStatusText(event.ownPartstat), systemImage: "checkmark.circle")
+                        if let key = currentRsvpStatusKey {
+                            Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
                                 .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        }
+                        HStack(spacing: 10) {
+                            ForEach(allowedRsvpOptions, id: \.rawValue) { rsvp in
+                                Button {
+                                    Task {
+                                        rsvpBusyForHref = event.href
+                                        let reminders = rsvpRemindersTouched ? rsvpReminderMinutes : nil
+                                        _ = await viewModel.respondToInvitation(event, status: rsvp, reminderMinutes: reminders)
+                                        rsvpBusyForHref = nil
+                                    }
+                                } label: {
+                                    VStack(spacing: 3) {
+                                        Image(systemName: rsvp.icon)
+                                            .font(.system(size: 18, weight: .medium))
+                                            .foregroundStyle(rsvp.color)
+                                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
+                                            .font(.caption2)
+                                            .foregroundStyle(.primary)
+                                    }
+                                    .frame(maxWidth: .infinity)
+                                }
+                                .buttonStyle(.borderless)
+                                .disabled(rsvpBusyForHref == event.href)
+                            }
                         }
                     } header: {
                         Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
@@ -1319,6 +1357,14 @@ private struct CalendarEventDetailSheet: View {
                     }
                 }
             }
+        .sheet(item: $dayPreviewOverlap) { overlap in
+            SouveraDayPreviewPopup(
+                day: overlap.event.start,
+                highlightEvent: event,
+                collidingEvent: overlap.event,
+                allEvents: overlapBasis(event),
+                onDismiss: { dayPreviewOverlap = nil })
+        }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -1943,6 +1989,12 @@ private struct MonthYearPickerSheet: View {
 extension SouveraCalendarView {
     /// Header 1:1 wie Mehr/Dateien: Verlauf, weisse Pills, dunkle Icons.
         /// Run 16.09.: Header-Aktionen als Bridge-Items (hosting UIKit-Bar).
+    /// B7: Überschneidungsbasis - geladene Termine.
+    private func overlapBasis(_ event: CalendarEventModel) -> [CalendarEventModel] {
+        guard case let .success(list) = viewModel.events else { return [] }
+        return list
+    }
+
     private func rsvpStatusText(_ partstat: String) -> String {
         switch partstat {
         case "accepted": return NSLocalizedString("_invitations_accept_", comment: "")

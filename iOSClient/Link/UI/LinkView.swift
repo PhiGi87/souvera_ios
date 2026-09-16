@@ -71,6 +71,7 @@ struct LinkView: View {
             // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
             // mit dunklen Icons); System-Navigationbar komplett versteckt.
             .toolbar(SouveraAppearance.useBridgeHeader ? .visible : .hidden, for: .navigationBar)
+            .modifier(SouveraBridgeBarModifier(bridge: headerBridge))
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
@@ -3022,16 +3023,26 @@ private struct LinkLobbyManagementView: View {
     }
 
     /// Zugelassene externe Teilnehmer (nicht mehr wartend).
+    /// Run 16.09. (2. Korrektur): Klassifikation ueber das Lobby-Ignore-
+    /// Permission-Bit (8) - der Admit setzt genau dieses Flag, BEVOR der
+    /// Gast beitritt. sessionIds hat ein wartender Gast erst beim
+    /// Beitreten (Feedback: Gast blieb in "Warten" haengen), inCall erst
+    /// im Call. attendeePermissions == -1 = Feld fehlt (alter Server):
+    /// dann faellt die Klassifikation auf inCall zurueck.
     private var admittedExternals: [LinkParticipant] {
         viewModel.participants.filter {
-            !Self.isInternal($0) && !Self.isModerator($0) && $0.inCall != 0
+            guard !Self.isInternal($0), !Self.isModerator($0) else { return false }
+            if $0.attendeePermissions < 0 { return $0.inCall != 0 }
+            return $0.canIgnoreLobby
         }
     }
 
     /// Wartende externe Lobby-Teilnehmer - NIE Moderatoren oder interne.
     private var waitingExternals: [LinkParticipant] {
         viewModel.participants.filter {
-            !Self.isInternal($0) && !Self.isModerator($0) && $0.inCall == 0
+            guard !Self.isInternal($0), !Self.isModerator($0) else { return false }
+            if $0.attendeePermissions < 0 { return $0.inCall == 0 }
+            return !$0.canIgnoreLobby
         }
     }
 

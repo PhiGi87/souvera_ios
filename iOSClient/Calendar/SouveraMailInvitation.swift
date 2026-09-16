@@ -18,6 +18,9 @@ struct SouveraMailInvitation: Identifiable {
     /// Geparster Termin (aus dem text/calendar-Part); nil bei reiner
     /// Text-Einladung ohne ICS.
     let event: CalendarEventModel?
+    /// Original-ICS der Einladung (fuer Kalender-Create mit PARTSTAT-
+    /// Aenderung und VALARM-Ergaenzung).
+    let rawICS: String?
     /// Zeitraum, in dem die Mail gesehen wurde (fuer Duplikat-Gate).
     let receivedAt: Date
 }

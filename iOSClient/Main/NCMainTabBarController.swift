@@ -22,7 +22,6 @@ class NCMainTabBarController: UITabBarController {
     var availableNotifications: Bool = false
     private weak var mailTabBarItem: UITabBarItem?
     /// Run 16.09.: Coordinator der Mail/Kalender/Link-Bridges (Retention).
-    private var headerCoordinators: [SouveraBarCoordinator] = []
     private weak var linkTabBarItem: UITabBarItem?
     var documentPickerViewController: NCDocumentPickerViewController?
     let navigationCollectionViewCommon = ThreadSafeArray<NavigationCollectionViewCommon>()
@@ -538,22 +537,18 @@ class NCMainTabBarController: UITabBarController {
     private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
         let hostingController = UIHostingController(rootView: root)
         let navigationController = UINavigationController(rootViewController: hostingController)
-        navigationController.setNavigationBarHidden(false, animated: false)
-        navigationController.navigationBar.standardAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.scrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.compactAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.compactScrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.isTranslucent = false
-        navigationController.navigationBar.tintColor = .white
-        navigationController.navigationBar.overrideUserInterfaceStyle = .light
+        // Run 16.09.: Die aeussere UIKit-Bar bleibt HIDDEN - die Bridge-
+        // Items rendern in der inneren SwiftUI-System-Bar
+        // (SouveraBridgeBarModifier), die den Liquid-Glass-Look wie
+        // Mehr/Dateien liefert. Sichtbar+hidden gleichzeitig = doppelter
+        // Header mit Gap (Feedback 16.09.).
+        navigationController.setNavigationBarHidden(true, animated: false)
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),
             image: UIImage(systemName: imageName),
             selectedImage: UIImage(systemName: imageName)
         )
         navigationController.tabBarItem.tag = tag
-        let coordinator = SouveraBarCoordinator(navigationController: navigationController, bridge: bridge)
-        headerCoordinators.append(coordinator)
         return navigationController
     }
 

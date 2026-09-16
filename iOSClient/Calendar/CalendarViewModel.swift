@@ -679,7 +679,8 @@ final class CalendarViewModel: ObservableObject {
     /// Beantwortet eine Kalender-Einladung: PARTSTAT des eigenen
     /// ATTENDEE in der originalen ICS umschreiben und per PUT (If-Match)
     /// zurueckschreiben. Der Server verschickt die iTIP-Antwort selbst.
-    func respondToInvitation(_ event: CalendarEventModel, status: CalendarRSVP) async -> Bool {
+    func respondToInvitation(_ event: CalendarEventModel, status: CalendarRSVP,
+                             reminderMinutes: [Int]? = nil) async -> Bool {
         var entry = cachedEntries.first(where: { $0.href == event.href })
         if entry == nil, !event.uid.isEmpty {
             // Run 16.09.: Mail-Einladung - der Server-Sync hat den Termin
@@ -693,19 +694,110 @@ final class CalendarViewModel: ObservableObject {
             return false
         }
         let me = Self.ownAttendeeEmail()
-        guard !me.isEmpty, let updated = Self.updatePartstat(ics: entry.ics, attendeeEmail: me, status: status.rawValue) else {
+        guard !me.isEmpty,
+              var updated = Self.updatePartstat(ics: entry.ics, attendeeEmail: me, status: status.rawValue) else {
             JmapLog.write("Invitation RSVP: own attendee \(me) not found in \(event.href)")
             return false
+        }
+        // B4: Erinnerungen uebernehmen (Editor) bzw. 15-min-Default.
+        if let reminderMinutes {
+            updated = Self.setValarms(ics: updated, minutes: reminderMinutes)
+        } else {
+            updated = Self.ensureDefaultReminder(ics: updated, status: status.rawValue)
         }
         let ok = await client.updateEvent(entry, ics: updated)
         if ok {
             JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
+            // B2: SOFORT-Feedback - betroffenen Eintrag lokal ersetzen und
+            // neu parsen statt vollen Reload abzuwarten.
+            if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
+                cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                                      href: entry.href, etag: entry.etag, ics: updated)
+            }
+            let refreshed = Self.parseEntries([CalDavEventEntry(
+                calendarHref: entry.calendarHref, href: entry.href,
+                etag: entry.etag, ics: updated)], ownEmail: me)
+            if case var .success(list) = events {
+                list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
+                list.append(contentsOf: refreshed)
+                events = .success(list.sorted { $0.start < $1.start })
+            }
+            await SouveraInvitationCenter.shared.setCalendarInvites(
+                refreshed.filter { $0.ownPartstat == "needs-action" },
+                accountKey: Self.stableAccountKey())
             actionFeedback = CalendarActionFeedback(
                 success: true,
                 message: "\(NSLocalizedString(status.titleKey, comment: "")): \(event.title)")
-            await load()
+            // B6: Externer Organisator - Server-iTIP erreicht ihn nicht,
+            // deshalb zusaetzlich die normale Antwort-Mail.
+            if Self.organizerIsExternal(event.organizerEmail) {
+                _ = await SouveraInviteMailSender.shared.sendReply(
+                    event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
+                    altProposal: nil)
+            }
+            // Stiller Hintergrund-Reload (Badges, weitere Foldes).
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await self?.load()
+            }
         }
         return ok
+    }
+
+    /// Run 16.09. (B4): Ersetzt alle VALARM-Blöcke durch die gegebenen
+    /// Erinnerungen (Minuten vor Beginn). Leere Liste = keine Erinnerung.
+    static func setValarms(ics: String, minutes: [Int]) -> String {
+        var cleaned: [String] = []
+        var inAlarm = false
+        for raw in ics
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n") {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line == "BEGIN:VALARM" { inAlarm = true; continue }
+            if line == "END:VALARM" { inAlarm = false; continue }
+            if inAlarm { continue }
+            cleaned.append(line)
+        }
+        guard !minutes.isEmpty,
+              let endIdx = cleaned.firstIndex(where: { $0 == "END:VEVENT" }) else {
+            return cleaned.joined(separator: "\r\n")
+        }
+        var alarms: [String] = []
+        for m in minutes.sorted() {
+            alarms += ["BEGIN:VALARM", "TRIGGER:-PT\(m)M", "ACTION:DISPLAY",
+                       "DESCRIPTION:Erinnerung", "END:VALARM"]
+        }
+        cleaned.insert(contentsOf: alarms, at: endIdx)
+        return cleaned.joined(separator: "\r\n")
+    }
+
+    /// Run 16.09. (B4): Standard-Erinnerung 15 min - nur wenn die ICS
+    /// noch KEINEN VALARM enthält und die Antwort nicht "Abgelehnt" ist.
+    static func ensureDefaultReminder(ics: String, status: String) -> String {
+        if status == "DECLINED" { return ics }
+        if ics.uppercased().contains("BEGIN:VALARM") { return ics }
+        return setValarms(ics: ics, minutes: [15])
+    }
+
+    /// B6: Termin eines FREMD-Organisators (interne oder externe
+    /// Einladung) - RSVP-Sektion im Detail anzeigen.
+    static func isForeignOrganizer(_ event: CalendarEventModel) -> Bool {
+        let me = ownAttendeeEmail()
+        guard !me.isEmpty else { return false }
+        let orga = event.organizerEmail.lowercased()
+        guard !orga.isEmpty else { return false }
+        return orga != me
+    }
+
+    /// Eigene Kalender-ORGANISATOR-Domain vs. Organisator des Termins -
+    /// externe Organisatoren bekommen zusaetzlich eine normale Antwort-
+    /// Mail (der Server-iTIP erreicht sie nicht).
+    static func organizerIsExternal(_ organizerEmail: String) -> Bool {
+        let me = ownAttendeeEmail()
+        guard !me.isEmpty, organizerEmail.contains("@") else { return false }
+        let myDomain = me.components(separatedBy: "@").last?.lowercased() ?? ""
+        let orgaDomain = organizerEmail.components(separatedBy: "@").last?.lowercased() ?? ""
+        return !myDomain.isEmpty && myDomain != orgaDomain
     }
 
     /// Schreibt PARTSTAT im eigenen ATTENDEE um (Case-insensitiver

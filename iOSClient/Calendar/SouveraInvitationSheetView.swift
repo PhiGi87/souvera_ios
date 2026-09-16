@@ -197,19 +197,45 @@ struct SouveraInvitationSheetView: View {
 // (Zeit, Organisator, Teilnehmer, Ueberschneidung) und direkt die
 // RSVP-Buttons. `respond` liefert nil, wenn Antworten in diesem Kontext
 // nicht moeglich ist (z. B. Mail-Einladung ohne Mail-Client).
+// Run 16.09.: Termin-Detailansicht einer Einladung - alle Details
+// (Zeit, Organisator, Teilnehmer), Überschneidungsliste mit Tages-Popup
+// (B7/B8), Erinnerungs-Editor (B4), zustandsabhängiges RSVP (B6) und
+// optionaler Alternativvorschlag beim Ablehnen (B9).
 struct SouveraInvitationDetailView: View {
     let event: CalendarEventModel
     let organizerFallback: String
     /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
-    let respond: ((CalendarViewModel.CalendarRSVP) async -> Bool?)?
-    /// Ueberschneidungspruefung gegen den geladenen Kalenderstand
-    /// (nil = keine Pruefung moeglich, z. B. im Mail-Modul).
-    var overlapCheck: ((CalendarEventModel) -> Bool)? = nil
-    var answerInMailHint: Bool = false
+    let respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?
+    /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
+    var overlapEvents: [CalendarEventModel] = []
 
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
     @State private var answeredText: String?
+    @State private var reminderMinutes: [Int] = [15]
+    @State private var remindersTouched = false
+    @State private var dayPreview: SouveraOverlap?
+    @State private var declineProposalMode = false
+    @State private var altProposalDate: Date?
+
+    /// Eigene Rollen-Optionen je nach bisherigem PARTSTAT (B6).
+    private var allowedOptions: [CalendarViewModel.CalendarRSVP] {
+        switch event.ownPartstat {
+        case "accepted": return [.tentative, .declined]
+        case "tentative": return [.accepted, .declined]
+        case "declined": return [.accepted, .tentative]
+        default: return CalendarViewModel.CalendarRSVP.allCases
+        }
+    }
+
+    private var currentStatusKey: String? {
+        switch event.ownPartstat {
+        case "accepted": return "_invitations_accept_"
+        case "tentative": return "_invitations_tentative_"
+        case "declined": return "_invitations_decline_"
+        default: return nil
+        }
+    }
 
     var body: some View {
         NavigationStack {
@@ -225,10 +251,11 @@ struct SouveraInvitationDetailView: View {
                          ? (event.organizerEmail.isEmpty ? organizerFallback : event.organizerEmail)
                          : event.organizerName)
                 }
-                if let overlapCheck, overlapCheck(event) {
-                    Section {
-                        Label(NSLocalizedString("_invitations_overlap_", comment: ""), systemImage: "exclamationmark.triangle")
-                            .foregroundStyle(.orange)
+                if !overlapEvents.isEmpty {
+                    Section(NSLocalizedString("_invitations_overlap_", comment: "")) {
+                        SouveraOverlapListView(event: event, allEvents: overlapEvents) { overlap in
+                            dayPreview = overlap
+                        }
                     }
                 }
                 if !event.attendees.isEmpty {
@@ -238,47 +265,12 @@ struct SouveraInvitationDetailView: View {
                         }
                     }
                 }
-                Section {
-                    if let answeredText {
-                        Label(answeredText, systemImage: "checkmark.circle.fill")
-                            .foregroundStyle(.green)
-                    } else if let respond {
-                        HStack(spacing: 10) {
-                            ForEach(CalendarViewModel.CalendarRSVP.allCases, id: \.rawValue) { rsvp in
-                                Button {
-                                    busy = true
-                                    Task {
-                                        let ok = await respond(rsvp)
-                                        busy = false
-                                        if ok == true {
-                                            answeredText = NSLocalizedString(rsvp.titleKey, comment: "")
-                                        }
-                                    }
-                                } label: {
-                                    VStack(spacing: 3) {
-                                        Image(systemName: rsvp.icon)
-                                            .font(.system(size: 18, weight: .medium))
-                                            .foregroundStyle(rsvp.color)
-                                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                            .font(.caption2)
-                                            .foregroundStyle(.primary)
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(busy)
-                            }
-                        }
-                    } else {
-                        Text(NSLocalizedString(answerInMailHint
-                            ? "_invitations_answer_in_mail_"
-                            : "_invitations_no_ics_hint_", comment: ""))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
+                // B4: Eigene Erinnerungen (Standard 15 min).
+                Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
+                    SouveraReminderEditor(minutes: $reminderMinutes)
+                        .onChange(of: reminderMinutes) { _, _ in remindersTouched = true }
                 }
+                rsvpSection
             }
             .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
             .navigationBarTitleDisplayMode(.inline)
@@ -289,6 +281,162 @@ struct SouveraInvitationDetailView: View {
             }
         }
         .preferredColorScheme(.light)
+        .sheet(item: $dayPreview) { overlap in
+            SouveraDayPreviewPopup(
+                day: overlap.event.start,
+                highlightEvent: event,
+                collidingEvent: overlap.event,
+                allEvents: overlapEvents,
+                onDismiss: { dayPreview = nil })
+        }
+    }
+
+    @ViewBuilder
+    private var rsvpSection: some View {
+        Section {
+            if let answeredText {
+                Label(answeredText, systemImage: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            } else if declineProposalMode {
+                declineProposalView
+            } else if let respond {
+                if let key = currentStatusKey {
+                    Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
+                        .foregroundStyle(.secondary)
+                        .font(.subheadline)
+                }
+                HStack(spacing: 10) {
+                    ForEach(allowedOptions, id: \.rawValue) { rsvp in
+                        Button {
+                            handle(rsvp, respond: respond)
+                        } label: {
+                            VStack(spacing: 3) {
+                                Image(systemName: rsvp.icon)
+                                    .font(.system(size: 18, weight: .medium))
+                                    .foregroundStyle(rsvp.color)
+                                Text(NSLocalizedString(rsvp.titleKey, comment: ""))
+                                    .font(.caption2)
+                                    .foregroundStyle(.primary)
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.borderless)
+                        .disabled(busy)
+                    }
+                }
+            } else {
+                Text(NSLocalizedString("_invitations_answer_in_mail_", comment: ""))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
+        } footer: {
+            if !overlapEvents.isEmpty,
+               !SouveraOverlapCalculator.overlaps(of: event, in: overlapEvents).isEmpty {
+                Label(NSLocalizedString("_invitations_overlap_", comment: ""), systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                    .font(.caption)
+            }
+        }
+    }
+
+    /// B9: Alternativvorschlag beim Ablehnen - optional, Slots in der
+    /// DAUER der Einladung.
+    @ViewBuilder
+    private var declineProposalView: some View {
+        let slots = SouveraAltProposal.proposals(for: event, in: overlapEvents)
+        Text(NSLocalizedString("_invitations_propose_alternative_", comment: ""))
+            .font(.subheadline)
+        if !slots.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(slots, id: \.timeIntervalSince1970) { slot in
+                        Button {
+                            altProposalDate = slot
+                        } label: {
+                            Text(slotText(slot))
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(
+                                    altProposalDate == slot ? Color.blue : Color(.systemGray5)))
+                                .foregroundStyle(altProposalDate == slot ? .white : .primary)
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+        }
+        HStack(spacing: 10) {
+            Button {
+                sendDecline(proposal: altProposalDate)
+            } label: {
+                Text(NSLocalizedString("_invitations_send_", comment: ""))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            Button {
+                // B9: ausdrücklich ohne Vorschlag ablehnen.
+                sendDecline(proposal: nil)
+            } label: {
+                Text(NSLocalizedString("_invitations_no_proposal_", comment: ""))
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private func slotText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func handle(_ rsvp: CalendarViewModel.CalendarRSVP,
+                        respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?) {
+        if rsvp == .declined {
+            // B9: erst der optionale Alternativvorschlag.
+            declineProposalMode = true
+            return
+        }
+        busy = true
+        Task {
+            let reminders = remindersTouched ? reminderMinutes : nil
+            let ok = await respond(rsvp, reminders, nil)
+            busy = false
+            if ok == true {
+                answeredText = NSLocalizedString(rsvp.titleKey, comment: "")
+            }
+        }
+    }
+
+    private func sendDecline(proposal: Date?) {
+        busy = true
+        let proposalText: String?
+        if let proposal {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .short
+            formatter.timeStyle = .short
+            let duration = event.end.timeIntervalSince(event.start)
+            let end = proposal.addingTimeInterval(duration)
+            let endFormatter = DateFormatter()
+            endFormatter.dateStyle = .none
+            endFormatter.timeStyle = .short
+            proposalText = "\(formatter.string(from: proposal)) – \(endFormatter.string(from: end))"
+        } else {
+            proposalText = nil
+        }
+        Task {
+            let reminders = remindersTouched ? reminderMinutes : nil
+            let ok = await respond(.declined, reminders, proposalText)
+            busy = false
+            if ok == true {
+                answeredText = NSLocalizedString("_invitations_decline_", comment: "")
+                declineProposalMode = false
+            }
+        }
     }
 
     private var timeLine: String {
@@ -298,6 +446,9 @@ struct SouveraInvitationDetailView: View {
         if event.allDay {
             return DateFormatter.localizedString(from: event.start, dateStyle: .medium, timeStyle: .none)
         }
-        return "\(formatter.string(from: event.start)) - \(formatter.string(from: event.end))"
+        let endFormatter = DateFormatter()
+        endFormatter.dateStyle = .none
+        endFormatter.timeStyle = .short
+        return "\(formatter.string(from: event.start)) – \(endFormatter.string(from: event.end))"
     }
 }
