@@ -313,37 +313,47 @@ private struct SouveraBridgeBarActive: ViewModifier {
                                startPoint: .top, endPoint: .bottom),
                 for: .navigationBar)
             .toolbar {
-                ForEach(bridge.leadingItems) { item in
-                    ToolbarItem(placement: .topBarLeading) {
-                        SouveraBridgeBarButton(item: item)
-                    }
-                }
-                ForEach(bridge.leadingMenus) { group in
-                    ToolbarItem(placement: .topBarLeading) {
-                        SouveraBridgeMenuButton(group: group)
-                    }
-                }
-                ForEach(bridge.leadingCustoms) { custom in
-                    ToolbarItem(placement: .topBarLeading) {
-                        UIKitViewWrapper(view: custom.view)
-                    }
-                }
-                ForEach(bridge.trailingCustoms) { custom in
-                    ToolbarItem(placement: .topBarTrailing) {
-                        UIKitViewWrapper(view: custom.view)
-                    }
-                }
-                ForEach(bridge.trailingItems) { item in
-                    ToolbarItem(placement: .topBarTrailing) {
-                        SouveraBridgeBarButton(item: item)
-                    }
-                }
-                ForEach(bridge.trailingMenus) { group in
-                    ToolbarItem(placement: .topBarTrailing) {
-                        SouveraBridgeMenuButton(group: group)
-                    }
-                }
+                leadingBarContent
+                trailingBarContent
             }
+    }
+
+    @ToolbarContentBuilder
+    private var leadingBarContent: some ToolbarContent {
+        ForEach(bridge.leadingCustoms) { (custom: SouveraHeaderBridge.Custom) in
+            ToolbarItem(placement: .topBarLeading) {
+                UIKitViewWrapper(view: custom.view)
+            }
+        }
+        ForEach(bridge.leadingItems) { (item: SouveraHeaderBridge.Item) in
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeBarButton(item: item)
+            }
+        }
+        ForEach(bridge.leadingMenus) { (group: SouveraHeaderBridge.MenuGroup) in
+            ToolbarItem(placement: .topBarLeading) {
+                SouveraBridgeMenuButton(group: group)
+            }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var trailingBarContent: some ToolbarContent {
+        ForEach(bridge.trailingCustoms) { (custom: SouveraHeaderBridge.Custom) in
+            ToolbarItem(placement: .topBarTrailing) {
+                UIKitViewWrapper(view: custom.view)
+            }
+        }
+        ForEach(bridge.trailingItems) { (item: SouveraHeaderBridge.Item) in
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeBarButton(item: item)
+            }
+        }
+        ForEach(bridge.trailingMenus) { (group: SouveraHeaderBridge.MenuGroup) in
+            ToolbarItem(placement: .topBarTrailing) {
+                SouveraBridgeMenuButton(group: group)
+            }
+        }
     }
 }
 
