@@ -395,7 +395,7 @@ struct SouveraInvitationDetailView: View {
     }
 
     private func handle(_ rsvp: CalendarViewModel.CalendarRSVP,
-                        respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?) {
+                        respond: @escaping (CalendarViewModel.CalendarRSVP, [Int]?, String?) async -> Bool?) {
         if rsvp == .declined {
             // B9: erst der optionale Alternativvorschlag.
             declineProposalMode = true
