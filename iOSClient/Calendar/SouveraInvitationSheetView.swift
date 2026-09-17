@@ -838,6 +838,9 @@ struct SouveraInvitationDetailView: View {
             if ok == true {
                 answeredRSVP = .declined
                 declineProposalMode = false
+                // Run 19.09. (Feedback): Ablehnung entfernt den Termin -
+                // Ergebnis-Popup, Schliessen beendet den Dialog.
+                cancelResultAlert = NSLocalizedString("_invitations_declined_removed_", comment: "")
             }
         }
     }

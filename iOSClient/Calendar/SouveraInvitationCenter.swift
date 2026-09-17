@@ -310,6 +310,11 @@ final class SouveraInvitationCenter: ObservableObject {
             handledExisting = await SouveraInvitationCenter.shared.respondToExistingCalendarEvent(
                 uid: resolved.eventUID, status: status.rawValue,
                 reminderMinutes: reminderMinutes)
+            // Run 19.09. (Feedback): Ablehnung entfernt den Termin
+            // komplett aus dem Kalender.
+            if status == .declined {
+                _ = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+            }
         }
         if status != .declined, !resolved.isCancellation, !handledExisting {
             var createICS = resolved.rawICS
@@ -485,8 +490,9 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraLog.write("Invitations", "calendar create: own attendee not found")
             return false
         }
-        if let reminderMinutes {
-            updated = CalendarViewModel.setValarms(ics: updated, minutes: reminderMinutes)
+        let effectiveReminders = reminderMinutes ?? Self.reminderOverrides(invitation.id)
+        if let effectiveReminders {
+            updated = CalendarViewModel.setValarms(ics: updated, minutes: effectiveReminders)
         } else {
             updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
         }
@@ -619,6 +625,30 @@ final class SouveraInvitationCenter: ObservableObject {
         return removed
     }
 
+    /// Run 19.09. (Feedback): Termin nach einer Ablehnung aus dem Kalender
+    /// entfernen (DELETE mit ETag-Retry).
+    @discardableResult
+    func removeEventByUID(_ uid: String) async -> Bool {
+        guard !uid.isEmpty else { return false }
+        let client = CalDavClient(account: nil)
+        let calendars = await client.fetchCalendars()
+        let calendar = Calendar.current
+        let now = Date()
+        for cal in calendars {
+            let fetched = await client.fetchEvents(
+                calendarHref: cal.href,
+                start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
+                end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
+            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                let ok = await CalendarViewModel.deleteEventEntry(entry, client: client)
+                SouveraLog.write("Invitations", "decline remove uid=\(uid): \(ok)")
+                return ok
+            }
+        }
+        SouveraLog.write("Invitations", "decline remove uid=\(uid): nicht im Kalender")
+        return false
+    }
+
     // MARK: - Erinnerungen (Run 19.09., einheitlich)
 
     private static let reminderOverridesKey = "invitations_reminder_overrides"
@@ -627,6 +657,18 @@ final class SouveraInvitationCenter: ObservableObject {
     static func reminderOverrides(_ inviteId: String) -> [Int]? {
         let dict = UserDefaults.standard.dictionary(forKey: reminderOverridesKey) as? [String: [Int]]
         return dict?[inviteId]
+    }
+
+    /// Erinnerungen ueber die Termin-UID finden (alle Einladungen der
+    /// aktuellen Session durchsuchen).
+    @MainActor
+    static func reminderOverride(forUID uid: String) -> [Int]? {
+        let dict = UserDefaults.standard.dictionary(forKey: reminderOverridesKey) as? [String: [Int]] ?? [:]
+        for invite in SouveraInvitationCenter.shared.mailInvites
+        where invite.eventUID.caseInsensitiveCompare(uid) == .orderedSame {
+            if let minutes = dict[invite.id] { return minutes }
+        }
+        return nil
     }
 
     /// Setzt die Erinnerungen einer Einladung: liegt der Termin schon im
@@ -683,8 +725,9 @@ final class SouveraInvitationCenter: ObservableObject {
                 guard let partstat = CalendarViewModel.updatePartstat(
                     ics: entry.ics, attendeeEmail: me, status: status) else { continue }
                 var updated = partstat
-                if let reminderMinutes {
-                    updated = CalendarViewModel.setValarms(ics: updated, minutes: reminderMinutes)
+                let override = reminderMinutes ?? Self.reminderOverride(forUID: uid)
+                if let override {
+                    updated = CalendarViewModel.setValarms(ics: updated, minutes: override)
                 } else {
                     updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
                 }
@@ -812,19 +855,32 @@ final class SouveraInvitationCenter: ObservableObject {
 
     /// Sendet die Antwort-Mail komplett (Aufbau + Versand). Funktioniert
     /// auch OHNE geparstes Event (Titel/Zeit aus dem Text-Fallback).
+    /// Run 19.09. (Feedback): EINE Quelle fuer das Statuswort in der Mail -
+    /// Button-Label ("Annehmen"/"Ablehnen") wird in die Vergangenheitsform
+    /// ueberfuehrt ("Angenommen"/"Abgelehnt"); bereits konvertierte Woerter
+    /// bleiben unveraendert.
+    static func doneStatusWord(for statusWord: String) -> String {
+        let accepted = NSLocalizedString("_invitations_done_accepted_", comment: "")
+        let tentative = NSLocalizedString("_invitations_done_tentative_", comment: "")
+        let declined = NSLocalizedString("_invitations_done_declined_", comment: "")
+        if statusWord == NSLocalizedString("_invitations_accept_", comment: "") || statusWord == accepted {
+            return accepted
+        }
+        if statusWord == NSLocalizedString("_invitations_tentative_", comment: "") || statusWord == tentative {
+            return tentative
+        }
+        if statusWord == NSLocalizedString("_invitations_decline_", comment: "") || statusWord == declined {
+            return declined
+        }
+        return declined
+    }
+
     @discardableResult
     static func sendReply(invitation: SouveraMailInvitation, statusWord: String,
                           altProposal: String?) async -> Bool {
-        // Run 18.09. (Feedback): in der Mail IMMER die Vergangenheitsform
-        // ("Angenommen") - nie das Button-Label ("Annehmen").
-        let doneWord: String
-        if statusWord == NSLocalizedString("_invitations_accept_", comment: "") {
-            doneWord = NSLocalizedString("_invitations_done_accepted_", comment: "")
-        } else if statusWord == NSLocalizedString("_invitations_tentative_", comment: "") {
-            doneWord = NSLocalizedString("_invitations_done_tentative_", comment: "")
-        } else {
-            doneWord = NSLocalizedString("_invitations_done_declined_", comment: "")
-        }
+        // Run 18.09./19.09. (Feedback): Betreff UND Body immer in der
+        // Vergangenheitsform - nie das Button-Label.
+        let doneWord = doneStatusWord(for: statusWord)
         let reply = await makeReplyMail(
             event: invitation.event,
             title: invitation.displayTitle,
@@ -837,7 +893,7 @@ final class SouveraInvitationCenter: ObservableObject {
         }
         let sent = await SouveraInviteMailSender.shared.send(
             to: reply.to,
-            subject: "\(statusWord): \(invitation.displayTitle)",
+            subject: "\(doneWord): \(invitation.displayTitle)",
             html: reply.html,
             text: reply.text,
             icsAttachmentURL: reply.icsURL)

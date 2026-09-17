@@ -206,6 +206,7 @@ struct SouveraCalendarView: View {
                     return await SouveraInvitationCenter.respondViaMail(
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
+                onFinished: { openedMailInvite = nil },
                 onBack: {
                     // Run 19.09. (Feedback): Zurück zur Einladungs-Übersicht.
                     // WICHTIG: auch detailEvent leeren - sonst erscheint der
@@ -1382,8 +1383,14 @@ private struct CalendarEventDetailSheet: View {
                                         rsvpBusyForHref = event.href
                                         let ok = await viewModel.respondToInvitation(
                                             event, status: rsvp, reminderMinutes: nil)
-                                        if ok { answeredRSVP = rsvp }
                                         rsvpBusyForHref = nil
+                                        if ok {
+                                            answeredRSVP = rsvp
+                                            // Run 19.09. (Feedback): die
+                                            // Ablehnung entfernt den Termin
+                                            // -> Detail schliessen.
+                                            if rsvp == .declined { dismiss() }
+                                        }
                                     }
                                 } label: {
                                     // Run 18.09. (Feedback): kompakte Icon-Kreise

@@ -1238,6 +1238,11 @@ final class MailViewModel: ObservableObject {
             handledExisting = await SouveraInvitationCenter.shared.respondToExistingCalendarEvent(
                 uid: resolved.eventUID, status: status.rawValue,
                 reminderMinutes: reminderMinutes)
+            // Run 19.09. (Feedback): Ablehnung entfernt den Termin
+            // komplett aus dem Kalender.
+            if status == .declined {
+                _ = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+            }
         }
         if status != .declined, !resolved.isCancellation, !handledExisting {
             var createICS = resolved.rawICS
@@ -1255,25 +1260,15 @@ final class MailViewModel: ObservableObject {
         if !resolved.isCancellation, !resolved.eventUID.isEmpty {
             SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end)
         }
-        // B1: Moderne Antwort-Mail (Eckdaten + Absender + optionaler
-        // Alternativvorschlag) - unabhaengig vom eigenen Send-Pfad.
+        // B1: Moderne Antwort-Mail - Run 19.09. EIN Pfad ueber den Center
+        // (korrekter Betreff in Vergangenheitsform, Submission-
+        // Finalisierung, Sent-Kopie, Logging).
         let event = resolved.event
         if event != nil || resolved.organizerEmail.contains("@") {
-            let statusWord = NSLocalizedString(status.titleKey, comment: "")
-            let reply = await SouveraInvitationCenter.makeReplyMail(
-                event: event,
-                title: resolved.displayTitle,
-                organizerEmail: resolved.organizerEmail,
-                statusWord: statusWord,
+            _ = await SouveraInvitationCenter.sendReply(
+                invitation: resolved,
+                statusWord: NSLocalizedString(status.titleKey, comment: ""),
                 altProposal: altProposal)
-            if !reply.to.isEmpty {
-                _ = await SouveraInviteMailSender.shared.send(
-                    to: reply.to,
-                    subject: "\(statusWord): \(resolved.displayTitle)",
-                    html: reply.html,
-                    text: reply.text,
-                    icsAttachmentURL: reply.icsURL)
-            }
         }
         // Einladungsmail gelesen markieren + als beantwortet merken.
         if useJmap, let api = jmapApi,

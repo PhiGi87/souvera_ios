@@ -743,6 +743,42 @@ final class CalendarViewModel: ObservableObject {
         let ok = await client.updateEvent(entry, ics: updated)
         if ok {
             JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
+            // Run 19.09. (Feedback): Eine ABLEHNUNG entfernt den Termin
+            // komplett aus dem Kalender (nach dem PARTSTAT-PUT, damit der
+            // Organisator die iTIP-Absage erhaelt).
+            if status == .declined, Self.isForeignOrganizer(event) {
+                let removed = await Self.deleteEventEntry(entry, client: client)
+                JmapLog.write("Invitation RSVP DECLINED -> removed from calendar: \(removed)")
+                cachedEntries.removeAll { $0.href == entry.href }
+                if case var .success(list) = events {
+                    list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
+                    events = .success(list)
+                }
+                if !event.uid.isEmpty {
+                    SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end)
+                }
+                let remaining: [CalendarEventModel] = {
+                    if case let .success(list) = events {
+                        return list.filter { $0.ownPartstat == "needs-action" }
+                    }
+                    return []
+                }()
+                await SouveraInvitationCenter.shared.setCalendarInvites(
+                    remaining, accountKey: Self.stableAccountKey())
+                actionFeedback = CalendarActionFeedback(
+                    success: true,
+                    message: NSLocalizedString("_invitations_declined_removed_", comment: ""))
+                if Self.organizerIsExternal(event.organizerEmail) {
+                    _ = await SouveraInvitationCenter.sendReply(
+                        event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
+                        altProposal: nil)
+                }
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: 2_000_000_000)
+                    await self?.load()
+                }
+                return true
+            }
             // B2: SOFORT-Feedback - betroffenen Eintrag lokal ersetzen und
             // neu parsen statt vollen Reload abzuwarten.
             if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
@@ -838,6 +874,16 @@ final class CalendarViewModel: ObservableObject {
         let myDomain = me.components(separatedBy: "@").last?.lowercased() ?? ""
         let orgaDomain = organizerEmail.components(separatedBy: "@").last?.lowercased() ?? ""
         return !myDomain.isEmpty && myDomain != orgaDomain
+    }
+
+    /// Run 19.09.: Event löschen - bei 412 (stale ETag) ohne If-Match
+    /// wiederholen, 404/410 gilt als bereits entfernt.
+    static func deleteEventEntry(_ entry: CalDavEventEntry,
+                                 client: CalDavClient) async -> Bool {
+        if await client.deleteEvent(entry) { return true }
+        let withoutEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                           href: entry.href, etag: nil, ics: entry.ics)
+        return await client.deleteEvent(withoutEtag)
     }
 
     /// Schreibt PARTSTAT im eigenen ATTENDEE um (Case-insensitiver
