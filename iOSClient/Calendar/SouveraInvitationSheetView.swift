@@ -479,7 +479,7 @@ struct SouveraInvitationDetailView: View {
             // Proposal nur senden, wenn Start+Ende gesetzt.
             let proposal: String? = showManualProposal ? Self.proposalText(
                 start: altProposalStart, end: altProposalEnd) : nil
-            sendDecline(proposal: proposal)
+            sendDecline(proposalText: proposal)
         } label: {
             Text(NSLocalizedString("_invitations_send_", comment: ""))
                 .frame(maxWidth: .infinity)

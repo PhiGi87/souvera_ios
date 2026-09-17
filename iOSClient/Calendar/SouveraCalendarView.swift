@@ -219,6 +219,9 @@ struct SouveraCalendarView: View {
             CalendarEventDetailSheet(
                 viewModel: viewModel,
                 event: event,
+                onEdit: { draft in
+                    editState = EditSheetState(draft: draft, existing: event)
+                },
                 onBackToInvitations: detailFromInvitations ? {
                     detailEvent = nil
                     detailFromInvitations = false
@@ -226,9 +229,7 @@ struct SouveraCalendarView: View {
                         showInvitationSheet = true
                     }
                 } : nil
-            ) { draft in
-                editState = EditSheetState(draft: draft, existing: event)
-            }
+            )
         }
         .sheet(item: $editState) { state in
             CalendarEventEditSheet(viewModel: viewModel, draft: state.draft, existing: state.existing)
