@@ -124,15 +124,16 @@ struct SouveraDayPreviewPopup: View {
         }
     }
 
-    /// Termine des Tages; gleichzeitige termine werden in Spalten
-    /// nebeneinander verteilt (einfache Greedy-Spaltenzuordnung).
+    /// Termine des Tages; echte Kollisionen in Spalten nebeneinander.
+    /// Run 18.09. (Feedback): Einzeltermin bekommt die VOLLE Breite.
     private var columns: [[CalendarEventModel]] {
         let events = dayEvents
+        guard events.count > 1 else { return events.isEmpty ? [] : [[events[0]]] }
         var columns: [[CalendarEventModel]] = []
         for event in events {
             var placed = false
             for index in columns.indices {
-                if columns[index].last.map({ $0.end <= event.start }) == true {
+                if columns[index].allSatisfy({ $0.end <= event.start || event.end <= $0.start }) {
                     columns[index].append(event)
                     placed = true
                     break
@@ -403,3 +404,22 @@ enum SouveraAltProposal {
     }
 }
 
+
+
+// MARK: - Run 18.09.: Status-Anzeige in Vergangenheitsform
+
+enum SouveraRSVPStatus {
+    /// Vergangenheits-Label ("Angenommen") + Farbe + Icon je PARTSTAT.
+    static func label(for partstat: String) -> (text: String, color: Color, icon: String)? {
+        switch partstat {
+        case "accepted":
+            return (NSLocalizedString("_invitations_done_accepted_", comment: ""), .green, "checkmark.circle.fill")
+        case "tentative":
+            return (NSLocalizedString("_invitations_done_tentative_", comment: ""), .orange, "questionmark.circle.fill")
+        case "declined":
+            return (NSLocalizedString("_invitations_done_declined_", comment: ""), .red, "xmark.circle.fill")
+        default:
+            return nil
+        }
+    }
+}

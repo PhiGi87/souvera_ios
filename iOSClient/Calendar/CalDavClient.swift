@@ -188,12 +188,25 @@ final class CalDavClient {
     func createEvent(calendarHref: String, ics: String, uid: String) async -> CalDavEventEntry? {
         guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: calendarHref, relativeTo: home)?.absoluteURL,
-              let url = URL(string: "\(uid).ics", relativeTo: calendarURL)?.absoluteURL else { return nil }
+              let url = URL(string: "\(uid).ics", relativeTo: calendarURL)?.absoluteURL else {
+            JmapLog.write("CalDAV createEvent: URL-Aufbau fehlgeschlagen (\(calendarHref))")
+            return nil
+        }
         var req = authorizedRequest(for: url, method: "PUT", contentType: "text/calendar; charset=utf-8")
         req.httpBody = ics.data(using: .utf8)
-        guard let (_, response) = try? await urlSession.data(for: req),
-              (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else { return nil }
+        guard let (_, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("CalDAV createEvent \(url.absoluteString): Transportfehler")
+            return nil
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(status) else {
+            // Run 18.09. (Feedback: Create FAILED ohne Diagnose): Status
+            // sichtbar loggen.
+            JmapLog.write("CalDAV createEvent \(url.absoluteString) -> \(status) (uid=\(uid))")
+            return nil
+        }
         let etag = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
+        JmapLog.write("CalDAV createEvent \(url.absoluteString) -> \(status)")
         return CalDavEventEntry(calendarHref: calendarHref, href: "\(uid).ics", etag: etag, ics: ics)
     }
 

@@ -9,16 +9,40 @@ import Foundation
 // Run 18.09. (Feedback: App-Hang): NICHT @MainActor - der komplette
 // Einladungs-Netzwerkverkehr (Credential, JMAP, Blob-Download) lief
 // sonst auf dem Main-Thread und blockierte die UI fuer Sekunden.
-final class SouveraInviteMailSender {
+// Run 18.09. (Feedback: Abgelehnt/Vielleicht-Mails kommen nicht an):
+// ACTOR-Serialisierung (keine konkurrierenden JMAP-Requests gegen den
+// Server - Stalwart antwortete mit maxConcurrentRequests/Timeout) und
+// Retry mit Backoff bei 429/5xx/Transportfehlern.
+actor SouveraInviteMailSender {
     static let shared = SouveraInviteMailSender()
 
-    /// Sendet eine Antwort-Mail (HTML + Text + optionaler ICS-Anhang).
+    /// Sendet eine Antwort-Mail (HTML + Text + optionaler ICS-Anhang)
+    /// mit bis zu 2 Wiederholungen (Backoff 2s/5s) bei 429/5xx/Timeout.
     func send(to: String,
               subject: String,
               html: String,
               text: String,
               icsAttachmentURL: URL?) async -> Bool {
         guard to.contains("@") else { return false }
+        for attempt in 0..<3 {
+            if attempt > 0 {
+                let backoff = attempt == 1 ? 2_000_000_000 : 5_000_000_000
+                try? await Task.sleep(nanoseconds: backoff)
+            }
+            if await sendOnce(to: to, subject: subject, html: html,
+                              text: text, icsAttachmentURL: icsAttachmentURL) {
+                return true
+            }
+            SouveraLog.write("Invitations", "send attempt \(attempt + 1) failed (subject=\(subject))")
+        }
+        return false
+    }
+
+    private func sendOnce(to: String,
+                          subject: String,
+                          html: String,
+                          text: String,
+                          icsAttachmentURL: URL?) async -> Bool {
         do {
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.renewCredential() else { return false }
@@ -147,7 +171,7 @@ extension SouveraInviteMailSender {
     /// 14:30 (Europe/Berlin)" bzw. englisch "When: ... from 2:00 PM to
     /// 2:30 PM..."). Liefert Titel + Zeitraum oder nil - NIEMALS eine
     /// Jetzt-Zeit als Platzhalter.
-    static func parseTimeFromText(subject: String, plainText: String?) -> (title: String, start: Date, end: Date)? {
+    nonisolated static func parseTimeFromText(subject: String, plainText: String?) -> (title: String, start: Date, end: Date)? {
         guard let text = plainText, !text.isEmpty else { return nil }
         // Erst die Zeilen mit Wann/When, sonst der Textanfang.
         let lines = text.split(separator: "\n")

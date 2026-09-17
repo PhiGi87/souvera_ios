@@ -1239,7 +1239,7 @@ final class MailViewModel: ObservableObject {
                 title: event.title, start: event.start, end: event.end,
                 organizerEmail: resolved.organizerEmail)
         }
-        if status != .declined, let ics = createICS {
+        if status != .declined, !resolved.isCancellation, let ics = createICS {
             await SouveraInvitationCenter.shared.createCalendarEvent(
                 from: resolved, ics: ics, status: status.rawValue,
                 calendarHref: calendarHref, reminderMinutes: reminderMinutes)
@@ -2132,6 +2132,11 @@ final class MailViewModel: ObservableObject {
         // neue Mails unzuverlässig; der Voll-Refresh garantiert den
         // Server-Stand (neue Mails sofort). Throttle oben verhindert Exzesse.
         Task { await refreshMessages() }
+        // Run 18.09. (Feedback): Einladungs-Scan auch bei der
+        // Hintergrundaktualisierung (Foreground-Rückkehr).
+        if let mailbox = currentMailbox {
+            Task { await scanInvitations(mailbox: mailbox) }
+        }
     }
 
     /// P62f: Inkrementeller Refresh (queryChanges statt Voll-Refresh) -

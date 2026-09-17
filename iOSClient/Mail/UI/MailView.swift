@@ -180,6 +180,26 @@ struct MailView: View {
                         reminderMinutes: reminders,
                         altProposal: altProposal)
                 },
+                overlapProvider: { day in
+                    // Run 18.09. (Feedback): Überschneidungen auch in der
+                    // Mail-Direktdetailansicht - Einladungstag lazy laden.
+                    let client = CalDavClient(account: nil)
+                    let calendar = Calendar.current
+                    let dayStart = calendar.startOfDay(for: day)
+                    let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
+                    let calendars = await client.fetchCalendars()
+                    var events: [CalendarEventModel] = []
+                    for cal in calendars {
+                        let fetched = await client.fetchEvents(
+                            calendarHref: cal.href, start: dayStart, end: dayEnd)
+                        for entry in fetched {
+                            events += ICSParser.parseEvents(
+                                entry.ics, calendarHref: cal.href,
+                                href: entry.href, etag: entry.etag)
+                        }
+                    }
+                    return events
+                },
                 onBack: {
                     showInvitationDetail = nil
                 }
@@ -1024,7 +1044,14 @@ private struct MailFolderListView: View {
         }
         .listStyle(.insetGrouped)
         .scrollPosition(id: $viewModel.folderScrollPosition, anchor: .top)
-        .refreshable { await viewModel.loadMailboxes() }
+        .refreshable {
+            await viewModel.loadMailboxes()
+            // Run 18.09. (Feedback): Einladungs-Scan auch beim manuellen
+            // Aktualisieren.
+            if let mailbox = viewModel.currentMailbox {
+                await viewModel.scanInvitations(mailbox: mailbox)
+            }
+        }
         .overlay(alignment: .bottom) {
             let firstRowId = firstVisibleRowId(boxes)
             if let firstId = firstRowId {
@@ -1435,7 +1462,12 @@ private struct MailMessageListView: View {
             // Die Liste bleibt beim Öffnen einer Mail gemountet (ZStack in
             // content) - die Scrollposition bleibt dadurch automatisch
             // erhalten, ohne Anchor-Restore.
-            .refreshable { await viewModel.refreshMessages() }
+            .refreshable {
+                await viewModel.refreshMessages()
+                if let mailbox = viewModel.currentMailbox {
+                    await viewModel.scanInvitations(mailbox: mailbox)
+                }
+            }
             .overlay(alignment: .bottom) {
                 if let firstId = sorted.first?.id {
                     scrollTopButton(proxy: proxy, firstId: firstId)

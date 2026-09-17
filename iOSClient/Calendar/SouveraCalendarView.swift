@@ -275,7 +275,12 @@ struct SouveraCalendarView: View {
                     .frame(maxWidth: .infinity)
             }
             .safeAreaPadding(.bottom, 8)
-            .refreshable { await viewModel.load() }
+            .refreshable {
+                await viewModel.load()
+                // Run 18.09.: Mail-Einladungen nicht ladbar aus dem
+                // Kalender-Modul - die Kalender-Einladungen frischen sich
+                // ueber load() selbst auf.
+            }
         } else {
             VStack(spacing: 0) {
                 monthSwitcher(compact: false)
@@ -283,7 +288,12 @@ struct SouveraCalendarView: View {
                 Divider()
                 dayEventList
             }
-            .refreshable { await viewModel.load() }
+            .refreshable {
+                await viewModel.load()
+                // Run 18.09.: Mail-Einladungen nicht ladbar aus dem
+                // Kalender-Modul - die Kalender-Einladungen frischen sich
+                // ueber load() selbst auf.
+            }
         }
     }
 
@@ -404,7 +414,12 @@ struct SouveraCalendarView: View {
                 bottomPadding: isWide ? 12 : 40,
                 scrollTrigger: scrollTrigger
             )
-            .refreshable { await viewModel.load() }
+            .refreshable {
+                await viewModel.load()
+                // Run 18.09.: Mail-Einladungen nicht ladbar aus dem
+                // Kalender-Modul - die Kalender-Einladungen frischen sich
+                // ueber load() selbst auf.
+            }
         }
         .offset(x: swipeOffset)
         .gesture(horizontalSwipe(step: 1))
@@ -1288,11 +1303,14 @@ private struct CalendarEventDetailSheet: View {
                     SouveraReminderEditor(minutes: $rsvpReminderMinutes)
                         .onChange(of: rsvpReminderMinutes) { _, _ in rsvpRemindersTouched = true }
                 }
-                // B7: Überschneidungen (tappbar -> Tages-Popup).
-                Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
-                    SouveraOverlapListView(event: event,
-                                           allEvents: overlapBasis(event)) { overlap in
-                        dayPreviewOverlap = overlap
+                // B7: Überschneidungen (tappbar -> Tages-Popup) - nur bei
+                // tatsächlichen Funden (Run 18.09.: keine leere Sektion).
+                if !SouveraOverlapCalculator.overlaps(of: event, in: overlapBasis(event)).isEmpty {
+                    Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
+                        SouveraOverlapListView(event: event,
+                                               allEvents: overlapBasis(event)) { overlap in
+                            dayPreviewOverlap = overlap
+                        }
                     }
                 }
                 // B6: RSVP bei Fremd-Organisator - Optionen je nach
@@ -1300,11 +1318,11 @@ private struct CalendarEventDetailSheet: View {
                 // selbst, extern zusaetzlich Antwort-Mail (im VM).
                 if CalendarViewModel.isForeignOrganizer(event) {
                     Section {
-                        if let key = currentRsvpStatusKey {
-                            // Run 18.09. (Feedback): beantwortet -> Status-
-                            // Label statt Buttons.
-                            Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle.fill")
-                                .foregroundStyle(.green)
+                        if let status = SouveraRSVPStatus.label(for: event.ownPartstat) {
+                            // Run 18.09. (Feedback): Vergangenheitsform +
+                            // Farbe/Icon.
+                            Label(status.text, systemImage: status.icon)
+                                .foregroundStyle(status.color)
                                 .font(.subheadline.weight(.medium))
                         }
                         if event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty {
@@ -1318,17 +1336,13 @@ private struct CalendarEventDetailSheet: View {
                                         rsvpBusyForHref = nil
                                     }
                                 } label: {
-                                    // Run 16.09. (Feedback): grosse Tasten.
-                                    HStack(spacing: 6) {
-                                        Image(systemName: rsvp.icon)
-                                            .font(.system(size: 15, weight: .semibold))
-                                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                            .font(.subheadline.weight(.semibold))
-                                    }
-                                    .foregroundStyle(rsvp.color)
-                                    .padding(.horizontal, 14)
-                                    .frame(minWidth: 96, minHeight: 40)
-                                    .background(Capsule().fill(rsvp.color.opacity(0.14)))
+                                    // Run 18.09. (Feedback): kompakte Icon-Kreise
+                                    // wie in der Einladungsübersicht.
+                                    Image(systemName: rsvp.icon)
+                                        .font(.system(size: 17, weight: .semibold))
+                                        .foregroundStyle(rsvp.color)
+                                        .frame(width: 36, height: 36)
+                                        .background(Circle().fill(rsvp.color.opacity(0.14)))
                                 }
                                 .buttonStyle(.borderless)
                                 .disabled(rsvpBusyForHref == event.href)
@@ -1397,11 +1411,18 @@ private struct CalendarEventDetailSheet: View {
         }
         .toolbar {
             if onBackToInvitations != nil {
+                // Run 18.09. (Feedback): Zurück oben LINKS, Abbrechen
+                // oben RECHTS.
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         onBackToInvitations?()
                     } label: {
-                        Label(NSLocalizedString("_back_", comment: ""), systemImage: "chevron.backward")
+                        Image(systemName: "chevron.backward")
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(NSLocalizedString("_cancel_", comment: "")) {
+                        dismiss()
                     }
                 }
             }

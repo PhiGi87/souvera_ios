@@ -136,7 +136,12 @@ struct SouveraInvitationSheetView: View {
                         .foregroundStyle(.orange)
                 }
             }
-            if processedIds.contains(invite.id) {
+            if invite.isCancellation {
+                // Run 18.09.: Absage -> manuell entfernen (im Detail).
+                Text(NSLocalizedString("_invitations_cancelled_", comment: ""))
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.orange)
+            } else if processedIds.contains(invite.id) {
                 Text(NSLocalizedString("_invitations_answered_", comment: ""))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.green)
@@ -202,6 +207,9 @@ struct SouveraInvitationDetailView: View {
     var onBack: (() -> Void)? = nil
     /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
     var overlapEvents: [CalendarEventModel] = []
+    /// Run 18.09.: Liefert die Termine eines Tages on-demand (Mail-
+    /// Direktdetail: Kalenderstand wird lazy geladen).
+    var overlapProvider: ((Date) async -> [CalendarEventModel])? = nil
 
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
@@ -210,8 +218,23 @@ struct SouveraInvitationDetailView: View {
     @State private var remindersTouched = false
     @State private var dayPreview: SouveraOverlap?
     @State private var declineProposalMode = false
-    @State private var altProposalStart: Date = Date().addingTimeInterval(3600)
-    @State private var altProposalEnd: Date = Date().addingTimeInterval(5400)
+    @State private var altProposalStart: Date = {
+        // Run 18.09.: naechste volle Stunde, Ende +30 min.
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .minute], from: Date())
+        let base = (components.minute ?? 0) == 0
+            ? Date()
+            : calendar.date(byAdding: .minute, value: 60 - (components.minute ?? 0), to: Date()) ?? Date()
+        return base
+    }()
+    @State private var altProposalEnd: Date = {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.hour, .minute], from: Date())
+        let base = (components.minute ?? 0) == 0
+            ? Date()
+            : calendar.date(byAdding: .minute, value: 60 - (components.minute ?? 0), to: Date()) ?? Date()
+        return base.addingTimeInterval(1800)
+    }()
     /// Run 17.09.: Kalender-Auswahl pro Einladung (Default: persoenlich).
     @State private var calendars: [CalDavCalendar] = []
     @State private var selectedCalendarHref: String?
@@ -233,6 +256,10 @@ struct SouveraInvitationDetailView: View {
 
     /// Der Zeitslot - manuell ueberschreibbar (3.2); Live-Stand aus dem
     /// Center (setManualTimes aktualisiert die Einladung dort).
+    /// Run 18.09.: CANCEL - Absage durch den Organisator: Entfernen-Button.
+    @State private var cancelRemoved = false
+    @State private var cancelBusy = false
+
     private var effectiveEvent: CalendarEventModel {
         center.mailInvites.first(where: { $0.id == event.href })?.event ?? event
     }
@@ -258,6 +285,10 @@ struct SouveraInvitationDetailView: View {
         return !live.resolved && live.event == nil
     }
 
+    private var isCancellation: Bool {
+        liveInvitation?.isCancellation == true
+    }
+
     private var displayEvent: CalendarEventModel {
         effectiveEvent
     }
@@ -280,6 +311,12 @@ struct SouveraInvitationDetailView: View {
                 Section(NSLocalizedString("_calendar_when_", comment: "")) {
                     if isResolving {
                         ProgressView()
+                    } else if let answered = SouveraRSVPStatus.label(for: displayEvent.ownPartstat) {
+                        // Run 18.09. (Feedback): nach Beantwortung ist der
+                        // Zeitslot NICHT mehr editierbar.
+                        Label(answered.text, systemImage: answered.icon)
+                            .foregroundStyle(answered.color)
+                            .font(.subheadline.weight(.medium))
                     } else if displayEvent.uid.isEmpty {
                         // Run 17.09. (3.2): kein Zeitslot erkannt ->
                         // manuell setzen wie im normalen Termin.
@@ -318,7 +355,8 @@ struct SouveraInvitationDetailView: View {
                              : displayEvent.organizerName)
                     }
                 }
-                if !isResolving, !overlapEvents.isEmpty {
+                if !isResolving,
+                   !SouveraOverlapCalculator.overlaps(of: displayEvent, in: overlapEvents).isEmpty {
                     Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
                         SouveraOverlapListView(event: displayEvent, allEvents: overlapEvents) { overlap in
                             dayPreview = overlap
@@ -352,7 +390,39 @@ struct SouveraInvitationDetailView: View {
                         }
                     }
                 }
-                rsvpSection
+                if isCancellation {
+                    Section {
+                        if cancelRemoved {
+                            Label(NSLocalizedString("_invitations_cancel_removed_", comment: ""),
+                                  systemImage: "trash.circle.fill")
+                                .foregroundStyle(.secondary)
+                                .font(.subheadline)
+                        } else {
+                            Button {
+                                cancelBusy = true
+                                Task {
+                                    let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
+                                        uid: displayEvent.uid)
+                                    cancelBusy = false
+                                    if ok {
+                                        cancelRemoved = true
+                                        SouveraInvitationCenter.markAnswered(messageId: displayEvent.href)
+                                        SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                                    }
+                                }
+                            } label: {
+                                Label(NSLocalizedString("_invitations_cancel_remove_", comment: ""),
+                                      systemImage: "trash")
+                                    .foregroundStyle(.red)
+                            }
+                            .disabled(cancelBusy)
+                        }
+                    } header: {
+                        Text(NSLocalizedString("_invitations_cancelled_", comment: ""))
+                    }
+                } else {
+                    rsvpSection
+                }
             }
             .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
             .navigationBarTitleDisplayMode(.inline)
@@ -368,6 +438,13 @@ struct SouveraInvitationDetailView: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
+                }
+            }
+            .task(id: displayEvent.start) {
+                // Run 18.09.: Überschneidungsbasis laden (Provider) bzw.
+                // aus dem Center aktualisieren.
+                if let overlapProvider {
+                    overlapEvents = await overlapProvider(displayEvent.start)
                 }
             }
             .onAppear {
@@ -405,11 +482,11 @@ struct SouveraInvitationDetailView: View {
             } else if declineProposalMode {
                 declineProposalView
             } else if let respond {
-                if let key = currentStatusKey {
-                    // Run 18.09. (Feedback): beantwortet -> Status-Label
-                    // statt Buttons (keine Buttons mehr unter beantworteten).
-                    Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                if let status = SouveraRSVPStatus.label(for: displayEvent.ownPartstat) {
+                    // Run 18.09. (Feedback): beantwortet -> Status-Label in
+                    // Vergangenheitsform mit Farbe/Icon.
+                    Label(status.text, systemImage: status.icon)
+                        .foregroundStyle(status.color)
                         .font(.subheadline.weight(.medium))
                 } else {
                 HStack(spacing: 12) {
@@ -463,15 +540,30 @@ struct SouveraInvitationDetailView: View {
         }
         .buttonStyle(.borderless)
         if showManualProposal {
-            // Run 18.09. (Feedback): Start UND Ende auswaehlbar.
+            // Run 18.09. (Feedback): Start UND Ende auswaehlbar; Start
+            // default = naechste volle Stunde, Ende mind. +30 min.
             DatePicker(NSLocalizedString("_calendar_start_", comment: ""),
                        selection: $altProposalStart,
                        in: Date()...,
                        displayedComponents: [.date, .hourAndMinute])
                 .font(.subheadline)
+                .onChange(of: altProposalStart) { _, newValue in
+                    // Start auf volle Stunde gerundet + Ende mind. 30 min.
+                    let calendar = Calendar.current
+                    let components = calendar.dateComponents([.hour, .minute], from: newValue)
+                    let rounded = (components.minute ?? 0) == 0
+                        ? newValue
+                        : calendar.date(byAdding: .minute, value: 60 - (components.minute ?? 0), to: newValue) ?? newValue
+                    if rounded != altProposalStart {
+                        altProposalStart = rounded
+                        if altProposalEnd < rounded.addingTimeInterval(1800) {
+                            altProposalEnd = rounded.addingTimeInterval(1800)
+                        }
+                    }
+                }
             DatePicker(NSLocalizedString("_calendar_end_", comment: ""),
                        selection: $altProposalEnd,
-                       in: altProposalStart...,
+                       in: altProposalStart.addingTimeInterval(1800)...,
                        displayedComponents: [.date, .hourAndMinute])
                 .font(.subheadline)
         }

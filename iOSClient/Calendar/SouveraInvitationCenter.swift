@@ -87,6 +87,21 @@ final class SouveraInvitationCenter: ObservableObject {
     // MARK: - Beantwortete Einladungen (persistiert)
 
     private static let answeredKey = "invitations_answered_message_ids"
+    private static let answeredSequenceKey = "invitations_answered_sequence_by_uid"
+
+    /// Run 18.09.: SEQUENCE-Buchhaltung je UID. Eine verschobene Einladung
+    /// kommt als NEUE Mail (neue messageId) und wird daher vom Scan
+    /// ohnehin neu erfasst - die Buchhaltung dokumentiert die letzte
+    /// beantwortete SEQUENCE (fuer kuenftige Duplikat-Gates).
+    static func resetAnsweredIfNewerSequence(uid: String, sequence: Int) {
+        guard sequence > 0 else { return }
+        var byUid = UserDefaults.standard.dictionary(forKey: answeredSequenceKey) as? [String: Int] ?? [:]
+        let previous = byUid[uid.lowercased()] ?? -1
+        if sequence > previous {
+            byUid[uid.lowercased()] = sequence
+            UserDefaults.standard.set(byUid, forKey: answeredSequenceKey)
+        }
+    }
     private static var answeredMessageIds: Set<String> {
         get { Set(UserDefaults.standard.stringArray(forKey: answeredKey) ?? []) }
         set { UserDefaults.standard.set(Array(newValue), forKey: answeredKey) }
@@ -157,6 +172,18 @@ final class SouveraInvitationCenter: ObservableObject {
                 }
             }
 
+            // Run 18.09.: METHOD/SEQUENCE erkennen (CANCEL + erneute
+            // Antwort-Wahl bei hoeherer SEQUENCE).
+            var kind = SouveraMailInvitation.Kind.invitation
+            var sequence = 0
+            if let ics = invitationICS {
+                let method = (Self.quickExtract(ics, key: "METHOD") ?? "REQUEST").uppercased()
+                sequence = Int(Self.quickExtract(ics, key: "SEQUENCE") ?? "") ?? 0
+                kind = method == "CANCEL" ? .cancel : .invitation
+                if let uid = Self.quickExtract(ics, key: "UID") {
+                    Self.resetAnsweredIfNewerSequence(uid: uid, sequence: sequence)
+                }
+            }
             invites.append(SouveraMailInvitation(
                 id: messageId,
                 messageId: messageId,
@@ -166,8 +193,8 @@ final class SouveraInvitationCenter: ObservableObject {
                 organizerEmail: parsedEvent?.organizerEmail ?? from,
                 event: parsedEvent,
                 rawICS: parsedEvent != nil ? invitationICS : nil,
-                receivedAt: Date()
-            ))
+                receivedAt: Date(),
+                kind: kind, sequence: sequence))
         }
         setMailInvites(invites, accountKey: accountKey)
     }
@@ -202,7 +229,7 @@ final class SouveraInvitationCenter: ObservableObject {
             createICS = synthesizeICS(title: event.title, start: event.start, end: event.end,
                                       organizerEmail: resolved.organizerEmail)
         }
-        if status != .declined, let ics = createICS {
+        if status != .declined, !resolved.isCancellation, let ics = createICS {
             _ = await SouveraInvitationCenter.shared.createCalendarEvent(
                 from: resolved, ics: ics, status: status.rawValue,
                 calendarHref: calendarHref, reminderMinutes: reminderMinutes)
@@ -234,12 +261,31 @@ final class SouveraInvitationCenter: ObservableObject {
         let ownEmail = CalendarViewModel.ownAttendeeEmail()
         var event: CalendarEventModel?
         var rawICS: String?
+        var kind = invitation.kind
+        var sequence = invitation.sequence
         if let ics = details.ics {
             rawICS = ics
+            // Run 18.09.: METHOD:CANCEL / METHOD:REQUEST+SEQUENCE erkennen.
+            let method = (Self.quickExtract(ics, key: "METHOD") ?? "REQUEST").uppercased()
+            sequence = Int(Self.quickExtract(ics, key: "SEQUENCE") ?? "") ?? 0
+            kind = method == "CANCEL" ? .cancel : .invitation
             event = ICSParser.parseEvents(ics, calendarHref: "", href: invitation.messageId,
                                           etag: nil, ownEmail: ownEmail.lowercased()).first
             if event == nil {
                 SouveraLog.write("Invitations", "ICS \(invitation.messageId) konnte nicht geparst werden - Text-Fallback")
+            }
+            if kind == .cancel {
+                // Absage: keine Antwort noetig - partstat neutral lassen.
+                event = event.map { e in
+                    CalendarEventModel(id: e.id, uid: e.uid, sequence: e.sequence,
+                                       title: e.title, start: e.start, end: e.end, allDay: e.allDay,
+                                       location: e.location, description: e.description,
+                                       attendees: e.attendees, talkRoomToken: e.talkRoomToken,
+                                       talkRoomName: e.talkRoomName, calendarHref: e.calendarHref,
+                                       href: e.href, etag: e.etag, reminders: e.reminders,
+                                       isTask: e.isTask, organizerName: e.organizerName,
+                                       organizerEmail: e.organizerEmail, ownPartstat: "")
+                }
             }
         }
         if event == nil, let parsed = SouveraInviteMailSender.parseTimeFromText(
@@ -259,7 +305,7 @@ final class SouveraInvitationCenter: ObservableObject {
             subject: invitation.subject, from: invitation.from,
             organizerEmail: event?.organizerEmail ?? invitation.organizerEmail,
             event: event, rawICS: rawICS, resolved: true,
-            receivedAt: invitation.receivedAt)
+            receivedAt: invitation.receivedAt, kind: kind, sequence: sequence)
         updateInvite(resolved)
         return resolved
     }
@@ -346,6 +392,11 @@ final class SouveraInvitationCenter: ObservableObject {
         } else {
             updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
         }
+        // Run 18.09. (Feedback: Create schlägt fehl, am "Neuer Termin"-
+        // Weg orientieren): Die externe ICS NORMALISIEREN (CRLF, kein
+        // METHOD, keine Leerzeilen-Artefakte) - gleiche Struktur wie
+        // buildICS. Fehlschlaege: Fallback auf frisch gebaute ICS.
+        let normalized = Self.normalizeForCalendar(ics)
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let chosen: CalDavCalendar? =
@@ -356,13 +407,47 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraLog.write("Invitations", "calendar create: no writable calendar")
             return false
         }
-        let created = await client.createEvent(calendarHref: target.href, ics: updated, uid: uid)
+        var created = await client.createEvent(calendarHref: target.href, ics: updated, uid: uid)
+        if created == nil, updated != normalized {
+            // Fallback 1: normalisierte Original-ICS ohne PARTSTAT-Umschrieb.
+            created = await client.createEvent(calendarHref: target.href, ics: normalized, uid: uid)
+        }
+        if created == nil, let event = invitation.event {
+            // Fallback 2: exakt der bewaehrte "Neuer Termin"-Weg - ICS
+            // frisch via buildICS bauen (Titel/Zeiten/Ort/Teilnehmer).
+            let draft = EventDraft(
+                uid: uid, title: event.title, start: event.start, end: event.end,
+                allDay: event.allDay, location: event.location ?? "",
+                notes: event.description ?? "", attendees: event.attendees,
+                talkRoomToken: event.talkRoomToken, talkRoomName: event.talkRoomName,
+                calendarHref: target.href, sequence: 0)
+            let rebuilt = ICSParser.buildICS(draft, organizerEmail: event.organizerEmail,
+                                             organizerName: event.organizerName)
+            created = await client.createEvent(calendarHref: target.href, ics: rebuilt, uid: uid)
+            SouveraLog.write("Invitations", "create fallback via buildICS: \(created != nil)")
+        }
         if created != nil {
             SouveraLog.write("Invitations", "calendar create ok in \(target.displayName) uid=\(uid)")
         } else {
             SouveraLog.write("Invitations", "calendar create FAILED uid=\(uid)")
         }
         return created != nil
+    }
+
+    /// Run 18.09.: Externe ICS in die buildICS-kompatible Form bringen:
+    /// entfalten, CRLF-Zeilenenden, keine METHOD-Zeile, keine Leerzeilen.
+    static func normalizeForCalendar(_ ics: String) -> String {
+        var lines: [String] = []
+        for raw in ics.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
+            if raw.hasPrefix(" ") || raw.hasPrefix("\t"), let last = lines.last {
+                lines[lines.count - 1] += String(raw.dropFirst())
+            } else {
+                lines.append(raw.trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return lines
+            .filter { !$0.isEmpty && !$0.uppercased().hasPrefix("METHOD:") }
+            .joined(separator: "\r\n")
     }
 
     /// Erster Wert des Keys in der ICS (zeilenbasiert, Folding-tolerant).
@@ -376,6 +461,32 @@ final class SouveraInvitationCenter: ObservableObject {
             }
         }
         return nil
+    }
+
+    /// Run 18.09.: CANCEL — eingeladenen Termin manuell aus dem Kalender
+    /// entfernen (UID-Match ueber alle Kalender).
+    @discardableResult
+    func removeCancelledEvent(uid: String) async -> Bool {
+        guard !uid.isEmpty else { return false }
+        let client = CalDavClient(account: nil)
+        let calendars = await client.fetchCalendars()
+        let calendar = Calendar.current
+        // Fenster: Tag des Termins +/- 1 (aus der geparsten Info), sonst
+        // breit um heute.
+        let now = Date()
+        for cal in calendars {
+            let fetched = await client.fetchEvents(
+                calendarHref: cal.href,
+                start: calendar.date(byAdding: .day, value: -30, to: now),
+                end: calendar.date(byAdding: .day, value: 370, to: now))
+            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                let ok = await client.deleteEvent(entry)
+                SouveraLog.write("Invitations", "cancel remove uid=\(uid): \(ok)")
+                return ok
+            }
+        }
+        SouveraLog.write("Invitations", "cancel remove: uid=\(uid) nicht im Kalender gefunden")
+        return false
     }
 
     // MARK: - Antworten per Mail (moderne Mail + ICS-REPLY-Anhang)
@@ -430,10 +541,14 @@ final class SouveraInvitationCenter: ObservableObject {
             .replacingOccurrences(of: "<", with: "&lt;")
         // Run 18.09. (Feedback): elegante Karte - Status als farbige
         // Kopfzeile mit Doppelpunkt, Eckdaten als saubere Tabelle.
+        // Run 18.09.: statusWord ist jetzt die Vergangenheitsform
+        // ("Angenommen") - Farbwahl darauf umgestellt.
+        let acceptedWord = NSLocalizedString("_invitations_done_accepted_", comment: "")
+        let tentativeWord = NSLocalizedString("_invitations_done_tentative_", comment: "")
         let statusColor: String
-        if statusWord.hasPrefix(NSLocalizedString("_invitations_accept_", comment: "")) {
+        if statusWord.hasPrefix(acceptedWord) {
             statusColor = "#34c759"
-        } else if statusWord.hasPrefix(NSLocalizedString("_invitations_tentative_", comment: "")) {
+        } else if statusWord.hasPrefix(tentativeWord) {
             statusColor = "#ff9500"
         } else {
             statusColor = "#ff3b30"
@@ -445,7 +560,7 @@ final class SouveraInvitationCenter: ObservableObject {
               <span style="color:#ffffff;font-size:16px;font-weight:700">\(statusWord):</span>
               <span style="color:#ffffff;font-size:16px">\(escapedTitle)</span>
             </div>
-            <table style="border-collapse:collapse;font-size:14px">\(rows)</table>
+            <table style="border-collapse:collapse;font-size:14px;margin:10px 18px;width:calc(100% - 36px)">\(rows)</table>
             <div style="padding:10px 18px 14px;color:#8a8a8e;font-size:12px">Souvera Workspace</div>
           </div>
         </div>
@@ -475,11 +590,21 @@ final class SouveraInvitationCenter: ObservableObject {
     @discardableResult
     static func sendReply(invitation: SouveraMailInvitation, statusWord: String,
                           altProposal: String?) async -> Bool {
+        // Run 18.09. (Feedback): in der Mail IMMER die Vergangenheitsform
+        // ("Angenommen") - nie das Button-Label ("Annehmen").
+        let doneWord: String
+        if statusWord == NSLocalizedString("_invitations_accept_", comment: "") {
+            doneWord = NSLocalizedString("_invitations_done_accepted_", comment: "")
+        } else if statusWord == NSLocalizedString("_invitations_tentative_", comment: "") {
+            doneWord = NSLocalizedString("_invitations_done_tentative_", comment: "")
+        } else {
+            doneWord = NSLocalizedString("_invitations_done_declined_", comment: "")
+        }
         let reply = await makeReplyMail(
             event: invitation.event,
             title: invitation.displayTitle,
             organizerEmail: invitation.organizerEmail,
-            statusWord: statusWord,
+            statusWord: doneWord,
             altProposal: altProposal)
         guard !reply.to.isEmpty else {
             SouveraLog.write("Invitations", "reply mail: no organizer address")
@@ -500,6 +625,8 @@ final class SouveraInvitationCenter: ObservableObject {
     @discardableResult
     static func sendReply(event: CalendarEventModel, statusWord: String,
                           altProposal: String?) async -> Bool {
+        // Wrapper reicht durch - die Vergangenheitsform setzt sendReply
+        // (invitation:).
         let invitation = SouveraMailInvitation(
             id: event.href, messageId: event.href, accountId: "",
             subject: event.title, from: event.organizerEmail,
@@ -514,13 +641,19 @@ final class SouveraInvitationCenter: ObservableObject {
     static func buildReplyICS(event: CalendarEventModel, statusWord: String,
                               altProposal: String?) -> String {
         let me = CalendarViewModel.ownAttendeeEmail()
+        // Run 18.09.: Mapping auf Vergangenheitsform + Fallback auf
+        // Button-Label (falls Aufrufer noch statusWord übergibt).
+        let accepted = NSLocalizedString("_invitations_done_accepted_", comment: "").lowercased()
+        let tentative = NSLocalizedString("_invitations_done_tentative_", comment: "").lowercased()
+        let acceptBtn = NSLocalizedString("_invitations_accept_", comment: "").lowercased()
+        let tentativeBtn = NSLocalizedString("_invitations_tentative_", comment: "").lowercased()
+        let w = statusWord.lowercased()
         let status: String
-        switch statusWord.lowercased() {
-        case let w where w.contains(NSLocalizedString("_invitations_accept_", comment: "").lowercased()):
+        if w.hasPrefix(accepted) || w.contains(acceptBtn) {
             status = "ACCEPTED"
-        case let w where w.contains(NSLocalizedString("_invitations_tentative_", comment: "").lowercased()):
+        } else if w.hasPrefix(tentative) || w.contains(tentativeBtn) {
             status = "TENTATIVE"
-        default:
+        } else {
             status = "DECLINED"
         }
         let formatter = DateFormatter()

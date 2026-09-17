@@ -25,6 +25,19 @@ struct SouveraMailInvitation: Identifiable {
     var resolved: Bool = false
     /// Zeitraum, in dem die Mail gesehen wurde (fuer Duplikat-Gate).
     let receivedAt: Date
+    /// Run 18.09.: Art der iTIP-Nachricht - "cancel" = Absage durch den
+    /// Organisator (manuelles Entfernen ueber Button), "invitation" =
+    /// neu/erneut (bei hoeherer SEQUENCE alte Antwort verwerfen).
+    var kind: Kind = .invitation
+    var sequence: Int = 0
+
+    enum Kind: String {
+        case invitation, cancel
+    }
+}
+
+extension SouveraMailInvitation {
+    var isCancellation: Bool { kind == .cancel }
 }
 
 extension SouveraMailInvitation {
