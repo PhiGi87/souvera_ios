@@ -589,12 +589,12 @@ struct SouveraInvitationDetailView: View {
                             start: displayEvent.start,
                             end: displayEvent.end)
                         cancelBusy = false
-                        var notFound = UserDefaults.standard.stringArray(
-                            forKey: Self.notInCalendarKey) ?? []
+                        var notFound = Set(UserDefaults.standard.stringArray(
+                            forKey: Self.notInCalendarKey) ?? [])
                         if ok {
                             cancelRemoved = true
                             notFound.remove(event.href)
-                            UserDefaults.standard.set(notFound, forKey: Self.notInCalendarKey)
+                            UserDefaults.standard.set(Array(notFound), forKey: Self.notInCalendarKey)
                             SouveraInvitationCenter.markAnswered(
                                 messageId: displayEvent.href, eventEnd: displayEvent.end)
                             SouveraInvitationCenter.shared.removeMailInvitation(event.href)
@@ -603,8 +603,8 @@ struct SouveraInvitationDetailView: View {
                         } else {
                             // "Nicht im Kalender" PERSISTENT merken -> Button
                             // bleibt dauerhaft weg; sichtbares Popup.
-                            if !notFound.contains(event.href) { notFound.append(event.href) }
-                            UserDefaults.standard.set(notFound, forKey: Self.notInCalendarKey)
+                            notFound.insert(event.href)
+                            UserDefaults.standard.set(Array(notFound), forKey: Self.notInCalendarKey)
                             cancelNotFound = true
                             SouveraInvitationCenter.markAnswered(
                                 messageId: displayEvent.href, eventEnd: displayEvent.end)
