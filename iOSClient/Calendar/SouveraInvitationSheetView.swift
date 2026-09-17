@@ -293,6 +293,11 @@ struct SouveraInvitationDetailView: View {
         effectiveEvent
     }
 
+    /// Run 18.09.: vorkompiliert - der body-Ausdruck war zu komplex.
+    private var hasOverlaps: Bool {
+        !SouveraOverlapCalculator.overlaps(of: displayEvent, in: overlapEvents).isEmpty
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -355,8 +360,7 @@ struct SouveraInvitationDetailView: View {
                              : displayEvent.organizerName)
                     }
                 }
-                if !isResolving,
-                   !SouveraOverlapCalculator.overlaps(of: displayEvent, in: overlapEvents).isEmpty {
+                if !isResolving, hasOverlaps {
                     Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
                         SouveraOverlapListView(event: displayEvent, allEvents: overlapEvents) { overlap in
                             dayPreview = overlap

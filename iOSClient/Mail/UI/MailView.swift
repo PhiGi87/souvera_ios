@@ -2735,11 +2735,10 @@ struct MailInvitationButtonIcon: View {
 
 
 // Run 18.09.: Überschneidungsbasis für die Mail-Direktdetailansicht
-// (Einladungstag lazy laden) - als Methode ausgelagert, damit der
-// body-Ausdruck kompilierbar bleibt.
-extension MailView {
-    fileprivate func loadOverlapEvents(for day: Date) async -> [CalendarEventModel] {
-        let client = CalDavClient(account: nil)
+// (Einladungstag lazy laden) - als freie Funktion, damit sie aus dem
+// ausgelagerten Sheet erreichbar ist.
+fileprivate func mailOverlapEvents(for day: Date) async -> [CalendarEventModel] {
+    let client = CalDavClient(account: nil)
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: day)
         let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
@@ -2754,8 +2753,7 @@ extension MailView {
                     href: entry.href, etag: entry.etag)
             }
         }
-        return events
-    }
+    return events
 }
 
 
@@ -2777,10 +2775,10 @@ struct MailInvitationDetailSheet: View {
             },
             // Run 18.09. (Feedback): Überschneidungen auch beim
             // Direktöffnen aus der Mail (Kalender-Tag lazy laden).
+            onBack: onBack,
             overlapProvider: { day in
-                await loadOverlapEvents(for: day)
-            },
-            onBack: onBack
+                await mailOverlapEvents(for: day)
+            }
         )
         .task {
             _ = await center.resolveInvitation(live)
