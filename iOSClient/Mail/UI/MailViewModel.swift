@@ -1258,7 +1258,7 @@ final class MailViewModel: ObservableObject {
             if !reply.to.isEmpty {
                 _ = await SouveraInviteMailSender.shared.send(
                     to: reply.to,
-                    subject: "Re: \(resolved.displayTitle)",
+                    subject: "\(statusWord): \(resolved.displayTitle)",
                     html: reply.html,
                     text: reply.text,
                     icsAttachmentURL: reply.icsURL)

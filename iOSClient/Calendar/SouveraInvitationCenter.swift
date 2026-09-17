@@ -208,11 +208,10 @@ final class SouveraInvitationCenter: ObservableObject {
                 calendarHref: calendarHref, reminderMinutes: reminderMinutes)
         }
         let statusWord = NSLocalizedString(status.titleKey, comment: "")
-        if let event = resolved.event {
-            let sent = await sendReply(event: event, statusWord: statusWord,
-                                       altProposal: altProposal)
-            if !sent { return false }
-        }
+        // Run 18.09.: Antwort-Mail IMMER (auch ohne geparstes Event).
+        let sent = await sendReply(invitation: resolved, statusWord: statusWord,
+                                   altProposal: altProposal)
+        if !sent { return false }
         markAnswered(messageId: resolved.messageId)
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
@@ -330,7 +329,11 @@ final class SouveraInvitationCenter: ObservableObject {
                              status: String,
                              calendarHref: String?,
                              reminderMinutes: [Int]?) async -> Bool {
-        guard let event = invitation.event else { return false }
+        // Run 18.09. (Feedback: Create passiert nicht): NICHT mehr am
+        // geparsten Modell haengen - UID direkt aus der ICS extrahieren
+        // (parseEvents kann an exotischen ICS scheitern, die ICS selbst
+        // ist trotzdem valide).
+        let uid = Self.quickExtract(ics, key: "UID") ?? invitation.messageId
         let me = CalendarViewModel.ownAttendeeEmail()
         guard !me.isEmpty,
               var updated = CalendarViewModel.updatePartstat(ics: ics, attendeeEmail: me, status: status) else {
@@ -352,12 +355,26 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraLog.write("Invitations", "calendar create: no writable calendar")
             return false
         }
-        let uid = event.uid.isEmpty ? UUID().uuidString.lowercased() : event.uid
         let created = await client.createEvent(calendarHref: target.href, ics: updated, uid: uid)
         if created != nil {
             SouveraLog.write("Invitations", "calendar create ok in \(target.displayName) uid=\(uid)")
+        } else {
+            SouveraLog.write("Invitations", "calendar create FAILED uid=\(uid)")
         }
         return created != nil
+    }
+
+    /// Erster Wert des Keys in der ICS (zeilenbasiert, Folding-tolerant).
+    static func quickExtract(_ ics: String, key: String) -> String? {
+        let unfolded = ics
+            .replacingOccurrences(of: "\r\n ", with: "")
+            .replacingOccurrences(of: "\n ", with: "")
+        for line in unfolded.components(separatedBy: .newlines) {
+            if line.uppercased().hasPrefix("\(key.uppercased()):") {
+                return String(line.dropFirst(key.count + 1)).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
     }
 
     // MARK: - Antworten per Mail (moderne Mail + ICS-REPLY-Anhang)
@@ -376,8 +393,8 @@ final class SouveraInvitationCenter: ObservableObject {
         var rows = ""
         func row(_ label: String, _ value: String) {
             guard !value.isEmpty else { return }
-            rows += "<tr><td style=\"padding:4px 14px 4px 0;color:#666;white-space:nowrap\">\(label)</td>"
-                + "<td style=\"padding:4px 0;font-weight:600\">\(value)</td></tr>"
+            rows += "<tr><td style=\"padding:5px 16px 5px 0;color:#8a8a8e;white-space:nowrap;font-size:13px;vertical-align:top\">\(label)</td>"
+                + "<td style=\"padding:5px 0;font-weight:600;font-size:14px\">\(value)</td></tr>"
         }
 
         let formatter = DateFormatter()
@@ -410,17 +427,30 @@ final class SouveraInvitationCenter: ObservableObject {
         let escapedTitle = (event?.title ?? title)
             .replacingOccurrences(of: "&", with: "&amp;")
             .replacingOccurrences(of: "<", with: "&lt;")
+        // Run 18.09. (Feedback): elegante Karte - Status als farbige
+        // Kopfzeile mit Doppelpunkt, Eckdaten als saubere Tabelle.
+        let statusColor: String
+        if statusWord.hasPrefix(NSLocalizedString("_invitations_accept_", comment: "")) {
+            statusColor = "#34c759"
+        } else if statusWord.hasPrefix(NSLocalizedString("_invitations_tentative_", comment: "")) {
+            statusColor = "#ff9500"
+        } else {
+            statusColor = "#ff3b30"
+        }
         let html = """
         <div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:560px">
-          <p style="margin:0 0 6px;font-size:15px">\(statusWord)</p>
-          <h2 style="margin:0 0 14px;font-size:19px">\(escapedTitle)</h2>
-          <table style="border-collapse:collapse;font-size:14px">\(rows)</table>
-          <p style="margin:18px 0 0;color:#888;font-size:12px">Souvera Workspace</p>
+          <div style="background:#f5f6f8;border-radius:14px;overflow:hidden;border:1px solid #e5e5ea">
+            <div style="padding:14px 18px;background:\(statusColor)">
+              <span style="color:#ffffff;font-size:16px;font-weight:700">\(statusWord):</span>
+              <span style="color:#ffffff;font-size:16px">\(escapedTitle)</span>
+            </div>
+            <table style="border-collapse:collapse;font-size:14px">\(rows)</table>
+            <div style="padding:10px 18px 14px;color:#8a8a8e;font-size:12px">Souvera Workspace</div>
+          </div>
         </div>
         """
         let text = """
-        \(statusWord)
-        \(event?.title ?? title)
+        \(statusWord): \(event?.title ?? title)
         \(timeText)
         \(NSLocalizedString("_invitations_reply_from_", comment: "")): \(me)
         """
@@ -439,23 +469,43 @@ final class SouveraInvitationCenter: ObservableObject {
         return (to, html, text, icsURL)
     }
 
-    /// Sendet die Antwort-Mail komplett (Aufbau + Versand).
+    /// Sendet die Antwort-Mail komplett (Aufbau + Versand). Funktioniert
+    /// auch OHNE geparstes Event (Titel/Zeit aus dem Text-Fallback).
     @discardableResult
-    static func sendReply(event: CalendarEventModel, statusWord: String,
+    static func sendReply(invitation: SouveraMailInvitation, statusWord: String,
                           altProposal: String?) async -> Bool {
         let reply = await makeReplyMail(
-            event: event,
-            title: event.title,
-            organizerEmail: event.organizerEmail,
+            event: invitation.event,
+            title: invitation.displayTitle,
+            organizerEmail: invitation.organizerEmail,
             statusWord: statusWord,
             altProposal: altProposal)
-        guard !reply.to.isEmpty else { return false }
-        return await SouveraInviteMailSender.shared.send(
+        guard !reply.to.isEmpty else {
+            SouveraLog.write("Invitations", "reply mail: no organizer address")
+            return false
+        }
+        let sent = await SouveraInviteMailSender.shared.send(
             to: reply.to,
-            subject: "Re: \(event.title)",
+            subject: "\(statusWord): \(invitation.displayTitle)",
             html: reply.html,
             text: reply.text,
             icsAttachmentURL: reply.icsURL)
+        SouveraLog.write("Invitations", "reply mail \(sent ? "sent" : "FAILED") to \(reply.to)")
+        return sent
+    }
+
+    /// Kompatibilitaets-Wrapper: Antwort aus dem KALENDER-Kontext
+    /// (CalDAV-Event vorhanden).
+    @discardableResult
+    static func sendReply(event: CalendarEventModel, statusWord: String,
+                          altProposal: String?) async -> Bool {
+        let invitation = SouveraMailInvitation(
+            id: event.href, messageId: event.href, accountId: "",
+            subject: event.title, from: event.organizerEmail,
+            organizerEmail: event.organizerEmail,
+            event: event, rawICS: nil, receivedAt: Date(), resolved: true)
+        return await sendReply(invitation: invitation, statusWord: statusWord,
+                               altProposal: altProposal)
     }
 
     /// Minimale iTIP-REPLY-ICS (METHOD:REPLY) mit dem eigenen PARTSTAT;

@@ -194,7 +194,6 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, verticalSizeClass == .compact ? 12 : 0)
-        .frame(height: 44, alignment: .top)
         // Run 15.09.: Gradient läuft unter den Buttons weiter; Höhe an
         // die Mehr/Dateien-Bar angepasst (Feedback: "2-4pt fehlen unten"
         // — nur die Unterkante, Button-Position unverändert).
@@ -206,7 +205,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
             // (Run 15.09., Feedback: Richtung war falsch herum).
             LinearGradient(colors: SouveraAppearance.gradientColors,
                            startPoint: .top, endPoint: .bottom)
-                .ignoresSafeArea(edges: .top)
+                // Run 18.09. (iPhone Landscape): Verlauf MUSS auch in die
+                // horizontalen Safe Areas laufen (dort ~59pt Insets) -
+                // sonst wirkt der Header abgeschnitten (1:1 Mehr/Dateien).
+                .ignoresSafeArea()
         )
     }
 }

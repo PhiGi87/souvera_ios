@@ -156,11 +156,14 @@ struct MailView: View {
                     showInvitationDetail = invite
                 } label: {
                     MailInvitationButtonIcon()
+                        // Run 18.09. (Feedback): sichtbares Pulsieren, damit
+                        // sich der Button vom Mail-Inhalt abhebt.
+                        .modifier(SouveraPulseEffect())
                 }
                 .buttonStyle(.plain)
                 .accessibilityLabel(Text(NSLocalizedString("_invitations_title_", comment: "")))
-                .padding(.trailing, 16)
-                .padding(.bottom, 52)
+                .padding(.trailing, 36)
+                .padding(.bottom, 42)
             }
         }
         .sheet(item: $showInvitationDetail) { invite in
@@ -176,6 +179,9 @@ struct MailView: View {
                         calendarHref: calendarHref,
                         reminderMinutes: reminders,
                         altProposal: altProposal)
+                },
+                onBack: {
+                    showInvitationDetail = nil
                 }
             )
             .task {

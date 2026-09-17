@@ -58,3 +58,22 @@ struct SouveraInvitationFAB: View {
         }
     }
 }
+
+/// Puls-Effekt (sanfter Scale-Loop) für den Einladungs-Button in der Mail.
+struct SouveraPulseEffect: ViewModifier {
+    @State private var pulsing = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    func body(content: Content) -> some View {
+        Group {
+            if reduceMotion {
+                content
+            } else {
+                content
+                    .scaleEffect(pulsing ? 1.08 : 1.0)
+                    .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: pulsing)
+                    .onAppear { pulsing = true }
+            }
+        }
+    }
+}

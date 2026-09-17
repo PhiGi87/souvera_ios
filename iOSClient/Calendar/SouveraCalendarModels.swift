@@ -185,18 +185,31 @@ enum ICSParser {
                         }
                     }
                 } else if keyPart.hasPrefix("ORGANIZER") {
-                    // Run 16.09.: ORGANIZER parsen (CN + mailto) —
-                    // Organisator-Anzeige im Termin-Detail.
+                    // Run 18.09. (Feedback): ORGANIZER sauber parsen -
+                    // CN-Wert in ORIGINAL-Schreibweise (keyPart ist
+                    // uppercased!), ohne nachfolgende Parameter (z. B.
+                    // ";EMAIL=..."), E-Mail aus mailto: oder EMAIL-Param.
                     hasOrganizer = true
-                    if let cnRange = keyPart.range(of: "CN=") {
-                        let cn = keyPart[cnRange.upperBound...]
-                            .components(separatedBy: ":").first?
-                            .trimmingCharacters(in: .whitespaces) ?? ""
+                    if let cnRange = rawKey.range(of: "CN=", options: .caseInsensitive) {
+                        let cnRaw = rawKey[cnRange.upperBound...]
+                            .components(separatedBy: ":").first ?? ""
+                        // Ersten Parameter nehmen; ";EMAIL=..." abtrennen.
+                        let cn = unescape(cnRaw.components(separatedBy: ";").first?
+                            .trimmingCharacters(in: .whitespaces) ?? "")
                         if !cn.isEmpty { organizerName = cn }
                     }
                     if let mailRange = value.range(of: "mailto:") {
                         organizerEmail = String(value[mailRange.upperBound...])
                             .trimmingCharacters(in: .whitespaces)
+                    }
+                    if organizerEmail.isEmpty {
+                        // EMAIL=-Parameter in den Parametern suchen.
+                        for param in rawKey.components(separatedBy: ";") {
+                            if param.uppercased().hasPrefix("EMAIL=") {
+                                organizerEmail = String(param.dropFirst("EMAIL=".count))
+                                    .trimmingCharacters(in: .whitespaces)
+                            }
+                        }
                     }
                     if organizerEmail.isEmpty {
                         organizerEmail = value.trimmingCharacters(in: .whitespaces)

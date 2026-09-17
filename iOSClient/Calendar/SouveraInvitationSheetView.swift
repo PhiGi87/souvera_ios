@@ -72,18 +72,12 @@ struct SouveraInvitationSheetView: View {
                         busyId = nil
                     }
                 } label: {
-                    // Run 16.09. (Feedback): grosse, klar getrennte Tasten -
-                    // Icon UND Text in farbig getoenter Kapsel, 40pt hoch.
-                    HStack(spacing: 6) {
-                        Image(systemName: rsvp.icon)
-                            .font(.system(size: 15, weight: .semibold))
-                        Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                            .font(.subheadline.weight(.semibold))
-                    }
-                    .foregroundStyle(rsvp.color)
-                    .padding(.horizontal, 14)
-                    .frame(minWidth: 96, minHeight: 40)
-                    .background(Capsule().fill(rsvp.color.opacity(0.14)))
+                    // Run 18.09. (Feedback): kompakte Icon-Kreise.
+                    Image(systemName: rsvp.icon)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(rsvp.color)
+                        .frame(width: 36, height: 36)
+                        .background(Circle().fill(rsvp.color.opacity(0.14)))
                 }
                 .buttonStyle(.borderless)
                 .disabled(busyId == id)
@@ -103,7 +97,7 @@ struct SouveraInvitationSheetView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if overlapHint(event) {
-                Text(NSLocalizedString("_invitations_overlap_", comment: ""))
+                Text(NSLocalizedString("_invitations_overlap_header_", comment: ""))
                     .font(.caption)
                     .foregroundStyle(.orange)
             }
@@ -137,7 +131,7 @@ struct SouveraInvitationSheetView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 if overlapHint(event) {
-                    Text(NSLocalizedString("_invitations_overlap_", comment: ""))
+                    Text(NSLocalizedString("_invitations_overlap_header_", comment: ""))
                         .font(.caption)
                         .foregroundStyle(.orange)
                 }
@@ -203,6 +197,9 @@ struct SouveraInvitationDetailView: View {
     let organizerFallback: String
     /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
     let respond: ((CalendarViewModel.CalendarRSVP, [Int]?, String?, String?) async -> Bool?)?
+    /// Run 18.09. (Feedback): Zurueck-Button oben links, wenn aus der
+    /// Einladungs-Übersicht geöffnet.
+    var onBack: (() -> Void)? = nil
     /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
     var overlapEvents: [CalendarEventModel] = []
 
@@ -221,6 +218,7 @@ struct SouveraInvitationDetailView: View {
     @State private var manualStart: Date = Date()
     @State private var manualEnd: Date = Date().addingTimeInterval(1800)
     @State private var manualTimesSet = false
+    @State private var showManualProposal = false
 
     /// Eigene Rollen-Optionen je nach bisherigem PARTSTAT (B6).
     private var allowedOptions: [CalendarViewModel.CalendarRSVP] {
@@ -289,7 +287,7 @@ struct SouveraInvitationDetailView: View {
                          : event.organizerName)
                 }
                 if !overlapEvents.isEmpty {
-                    Section(NSLocalizedString("_invitations_overlap_", comment: "")) {
+                    Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
                         SouveraOverlapListView(event: event, allEvents: overlapEvents) { overlap in
                             dayPreview = overlap
                         }
@@ -327,6 +325,15 @@ struct SouveraInvitationDetailView: View {
             .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                if onBack != nil {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button {
+                            onBack?()
+                        } label: {
+                            Label(NSLocalizedString("_back_", comment: ""), systemImage: "chevron.backward")
+                        }
+                    }
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
                 }
@@ -367,29 +374,27 @@ struct SouveraInvitationDetailView: View {
                 declineProposalView
             } else if let respond {
                 if let key = currentStatusKey {
-                    Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
-                        .foregroundStyle(.secondary)
-                        .font(.subheadline)
-                }
-                HStack(spacing: 10) {
+                    // Run 18.09. (Feedback): beantwortet -> Status-Label
+                    // statt Buttons (keine Buttons mehr unter beantworteten).
+                    Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.green)
+                        .font(.subheadline.weight(.medium))
+                } else {
+                HStack(spacing: 12) {
                     ForEach(allowedOptions, id: \.rawValue) { rsvp in
                         Button {
                             handle(rsvp, respond: respond)
                         } label: {
-                            // Run 16.09. (Feedback): grosse Tasten.
-                            HStack(spacing: 6) {
-                                Image(systemName: rsvp.icon)
-                                    .font(.system(size: 15, weight: .semibold))
-                                Text(NSLocalizedString(rsvp.titleKey, comment: ""))
-                                    .font(.subheadline.weight(.semibold))
-                            }
-                            .foregroundStyle(rsvp.color)
-                            .padding(.horizontal, 14)
-                            .frame(minWidth: 96, minHeight: 40)
-                            .background(Capsule().fill(rsvp.color.opacity(0.14)))
+                            // Run 18.09. (Feedback): kompakte Icon-Kreise.
+                            Image(systemName: rsvp.icon)
+                                .font(.system(size: 17, weight: .semibold))
+                                .foregroundStyle(rsvp.color)
+                                .frame(width: 36, height: 36)
+                                .background(Circle().fill(rsvp.color.opacity(0.14)))
                         }
                         .buttonStyle(.borderless)
                         .disabled(busy)
+                    }
                     }
                 }
             } else {
@@ -402,7 +407,7 @@ struct SouveraInvitationDetailView: View {
         } footer: {
             if !overlapEvents.isEmpty,
                !SouveraOverlapCalculator.overlaps(of: event, in: overlapEvents).isEmpty {
-                Label(NSLocalizedString("_invitations_overlap_", comment: ""), systemImage: "exclamationmark.triangle")
+                Label(NSLocalizedString("_invitations_overlap_header_", comment: ""), systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
                     .font(.caption)
             }
@@ -413,53 +418,34 @@ struct SouveraInvitationDetailView: View {
     /// DAUER der Einladung.
     @ViewBuilder
     private var declineProposalView: some View {
-        let slots = SouveraAltProposal.proposals(for: effectiveEvent, in: overlapEvents)
-        Text(NSLocalizedString("_invitations_propose_alternative_", comment: ""))
-            .font(.subheadline)
-        if !slots.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(slots, id: \.timeIntervalSince1970) { slot in
-                        Button {
-                            altProposalDate = slot
-                        } label: {
-                            Text(slotText(slot))
-                                .font(.caption.weight(.medium))
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(
-                                    altProposalDate == slot ? Color.blue : Color(.systemGray5)))
-                                .foregroundStyle(altProposalDate == slot ? .white : .primary)
-                        }
-                        .buttonStyle(.borderless)
-                    }
-                }
-            }
+        // Run 18.09. (Feedback): KEINE automatischen Vorschläge mehr -
+        // optionaler manueller Zeitslot (nur bei Touch eingeblendet),
+        // darunter ein einziger "Senden"-Button. Ohne Angabe wird ohne
+        // Vorschlag gesendet.
+        Button {
+            withAnimation { showManualProposal.toggle() }
+        } label: {
+            Label(NSLocalizedString("_invitations_add_proposal_", comment: ""),
+                  systemImage: showManualProposal ? "minus.circle" : "plus.circle")
+                .font(.subheadline.weight(.medium))
         }
-        // Run 17.09.: manuelle Alternativzeit (beliebig, wie beim Termin).
-        DatePicker(NSLocalizedString("_calendar_when_", comment: ""),
-                   selection: Binding(
-                    get: { altProposalDate ?? (slots.first ?? effectiveEvent.end) },
-                    set: { altProposalDate = $0 }),
-                   displayedComponents: [.date, .hourAndMinute])
-            .font(.subheadline)
-        HStack(spacing: 10) {
-            Button {
-                sendDecline(proposal: altProposalDate)
-            } label: {
-                Text(NSLocalizedString("_invitations_send_proposal_", comment: ""))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.borderedProminent)
-            Button {
-                // B9: ausdrücklich ohne Vorschlag ablehnen.
-                sendDecline(proposal: nil)
-            } label: {
-                Text(NSLocalizedString("_invitations_no_proposal_", comment: ""))
-                    .frame(maxWidth: .infinity)
-            }
-            .buttonStyle(.bordered)
+        .buttonStyle(.borderless)
+        if showManualProposal {
+            DatePicker(NSLocalizedString("_calendar_when_", comment: ""),
+                       selection: Binding(
+                        get: { altProposalDate ?? effectiveEvent.end },
+                        set: { altProposalDate = $0 }),
+                       displayedComponents: [.date, .hourAndMinute])
+                .font(.subheadline)
         }
+        Button {
+            sendDecline(proposal: altProposalDate)
+        } label: {
+            Text(NSLocalizedString("_invitations_send_", comment: ""))
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(busy)
     }
 
     private func slotText(_ date: Date) -> String {

@@ -151,8 +151,8 @@ struct SouveraCalendarView: View {
             SouveraInvitationFAB(center: .shared) {
                 showInvitationSheet = true
             }
-            .padding(.trailing, 16)
-            .padding(.bottom, 52)
+            .padding(.trailing, 36)
+            .padding(.bottom, 42)
         }
         .sheet(isPresented: $showInvitationSheet) {
             SouveraInvitationSheetView(
@@ -202,7 +202,10 @@ struct SouveraCalendarView: View {
                     return await SouveraInvitationCenter.respondViaMail(
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
-                overlapEvents: live.event != nil ? overlapBasis(live.event!) : []
+                overlapEvents: live.event != nil ? overlapBasis(live.event!) : [],
+                onBack: {
+                    openedMailInvite = nil
+                }
             )
             .task {
                 _ = await SouveraInvitationCenter.shared.resolveInvitation(live)
@@ -1268,7 +1271,7 @@ private struct CalendarEventDetailSheet: View {
                         .onChange(of: rsvpReminderMinutes) { _, _ in rsvpRemindersTouched = true }
                 }
                 // B7: Überschneidungen (tappbar -> Tages-Popup).
-                Section(NSLocalizedString("_invitations_overlap_", comment: "")) {
+                Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
                     SouveraOverlapListView(event: event,
                                            allEvents: overlapBasis(event)) { overlap in
                         dayPreviewOverlap = overlap
@@ -1280,11 +1283,14 @@ private struct CalendarEventDetailSheet: View {
                 if CalendarViewModel.isForeignOrganizer(event) {
                     Section {
                         if let key = currentRsvpStatusKey {
-                            Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
-                                .foregroundStyle(.secondary)
-                                .font(.subheadline)
+                            // Run 18.09. (Feedback): beantwortet -> Status-
+                            // Label statt Buttons.
+                            Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                                .font(.subheadline.weight(.medium))
                         }
-                        HStack(spacing: 10) {
+                        if event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty {
+                        HStack(spacing: 12) {
                             ForEach(allowedRsvpOptions, id: \.rawValue) { rsvp in
                                 Button {
                                     Task {
@@ -1309,6 +1315,7 @@ private struct CalendarEventDetailSheet: View {
                                 .buttonStyle(.borderless)
                                 .disabled(rsvpBusyForHref == event.href)
                             }
+                        }
                         }
                     } header: {
                         Text(NSLocalizedString("_invitations_rsvp_", comment: ""))

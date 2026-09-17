@@ -637,6 +637,10 @@ struct LinkView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            // Run 18.09. (Feedback): BEIDE Spalten enden an derselben
+            // Kante (Tab-Bar) - die linke List hielt sonst ihren
+            // eigenen Bottom-Inset.
+            .ignoresSafeArea(.container, edges: .bottom)
         }
     }
 }
@@ -2265,6 +2269,7 @@ private struct LinkMessageBubble: View {
                 Text(displayText)
             } else {
                 Text(message.attributedDisplayText())
+                    .fixedSize(horizontal: false, vertical: true)
                     .souveraOpenURLAction()
             }
         }
@@ -2299,6 +2304,9 @@ private struct LinkMessageBubble: View {
             }
         }
         .foregroundStyle(isOwn ? .white : .primary)
+        // Run 18.09. (Feedback): URLs auf dem blauen eigenen Bubble-
+        // Hintergrund in Orange (gut lesbar), fremde bleiben Standard.
+        .tint(isOwn ? Color.orange : Color.blue)
     }
 
     /// Liefer-Haken (talk-web): 1 Haken = in der Warteschlange,
