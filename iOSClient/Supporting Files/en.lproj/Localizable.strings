@@ -1262,3 +1262,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_send_proposal_" = "Send proposal";
 "_invitations_add_proposal_" = "Add alternative proposal";
 "_invitations_overlap_header_" = "Event overlaps";
+"_invitations_loading_" = "Loading event details…";

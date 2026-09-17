@@ -210,7 +210,8 @@ struct SouveraInvitationDetailView: View {
     @State private var remindersTouched = false
     @State private var dayPreview: SouveraOverlap?
     @State private var declineProposalMode = false
-    @State private var altProposalDate: Date?
+    @State private var altProposalStart: Date = Date().addingTimeInterval(3600)
+    @State private var altProposalEnd: Date = Date().addingTimeInterval(5400)
     /// Run 17.09.: Kalender-Auswahl pro Einladung (Default: persoenlich).
     @State private var calendars: [CalDavCalendar] = []
     @State private var selectedCalendarHref: String?
@@ -245,14 +246,41 @@ struct SouveraInvitationDetailView: View {
         }
     }
 
+    /// Run 18.09. (Feedback): Live-Stand aus dem Center - NIE der beim
+    /// Oeffnen eingefrorene Snapshot. Solange die Aufloesung laeuft,
+    /// erscheint eine Warteuhr (Spinner) statt Fantasie-Daten.
+    private var liveInvitation: SouveraMailInvitation? {
+        center.mailInvites.first(where: { $0.id == event.href })
+    }
+
+    private var isResolving: Bool {
+        guard let live = liveInvitation else { return false }
+        return !live.resolved && live.event == nil
+    }
+
+    private var displayEvent: CalendarEventModel {
+        effectiveEvent
+    }
+
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text(event.title).font(.title3).fontWeight(.semibold)
+                    if isResolving {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(NSLocalizedString("_invitations_loading_", comment: ""))
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Text(displayEvent.title).font(.title3).fontWeight(.semibold)
+                    }
                 }
                 Section(NSLocalizedString("_calendar_when_", comment: "")) {
-                    if event.uid.isEmpty {
+                    if isResolving {
+                        ProgressView()
+                    } else if displayEvent.uid.isEmpty {
                         // Run 17.09. (3.2): kein Zeitslot erkannt ->
                         // manuell setzen wie im normalen Termin.
                         DatePicker(NSLocalizedString("_calendar_start_", comment: ""),
@@ -282,20 +310,24 @@ struct SouveraInvitationDetailView: View {
                     }
                 }
                 Section(NSLocalizedString("_invitations_organizer_", comment: "")) {
-                    Text(event.organizerName.isEmpty
-                         ? (event.organizerEmail.isEmpty ? organizerFallback : event.organizerEmail)
-                         : event.organizerName)
+                    if isResolving {
+                        ProgressView()
+                    } else {
+                        Text(displayEvent.organizerName.isEmpty
+                             ? (displayEvent.organizerEmail.isEmpty ? organizerFallback : displayEvent.organizerEmail)
+                             : displayEvent.organizerName)
+                    }
                 }
-                if !overlapEvents.isEmpty {
+                if !isResolving, !overlapEvents.isEmpty {
                     Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
-                        SouveraOverlapListView(event: event, allEvents: overlapEvents) { overlap in
+                        SouveraOverlapListView(event: displayEvent, allEvents: overlapEvents) { overlap in
                             dayPreview = overlap
                         }
                     }
                 }
-                if !event.attendees.isEmpty {
+                if !isResolving, !displayEvent.attendees.isEmpty {
                     Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
-                        ForEach(event.attendees, id: \.self) { attendee in
+                        ForEach(displayEvent.attendees, id: \.self) { attendee in
                             Text(attendee).font(.subheadline)
                         }
                     }
@@ -356,9 +388,9 @@ struct SouveraInvitationDetailView: View {
             if let overlap = dayPreview {
                 SouveraDayPreviewPopup(
                     day: overlap.event.start,
-                    highlightEvent: event,
+                    highlightEvent: displayEvent,
                     collidingEvent: overlap.event,
-                    allEvents: overlapEvents,
+                    allEvents: overlapEvents + [displayEvent],
                     onDismiss: { dayPreview = nil })
             }
         }
@@ -431,21 +463,39 @@ struct SouveraInvitationDetailView: View {
         }
         .buttonStyle(.borderless)
         if showManualProposal {
-            DatePicker(NSLocalizedString("_calendar_when_", comment: ""),
-                       selection: Binding(
-                        get: { altProposalDate ?? effectiveEvent.end },
-                        set: { altProposalDate = $0 }),
+            // Run 18.09. (Feedback): Start UND Ende auswaehlbar.
+            DatePicker(NSLocalizedString("_calendar_start_", comment: ""),
+                       selection: $altProposalStart,
+                       in: Date()...,
+                       displayedComponents: [.date, .hourAndMinute])
+                .font(.subheadline)
+            DatePicker(NSLocalizedString("_calendar_end_", comment: ""),
+                       selection: $altProposalEnd,
+                       in: altProposalStart...,
                        displayedComponents: [.date, .hourAndMinute])
                 .font(.subheadline)
         }
         Button {
-            sendDecline(proposal: altProposalDate)
+            // Proposal nur senden, wenn Start+Ende gesetzt.
+            let proposal: String? = showManualProposal ? Self.proposalText(
+                start: altProposalStart, end: altProposalEnd) : nil
+            sendDecline(proposal: proposal)
         } label: {
             Text(NSLocalizedString("_invitations_send_", comment: ""))
                 .frame(maxWidth: .infinity)
         }
         .buttonStyle(.borderedProminent)
         .disabled(busy)
+    }
+
+    private static func proposalText(start: Date, end: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        let endFormatter = DateFormatter()
+        endFormatter.dateStyle = .none
+        endFormatter.timeStyle = .short
+        return "\(formatter.string(from: start)) – \(endFormatter.string(from: end))"
     }
 
     private func slotText(_ date: Date) -> String {
@@ -473,23 +523,9 @@ struct SouveraInvitationDetailView: View {
         }
     }
 
-    private func sendDecline(proposal: Date?) {
+    private func sendDecline(proposalText: String?) {
         guard let respond else { return }
         busy = true
-        let proposalText: String?
-        if let proposal {
-            let formatter = DateFormatter()
-            formatter.dateStyle = .short
-            formatter.timeStyle = .short
-            let duration = effectiveEvent.end.timeIntervalSince(effectiveEvent.start)
-            let end = proposal.addingTimeInterval(duration)
-            let endFormatter = DateFormatter()
-            endFormatter.dateStyle = .none
-            endFormatter.timeStyle = .short
-            proposalText = "\(formatter.string(from: proposal)) – \(endFormatter.string(from: end))"
-        } else {
-            proposalText = nil
-        }
         Task {
             let reminders = remindersTouched ? reminderMinutes : nil
             let ok = await respond(.declined, reminders, proposalText, selectedCalendarHref)

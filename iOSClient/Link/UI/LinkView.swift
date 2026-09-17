@@ -618,9 +618,6 @@ struct LinkView: View {
                     callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
                 }
                 .frame(width: roomWidth)
-                // Run 16.09.: Die linke Spalte laeuft wie die rechte bis
-                // an die Tab-Bar-Kante (Feedback Landscape).
-                .ignoresSafeArea(.container, edges: .bottom)
                 Divider()
                 ZStack {
                     if case let .chat(token, title) = viewModel.route {
@@ -637,10 +634,6 @@ struct LinkView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            // Run 18.09. (Feedback): BEIDE Spalten enden an derselben
-            // Kante (Tab-Bar) - die linke List hielt sonst ihren
-            // eigenen Bottom-Inset.
-            .ignoresSafeArea(.container, edges: .bottom)
         }
     }
 }

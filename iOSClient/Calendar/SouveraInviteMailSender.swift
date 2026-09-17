@@ -6,7 +6,9 @@
 // JMAP-Client aufgebaut, ein Entwurf erzeugt und submitted.
 import Foundation
 
-@MainActor
+// Run 18.09. (Feedback: App-Hang): NICHT @MainActor - der komplette
+// Einladungs-Netzwerkverkehr (Credential, JMAP, Blob-Download) lief
+// sonst auf dem Main-Thread und blockierte die UI fuer Sekunden.
 final class SouveraInviteMailSender {
     static let shared = SouveraInviteMailSender()
 

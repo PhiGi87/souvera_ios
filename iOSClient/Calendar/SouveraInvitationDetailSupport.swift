@@ -273,9 +273,12 @@ struct SouveraDayPreviewPopup: View {
                 .opacity(0)
         )
         .overlay(
+            // Run 18.09. (Feedback): Schraffur AUSSCHLIESSLICH fuer
+            // unbeantwortete Einladungen (needs-action) - normale Termine
+            // (leerer PARTSTAT) bleiben unangetastet.
             SouveraHatchOverlay()
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-                .opacity((event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty) ? 0.35 : 0)
+                .opacity(event.ownPartstat == "needs-action" ? 0.35 : 0)
         )
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0))
     }

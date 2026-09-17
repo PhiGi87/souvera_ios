@@ -319,21 +319,19 @@ final class SouveraBarCoordinator {
                                               bridge.trailingCustoms)
     }
 
-    /// Eine Gruppe pro Element - jede Gruppe rendert als eigener
-    /// Glas-Kreis (wie die trailingItemGroups bei Mehr).
+    /// Run 18.09.: EINE Gruppe pro Seite (identisch zu Mehr/Dateien) -
+    /// iOS 26 rendert die Items darin als komfortable Glas-Pills;
+    /// Standard-Symbolgroesse (kein Medium-Config).
     private static func groups(_ items: [SouveraHeaderBridge.Item],
                                _ menus: [SouveraHeaderBridge.MenuGroup],
                                _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItemGroup] {
-        var groups: [UIBarButtonItemGroup] = []
+        var bars: [UIBarButtonItem] = []
         for custom in customs {
-            groups.append(UIBarButtonItemGroup(
-                barButtonItems: [UIBarButtonItem(customView: custom.view)],
-                representativeItem: nil))
+            bars.append(UIBarButtonItem(customView: custom.view))
         }
         for item in items where !item.icon.isEmpty {
             let bar = UIBarButtonItem(
-                image: UIImage(systemName: item.icon)?
-                    .applyingSymbolConfiguration(.init(weight: .medium)),
+                image: UIImage(systemName: item.icon),
                 style: .plain,
                 target: nil,
                 action: nil
@@ -341,12 +339,11 @@ final class SouveraBarCoordinator {
             bar.primaryAction = UIAction { _ in item.handler() }
             bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : .white)
             bar.accessibilityLabel = item.accessibilityLabel
-            groups.append(UIBarButtonItemGroup(barButtonItems: [bar], representativeItem: nil))
+            bars.append(bar)
         }
         for menu in menus where !menu.icon.isEmpty {
             let bar = UIBarButtonItem(
-                image: UIImage(systemName: menu.icon)?
-                    .applyingSymbolConfiguration(.init(weight: .medium)),
+                image: UIImage(systemName: menu.icon),
                 menu: UIMenu(children: menu.entries.map { entry in
                     UIAction(title: entry.title,
                              image: entry.icon.flatMap { UIImage(systemName: $0) },
@@ -357,9 +354,10 @@ final class SouveraBarCoordinator {
             )
             bar.tintColor = .white
             bar.accessibilityLabel = menu.accessibilityLabel
-            groups.append(UIBarButtonItemGroup(barButtonItems: [bar], representativeItem: nil))
+            bars.append(bar)
         }
-        return groups
+        guard !bars.isEmpty else { return [] }
+        return [UIBarButtonItemGroup(barButtonItems: bars, representativeItem: nil)]
     }
 }
 

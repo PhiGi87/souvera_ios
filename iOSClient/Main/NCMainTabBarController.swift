@@ -539,18 +539,29 @@ class NCMainTabBarController: UITabBarController {
     private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
         let hostingController = UIHostingController(rootView: root)
         let navigationController = UINavigationController(rootViewController: hostingController)
-        // Run 16.09.: Die aeussere UIKit-Bar bleibt HIDDEN - die Bridge-
-        // Items rendern in der inneren SwiftUI-System-Bar
-        // (SouveraBridgeBarModifier), die den Liquid-Glass-Look wie
-        // Mehr/Dateien liefert. Sichtbar+hidden gleichzeitig = doppelter
-        // Header mit Gap (Feedback 16.09.).
-        navigationController.setNavigationBarHidden(true, animated: false)
+        // Run 18.09. (Feedback: "iPad-Header komplett weg"): Die aeussere
+        // UIKit-Bar ist WIEDER SICHTBAR - 1:1 wie Mehr/Dateien (blauer
+        // Verlauf, Glas-Kreis-Buttons via Coordinator). Die innere
+        // SwiftUI-Bar bleibt in den Modul-Views versteckt
+        // (.toolbar(.hidden)).
+        // Nur auf dem iPad (bridge mode); auf dem iPhone bleibt die
+        // aeussere Bar hidden - dort zeichnet der Glas-Header.
+        navigationController.setNavigationBarHidden(!SouveraAppearance.useBridgeHeader, animated: false)
+        navigationController.navigationBar.standardAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.scrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.compactAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.compactScrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
+        navigationController.navigationBar.isTranslucent = false
+        navigationController.navigationBar.tintColor = .white
+        navigationController.navigationBar.overrideUserInterfaceStyle = .light
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),
             image: UIImage(systemName: imageName),
             selectedImage: UIImage(systemName: imageName)
         )
         navigationController.tabBarItem.tag = tag
+        let coordinator = SouveraBarCoordinator(navigationController: navigationController, bridge: bridge)
+        headerCoordinators.append(coordinator)
         return navigationController
     }
 

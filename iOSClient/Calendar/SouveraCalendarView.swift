@@ -40,6 +40,9 @@ struct SouveraCalendarView: View {
     @State private var showInvitationSheet = false
     @State private var rsvpBusyForHref: String?
     @State private var openedMailInvite: SouveraMailInvitation?
+    /// Run 18.09.: Detail wurde aus der Einladungsuebersicht geöffnet ->
+    /// Zurueck-Pfeil fuehrt dorthin zurueck.
+    @State private var detailFromInvitations = false
 
     enum CalendarViewMode: String, CaseIterable, Identifiable {
         case day, threeDay, month
@@ -166,6 +169,7 @@ struct SouveraCalendarView: View {
                 mailInteractionEnabled: true,
                 onOpenCalendarEvent: { event in
                     showInvitationSheet = false
+                    detailFromInvitations = true
                     selectedDay = event.start
                     viewModel.visibleMonth = event.start
                     viewMode = .day
@@ -212,7 +216,17 @@ struct SouveraCalendarView: View {
             }
         }
         .sheet(item: $detailEvent) { event in
-            CalendarEventDetailSheet(viewModel: viewModel, event: event) { draft in
+            CalendarEventDetailSheet(
+                viewModel: viewModel,
+                event: event,
+                onBackToInvitations: detailFromInvitations ? {
+                    detailEvent = nil
+                    detailFromInvitations = false
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                        showInvitationSheet = true
+                    }
+                } : nil
+            ) { draft in
                 editState = EditSheetState(draft: draft, existing: event)
             }
         }
@@ -1158,6 +1172,9 @@ private struct CalendarEventDetailSheet: View {
     @ObservedObject var viewModel: CalendarViewModel
     let event: CalendarEventModel
     let onEdit: (EventDraft) -> Void
+    /// Run 18.09.: gesetzt = aus der Einladungsuebersicht geöffnet ->
+    /// Zurueck-Pfeil oben links fuehrt dorthin zurueck.
+    var onBackToInvitations: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var rsvpBusyForHref: String?
     @State private var rsvpReminderMinutes: [Int] = [15]
@@ -1375,6 +1392,17 @@ private struct CalendarEventDetailSheet: View {
                     collidingEvent: overlap.event,
                     allEvents: overlapBasis(event),
                     onDismiss: { dayPreviewOverlap = nil })
+            }
+        }
+        .toolbar {
+            if onBackToInvitations != nil {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button {
+                        onBackToInvitations?()
+                    } label: {
+                        Label(NSLocalizedString("_back_", comment: ""), systemImage: "chevron.backward")
+                    }
+                }
             }
         }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
