@@ -89,6 +89,31 @@ final class SouveraInvitationCenter: ObservableObject {
     private static let answeredKey = "invitations_answered_message_ids"
     private static let answeredSequenceKey = "invitations_answered_sequence_by_uid"
     private static let answeredEndKey = "invitations_answered_enddates"
+    /// Run 19.09. (Feedback): beantwortete Termin-UIDs - Uebersicht-Filter
+    /// und Schraffur sind damit sofort korrekt, auch wenn der Server noch
+    /// NEEDS-ACTION liefert.
+    private static let answeredUidsKey = "invitations_answered_uids"
+
+    static func answeredUids() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: answeredUidsKey) ?? [])
+    }
+
+    static func isAnswered(uid: String) -> Bool {
+        guard !uid.isEmpty else { return false }
+        return answeredUids().contains(uid.lowercased())
+    }
+
+    static func markAnsweredUid(_ uid: String, end: Date?) {
+        guard !uid.isEmpty else { return }
+        var uids = answeredUids()
+        uids.insert(uid.lowercased())
+        UserDefaults.standard.set(Array(uids), forKey: answeredUidsKey)
+        if let end {
+            var ends = UserDefaults.standard.dictionary(forKey: "invitations_uid_enddates") as? [String: Double] ?? [:]
+            ends[uid.lowercased()] = end.timeIntervalSince1970
+            UserDefaults.standard.set(ends, forKey: "invitations_uid_enddates")
+        }
+    }
 
     /// Run 18.09.: SEQUENCE-Buchhaltung je UID. Eine verschobene Einladung
     /// kommt als NEUE Mail (neue messageId) und wird daher vom Scan
@@ -134,6 +159,12 @@ final class SouveraInvitationCenter: ObservableObject {
         if !expiredUids.isEmpty {
             UserDefaults.standard.set(byUid, forKey: answeredSequenceKey)
             UserDefaults.standard.set(uidEnds, forKey: "invitations_uid_enddates")
+        }
+        // answered-UID-Marker ebenfalls aufraeumen.
+        if !expiredUids.isEmpty {
+            var answered = answeredUids()
+            for uid in expiredUids { answered.remove(uid) }
+            UserDefaults.standard.set(Array(answered), forKey: answeredUidsKey)
         }
         if !expiredIds.isEmpty || !expiredUids.isEmpty {
             SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs entfernt (Termin vorbei)")
@@ -272,15 +303,28 @@ final class SouveraInvitationCenter: ObservableObject {
                                calendarHref: String? = nil) async -> Bool {
         // Run 17.09.: erst echte Termindaten (Lazy-Fetch + Text-Fallback).
         let resolved = await SouveraInvitationCenter.shared.resolveInvitation(invitation)
-        var createICS = resolved.rawICS
-        if createICS == nil, let event = resolved.event {
-            createICS = synthesizeICS(title: event.title, start: event.start, end: event.end,
-                                      organizerEmail: resolved.organizerEmail)
+        // Run 19.09.: zuerst PUT auf einen bereits vorhandenen Termin
+        // (UID-Match) - nur ohne Match neu anlegen (kein Duplikat).
+        var handledExisting = false
+        if !resolved.isCancellation, !resolved.eventUID.isEmpty {
+            handledExisting = await SouveraInvitationCenter.shared.respondToExistingCalendarEvent(
+                uid: resolved.eventUID, status: status.rawValue,
+                reminderMinutes: reminderMinutes)
         }
-        if status != .declined, !resolved.isCancellation, let ics = createICS {
-            _ = await SouveraInvitationCenter.shared.createCalendarEvent(
-                from: resolved, ics: ics, status: status.rawValue,
-                calendarHref: calendarHref, reminderMinutes: reminderMinutes)
+        if status != .declined, !resolved.isCancellation, !handledExisting {
+            var createICS = resolved.rawICS
+            if createICS == nil, let event = resolved.event {
+                createICS = synthesizeICS(title: event.title, start: event.start, end: event.end,
+                                          organizerEmail: resolved.organizerEmail)
+            }
+            if let ics = createICS {
+                _ = await SouveraInvitationCenter.shared.createCalendarEvent(
+                    from: resolved, ics: ics, status: status.rawValue,
+                    calendarHref: calendarHref, reminderMinutes: reminderMinutes)
+            }
+        }
+        if !resolved.isCancellation, !resolved.eventUID.isEmpty {
+            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end)
         }
         let statusWord = NSLocalizedString(status.titleKey, comment: "")
         // Run 18.09.: Antwort-Mail IMMER (auch ohne geparstes Event).
@@ -475,8 +519,15 @@ final class SouveraInvitationCenter: ObservableObject {
                 notes: event.description ?? "", attendees: event.attendees,
                 talkRoomToken: event.talkRoomToken, talkRoomName: event.talkRoomName,
                 calendarHref: target.href)
-            let rebuilt = ICSParser.buildICS(draft, organizerEmail: event.organizerEmail,
+            var rebuilt = ICSParser.buildICS(draft, organizerEmail: event.organizerEmail,
                                              organizerName: event.organizerName)
+            // Run 19.09. (Feedback): die gewaehlte Antwort in den eigenen
+            // Attendee schreiben - buildICS setzt sonst ueberall
+            // NEEDS-ACTION.
+            if let withPartstat = CalendarViewModel.updatePartstat(
+                ics: rebuilt, attendeeEmail: me, status: status) {
+                rebuilt = withPartstat
+            }
             created = await client.createEvent(calendarHref: target.href, ics: rebuilt, uid: uid)
             SouveraLog.write("Invitations", "create fallback via buildICS: \(created != nil)")
         }
@@ -566,6 +617,84 @@ final class SouveraInvitationCenter: ObservableObject {
         return removed
     }
 
+    // MARK: - Erinnerungen (Run 19.09., einheitlich)
+
+    private static let reminderOverridesKey = "invitations_reminder_overrides"
+
+    /// Gespeicherte Erinnerungen einer Einladung (vor dem Kalender-Create).
+    static func reminderOverrides(_ inviteId: String) -> [Int]? {
+        let dict = UserDefaults.standard.dictionary(forKey: reminderOverridesKey) as? [String: [Int]]
+        return dict?[inviteId]
+    }
+
+    /// Setzt die Erinnerungen einer Einladung: liegt der Termin schon im
+    /// Kalender (UID-Match) -> sofort per PUT speichern; sonst an der
+    /// Einladung merken (der Create wendet sie an).
+    @discardableResult
+    func updateInvitationReminders(_ invitation: SouveraMailInvitation,
+                                   minutes: [Int]) async -> Bool {
+        var dict = UserDefaults.standard.dictionary(forKey: Self.reminderOverridesKey) as? [String: [Int]] ?? [:]
+        dict[invitation.id] = minutes
+        UserDefaults.standard.set(dict, forKey: Self.reminderOverridesKey)
+
+        let uid = invitation.eventUID
+        guard !uid.isEmpty else { return true }
+        let client = CalDavClient(account: nil)
+        let calendars = await client.fetchCalendars()
+        let calendar = Calendar.current
+        let now = Date()
+        for cal in calendars {
+            let fetched = await client.fetchEvents(
+                calendarHref: cal.href,
+                start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
+                end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
+            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                let updated = CalendarViewModel.setValarms(ics: entry.ics, minutes: minutes)
+                let ok = await client.updateEvent(entry, ics: updated)
+                SouveraLog.write("Invitations", "reminders update uid=\(uid): \(ok)")
+                return ok
+            }
+        }
+        return true
+    }
+
+    // MARK: - Antwort auf einen bereits im Kalender liegenden Termin
+
+    /// Run 19.09. (Feedback: keine Duplikate, Antwort muss persistieren):
+    /// Wenn ein Termin mit dieser UID bereits im Kalender liegt, wird nur
+    /// die eigene PARTSTAT per PUT aktualisiert (CalDAV + Server-iTIP).
+    @discardableResult
+    func respondToExistingCalendarEvent(uid: String, status: String,
+                                        reminderMinutes: [Int]?) async -> Bool {
+        guard !uid.isEmpty else { return false }
+        let client = CalDavClient(account: nil)
+        let calendars = await client.fetchCalendars()
+        let me = CalendarViewModel.ownAttendeeEmail()
+        let calendar = Calendar.current
+        let now = Date()
+        for cal in calendars {
+            let fetched = await client.fetchEvents(
+                calendarHref: cal.href,
+                start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
+                end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
+            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                guard let partstat = CalendarViewModel.updatePartstat(
+                    ics: entry.ics, attendeeEmail: me, status: status) else { continue }
+                var updated = partstat
+                if let reminderMinutes {
+                    updated = CalendarViewModel.setValarms(ics: updated, minutes: reminderMinutes)
+                } else {
+                    updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
+                }
+                let ok = await client.updateEvent(entry, ics: updated)
+                SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): \(ok)")
+                return ok
+            }
+        }
+        SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): nicht im Kalender")
+        return false
+    }
+
     // MARK: - Antworten per Mail (moderne Mail + ICS-REPLY-Anhang)
 
     /// Baut die Antwort-Mail: moderner HTML-Body mit Eckdaten, klarer
@@ -576,6 +705,23 @@ final class SouveraInvitationCenter: ObservableObject {
                               organizerEmail: String,
                               statusWord: String,
                               altProposal: String?) async -> (to: String, html: String, text: String, icsURL: URL?) {
+        // Run 19.09. (Feedback): das Statuswort ZENTRAL in die
+        // Vergangenheitsform ueberfuehren - Aufrufer duerfen das
+        // Button-Label ("Annehmen") durchreichen, die Mail zeigt nie
+        // "Annehmen".
+        let acceptBtn = NSLocalizedString("_invitations_accept_", comment: "")
+        let tentativeBtn = NSLocalizedString("_invitations_tentative_", comment: "")
+        let doneWord: String
+        if statusWord.hasPrefix(NSLocalizedString("_invitations_done_accepted_", comment: ""))
+            || statusWord == acceptBtn {
+            doneWord = NSLocalizedString("_invitations_done_accepted_", comment: "")
+        } else if statusWord.hasPrefix(NSLocalizedString("_invitations_done_tentative_", comment: ""))
+            || statusWord == tentativeBtn {
+            doneWord = NSLocalizedString("_invitations_done_tentative_", comment: "")
+        } else {
+            doneWord = NSLocalizedString("_invitations_done_declined_", comment: "")
+        }
+        let statusWord = doneWord
         let me = CalendarViewModel.ownAttendeeEmail()
         let to = organizerEmail.contains("@") ? organizerEmail : ""
 

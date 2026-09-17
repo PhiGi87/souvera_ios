@@ -188,43 +188,31 @@ struct SouveraDayPreviewPopup: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
-                    // Run 18.09.: ABSOLUTES Koordinatensystem - Grid und
-                    // Blöcke aus derselben minutes -> y-Rechnung.
+                    // Run 19.09. (Feedback: Position exakt): Das gesamte
+                    // Raster + alle Bloecke werden in EINEM Canvas
+                    // gezeichnet - eine einzige Koordinatenquelle
+                    // (Minuten x Hoehe/60), keine SwiftUI-Layout-Drift.
                     ZStack(alignment: .topLeading) {
-                        // Stundenlinien + Labels
-                        ForEach(hours, id: \.self) { hour in
-                            let y = CGFloat(hour) * hourHeight
-                            Text(String(format: "%02d:00", hour))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                                .frame(width: labelWidth, alignment: .center)
-                                .offset(y: y - 8)
-                            Rectangle()
-                                .fill(Color(.systemGray5))
-                                .frame(height: 0.5)
-                                .offset(y: y)
-                                .padding(.leading, labelWidth + 8)
-                                .id(y)
+                        Canvas { context, size in
+                            drawDay(context: context, size: size)
                         }
-                        // Terminblöcke (clusterweise, volle Breite wenn
-                        // solo) - Run 19.09.: .position mit explizitem
-                        // ZENTRUM (mathematisch eindeutig, kein Offset-Drift).
-                        ForEach(clusters.indices, id: \.self) { clusterIndex in
-                            clusterBlocks(clusters[clusterIndex], clusterIndex: clusterIndex)
-                        }
+                        .frame(height: 24 * hourHeight)
+                        // Unsichtbarer Fokus-Anker fuer den Auto-Scroll.
+                        Color.clear
+                            .frame(height: 1)
+                            .offset(y: focusY)
+                            .id("focus")
                     }
                     .frame(height: 24 * hourHeight)
-                    .padding(.vertical, 8)
                 }
                 .onAppear {
                     // Run 19.09. (Feedback): Auto-Position auf den
-                    // Einladungstermin, mit Retry nach dem Layout-Commit -
-                    // danach ist freies Scrollen uneingeschraenkt.
-                    let hour = Calendar.current.component(.hour, from: highlightEvent.start)
-                    let target = CGFloat(max(0, hour - 1)) * hourHeight
+                    // Einladungstermin - nach dem Layout-Commit, mit Retry;
+                    // danach freies Scrollen ueber den ganzen Tag.
+                    SouveraLog.write("PopupDay", "focusY=\(focusY) highlight=\(highlightEvent.title) start=\(highlightEvent.start)")
                     for delay in [0.0, 0.15, 0.4] {
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                            proxy.scrollTo(target, anchor: .top)
+                            proxy.scrollTo("focus", anchor: .top)
                         }
                     }
                 }
@@ -235,6 +223,89 @@ struct SouveraDayPreviewPopup: View {
         .shadow(color: .black.opacity(0.25), radius: 18)
         .frame(maxHeight: 560)
     }
+
+    // Run 19.09.: Y-Position des Fokus (Einladungsstart - 1 h).
+    private var focusY: CGFloat {
+        let target = highlightEvent.start.addingTimeInterval(-3600)
+        return max(0, offsetYForDate(target))
+    }
+
+    private func offsetYForDate(_ date: Date) -> CGFloat {
+        let startOfDay = Calendar.current.startOfDay(for: day)
+        let minutes = Calendar.current.dateComponents([.minute], from: startOfDay, to: date).minute ?? 0
+        return CGFloat(minutes) / 60 * hourHeight
+    }
+
+    /// Zeichnet Stundenraster + Terminbloecke exakt.
+    private func drawDay(context: GraphicsContext, size: CGSize) {
+        // Raster
+        for hour in 0..<24 {
+            let y = CGFloat(hour) * hourHeight
+            let label = Text(String(format: "%02d:00", hour))
+                .font(.caption2)
+                .foregroundStyle(Color.secondary)
+            context.draw(label, at: CGPoint(x: labelWidth / 2, y: y - 8), anchor: .center)
+            var line = Path()
+            line.move(to: CGPoint(x: labelWidth + 8, y: y))
+            line.addLine(to: CGPoint(x: size.width - 12, y: y))
+            context.stroke(line, with: .color(Color(.systemGray5)), lineWidth: 0.5)
+        }
+        // Bloecke
+        let usable = size.width - labelWidth - 8 - 24
+        for cluster in clusters {
+            let columnCount = max(1, cluster.columns.count)
+            for (columnIndex, columnEvents) in cluster.columns.enumerated() {
+                for event in columnEvents {
+                    let spacing: CGFloat = columnCount > 1 ? 6 : 0
+                    let colWidth = usable / CGFloat(columnCount)
+                    let x = labelWidth + 8 + CGFloat(columnIndex) * colWidth
+                    let width = colWidth - spacing
+                    let y = offsetY(for: event)
+                    let height = blockHeight(for: event)
+                    let rect = CGRect(x: x, y: y, width: width, height: height)
+                    let isInvite = event.href == highlightEvent.href
+                    let isCollision = event.href == collisionHref
+                    let path = Path(roundedRect: rect, cornerRadius: 7)
+                    let fill: Color = isInvite ? Color.blue.opacity(0.10)
+                        : (isCollision ? Color.orange.opacity(0.12) : Color(.systemGray6))
+                    context.fill(path, with: .color(fill))
+                    // Schraffur nur fuer unbeantwortete Einladungen
+                    if event.ownPartstat == "needs-action",
+                       !SouveraInvitationCenter.isAnswered(uid: event.uid) {
+                        context.drawLayer { layer in
+                            layer.clip(to: path)
+                            var x0 = rect.minX - rect.height
+                            while x0 < rect.maxX {
+                                var hatch = Path()
+                                hatch.move(to: CGPoint(x: x0, y: rect.maxY))
+                                hatch.addLine(to: CGPoint(x: x0 + rect.height, y: rect.minY))
+                                layer.stroke(hatch, with: .color(.secondary.opacity(0.35)), lineWidth: 1)
+                                x0 += 10
+                            }
+                        }
+                    }
+                    let border: Color = isInvite ? .blue : (isCollision ? .orange : .clear)
+                    if isInvite || isCollision {
+                        context.stroke(path, with: .color(border), lineWidth: 1.5)
+                    }
+                    // Texte
+                    let timeFormatter = DateFormatter()
+                    timeFormatter.dateStyle = .none
+                    timeFormatter.timeStyle = .short
+                    let timeText = Text("\(timeFormatter.string(from: event.start)) – \(timeFormatter.string(from: event.end))")
+                        .font(.caption2)
+                        .foregroundStyle(Color.secondary)
+                    context.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 12), anchor: .leading)
+                    let titleText = Text(event.title)
+                        .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
+                        .foregroundStyle(Color.primary)
+                    context.draw(titleText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 28), anchor: .leading)
+                }
+            }
+        }
+    }
+
+    private var collisionHref: String { collidingEvent.href }
 
     /// Verfügbare Breite für die Blöcke (innen, nach Labelspalte).
     private var availableWidth: CGFloat {
@@ -278,7 +349,8 @@ struct SouveraDayPreviewPopup: View {
         .overlay(
             SouveraHatchOverlay()
                 .clipShape(RoundedRectangle(cornerRadius: 7))
-                .opacity(event.ownPartstat == "needs-action" ? 0.35 : 0)
+                .opacity(event.ownPartstat == "needs-action"
+                         && !SouveraInvitationCenter.isAnswered(uid: event.uid) ? 0.35 : 0)
         )
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0))
     }
@@ -327,47 +399,6 @@ struct SouveraHatchOverlay: View {
             }
         }
         .allowsHitTesting(false)
-    }
-}
-
-// MARK: - B4: Erinnerungs-Editor
-
-struct SouveraReminderEditor: View {
-    @Binding var minutes: [Int]
-
-    private let suggestions = [5, 10, 15, 30, 60]
-
-    var body: some View {
-        ForEach(minutes.sorted(), id: \.self) { minute in
-            HStack {
-                Label(String(format: NSLocalizedString("_calendar_reminder_minutes_before_", comment: ""), minute),
-                      systemImage: "bell.fill")
-                    .font(.subheadline)
-                Spacer()
-                Button {
-                    minutes.removeAll { $0 == minute }
-                } label: {
-                    Image(systemName: "minus.circle.fill")
-                        .foregroundStyle(.red)
-                }
-                .buttonStyle(.borderless)
-            }
-        }
-        HStack(spacing: 6) {
-            ForEach(suggestions, id: \.self) { suggestion in
-                Button {
-                    if !minutes.contains(suggestion) { minutes.append(suggestion) }
-                } label: {
-                    Text("\(suggestion)")
-                        .font(.caption.weight(.medium))
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 5)
-                        .background(Capsule().fill(minutes.contains(suggestion) ? Color.blue : Color(.systemGray5)))
-                        .foregroundStyle(minutes.contains(suggestion) ? .white : .primary)
-                }
-                .buttonStyle(.borderless)
-            }
-        }
     }
 }
 
@@ -422,7 +453,9 @@ enum SouveraAltProposal {
 enum SouveraRSVPStatus {
     /// Vergangenheits-Label ("Angenommen") + Farbe + Icon je PARTSTAT.
     static func label(for partstat: String) -> (text: String, color: Color, icon: String)? {
-        switch partstat {
+        // Run 19.09. (Feedback): case-insensitiv - answeredRSVP.rawValue ist
+        // GROSS ("ACCEPTED"), der Parser liefert klein ("accepted").
+        switch partstat.lowercased() {
         case "accepted":
             return (NSLocalizedString("_invitations_done_accepted_", comment: ""), .green, "checkmark.circle.fill")
         case "tentative":

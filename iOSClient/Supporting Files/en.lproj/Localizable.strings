@@ -1274,3 +1274,5 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_event_title_" = "Event";
 "_invitations_cancel_title_" = "Cancellation";
 "_invitations_cancel_not_found_" = "Event not found in the calendar.";
+"_calendar_reminder_saved_" = "Reminders saved";
+"_calendar_reminder_save_failed_" = "Reminders could not be saved";

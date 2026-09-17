@@ -38,6 +38,15 @@ struct SouveraMailInvitation: Identifiable {
 
 extension SouveraMailInvitation {
     var isCancellation: Bool { kind == .cancel }
+
+    /// Echte Termin-UID (nicht die Mail-ID) - fuer UID-Match im Kalender.
+    var eventUID: String {
+        if let event, !event.uid.isEmpty, event.uid != messageId { return event.uid }
+        if let rawICS, let uid = SouveraInvitationCenter.quickExtract(rawICS, key: "UID") {
+            return uid
+        }
+        return ""
+    }
 }
 
 extension SouveraMailInvitation {

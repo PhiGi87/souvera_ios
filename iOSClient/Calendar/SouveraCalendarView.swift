@@ -207,15 +207,17 @@ struct SouveraCalendarView: View {
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
                 onBack: {
-                    // Run 19.09. (Feedback): Zurück zur Einladungs-Übersicht,
-                    // wenn von dort gekommen.
-                    if detailFromInvitations {
-                        openedMailInvite = nil
+                    // Run 19.09. (Feedback): Zurück zur Einladungs-Übersicht.
+                    // WICHTIG: auch detailEvent leeren - sonst erscheint der
+                    // alte Termin-Dialog statt der Übersicht.
+                    let fromInvitations = detailFromInvitations
+                    openedMailInvite = nil
+                    detailEvent = nil
+                    detailFromInvitations = false
+                    if fromInvitations {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                             showInvitationSheet = true
                         }
-                    } else {
-                        openedMailInvite = nil
                     }
                 },
                 overlapProvider: { day in
@@ -236,9 +238,11 @@ struct SouveraCalendarView: View {
                     editState = EditSheetState(draft: draft, existing: event)
                 },
                 onBackToInvitations: detailFromInvitations ? {
-                    // Run 19.09. (Feedback): Kein gestapeltes Praesentieren -
-                    // die Übersicht oeffnet erst nach dem Dismiss des
-                    // Details, damit es keine doppelten Toolbars gibt.
+                    // Run 19.09. (Feedback): beide Detail-States leeren,
+                    // dann die Übersicht oeffnen (kein stehengebliebener
+                    // Termin-Dialog).
+                    detailEvent = nil
+                    openedMailInvite = nil
                     detailFromInvitations = false
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                         showInvitationSheet = true
@@ -1211,8 +1215,8 @@ private struct CalendarEventDetailSheet: View {
     /// Run 19.09. (Feedback): Event-Kopie friert ownPartstat ein - die
     /// Antwort wird im State gemerkt und steuert Anzeige/Optionen.
     @State private var answeredRSVP: CalendarViewModel.CalendarRSVP?
-    @State private var rsvpReminderMinutes: [Int] = [15]
-    @State private var rsvpRemindersTouched = false
+    @State private var rsvpReminderMinutes: [Int] = []
+    @State private var rsvpRemindersLoaded = false
     @State private var dayPreviewOverlap: SouveraOverlap?
 
     private var effectivePartstat: String {
@@ -1301,13 +1305,6 @@ private struct CalendarEventDetailSheet: View {
                         }
                     }
                 }
-                if !event.reminders.isEmpty {
-                    Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
-                        ForEach(event.reminders.sorted(), id: \.self) { minutes in
-                            Label(CalendarReminderText.label(minutes: minutes), systemImage: "bell")
-                        }
-                    }
-                }
                 // Run 16.09.: Organisator-Zeile (Name, sonst E-Mail -
                 // bei externen Einladungen zumindest die Adresse).
                 if !event.organizerName.isEmpty || !event.organizerEmail.isEmpty {
@@ -1320,10 +1317,37 @@ private struct CalendarEventDetailSheet: View {
                         Text(NSLocalizedString("_invitations_organizer_", comment: ""))
                     }
                 }
-                // B4: Erinnerungen bearbeiten (Standard 15 min).
+                // Run 19.09. (Feedback): EIN Erinnerungs-Konzept (wie im
+                // Termin-Edit) - sofort speichern, auch nach dem Antworten.
                 Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
-                    SouveraReminderEditor(minutes: $rsvpReminderMinutes)
-                        .onChange(of: rsvpReminderMinutes) { _, _ in rsvpRemindersTouched = true }
+                    ForEach(rsvpReminderMinutes.sorted(), id: \.self) { minutes in
+                        HStack {
+                            Label(CalendarReminderText.label(minutes: minutes), systemImage: "bell")
+                                .font(.subheadline)
+                            Spacer()
+                            Button {
+                                var updated = rsvpReminderMinutes
+                                updated.removeAll { $0 == minutes }
+                                rsvpReminderMinutes = updated
+                                Task { _ = await viewModel.updateReminders(event, minutes: updated) }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    Menu {
+                        ForEach(CalendarReminderText.presets, id: \.self) { minutes in
+                            Button(CalendarReminderText.label(minutes: minutes)) {
+                                guard !rsvpReminderMinutes.contains(minutes) else { return }
+                                var updated = rsvpReminderMinutes
+                                updated.append(minutes)
+                                rsvpReminderMinutes = updated
+                                Task { _ = await viewModel.updateReminders(event, minutes: updated) }
+                            }
+                        }
+                    } label: {
+                        Label(NSLocalizedString("_calendar_reminder_add_", comment: ""), systemImage: "plus.bell")
+                    }
                 }
                 // B7: Überschneidungen (tappbar -> Tages-Popup) - nur bei
                 // tatsächlichen Funden (Run 18.09.: keine leere Sektion).
@@ -1356,8 +1380,8 @@ private struct CalendarEventDetailSheet: View {
                                 Button {
                                     Task {
                                         rsvpBusyForHref = event.href
-                                        let reminders = rsvpRemindersTouched ? rsvpReminderMinutes : nil
-                                        let ok = await viewModel.respondToInvitation(event, status: rsvp, reminderMinutes: reminders)
+                                        let ok = await viewModel.respondToInvitation(
+                                            event, status: rsvp, reminderMinutes: nil)
                                         if ok { answeredRSVP = rsvp }
                                         rsvpBusyForHref = nil
                                     }
@@ -1438,6 +1462,12 @@ private struct CalendarEventDetailSheet: View {
         // Run 19.09. (Feedback): EIN Toolbar-Set - Zurück links (nur im
         // Einladungskontext), ein "Abbrechen" rechts. Zwei Toolbar-Blöcke
         // produzierten ein doppeltes "Abbrechen".
+        .onAppear {
+            if !rsvpRemindersLoaded {
+                rsvpReminderMinutes = event.reminders
+                rsvpRemindersLoaded = true
+            }
+        }
         .toolbar {
             if onBackToInvitations != nil {
                 ToolbarItem(placement: .cancellationAction) {

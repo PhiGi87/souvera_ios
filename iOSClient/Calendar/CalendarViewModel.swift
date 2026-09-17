@@ -646,6 +646,41 @@ final class CalendarViewModel: ObservableObject {
         }
     }
 
+    /// Run 19.09. (Feedback): Erinnerungen eines bestehenden Termins
+    /// sofort speichern (setValarms + PUT) - einheitlich mit den
+    /// Einladungen, auch nach dem Antworten.
+    @discardableResult
+    func updateReminders(_ event: CalendarEventModel, minutes: [Int]) async -> Bool {
+        guard let entry = cachedEntries.first(where: { $0.href == event.href }) else {
+            actionFeedback = CalendarActionFeedback(
+                success: false,
+                message: NSLocalizedString("_calendar_reminder_save_failed_", comment: ""))
+            return false
+        }
+        let updated = Self.setValarms(ics: entry.ics, minutes: minutes)
+        let ok = await client.updateEvent(entry, ics: updated)
+        if ok, let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
+            cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                                  href: entry.href, etag: entry.etag, ics: updated)
+            if case var .success(list) = events {
+                let refreshed = Self.parseEntries([CalDavEventEntry(
+                    calendarHref: entry.calendarHref, href: entry.href,
+                    etag: entry.etag, ics: updated)], ownEmail: Self.ownAttendeeEmail())
+                list.removeAll { $0.href == event.href }
+                list.append(contentsOf: refreshed)
+                events = .success(list.sorted { $0.start < $1.start })
+            }
+            actionFeedback = CalendarActionFeedback(
+                success: true,
+                message: NSLocalizedString("_calendar_reminder_saved_", comment: ""))
+        } else {
+            actionFeedback = CalendarActionFeedback(
+                success: false,
+                message: NSLocalizedString("_calendar_reminder_save_failed_", comment: ""))
+        }
+        return ok
+    }
+
     // MARK: - Einladungen (Run 16.09.)
 
     enum CalendarRSVP: String, CaseIterable {
@@ -728,6 +763,11 @@ final class CalendarViewModel: ObservableObject {
             actionFeedback = CalendarActionFeedback(
                 success: true,
                 message: "\(NSLocalizedString(status.titleKey, comment: "")): \(event.title)")
+            // Run 19.09.: Antwort lokal markieren (Uebersicht-Filter +
+            // Schraffur sind sofort korrekt, unabhaengig vom Serverstand).
+            if !event.uid.isEmpty {
+                SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end)
+            }
             // B6: Externer Organisator - Server-iTIP erreicht ihn nicht,
             // deshalb zusaetzlich die normale Antwort-Mail.
             if Self.organizerIsExternal(event.organizerEmail) {

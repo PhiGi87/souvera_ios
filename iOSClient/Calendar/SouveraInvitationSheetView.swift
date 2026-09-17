@@ -30,7 +30,10 @@ struct SouveraInvitationSheetView: View {
                 // Run 19.09. (Feedback): beantwortete Einladungen (PARTSTAT
                 // != needs-action) erscheinen NICHT mehr in der Übersicht -
                 // defensiv render-seitig gefiltert.
-                let openCalendarInvites = center.calendarInvites.filter { $0.ownPartstat == "needs-action" }
+                let openCalendarInvites = center.calendarInvites.filter {
+                    $0.ownPartstat == "needs-action"
+                        && !SouveraInvitationCenter.isAnswered(uid: $0.uid)
+                }
                 if !openCalendarInvites.isEmpty {
                     Section(NSLocalizedString("_invitations_section_calendar_", comment: "")) {
                         ForEach(openCalendarInvites) { event in
@@ -259,8 +262,9 @@ struct SouveraInvitationDetailView: View {
     /// Run 19.09. (Feedback): gewaehlte Antwort merken - das Label zeigt
     /// das KORREKTE Icon/Farbe (gruen ✓ / orange ? / rot ✕).
     @State private var answeredRSVP: CalendarViewModel.CalendarRSVP?
-    @State private var reminderMinutes: [Int] = [15]
-    @State private var remindersTouched = false
+    /// Run 19.09.: Erinnerungen (einheitliches Konzept, sofort gespeichert).
+    @State private var reminderMinutes: [Int] = []
+    @State private var remindersLoaded = false
     @State private var dayPreview: SouveraOverlap?
     @State private var declineProposalMode = false
     @State private var altProposalStart: Date = {
@@ -403,6 +407,16 @@ struct SouveraInvitationDetailView: View {
                 }
             }
             .onChange(of: isResolving) { _, resolving in
+                if !resolving, !remindersLoaded {
+                    // Run 19.09.: Erinnerungen laden (Overrides gewinnen).
+                    if let live = liveInvitation,
+                       let override = SouveraInvitationCenter.reminderOverrides(live.id) {
+                        reminderMinutes = override
+                    } else {
+                        reminderMinutes = displayEvent.reminders
+                    }
+                    remindersLoaded = true
+                }
                 // Run 18.09.: Nach dem Resolve die Überschneidungsbasis
                 // (Mail-Direktdetail: Kalender-Tag lazy) nachladen.
                 if !resolving, let overlapProvider {
@@ -542,9 +556,56 @@ struct SouveraInvitationDetailView: View {
 
     @ViewBuilder
     private var reminderSection: some View {
+        // Run 19.09. (Feedback): identisches Konzept wie im Termin-Edit;
+        // jede Aenderung wird SOFORT gespeichert (PUT bei vorhandenem
+        // Termin, sonst beim Anlegen angewandt).
         Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
-            SouveraReminderEditor(minutes: $reminderMinutes)
-                .onChange(of: reminderMinutes) { _, _ in remindersTouched = true }
+            ForEach(reminderMinutes.sorted(), id: \.self) { minutes in
+                HStack {
+                    Label(CalendarReminderText.label(minutes: minutes), systemImage: "bell")
+                        .font(.subheadline)
+                    Spacer()
+                    Button {
+                        var updated = reminderMinutes
+                        updated.removeAll { $0 == minutes }
+                        reminderMinutes = updated
+                        Task {
+                            _ = await SouveraInvitationCenter.shared.updateInvitationReminders(
+                                liveInvitation ?? SouveraMailInvitation(
+                                    id: event.href, messageId: event.href, accountId: "",
+                                    subject: event.title, from: event.organizerEmail,
+                                    organizerEmail: event.organizerEmail,
+                                    event: event, rawICS: nil, resolved: true,
+                                    receivedAt: Date()),
+                                minutes: updated)
+                        }
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Menu {
+                ForEach(CalendarReminderText.presets, id: \.self) { minutes in
+                    Button(CalendarReminderText.label(minutes: minutes)) {
+                        guard !reminderMinutes.contains(minutes) else { return }
+                        var updated = reminderMinutes
+                        updated.append(minutes)
+                        reminderMinutes = updated
+                        Task {
+                            _ = await SouveraInvitationCenter.shared.updateInvitationReminders(
+                                liveInvitation ?? SouveraMailInvitation(
+                                    id: event.href, messageId: event.href, accountId: "",
+                                    subject: event.title, from: event.organizerEmail,
+                                    organizerEmail: event.organizerEmail,
+                                    event: event, rawICS: nil, resolved: true,
+                                    receivedAt: Date()),
+                                minutes: updated)
+                        }
+                    }
+                }
+            } label: {
+                Label(NSLocalizedString("_calendar_reminder_add_", comment: ""), systemImage: "plus.bell")
+            }
         }
     }
 
@@ -760,8 +821,7 @@ struct SouveraInvitationDetailView: View {
         }
         busy = true
         Task {
-            let reminders = remindersTouched ? reminderMinutes : nil
-            let ok = await respond(rsvp, reminders, nil, selectedCalendarHref)
+            let ok = await respond(rsvp, nil, nil, selectedCalendarHref)
             busy = false
             if ok == true {
                 answeredRSVP = rsvp
@@ -773,8 +833,7 @@ struct SouveraInvitationDetailView: View {
         guard let respond else { return }
         busy = true
         Task {
-            let reminders = remindersTouched ? reminderMinutes : nil
-            let ok = await respond(.declined, reminders, proposalText, selectedCalendarHref)
+            let ok = await respond(.declined, nil, proposalText, selectedCalendarHref)
             busy = false
             if ok == true {
                 answeredRSVP = .declined

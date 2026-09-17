@@ -327,6 +327,32 @@ final class JmapApi {
         )
     }
 
+    /// Run 19.09. (Feedback: Antwort-Mail kam nicht an): Die Einreichung
+    /// nach dem Submit auf "final" setzen (Undo-Fenster beenden) und den
+    /// Zustand pruefen - Stalwart akzeptierte sie sonst nur als "pending".
+    func finalizeSubmission(accountId: String, submissionId: String) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
+        args["accountId"] = try resolveAccountArg(accountId)
+        args["update"] = [submissionId: ["undoStatus": "final"]]
+        return try await client.singleCall(
+            "EmailSubmission/set",
+            args: args,
+            using: [JmapCapabilities.core, JmapCapabilities.mail, JmapCapabilities.submission]
+        )
+    }
+
+    /// Zustand einer Einreichung abfragen (sent/failed/pending).
+    func getSubmission(accountId: String, submissionId: String) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
+        args["accountId"] = try resolveAccountArg(accountId)
+        args["ids"] = [submissionId]
+        return try await client.singleCall(
+            "EmailSubmission/get",
+            args: args,
+            using: [JmapCapabilities.core, JmapCapabilities.mail, JmapCapabilities.submission]
+        )
+    }
+
     // MARK: - Identity/get
 
     func getIdentities(accountId: String) async throws -> [[String: Any]] {

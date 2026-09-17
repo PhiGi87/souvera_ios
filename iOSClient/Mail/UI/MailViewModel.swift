@@ -1231,18 +1231,29 @@ final class MailViewModel: ObservableObject {
         // Run 17.09.: ZUERST echte Termindaten beschaffen (ICS oder
         // Text-Fallback) - die Buttons funktionieren dadurch immer.
         let resolved = await SouveraInvitationCenter.shared.resolveInvitation(invitation)
-        // B1: Bei Annehmen/Vielleicht den Termin in den gewaehlten
-        // Kalender (Default: persoenlich) eintragen.
-        var createICS = resolved.rawICS
-        if createICS == nil, let event = resolved.event {
-            createICS = SouveraInvitationCenter.synthesizeICS(
-                title: event.title, start: event.start, end: event.end,
-                organizerEmail: resolved.organizerEmail)
+        // Run 19.09. (Feedback): zuerst PUT auf einen bereits vorhandenen
+        // Termin (UID-Match) - nur ohne Match neu anlegen (kein Duplikat).
+        var handledExisting = false
+        if !resolved.isCancellation, !resolved.eventUID.isEmpty {
+            handledExisting = await SouveraInvitationCenter.shared.respondToExistingCalendarEvent(
+                uid: resolved.eventUID, status: status.rawValue,
+                reminderMinutes: reminderMinutes)
         }
-        if status != .declined, !resolved.isCancellation, let ics = createICS {
-            await SouveraInvitationCenter.shared.createCalendarEvent(
-                from: resolved, ics: ics, status: status.rawValue,
-                calendarHref: calendarHref, reminderMinutes: reminderMinutes)
+        if status != .declined, !resolved.isCancellation, !handledExisting {
+            var createICS = resolved.rawICS
+            if createICS == nil, let event = resolved.event {
+                createICS = SouveraInvitationCenter.synthesizeICS(
+                    title: event.title, start: event.start, end: event.end,
+                    organizerEmail: resolved.organizerEmail)
+            }
+            if let ics = createICS {
+                await SouveraInvitationCenter.shared.createCalendarEvent(
+                    from: resolved, ics: ics, status: status.rawValue,
+                    calendarHref: calendarHref, reminderMinutes: reminderMinutes)
+            }
+        }
+        if !resolved.isCancellation, !resolved.eventUID.isEmpty {
+            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end)
         }
         // B1: Moderne Antwort-Mail (Eckdaten + Absender + optionaler
         // Alternativvorschlag) - unabhaengig vom eigenen Send-Pfad.

@@ -88,13 +88,40 @@ actor SouveraInviteMailSender {
             )
             let created = draftResp["created"] as? [String: Any]
             let emailId = (created?["new"] as? [String: Any])?.optString("id") ?? ""
-            guard !emailId.isEmpty, !identityId.isEmpty else { return false }
-            _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identityId)
+            guard !emailId.isEmpty, !identityId.isEmpty else {
+                SouveraLog.write("Invitations", "reply: draft-create fehlgeschlagen (emailId=\(emailId) identity=\(identityId))")
+                return false
+            }
+            // Run 19.09. (Feedback: Mail kam nicht an): Einreichung
+            // finalisieren (Undo-Fenster beenden) + Ergebnis loggen.
+            let submitResp = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identityId)
+            let submissionId = ((submitResp["created"] as? [String: Any])?["sendme"] as? [String: Any])?.optString("id") ?? ""
+            SouveraLog.write("Invitations", "reply submission email=\(emailId) submission=\(submissionId)")
+            if !submissionId.isEmpty {
+                _ = try? await api.finalizeSubmission(accountId: accId, submissionId: submissionId)
+                if let state = try? await api.getSubmission(accountId: accId, submissionId: submissionId),
+                   let list = state["list"] as? [[String: Any]],
+                   let first = list.first {
+                    let status = first.optString("undoStatus") ?? "-"
+                    let delivery = (first["deliveryStatus"] as? [String: Any])
+                        .flatMap { $0.values.first as? [String: Any] }?
+                        .optString("delivered") ?? "-"
+                    SouveraLog.write("Invitations", "reply submission state: undo=\(status) delivered=\(delivery)")
+                }
+            }
             _ = try? await api.setEmailFlags(
                 accountId: accId,
                 emailIds: [emailId],
                 keywordsToRemove: ["$draft"]
             )
+            // Run 19.09. (Feedback): Kopie nach "Gesendet" verschieben -
+            // die Antwort tauchte sonst nur in Entwuerfe auf.
+            if let sent = mailboxes.first(where: { ($0["role"] as? String) == "sent" })?["id"] as? String,
+               !sent.isEmpty {
+                _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId],
+                                              targetMailboxId: sent, markRead: true)
+            }
+            SouveraLog.write("Invitations", "reply sent to \(to)")
             return true
         } catch {
             SouveraLog.write("Invitations", "reply mail failed: \(error)")
