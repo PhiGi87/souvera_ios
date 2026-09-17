@@ -142,6 +142,12 @@ final class SouveraInvitationCenter: ObservableObject {
             guard !answered.contains(messageId) else { continue }
             let from = Self.firstFromAddress(json)
             let lowerSubject = subject.lowercased()
+            // Run 18.09. (Feedback): auch ABLESAGEN erkennen - Betreff-
+            // Praefix "Abgesagt:"/"Cancelled:" (auch ohne ICS).
+            let cancelHint = lowerSubject.hasPrefix("abgesagt:")
+                || lowerSubject.hasPrefix("cancelled:")
+                || lowerSubject.hasPrefix("canceled:")
+                || lowerSubject.hasPrefix("abgesagt ")
             let subjectHint = lowerSubject.hasPrefix("invitation:")
                 || lowerSubject.hasPrefix("einladung:")
                 || lowerSubject.hasPrefix("invito:")
@@ -156,7 +162,7 @@ final class SouveraInvitationCenter: ObservableObject {
                 ($0["type"] as? String)?.lowercased().contains("calendar") == true
                     || (($0["name"] as? String)?.lowercased().hasSuffix(".ics") == true)
             })
-            guard subjectHint || icsAttachment != nil else { continue }
+            guard subjectHint || cancelHint || icsAttachment != nil else { continue }
 
             var parsedEvent: CalendarEventModel?
             var invitationICS: String?
@@ -174,12 +180,12 @@ final class SouveraInvitationCenter: ObservableObject {
 
             // Run 18.09.: METHOD/SEQUENCE erkennen (CANCEL + erneute
             // Antwort-Wahl bei hoeherer SEQUENCE).
-            var kind = SouveraMailInvitation.Kind.invitation
+            var kind: SouveraMailInvitation.Kind = cancelHint ? .cancel : .invitation
             var sequence = 0
             if let ics = invitationICS {
                 let method = (Self.quickExtract(ics, key: "METHOD") ?? "REQUEST").uppercased()
                 sequence = Int(Self.quickExtract(ics, key: "SEQUENCE") ?? "") ?? 0
-                kind = method == "CANCEL" ? .cancel : .invitation
+                if method == "CANCEL" { kind = .cancel }
                 if let uid = Self.quickExtract(ics, key: "UID") {
                     Self.resetAnsweredIfNewerSequence(uid: uid, sequence: sequence)
                 }
@@ -269,6 +275,12 @@ final class SouveraInvitationCenter: ObservableObject {
             let method = (Self.quickExtract(ics, key: "METHOD") ?? "REQUEST").uppercased()
             sequence = Int(Self.quickExtract(ics, key: "SEQUENCE") ?? "") ?? 0
             kind = method == "CANCEL" ? .cancel : .invitation
+            // Run 18.09.: Betreff-Fallback, falls kein METHOD in der ICS.
+            if invitation.subject.lowercased().hasPrefix("abgesagt:")
+                || invitation.subject.lowercased().hasPrefix("cancelled:")
+                || invitation.subject.lowercased().hasPrefix("canceled:") {
+                kind = .cancel
+            }
             event = ICSParser.parseEvents(ics, calendarHref: "", href: invitation.messageId,
                                           etag: nil, ownEmail: ownEmail.lowercased()).first
             if event == nil {

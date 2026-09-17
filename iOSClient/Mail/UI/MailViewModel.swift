@@ -1475,6 +1475,9 @@ final class MailViewModel: ObservableObject {
                     var fetchedAll: [[String: Any]] = []
                     var cursor = 0
                     while cursor < refetch.count {
+                        // Run 18.09. (Feedback: Blockade): Main-Thread zwischen
+                        // Batches entlasten.
+                        await Task.yield()
                         let batch = Array(refetch[cursor..<min(cursor + 500, refetch.count)])
                         cursor += 500
                         let fetched = try await api.getEmails(accountId: accId, ids: batch, properties: JmapApi.listSyncProperties)
@@ -1512,7 +1515,7 @@ final class MailViewModel: ObservableObject {
                     // inkrementelle Sync (Snapshot von VOR der Löschung) die
                     // gelöschten Mails in den Cache (Reappear-Muster).
                     let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
-                    MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
+                    await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                     messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
@@ -1657,7 +1660,7 @@ final class MailViewModel: ObservableObject {
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
                 let collectedFiltered = collected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
+                await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
                 JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
@@ -1750,7 +1753,7 @@ final class MailViewModel: ObservableObject {
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
             let savedCollected = finalCollected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
-            MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
+            await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
             // Stands (Voll-Refresh) sind die optimistisch entfernten IDs
@@ -1785,7 +1788,7 @@ final class MailViewModel: ObservableObject {
                 JmapLog.write("P64 stale verification removed \(removedSet.count) of \(cachedIds.count) cached mails")
                 var kept = finalSnapshot.filter { !removedSet.contains($0.optString("id") ?? "") }
                 kept = kept.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: cacheAccountKey, mailboxId: cacheKey, emails: kept, queryState: finalState)
+                await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 // Live-Liste ebenfalls bereinigen: auf einem anderen Gerät /
                 // im Web gelöschte Mails entfernen. NUR Entfernen auf Basis des
                 // AKTUELLEN Listenstands (kein Republish des alten Snapshots -
@@ -1869,7 +1872,7 @@ final class MailViewModel: ObservableObject {
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
                 let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
+                await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
                 messages = .success(filterPendingRemoved(protectingLiveMessages(keptEmails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })))
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
@@ -2871,11 +2874,12 @@ final class MailViewModel: ObservableObject {
             mutationRefreshTask = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 800_000_000)
                 guard !Task.isCancelled else { return }
-                // P62f-Fix: pendingRemovedIds werden NUR im Sync selbst
-                // freigegeben, wenn der Full-Refresh TATSÄCHLICH lief
-                // (sonst leert ein gequeueter Refresh den Filter zu früh
-                // und die Mail taucht wieder auf - Log-Beweis).
-                await self?.refreshMessages()
+                // Run 18.09. (Feedback: Blockade nach Löschen - Voll-
+                // Refresh lud alle 319 Mails seitenweise neu und blockierte
+                // die UI): INKREMENTELLER Sync statt Voll-Refresh. Die
+                // pendingRemovedIds bleiben bis zum nächsten Voll-Refresh
+                // aktiv (Grace-Liste schützt zusätzlich).
+                await self?.refreshMessagesIncremental()
             }
         } else if !lastSearchQuery.isEmpty {
             Task { await search(lastSearchQuery) }

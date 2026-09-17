@@ -2775,6 +2775,11 @@ struct MailInvitationDetailSheet: View {
             respond: { rsvp, reminders, altProposal, calendarHref in
                 await respond(rsvp, reminders, altProposal, calendarHref)
             },
+            // Run 18.09. (Feedback): Überschneidungen auch beim
+            // Direktöffnen aus der Mail (Kalender-Tag lazy laden).
+            overlapProvider: { day in
+                await loadOverlapEvents(for: day)
+            },
             onBack: onBack
         )
         .task {

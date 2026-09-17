@@ -402,7 +402,10 @@ struct SouveraInvitationDetailView: View {
                                 cancelBusy = true
                                 Task {
                                     let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
-                                        uid: displayEvent.uid)
+                                        uid: displayEvent.uid,
+                                        title: displayEvent.title,
+                                        start: displayEvent.start,
+                                        end: displayEvent.end)
                                     cancelBusy = false
                                     if ok {
                                         cancelRemoved = true

@@ -102,11 +102,13 @@ struct SouveraOverlapListView: View {
     }
 }
 
-// MARK: - B8: Tages-Popup (Run 18.09. Neubau)
+// MARK: - B8: Tages-Popup (Run 18.09. final)
 //
-// Echtes Popup-Overlay: ganzer Tag scrollbar (00-24 Uhr), Termine
-// seit-an-seit (Spaltenaufteilung wie Tagesansicht), offene Termine
-// schraffiert, sauberer Innenrahmen.
+// Absolutes Koordinatensystem: Stundenlinien, Labels und Terminblöcke
+// werden ALLE aus demselben minutes x hourHeight-Wert positioniert -
+// keine VStack/HStack-Interaktion, dadurch exakte Ausrichtung.
+// Überlappungs-Cluster: einzelne Termine volle Breite, kollidierende
+// Termine teilen sich Spalten.
 
 struct SouveraDayPreviewPopup: View {
     let day: Date
@@ -116,38 +118,47 @@ struct SouveraDayPreviewPopup: View {
     let onDismiss: () -> Void
 
     private let hourHeight: CGFloat = 52
+    private let labelWidth: CGFloat = 44
 
-    private var hours: [Date] {
-        let start = Calendar.current.startOfDay(for: day)
-        return (0..<24).compactMap {
-            Calendar.current.date(byAdding: .hour, value: $0, to: start)
-        }
-    }
-
-    /// Termine des Tages; echte Kollisionen in Spalten nebeneinander.
-    /// Run 18.09. (Feedback): Einzeltermin bekommt die VOLLE Breite.
-    private var columns: [[CalendarEventModel]] {
-        let events = dayEvents
-        guard events.count > 1 else { return events.isEmpty ? [] : [[events[0]]] }
-        var columns: [[CalendarEventModel]] = []
-        for event in events {
-            var placed = false
-            for index in columns.indices {
-                if columns[index].allSatisfy({ $0.end <= event.start || event.end <= $0.start }) {
-                    columns[index].append(event)
-                    placed = true
-                    break
-                }
-            }
-            if !placed { columns.append([event]) }
-        }
-        return columns
-    }
+    private var hours: [Int] { Array(0..<24) }
 
     private var dayEvents: [CalendarEventModel] {
         allEvents
-            .filter { Calendar.current.isDate($0.start, inSameDayAs: day) }
+            .filter { Calendar.current.isDate($0.start, inSameDayAs: day) && !$0.allDay }
             .sorted { $0.start < $1.start }
+    }
+
+    /// Run 18.09. (Feedback): Überlappungs-CLUSTER - nur wirklich
+    /// kollidierende Termine teilen Spalten; Einzeltermine volle Breite.
+    private struct Cluster {
+        var events: [CalendarEventModel] = []
+        var columns: [[CalendarEventModel]] = []
+        var end: Date = Date.distantPast
+    }
+
+    private var clusters: [Cluster] {
+        var clusters: [Cluster] = []
+        for event in dayEvents {
+            if let last = clusters.last, event.start < last.end {
+                // Kollision mit dem laufenden Cluster: Spalte finden.
+                var cluster = last
+                var placed = false
+                for index in cluster.columns.indices {
+                    if cluster.columns[index].allSatisfy({ $0.end <= event.start || event.end <= $0.start }) {
+                        cluster.columns[index].append(event)
+                        placed = true
+                        break
+                    }
+                }
+                if !placed { cluster.columns.append([event]) }
+                cluster.events.append(event)
+                cluster.end = max(cluster.end, event.end)
+                clusters[clusters.count - 1] = cluster
+            } else {
+                clusters.append(Cluster(events: [event], columns: [[event]], end: event.end))
+            }
+        }
+        return clusters
     }
 
     var body: some View {
@@ -177,49 +188,50 @@ struct SouveraDayPreviewPopup: View {
 
             ScrollViewReader { proxy in
                 ScrollView {
+                    // Run 18.09.: ABSOLUTES Koordinatensystem - Grid und
+                    // Blöcke aus derselben minutes -> y-Rechnung.
                     ZStack(alignment: .topLeading) {
-                        // Stundenraster (ganzer Tag)
-                        VStack(spacing: 0) {
-                            ForEach(hours, id: \.timeIntervalSince1970) { hour in
-                                HStack(spacing: 8) {
-                                    Text(hourText(hour))
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .frame(width: 44, alignment: .center)
-                                    Rectangle()
-                                        .fill(Color(.systemGray5))
-                                        .frame(height: 0.5)
+                        // Stundenlinien + Labels
+                        ForEach(hours, id: \.self) { hour in
+                            let y = CGFloat(hour) * hourHeight
+                            Text(String(format: "%02d:00", hour))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(width: labelWidth, alignment: .center)
+                                .offset(y: y - 8)
+                            Rectangle()
+                                .fill(Color(.systemGray5))
+                                .frame(height: 0.5)
+                                .offset(y: y)
+                                .padding(.leading, labelWidth + 8)
+                                .id(y)
+                        }
+                        // Terminblöcke (clusterweise, volle Breite wenn solo)
+                        ForEach(clusters.indices, id: \.self) { clusterIndex in
+                            let cluster = clusters[clusterIndex]
+                            let columnCount = CGFloat(max(1, cluster.columns.count))
+                            ForEach(cluster.columns.indices, id: \.self) { columnIndex in
+                                ForEach(cluster.columns[columnIndex]) { event in
+                                    let width = availableWidth / columnCount
+                                        - (columnCount > 1 ? 6 : 0)
+                                    block(for: event)
+                                        .frame(width: max(60, width),
+                                               height: blockHeight(for: event))
+                                        .offset(
+                                            x: labelWidth + 8
+                                                + CGFloat(columnIndex) * (availableWidth / columnCount),
+                                            y: offsetY(for: event))
                                 }
-                                .frame(height: hourHeight, alignment: .top)
                             }
                         }
-                        // Terminblöcke (seit-an-seit in Spalten)
-                        HStack(alignment: .top, spacing: 6) {
-                            ForEach(columns.indices, id: \.self) { columnIndex in
-                                ZStack(alignment: .topLeading) {
-                                    Color.clear
-                                    ForEach(columns[columnIndex]) { event in
-                                        block(for: event)
-                                            .frame(height: blockHeight(for: event))
-                                            .offset(y: offsetY(for: event))
-                                    }
-                                }
-                            }
-                        }
-                        .padding(.leading, 52)
-                        .padding(.trailing, 12)
                     }
+                    .frame(height: 24 * hourHeight)
                     .padding(.vertical, 8)
-                    .onAppear {
-                        // Run 18.09.: zum Ereignis-Bereich scrollen (im
-                        // ganzen Tag ~ Scroll auf die Startstunde).
-                        let hour = Calendar.current.component(.hour, from: highlightEvent.start)
-                        if let target = hours.first(where: {
-                            Calendar.current.component(.hour, from: $0) == max(0, hour - 1)
-                        }) {
-                            proxy.scrollTo(target.timeIntervalSince1970, anchor: .top)
-                        }
-                    }
+                }
+                .onAppear {
+                    let hour = Calendar.current.component(.hour, from: highlightEvent.start)
+                    let y = CGFloat(max(0, hour - 1)) * hourHeight
+                    proxy.scrollTo(y, anchor: .top)
                 }
             }
         }
@@ -229,7 +241,11 @@ struct SouveraDayPreviewPopup: View {
         .frame(maxHeight: 560)
     }
 
-    /// Y-Position relativ zum Tagesbeginn (ganze 24 h).
+    /// Verfügbare Breite für die Blöcke (innen, nach Labelspalte).
+    private var availableWidth: CGFloat {
+        UIScreen.main.bounds.width - 56 - labelWidth - 8 - 12 - 12
+    }
+
     private func offsetY(for event: CalendarEventModel) -> CGFloat {
         let startOfDay = Calendar.current.startOfDay(for: day)
         let minutes = Calendar.current.dateComponents([.minute],
@@ -263,32 +279,13 @@ struct SouveraDayPreviewPopup: View {
         .padding(6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 7).fill(fill))
-        // Run 18.09. (Feedback): offene (unbeantwortete) Termine schraffiert.
+        // Schraffur AUSSCHLIESSLICH fuer unbeantwortete Einladungen.
         .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .fill(
-                    LinearGradient(
-                        colors: [.clear, .clear],
-                        startPoint: .topLeading, endPoint: .bottomTrailing)
-                )
-                .opacity(0)
-        )
-        .overlay(
-            // Run 18.09. (Feedback): Schraffur AUSSCHLIESSLICH fuer
-            // unbeantwortete Einladungen (needs-action) - normale Termine
-            // (leerer PARTSTAT) bleiben unangetastet.
             SouveraHatchOverlay()
                 .clipShape(RoundedRectangle(cornerRadius: 7))
                 .opacity(event.ownPartstat == "needs-action" ? 0.35 : 0)
         )
         .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0))
-    }
-
-    private func hourText(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        return formatter.string(from: date)
     }
 
     private var dayTitle: String {

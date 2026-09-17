@@ -209,7 +209,11 @@ struct SouveraCalendarView: View {
                 onBack: {
                     openedMailInvite = nil
                 },
-                overlapEvents: live.event != nil ? overlapBasis(live.event!) : []
+                overlapProvider: { day in
+                    await viewModel.load()
+                    if case let .success(list) = viewModel.events { return list }
+                    return []
+                }
             )
             .task {
                 _ = await SouveraInvitationCenter.shared.resolveInvitation(live)

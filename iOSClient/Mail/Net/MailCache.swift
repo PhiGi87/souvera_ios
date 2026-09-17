@@ -65,6 +65,16 @@ enum MailCache {
         let queryState: String?
     }
 
+    /// Run 18.09. (Feedback: UI-Blockade beim Sync): JSON-Serialisierung
+    /// + Gzip-Kompression laufen CPU-lastig - OFF-MAIN ausfuehren.
+    static func saveMessagesOffMain(account: String, mailboxId: String,
+                                    emails: [[String: Any]], queryState: String?) async {
+        let acc = account, id = mailboxId, qs = queryState
+        await Task.detached(priority: .utility) {
+            saveMessages(account: acc, mailboxId: id, emails: emails, queryState: qs)
+        }.value
+    }
+
     static func saveMessages(account: String, mailboxId: String, emails: [[String: Any]], queryState: String?) {
         guard let fileURL = fileURL(account: account, mailboxId: mailboxId) else {
             JmapLog.write("messages cache save: SKIPPED (empty account/mailboxId)")
