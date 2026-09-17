@@ -504,7 +504,7 @@ final class SouveraInvitationCenter: ObservableObject {
             id: event.href, messageId: event.href, accountId: "",
             subject: event.title, from: event.organizerEmail,
             organizerEmail: event.organizerEmail,
-            event: event, rawICS: nil, receivedAt: Date(), resolved: true)
+            event: event, rawICS: nil, resolved: true, receivedAt: Date())
         return await sendReply(invitation: invitation, statusWord: statusWord,
                                altProposal: altProposal)
     }
