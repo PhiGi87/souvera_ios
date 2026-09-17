@@ -416,11 +416,11 @@ final class SouveraInvitationCenter: ObservableObject {
             // Fallback 2: exakt der bewaehrte "Neuer Termin"-Weg - ICS
             // frisch via buildICS bauen (Titel/Zeiten/Ort/Teilnehmer).
             let draft = EventDraft(
-                uid: uid, title: event.title, start: event.start, end: event.end,
+                uid: uid, sequence: 0, title: event.title, start: event.start, end: event.end,
                 allDay: event.allDay, location: event.location ?? "",
                 notes: event.description ?? "", attendees: event.attendees,
                 talkRoomToken: event.talkRoomToken, talkRoomName: event.talkRoomName,
-                calendarHref: target.href, sequence: 0)
+                calendarHref: target.href)
             let rebuilt = ICSParser.buildICS(draft, organizerEmail: event.organizerEmail,
                                              organizerName: event.organizerName)
             created = await client.createEvent(calendarHref: target.href, ics: rebuilt, uid: uid)
@@ -477,8 +477,8 @@ final class SouveraInvitationCenter: ObservableObject {
         for cal in calendars {
             let fetched = await client.fetchEvents(
                 calendarHref: cal.href,
-                start: calendar.date(byAdding: .day, value: -30, to: now),
-                end: calendar.date(byAdding: .day, value: 370, to: now))
+                start: calendar.date(byAdding: .day, value: -30, to: now) ?? now,
+                end: calendar.date(byAdding: .day, value: 370, to: now) ?? now)
             for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
                 let ok = await client.deleteEvent(entry)
                 SouveraLog.write("Invitations", "cancel remove uid=\(uid): \(ok)")

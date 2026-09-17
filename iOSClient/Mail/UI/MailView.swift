@@ -181,24 +181,7 @@ struct MailView: View {
                         altProposal: altProposal)
                 },
                 overlapProvider: { day in
-                    // Run 18.09. (Feedback): Überschneidungen auch in der
-                    // Mail-Direktdetailansicht - Einladungstag lazy laden.
-                    let client = CalDavClient(account: nil)
-                    let calendar = Calendar.current
-                    let dayStart = calendar.startOfDay(for: day)
-                    let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
-                    let calendars = await client.fetchCalendars()
-                    var events: [CalendarEventModel] = []
-                    for cal in calendars {
-                        let fetched = await client.fetchEvents(
-                            calendarHref: cal.href, start: dayStart, end: dayEnd)
-                        for entry in fetched {
-                            events += ICSParser.parseEvents(
-                                entry.ics, calendarHref: cal.href,
-                                href: entry.href, etag: entry.etag)
-                        }
-                    }
-                    return events
+                    await loadOverlapEvents(for: day)
                 },
                 onBack: {
                     showInvitationDetail = nil
@@ -2759,5 +2742,30 @@ struct MailInvitationButtonIcon: View {
             .foregroundStyle(colorScheme == .dark ? Color.white : Color(red: 0.05, green: 0.15, blue: 0.35))
             .frame(width: 56, height: 56)
             .modifier(SouveraInvitationFABBackground())
+    }
+}
+
+
+// Run 18.09.: Überschneidungsbasis für die Mail-Direktdetailansicht
+// (Einladungstag lazy laden) - als Methode ausgelagert, damit der
+// body-Ausdruck kompilierbar bleibt.
+extension MailView {
+    fileprivate func loadOverlapEvents(for day: Date) async -> [CalendarEventModel] {
+        let client = CalDavClient(account: nil)
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: day)
+        let dayEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) ?? day
+        let calendars = await client.fetchCalendars()
+        var events: [CalendarEventModel] = []
+        for cal in calendars {
+            let fetched = await client.fetchEvents(
+                calendarHref: cal.href, start: dayStart, end: dayEnd)
+            for entry in fetched {
+                events += ICSParser.parseEvents(
+                    entry.ics, calendarHref: cal.href,
+                    href: entry.href, etag: entry.etag)
+            }
+        }
+        return events
     }
 }

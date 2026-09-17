@@ -26,7 +26,7 @@ actor SouveraInviteMailSender {
         guard to.contains("@") else { return false }
         for attempt in 0..<3 {
             if attempt > 0 {
-                let backoff = attempt == 1 ? 2_000_000_000 : 5_000_000_000
+                let backoff: UInt64 = attempt == 1 ? 2_000_000_000 : 5_000_000_000
                 try? await Task.sleep(nanoseconds: backoff)
             }
             if await sendOnce(to: to, subject: subject, html: html,

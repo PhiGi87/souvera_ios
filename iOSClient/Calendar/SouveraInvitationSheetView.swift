@@ -440,15 +440,20 @@ struct SouveraInvitationDetailView: View {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
                 }
             }
-            .task(id: displayEvent.start) {
-                // Run 18.09.: Überschneidungsbasis laden (Provider) bzw.
-                // aus dem Center aktualisieren.
-                if let overlapProvider {
-                    overlapEvents = await overlapProvider(displayEvent.start)
+            .onChange(of: isResolving) { _, resolving in
+                // Run 18.09.: Nach dem Resolve die Überschneidungsbasis
+                // (Mail-Direktdetail: Kalender-Tag lazy) nachladen.
+                if !resolving, let overlapProvider {
+                    Task {
+                        overlapEvents = await overlapProvider(displayEvent.start)
+                    }
                 }
             }
             .onAppear {
                 Task {
+                    if let overlapProvider {
+                        overlapEvents = await overlapProvider(displayEvent.start)
+                    }
                     let client = CalDavClient(account: nil)
                     let fetched = await client.fetchCalendars()
                     calendars = fetched
