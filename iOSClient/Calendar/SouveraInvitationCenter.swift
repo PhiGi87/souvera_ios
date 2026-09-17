@@ -475,30 +475,53 @@ final class SouveraInvitationCenter: ObservableObject {
         return nil
     }
 
-    /// Run 18.09.: CANCEL — eingeladenen Termin manuell aus dem Kalender
-    /// entfernen (UID-Match ueber alle Kalender).
-    @discardableResult
-    func removeCancelledEvent(uid: String) async -> Bool {
-        guard !uid.isEmpty else { return false }
+    /// Run 18.09. (Feedback): Matching UID ODER exakt Titel (normalisiert)
+    /// + Start/Ende ±5 min - ohne ICS kein blur-Raten.
+    func removeCancelledEvent(uid: String, title: String = "",
+                              start: Date? = nil, end: Date? = nil) async -> Bool {
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let calendar = Calendar.current
-        // Fenster: Tag des Termins +/- 1 (aus der geparsten Info), sonst
-        // breit um heute.
         let now = Date()
+        let normalizedTitle = title.lowercased()
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        var removed = false
         for cal in calendars {
             let fetched = await client.fetchEvents(
                 calendarHref: cal.href,
                 start: calendar.date(byAdding: .day, value: -30, to: now) ?? now,
                 end: calendar.date(byAdding: .day, value: 370, to: now) ?? now)
-            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
-                let ok = await client.deleteEvent(entry)
-                SouveraLog.write("Invitations", "cancel remove uid=\(uid): \(ok)")
-                return ok
+            for entry in fetched {
+                var matches = false
+                if !uid.isEmpty,
+                   entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                    matches = true
+                } else if !normalizedTitle.isEmpty, let refStart = start, let refEnd = end {
+                    let candidate = ICSParser.parseEvents(
+                        entry.ics, calendarHref: cal.href, href: entry.href,
+                        etag: entry.etag).first
+                    if let candidate {
+                        let candidateTitle = candidate.title.lowercased()
+                            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                            .filter { !$0.isEmpty }.joined(separator: " ")
+                        let startDelta = abs(candidate.start.timeIntervalSince(refStart))
+                        let endDelta = abs(candidate.end.timeIntervalSince(refEnd))
+                        matches = candidateTitle == normalizedTitle
+                            && startDelta <= 300 && endDelta <= 300
+                    }
+                }
+                if matches {
+                    let ok = await client.deleteEvent(entry)
+                    SouveraLog.write("Invitations", "cancel remove uid=\(uid) title=\(title): \(ok)")
+                    if ok { removed = true }
+                }
             }
         }
-        SouveraLog.write("Invitations", "cancel remove: uid=\(uid) nicht im Kalender gefunden")
-        return false
+        if !removed {
+            SouveraLog.write("Invitations", "cancel remove: kein Match (uid=\(uid) title=\(title))")
+        }
+        return removed
     }
 
     // MARK: - Antworten per Mail (moderne Mail + ICS-REPLY-Anhang)
