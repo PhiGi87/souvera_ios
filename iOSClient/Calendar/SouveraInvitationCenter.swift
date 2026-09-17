@@ -556,7 +556,9 @@ final class SouveraInvitationCenter: ObservableObject {
     }
 
     /// Erster Wert des Keys in der ICS (zeilenbasiert, Folding-tolerant).
-    static func quickExtract(_ ics: String, key: String) -> String? {
+    /// nonisolated: wird auch aus nonisolated Kontexten (z. B. dem
+    /// Mail-Modell) aufgerufen.
+    nonisolated static func quickExtract(_ ics: String, key: String) -> String? {
         let unfolded = ics
             .replacingOccurrences(of: "\r\n ", with: "")
             .replacingOccurrences(of: "\n ", with: "")
