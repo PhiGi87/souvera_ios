@@ -25,60 +25,32 @@ struct SouveraInvitationSheetView: View {
     var body: some View {
         NavigationStack {
             List {
-                titleSection
-                whenSection
-                organizerSection
-                if !isResolving, hasOverlaps {
-                    overlapSection
+                if !center.calendarInvites.isEmpty {
+                    Section(NSLocalizedString("_invitations_section_calendar_", comment: "")) {
+                        ForEach(center.calendarInvites) { event in
+                            calendarRow(event)
+                        }
+                    }
                 }
-                if !isResolving, !displayEvent.attendees.isEmpty {
-                    attendeesSection
+                if !center.mailInvites.isEmpty {
+                    Section(NSLocalizedString("_invitations_section_mail_", comment: "")) {
+                        ForEach(center.mailInvites) { invite in
+                            mailRow(invite)
+                        }
+                    }
                 }
-                reminderSection
-                calendarSection
-                if isCancellation {
-                    cancelSection
-                } else {
-                    rsvpSection
+                if center.calendarInvites.isEmpty && center.mailInvites.isEmpty {
+                    Section {
+                        Text(NSLocalizedString("_invitations_none_", comment: ""))
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                if onBack != nil {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button {
-                            onBack?()
-                        } label: {
-                            Label(NSLocalizedString("_back_", comment: ""), systemImage: "chevron.backward")
-                        }
-                    }
-                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
-                }
-            }
-            .onChange(of: isResolving) { _, resolving in
-                // Run 18.09.: Nach dem Resolve die Überschneidungsbasis
-                // (Mail-Direktdetail: Kalender-Tag lazy) nachladen.
-                if !resolving, let overlapProvider {
-                    Task {
-                        overlapEvents = await overlapProvider(displayEvent.start)
-                    }
-                }
-            }
-            .onAppear {
-                Task {
-                    if let overlapProvider {
-                        overlapEvents = await overlapProvider(displayEvent.start)
-                    }
-                    let client = CalDavClient(account: nil)
-                    let fetched = await client.fetchCalendars()
-                    calendars = fetched
-                    if selectedCalendarHref == nil {
-                        selectedCalendarHref = (fetched.first(where: { $0.canWrite && $0.isPersonal })
-                            ?? fetched.first(where: { $0.canWrite }))?.href
-                    }
                 }
             }
         }
@@ -329,132 +301,19 @@ struct SouveraInvitationDetailView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    if isResolving {
-                        HStack(spacing: 10) {
-                            ProgressView()
-                            Text(NSLocalizedString("_invitations_loading_", comment: ""))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        Text(displayEvent.title).font(.title3).fontWeight(.semibold)
-                    }
-                }
-                Section(NSLocalizedString("_calendar_when_", comment: "")) {
-                    if isResolving {
-                        ProgressView()
-                    } else if let answered = SouveraRSVPStatus.label(for: displayEvent.ownPartstat) {
-                        // Run 18.09. (Feedback): nach Beantwortung ist der
-                        // Zeitslot NICHT mehr editierbar.
-                        Label(answered.text, systemImage: answered.icon)
-                            .foregroundStyle(answered.color)
-                            .font(.subheadline.weight(.medium))
-                    } else if displayEvent.uid.isEmpty {
-                        // Run 17.09. (3.2): kein Zeitslot erkannt ->
-                        // manuell setzen wie im normalen Termin.
-                        DatePicker(NSLocalizedString("_calendar_start_", comment: ""),
-                                   selection: $manualStart,
-                                   displayedComponents: [.date, .hourAndMinute])
-                        DatePicker(NSLocalizedString("_calendar_end_", comment: ""),
-                                   selection: $manualEnd,
-                                   in: manualStart...,
-                                   displayedComponents: [.date, .hourAndMinute])
-                            .onChange(of: manualEnd) { _, newValue in
-                                manualTimesSet = true
-                                SouveraInvitationCenter.shared.setManualTimes(
-                                    inviteId: event.href,
-                                    title: event.title,
-                                    start: manualStart, end: max(newValue, manualStart.addingTimeInterval(300)),
-                                    organizerEmail: event.organizerEmail)
-                            }
-                            .onChange(of: manualStart) { _, newValue in
-                                SouveraInvitationCenter.shared.setManualTimes(
-                                    inviteId: event.href,
-                                    title: event.title,
-                                    start: newValue, end: max(manualEnd, newValue.addingTimeInterval(300)),
-                                    organizerEmail: event.organizerEmail)
-                            }
-                    } else {
-                        Text(timeLine)
-                    }
-                }
-                Section(NSLocalizedString("_invitations_organizer_", comment: "")) {
-                    if isResolving {
-                        ProgressView()
-                    } else {
-                        Text(displayEvent.organizerName.isEmpty
-                             ? (displayEvent.organizerEmail.isEmpty ? organizerFallback : displayEvent.organizerEmail)
-                             : displayEvent.organizerName)
-                    }
-                }
+                titleSection
+                whenSection
+                organizerSection
                 if !isResolving, hasOverlaps {
-                    Section(NSLocalizedString("_invitations_overlap_header_", comment: "")) {
-                        SouveraOverlapListView(event: displayEvent, allEvents: overlapEvents) { overlap in
-                            dayPreview = overlap
-                        }
-                    }
+                    overlapSection
                 }
                 if !isResolving, !displayEvent.attendees.isEmpty {
-                    Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
-                        ForEach(displayEvent.attendees, id: \.self) { attendee in
-                            Text(attendee).font(.subheadline)
-                        }
-                    }
+                    attendeesSection
                 }
-                // B4: Eigene Erinnerungen (Standard 15 min).
-                Section(NSLocalizedString("_calendar_reminders_", comment: "")) {
-                    SouveraReminderEditor(minutes: $reminderMinutes)
-                        .onChange(of: reminderMinutes) { _, _ in remindersTouched = true }
-                }
-                // Run 17.09.: Kalender-Auswahl pro Einladung.
-                Section(NSLocalizedString("_calendar_", comment: "")) {
-                    if calendars.isEmpty {
-                        Text(NSLocalizedString("_loading_", comment: ""))
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Picker(NSLocalizedString("_calendar_", comment: ""),
-                               selection: $selectedCalendarHref) {
-                            ForEach(calendars.filter { $0.canWrite }, id: \.href) { calendar in
-                                Text(calendar.displayName).tag(calendar.href as String?)
-                            }
-                        }
-                    }
-                }
+                reminderSection
+                calendarSection
                 if isCancellation {
-                    Section {
-                        if cancelRemoved {
-                            Label(NSLocalizedString("_invitations_cancel_removed_", comment: ""),
-                                  systemImage: "trash.circle.fill")
-                                .foregroundStyle(.secondary)
-                                .font(.subheadline)
-                        } else {
-                            Button {
-                                cancelBusy = true
-                                Task {
-                                    let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
-                                        uid: displayEvent.uid,
-                                        title: displayEvent.title,
-                                        start: displayEvent.start,
-                                        end: displayEvent.end)
-                                    cancelBusy = false
-                                    if ok {
-                                        cancelRemoved = true
-                                        SouveraInvitationCenter.markAnswered(messageId: displayEvent.href)
-                                        SouveraInvitationCenter.shared.removeMailInvitation(event.href)
-                                    }
-                                }
-                            } label: {
-                                Label(NSLocalizedString("_invitations_cancel_remove_", comment: ""),
-                                      systemImage: "trash")
-                                    .foregroundStyle(.red)
-                            }
-                            .disabled(cancelBusy)
-                        }
-                    } header: {
-                        Text(NSLocalizedString("_invitations_cancelled_", comment: ""))
-                    }
+                    cancelSection
                 } else {
                     rsvpSection
                 }
