@@ -206,7 +206,6 @@ struct SouveraCalendarView: View {
                     return await SouveraInvitationCenter.respondViaMail(
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
-                onFinished: { openedMailInvite = nil },
                 onBack: {
                     // Run 19.09. (Feedback): Zurück zur Einladungs-Übersicht.
                     // WICHTIG: auch detailEvent leeren - sonst erscheint der
@@ -221,6 +220,7 @@ struct SouveraCalendarView: View {
                         }
                     }
                 },
+                onFinished: { openedMailInvite = nil },
                 overlapProvider: { day in
                     await viewModel.load()
                     if case let .success(list) = viewModel.events { return list }
