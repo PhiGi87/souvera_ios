@@ -16,7 +16,7 @@ struct SouveraInvitationFABBackground: ViewModifier {
             .background(
                 // Run 19.09. (Feedback): leichtes ORANGE statt blau - der
                 // pulsierende Button hebt sich so klar ab.
-                Circle().fill(Color.orange.opacity(colorScheme == .dark ? 0.55 : 0.40))
+                Circle().fill(Color.orange.opacity(colorScheme == .dark ? 0.62 : 0.48))
             )
             .modifier(SouveraHeaderGlass(shape: Circle()))
     }
@@ -28,9 +28,9 @@ struct SouveraInvitationFAB: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var iconColor: Color {
-        // Run 19.09.: Weiss auf dem orangen Glas - kontraststark in
-        // Hell- und Dunkelmodus.
-        Color.white
+        // Run 19.09. (Feedback): DUNKELBLAUES Icon auf dem orangen Glas
+        // (in Hell- und Dunkelmodus gleich).
+        Color(red: 0.05, green: 0.15, blue: 0.35)
     }
 
     var body: some View {

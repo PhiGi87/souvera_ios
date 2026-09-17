@@ -1447,8 +1447,27 @@ final class MailViewModel: ObservableObject {
                     // liefert sie mit frischen Keywords zurueck (bzw. fehlen
                     // sie dort, war die Mail wirklich geloescht).
                     var refetchIds = Set(added + dirty + removed)
-                    for email in emails {
-                        if let id = email.optString("id"), !id.isEmpty { refetchIds.insert(id) }
+                    // Run 19.09. (Feedback: gefuehlter Freeze): der 30-s-
+                    // Takt lud den KOMPLETTEN Mirror (~314 Mails, ~600 KB)
+                    // neu - Main-Thread-Dauerlast. Der Komplett-Refetch
+                    // (Schluessel: Pill-/Flag-Konsistenz) laeuft jetzt nur
+                    // noch ALLE 5 MINUTEN (deepMirrorPass); im 30-s-Takt
+                    // werden nur added/removed/dirty + Top-50-Neuzugaenge
+                    // geladen. Die Pills selbst ziehen geaenderter Mails
+                    // SOFORT nach (dirty/removed sind im Refetch-Set) -
+                    // Pill-Latenz bleibt <= 1 s.
+                    let deepMirrorPass: Bool
+                    if let last = lastDeepMirrorRefresh[cacheKey],
+                       Date().timeIntervalSince(last) < 300 {
+                        deepMirrorPass = false
+                    } else {
+                        deepMirrorPass = true
+                        lastDeepMirrorRefresh[cacheKey] = Date()
+                    }
+                    if deepMirrorPass {
+                        for email in emails {
+                            if let id = email.optString("id"), !id.isEmpty { refetchIds.insert(id) }
+                        }
                     }
                     // Run 15.09. (Log d2zaaaa3gj): Stalwart bumpt den
                     // queryChanges-State, liefert added[] aber IMMER leer
@@ -1517,7 +1536,8 @@ final class MailViewModel: ObservableObject {
                     // gelöschten Mails in den Cache (Reappear-Muster).
                     let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                     await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
-                    messages = .success(filterPendingRemoved(protectingLiveMessages(emails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+                    let mapped = await mapMessagesOffMain(emails, account: accountName, accountId: accId, mailboxId: cacheKey)
+                    messages = .success(filterPendingRemoved(protectingLiveMessages(mapped)))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) new=\(newCount) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
@@ -1564,7 +1584,8 @@ final class MailViewModel: ObservableObject {
                 isFetchingMail = true
             } else {
                 let cachedList = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
-                messages = .success(filterPendingRemoved(protectingLiveMessages(cachedList.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+                let cachedMapped = await mapMessagesOffMain(cachedList, account: accountName, accountId: accId, mailboxId: cacheKey)
+                messages = .success(filterPendingRemoved(protectingLiveMessages(cachedMapped)))
             }
             var lastId: String?
             var hasMore = false
@@ -1664,7 +1685,8 @@ final class MailViewModel: ObservableObject {
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
                 JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
-                messages = .success(filterPendingRemoved(protectingLiveMessages(collected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+                let collectedMapped = await mapMessagesOffMain(collected, account: accountName, accountId: accId, mailboxId: cacheKey)
+                messages = .success(filterPendingRemoved(protectingLiveMessages(collectedMapped)))
                 if !pageHasMore {
                     break
                 }
@@ -1755,7 +1777,8 @@ final class MailViewModel: ObservableObject {
             dirtyFlagIds[cacheKey] = nil
             let savedCollected = finalCollected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
             await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
-            messages = .success(filterPendingRemoved(protectingLiveMessages(savedCollected.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: cacheKey, json: $0) })))
+            let savedMapped = await mapMessagesOffMain(savedCollected, account: accountName, accountId: accId, mailboxId: cacheKey)
+            messages = .success(filterPendingRemoved(protectingLiveMessages(savedMapped)))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
             // Stands (Voll-Refresh) sind die optimistisch entfernten IDs
             // freigegeben - nur hier, nicht nach gequeueten Refreshes.
@@ -1874,7 +1897,8 @@ final class MailViewModel: ObservableObject {
                 hasMoreMessages = hasMore
                 let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
-                messages = .success(filterPendingRemoved(protectingLiveMessages(keptEmails.map { JmapMapper.mapMessage(account: accountName, accountId: accId, mailboxId: mailbox.id, json: $0) })))
+                let keptMapped = await mapMessagesOffMain(keptEmails, account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id)
+                messages = .success(filterPendingRemoved(protectingLiveMessages(keptMapped)))
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
                 isFetchingMail = false
@@ -1909,6 +1933,9 @@ final class MailViewModel: ObservableObject {
     /// P62d: Debounce-Task für den Refresh nach Mutationen (Löschen/
     /// Verschieben) - ein Refresh nach der LETZTEN Mutation statt pro Swipe.
     private var mutationRefreshTask: Task<Void, Never>?
+    /// Run 19.09.: Letzter Komplett-Mirror-Refetch je Mailbox (5-min-
+    /// Drossel fuer den inkrementellen Sync).
+    private var lastDeepMirrorRefresh: [String: Date] = [:]
     /// P62f: Optimistisch entfernte Mail-IDs - Sync-Publishes und Cache-Saves
     /// filtern sie, bis der Debounce-Refresh (Server-Wahrheit) bestätigt.
     /// Verhindert das Wiederauftauchen gelöschter Mails durch parallel
@@ -2101,7 +2128,28 @@ final class MailViewModel: ObservableObject {
         await refreshMessages()
     }
 
+    /// Run 19.09. (Feedback: Freeze): Batch-Mapping laeuft OFF-MAIN -
+    /// JmapMapper.mapMessage x 300+ Mails blockierte sonst den MainActor.
+    private func mapMessagesOffMain(_ emails: [[String: Any]], account: String,
+                                    accountId: String, mailboxId: String) async -> [MailMessage] {
+        let acc = account, accId = accountId, boxId = mailboxId
+        return await Task.detached(priority: .userInitiated) {
+            emails.map { JmapMapper.mapMessage(account: acc, accountId: accId, mailboxId: boxId, json: $0) }
+        }.value
+    }
+
+    /// Run 19.09.: Guard gegen ueberlappende Voll-Refreshs (Log: zwei
+    /// forceFullRefresh=true hintereinander).
+    private var isFullRefreshRunning = false
+
     func refreshMessages() async {
+        guard !isFullRefreshRunning else {
+            JmapLog.write("refreshMessages: skipped (full refresh already running)")
+            await refreshMessagesIncremental()
+            return
+        }
+        isFullRefreshRunning = true
+        defer { isFullRefreshRunning = false }
         guard let mailbox = currentMailbox else { return }
         if useJmap {
             await syncMessagesJmap(mailbox, forceFullRefresh: true)
@@ -2132,10 +2180,15 @@ final class MailViewModel: ObservableObject {
         guard force || flagSet || elapsed >= 8 else { return }
         lastEntryRefresh = Date()
         JmapLog.write("refreshOnEntry (force=\(force) flag=\(flagSet))")
-        // P62g: VOLLER Refresh beim Eintritt - Stalwarts queryChanges meldet
-        // neue Mails unzuverlässig; der Voll-Refresh garantiert den
-        // Server-Stand (neue Mails sofort). Throttle oben verhindert Exzesse.
-        Task { await refreshMessages() }
+        // Run 19.09. (Feedback: Freeze): Push-Flags loesen NUR NOCH einen
+        // INKREMENTELLEN Sync aus - jeder Push hatte vorher einen
+        // Voll-Refresh (319-Mail-Refetch) getriggert. Voll-Refresh nur
+        // noch bei force (Pull-to-Refresh/App-Start/Ordnerwechsel).
+        if force {
+            Task { await refreshMessages() }
+        } else {
+            Task { await refreshMessagesIncremental() }
+        }
         // Run 18.09. (Feedback): Einladungs-Scan auch bei der
         // Hintergrundaktualisierung (Foreground-Rückkehr).
         if let mailbox = currentMailbox {

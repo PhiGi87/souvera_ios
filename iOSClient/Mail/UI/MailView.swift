@@ -176,7 +176,8 @@ struct MailView: View {
                         reminderMinutes: reminders,
                         altProposal: altProposal)
                 },
-                onBack: { showInvitationDetail = nil }
+                onBack: { showInvitationDetail = nil },
+                onFinished: { showInvitationDetail = nil }
             )
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
@@ -2727,7 +2728,7 @@ struct MailInvitationButtonIcon: View {
     var body: some View {
         Image(systemName: "calendar.badge.exclamationmark")
             .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(Color.white)
+            .foregroundStyle(Color(red: 0.05, green: 0.15, blue: 0.35))
             .frame(width: 56, height: 56)
             .modifier(SouveraInvitationFABBackground())
     }
@@ -2763,6 +2764,7 @@ struct MailInvitationDetailSheet: View {
     let invitation: SouveraMailInvitation
     let respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?, String?) async -> Bool?
     let onBack: () -> Void
+    var onFinished: (() -> Void)? = nil
     @ObservedObject private var center = SouveraInvitationCenter.shared
 
     var body: some View {
@@ -2776,6 +2778,7 @@ struct MailInvitationDetailSheet: View {
             // Run 18.09. (Feedback): Überschneidungen auch beim
             // Direktöffnen aus der Mail (Kalender-Tag lazy laden).
             onBack: onBack,
+            onFinished: onFinished,
             overlapProvider: { day in
                 await mailOverlapEvents(for: day)
             }

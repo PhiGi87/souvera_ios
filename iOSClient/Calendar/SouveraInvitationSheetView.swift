@@ -27,9 +27,13 @@ struct SouveraInvitationSheetView: View {
     var body: some View {
         NavigationStack {
             List {
-                if !center.calendarInvites.isEmpty {
+                // Run 19.09. (Feedback): beantwortete Einladungen (PARTSTAT
+                // != needs-action) erscheinen NICHT mehr in der Übersicht -
+                // defensiv render-seitig gefiltert.
+                let openCalendarInvites = center.calendarInvites.filter { $0.ownPartstat == "needs-action" }
+                if !openCalendarInvites.isEmpty {
                     Section(NSLocalizedString("_invitations_section_calendar_", comment: "")) {
-                        ForEach(center.calendarInvites) { event in
+                        ForEach(openCalendarInvites) { event in
                             calendarRow(event)
                         }
                     }
@@ -241,6 +245,9 @@ struct SouveraInvitationDetailView: View {
     /// Run 18.09. (Feedback): Zurueck-Button oben links, wenn aus der
     /// Einladungs-Übersicht geöffnet.
     var onBack: (() -> Void)? = nil
+    /// Wird nach dem Schliessen des Ergebnis-Popups gerufen - schliesst
+    /// den gesamten Dialog.
+    var onFinished: (() -> Void)? = nil
     /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
     @State var overlapEvents: [CalendarEventModel] = []
     /// Run 18.09.: Liefert die Termine eines Tages on-demand (Mail-
@@ -298,6 +305,15 @@ struct SouveraInvitationDetailView: View {
     @State private var cancelRemoved = false
     @State private var cancelBusy = false
     @State private var cancelNotFound = false
+    /// Run 19.09. (Feedback): "nicht im Kalender" PERSISTENT merken -
+    /// der Einladungs-Button/Entry bleibt dann dauerhaft ausgeblendet.
+    private static let notInCalendarKey = "invitations_not_in_calendar_ids"
+    private var isNotInCalendar: Bool {
+        UserDefaults.standard.stringArray(forKey: Self.notInCalendarKey)?
+            .contains(event.href) == true
+    }
+    /// Run 19.09. (Feedback): Ergebnis-Popup beim Entfernen.
+    @State private var cancelResultAlert: String?
 
     private var effectiveEvent: CalendarEventModel {
         center.mailInvites.first(where: { $0.id == event.href })?.event ?? event
@@ -411,6 +427,16 @@ struct SouveraInvitationDetailView: View {
             }
         }
         .preferredColorScheme(.light)
+        // Run 19.09. (Feedback): Ergebnis-Popup; beim Schliessen schliesst
+        // sich der gesamte Dialog.
+        .alert(cancelResultAlert ?? "",
+               isPresented: Binding(get: { cancelResultAlert != nil },
+                                    set: { if !$0 { cancelResultAlert = nil; onFinished?() } })) {
+            Button(NSLocalizedString("_done_", comment: "")) {
+                cancelResultAlert = nil
+                onFinished?()
+            }
+        }
         // Run 17.09. (Feedback): echtes Popup-Overlay statt Sheet.
         .overlay {
             if let overlap = dayPreview {
@@ -543,7 +569,7 @@ struct SouveraInvitationDetailView: View {
     @ViewBuilder
     private var cancelSection: some View {
         Section {
-            if cancelRemoved {
+            if cancelRemoved || isNotInCalendar {
                 Label(NSLocalizedString("_invitations_cancel_removed_", comment: ""),
                       systemImage: "trash.circle.fill")
                     .foregroundStyle(.secondary)
@@ -563,15 +589,27 @@ struct SouveraInvitationDetailView: View {
                             start: displayEvent.start,
                             end: displayEvent.end)
                         cancelBusy = false
+                        var notFound = UserDefaults.standard.stringArray(
+                            forKey: Self.notInCalendarKey) ?? []
                         if ok {
                             cancelRemoved = true
+                            notFound.remove(event.href)
+                            UserDefaults.standard.set(notFound, forKey: Self.notInCalendarKey)
                             SouveraInvitationCenter.markAnswered(
                                 messageId: displayEvent.href, eventEnd: displayEvent.end)
                             SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                            // Run 19.09. (Feedback): Ergebnis-Popup.
+                            cancelResultAlert = NSLocalizedString("_invitations_cancel_removed_", comment: "")
                         } else {
-                            // Run 19.09. (Feedback): sichtbares Feedback,
-                            // wenn der Termin nicht im Kalender ist.
+                            // "Nicht im Kalender" PERSISTENT merken -> Button
+                            // bleibt dauerhaft weg; sichtbares Popup.
+                            if !notFound.contains(event.href) { notFound.append(event.href) }
+                            UserDefaults.standard.set(notFound, forKey: Self.notInCalendarKey)
                             cancelNotFound = true
+                            SouveraInvitationCenter.markAnswered(
+                                messageId: displayEvent.href, eventEnd: displayEvent.end)
+                            SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                            cancelResultAlert = NSLocalizedString("_invitations_cancel_not_found_", comment: "")
                         }
                     }
                 } label: {

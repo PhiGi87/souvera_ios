@@ -840,7 +840,13 @@ final class CalendarViewModel: ObservableObject {
             }
             lines.append(line)
         }
-        guard found else { return nil }
+        guard found else {
+            // Run 19.09. (Diagnose): Attendee-Zeilen loggen, wenn der
+            // eigene Match fehlschlaegt - Erkennung von Format-Abweichungen.
+            let attendees = unfolded.filter { $0.uppercased().hasPrefix("ATTENDEE") }
+            JmapLog.write("updatePartstat: own attendee \(target) NOT found; attendees=\(attendees.joined(separator: " | "))")
+            return nil
+        }
         return lines.joined(separator: "\r\n")
     }
 

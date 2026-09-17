@@ -1208,12 +1208,19 @@ private struct CalendarEventDetailSheet: View {
     var onBackToInvitations: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     @State private var rsvpBusyForHref: String?
+    /// Run 19.09. (Feedback): Event-Kopie friert ownPartstat ein - die
+    /// Antwort wird im State gemerkt und steuert Anzeige/Optionen.
+    @State private var answeredRSVP: CalendarViewModel.CalendarRSVP?
     @State private var rsvpReminderMinutes: [Int] = [15]
     @State private var rsvpRemindersTouched = false
     @State private var dayPreviewOverlap: SouveraOverlap?
 
+    private var effectivePartstat: String {
+        answeredRSVP?.rawValue.lowercased() ?? event.ownPartstat
+    }
+
     private var currentRsvpStatusKey: String? {
-        switch event.ownPartstat {
+        switch effectivePartstat {
         case "accepted": return "_invitations_accept_"
         case "tentative": return "_invitations_tentative_"
         case "declined": return "_invitations_decline_"
@@ -1228,7 +1235,7 @@ private struct CalendarEventDetailSheet: View {
     }
 
     private var allowedRsvpOptions: [CalendarViewModel.CalendarRSVP] {
-        switch event.ownPartstat {
+        switch effectivePartstat {
         case "accepted": return [.tentative, .declined]
         case "tentative": return [.accepted, .declined]
         case "declined": return [.accepted, .tentative]
@@ -1333,7 +1340,7 @@ private struct CalendarEventDetailSheet: View {
                 // selbst, extern zusaetzlich Antwort-Mail (im VM).
                 if CalendarViewModel.isForeignOrganizer(event) {
                     Section {
-                        if let status = SouveraRSVPStatus.label(for: event.ownPartstat) {
+                        if let status = SouveraRSVPStatus.label(for: effectivePartstat) {
                             // Run 19.09. (Feedback): Vergangenheitsform +
                             // KORREKTE Farbe/das KORREKTE Icon.
                             Label(status.text, systemImage: status.icon)
@@ -1343,14 +1350,15 @@ private struct CalendarEventDetailSheet: View {
                         // Run 19.09. (Feedback): nach der Antwort bleiben
                         // Aenderungs-Buttons: Ablehnen IMMER, plus die
                         // von der aktuellen Antwort abweichende Option.
-                        if event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty || !allowedRsvpOptions.isEmpty {
+                        if effectivePartstat == "needs-action" || effectivePartstat.isEmpty || !allowedRsvpOptions.isEmpty {
                         HStack(spacing: 12) {
                             ForEach(allowedRsvpOptions, id: \.rawValue) { rsvp in
                                 Button {
                                     Task {
                                         rsvpBusyForHref = event.href
                                         let reminders = rsvpRemindersTouched ? rsvpReminderMinutes : nil
-                                        _ = await viewModel.respondToInvitation(event, status: rsvp, reminderMinutes: reminders)
+                                        let ok = await viewModel.respondToInvitation(event, status: rsvp, reminderMinutes: reminders)
+                                        if ok { answeredRSVP = rsvp }
                                         rsvpBusyForHref = nil
                                     }
                                 } label: {
@@ -1427,10 +1435,11 @@ private struct CalendarEventDetailSheet: View {
                     onDismiss: { dayPreviewOverlap = nil })
             }
         }
+        // Run 19.09. (Feedback): EIN Toolbar-Set - Zurück links (nur im
+        // Einladungskontext), ein "Abbrechen" rechts. Zwei Toolbar-Blöcke
+        // produzierten ein doppeltes "Abbrechen".
         .toolbar {
             if onBackToInvitations != nil {
-                // Run 18.09. (Feedback): Zurück oben LINKS, Abbrechen
-                // oben RECHTS.
                 ToolbarItem(placement: .cancellationAction) {
                     Button {
                         onBackToInvitations?()
@@ -1438,20 +1447,13 @@ private struct CalendarEventDetailSheet: View {
                         Image(systemName: "chevron.backward")
                     }
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(NSLocalizedString("_cancel_", comment: "")) {
-                        dismiss()
-                    }
-                }
+            }
+            ToolbarItem(placement: .confirmationAction) {
+                Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
             }
         }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button(NSLocalizedString("_cancel_", comment: "")) { dismiss() }
-                }
-            }
         }
     }
 
