@@ -231,6 +231,12 @@ struct SouveraInvitationDetailView: View {
         }
     }
 
+    /// Der Zeitslot - manuell ueberschreibbar (3.2); Live-Stand aus dem
+    /// Center (setManualTimes aktualisiert die Einladung dort).
+    private var effectiveEvent: CalendarEventModel {
+        center.mailInvites.first(where: { $0.id == event.href })?.event ?? event
+    }
+
     private var currentStatusKey: String? {
         switch event.ownPartstat {
         case "accepted": return "_invitations_accept_"
@@ -309,7 +315,7 @@ struct SouveraInvitationDetailView: View {
                     } else {
                         Picker(NSLocalizedString("_calendar_", comment: ""),
                                selection: $selectedCalendarHref) {
-                            ForEach(calendars.filter { $0.canWrite }) { calendar in
+                            ForEach(calendars.filter { $0.canWrite }, id: \.href) { calendar in
                                 Text(calendar.displayName).tag(calendar.href as String?)
                             }
                         }
@@ -358,7 +364,7 @@ struct SouveraInvitationDetailView: View {
                     .foregroundStyle(.green)
             } else if declineProposalMode {
                 declineProposalView
-            } else if respond != nil {
+            } else if let respond {
                 if let key = currentStatusKey {
                     Label(NSLocalizedString(key, comment: ""), systemImage: "checkmark.circle")
                         .foregroundStyle(.secondary)
@@ -481,13 +487,14 @@ struct SouveraInvitationDetailView: View {
     }
 
     private func sendDecline(proposal: Date?) {
+        guard let respond else { return }
         busy = true
         let proposalText: String?
         if let proposal {
             let formatter = DateFormatter()
             formatter.dateStyle = .short
             formatter.timeStyle = .short
-            let duration = event.end.timeIntervalSince(event.start)
+            let duration = effectiveEvent.end.timeIntervalSince(effectiveEvent.start)
             let end = proposal.addingTimeInterval(duration)
             let endFormatter = DateFormatter()
             endFormatter.dateStyle = .none

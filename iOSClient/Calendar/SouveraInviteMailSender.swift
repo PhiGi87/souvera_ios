@@ -113,8 +113,8 @@ extension SouveraInviteMailSender {
 
             // 1) text/calendar-Part (Attachment ODER Inline).
             var ics: String?
-            let parts = (json["attachments"] as? [[String: Any]]) ?? []
-                + (json["inlineAttachments"] as? [[String: Any]]) ?? []
+            let parts = ((json["attachments"] as? [[String: Any]]) ?? [])
+                + ((json["inlineAttachments"] as? [[String: Any]]) ?? [])
             if let calPart = parts.first(where: {
                 ($0["type"] as? String)?.lowercased().contains("calendar") == true
                     || (($0["name"] as? String)?.lowercased().hasSuffix(".ics") == true)
