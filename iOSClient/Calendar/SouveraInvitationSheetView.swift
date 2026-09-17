@@ -21,6 +21,8 @@ struct SouveraInvitationSheetView: View {
 
     @State private var busyId: String?
     @State private var processedIds: Set<String> = []
+    @State private var removedIds: Set<String> = []
+    @State private var cancelRemoveId: String?
 
     var body: some View {
         NavigationStack {
@@ -137,10 +139,44 @@ struct SouveraInvitationSheetView: View {
                 }
             }
             if invite.isCancellation {
-                // Run 18.09.: Absage -> manuell entfernen (im Detail).
-                Text(NSLocalizedString("_invitations_cancelled_", comment: ""))
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.orange)
+                // Run 19.09. (Feedback): Entfernen auch hier per Button.
+                if removedIds.contains(invite.id) {
+                    Label(NSLocalizedString("_invitations_cancel_removed_", comment: ""),
+                          systemImage: "trash.circle.fill")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button {
+                        cancelRemoveId = invite.id
+                        Task {
+                            let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
+                                uid: invite.event?.uid ?? "",
+                                title: invite.displayTitle,
+                                start: invite.event?.start,
+                                end: invite.event?.end)
+                            if ok {
+                                removedIds.insert(invite.id)
+                                SouveraInvitationCenter.markAnswered(
+                                    messageId: invite.messageId, eventEnd: invite.event?.end)
+                                SouveraInvitationCenter.shared.removeMailInvitation(invite.id)
+                            }
+                            cancelRemoveId = nil
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            if cancelRemoveId == invite.id {
+                                ProgressView().scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "trash")
+                            }
+                            Text(NSLocalizedString("_invitations_cancel_remove_", comment: ""))
+                        }
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(cancelRemoveId != nil)
+                }
             } else if processedIds.contains(invite.id) {
                 Text(NSLocalizedString("_invitations_answered_", comment: ""))
                     .font(.caption.weight(.medium))
@@ -213,7 +249,9 @@ struct SouveraInvitationDetailView: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var busy = false
-    @State private var answeredText: String?
+    /// Run 19.09. (Feedback): gewaehlte Antwort merken - das Label zeigt
+    /// das KORREKTE Icon/Farbe (gruen ✓ / orange ? / rot ✕).
+    @State private var answeredRSVP: CalendarViewModel.CalendarRSVP?
     @State private var reminderMinutes: [Int] = [15]
     @State private var remindersTouched = false
     @State private var dayPreview: SouveraOverlap?
@@ -259,6 +297,7 @@ struct SouveraInvitationDetailView: View {
     /// Run 18.09.: CANCEL - Absage durch den Organisator: Entfernen-Button.
     @State private var cancelRemoved = false
     @State private var cancelBusy = false
+    @State private var cancelNotFound = false
 
     private var effectiveEvent: CalendarEventModel {
         center.mailInvites.first(where: { $0.id == event.href })?.event ?? event
@@ -293,6 +332,19 @@ struct SouveraInvitationDetailView: View {
         effectiveEvent
     }
 
+    /// Run 19.09. (Feedback): Dialog-Titel dynamisch - "Einladung"
+    /// (unbeantwortet), "Termin" (beantwortet), "Absage" (CANCEL).
+    private var detailTitle: String {
+        if liveInvitation?.isCancellation == true {
+            return NSLocalizedString("_invitations_cancel_title_", comment: "")
+        }
+        if SouveraRSVPStatus.label(for: displayEvent.ownPartstat) != nil
+            || answeredRSVP != nil {
+            return NSLocalizedString("_invitations_event_title_", comment: "")
+        }
+        return NSLocalizedString("_invitations_title_detail_", comment: "")
+    }
+
     /// Run 18.09.: vorkompiliert - der body-Ausdruck war zu komplex.
     private var hasOverlaps: Bool {
         !SouveraOverlapCalculator.overlaps(of: displayEvent, in: overlapEvents).isEmpty
@@ -318,7 +370,7 @@ struct SouveraInvitationDetailView: View {
                     rsvpSection
                 }
             }
-            .navigationTitle(Text(NSLocalizedString("_invitations_title_", comment: "")))
+            .navigationTitle(Text(detailTitle))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if onBack != nil {
@@ -496,6 +548,11 @@ struct SouveraInvitationDetailView: View {
                       systemImage: "trash.circle.fill")
                     .foregroundStyle(.secondary)
                     .font(.subheadline)
+            } else if cancelNotFound {
+                Label(NSLocalizedString("_invitations_cancel_not_found_", comment: ""),
+                      systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .font(.subheadline)
             } else {
                 Button {
                     cancelBusy = true
@@ -508,8 +565,13 @@ struct SouveraInvitationDetailView: View {
                         cancelBusy = false
                         if ok {
                             cancelRemoved = true
-                            SouveraInvitationCenter.markAnswered(messageId: displayEvent.href)
+                            SouveraInvitationCenter.markAnswered(
+                                messageId: displayEvent.href, eventEnd: displayEvent.end)
                             SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                        } else {
+                            // Run 19.09. (Feedback): sichtbares Feedback,
+                            // wenn der Termin nicht im Kalender ist.
+                            cancelNotFound = true
                         }
                     }
                 } label: {
@@ -527,9 +589,12 @@ struct SouveraInvitationDetailView: View {
     @ViewBuilder
     private var rsvpSection: some View {
         Section {
-            if let answeredText {
-                Label(answeredText, systemImage: "checkmark.circle.fill")
-                    .foregroundStyle(.green)
+            if let answeredRSVP {
+                // Run 19.09. (Feedback): korrektes Icon/Farbe je Antwort.
+                let status = SouveraRSVPStatus.label(for: answeredRSVP.rawValue)
+                Label(status?.text ?? "", systemImage: status?.icon ?? "checkmark.circle.fill")
+                    .foregroundStyle(status?.color ?? .green)
+                    .font(.subheadline.weight(.medium))
             } else if declineProposalMode {
                 declineProposalView
             } else if let respond {
@@ -661,7 +726,7 @@ struct SouveraInvitationDetailView: View {
             let ok = await respond(rsvp, reminders, nil, selectedCalendarHref)
             busy = false
             if ok == true {
-                answeredText = NSLocalizedString(rsvp.titleKey, comment: "")
+                answeredRSVP = rsvp
             }
         }
     }
@@ -674,7 +739,7 @@ struct SouveraInvitationDetailView: View {
             let ok = await respond(.declined, reminders, proposalText, selectedCalendarHref)
             busy = false
             if ok == true {
-                answeredText = NSLocalizedString("_invitations_decline_", comment: "")
+                answeredRSVP = .declined
                 declineProposalMode = false
             }
         }

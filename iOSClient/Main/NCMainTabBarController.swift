@@ -536,9 +536,27 @@ class NCMainTabBarController: UITabBarController {
     /// Run 16.09.: Variante mit SICHTBARER blauer UIKit-Bar + Bridge-Items
     /// (1:1 wie Mehr/Dateien — auf dem iPad flankieren die Items die
     /// zentrierte Tab-Pill automatisch). Für Mail/Kalender/Link.
+    /// Run 19.09. (Feedback: iPad-Header verschwunden): SwiftUI's
+    /// `.toolbar(.hidden)` im inneren NavigationStack versteckt AUCH die
+    /// aeussere UIKit-Bar (UIHostingController delegiert). Diese Subclass
+    /// ignoriert Hide-Versuche auf dem iPad - die Bar bleibt sichtbar
+    /// (1:1 Mehr/Dateien). Auf dem iPhone gilt das Hidden weiterhin
+    /// (dort zeichnet der Glas-Header).
+    final class SouveraHostedNavigationController: UINavigationController {
+        override func setNavigationBarHidden(_ hidden: Bool, animated: Bool) {
+            super.setNavigationBarHidden(SouveraAppearance.useBridgeHeader ? false : hidden,
+                                         animated: animated)
+        }
+
+        override var isNavigationBarHidden: Bool {
+            get { SouveraAppearance.useBridgeHeader ? false : super.isNavigationBarHidden }
+            set { super.isNavigationBarHidden = newValue }
+        }
+    }
+
     private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
         let hostingController = UIHostingController(rootView: root)
-        let navigationController = UINavigationController(rootViewController: hostingController)
+        let navigationController = SouveraHostedNavigationController(rootViewController: hostingController)
         // Run 18.09. (Feedback: "iPad-Header komplett weg"): Die aeussere
         // UIKit-Bar ist WIEDER SICHTBAR - 1:1 wie Mehr/Dateien (blauer
         // Verlauf, Glas-Kreis-Buttons via Coordinator). Die innere
@@ -554,6 +572,7 @@ class NCMainTabBarController: UITabBarController {
         navigationController.navigationBar.isTranslucent = false
         navigationController.navigationBar.tintColor = .white
         navigationController.navigationBar.overrideUserInterfaceStyle = .light
+        navigationController.setNavigationBarHidden(false, animated: false)
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),
             image: UIImage(systemName: imageName),

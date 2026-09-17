@@ -206,21 +206,28 @@ struct SouveraDayPreviewPopup: View {
                                 .padding(.leading, labelWidth + 8)
                                 .id(y)
                         }
-                        // Terminblöcke (clusterweise, volle Breite wenn solo)
+                        // Terminblöcke (clusterweise, volle Breite wenn
+                        // solo) - Run 19.09.: .position mit explizitem
+                        // ZENTRUM (mathematisch eindeutig, kein Offset-
+                        // Drift mehr); Y-Werte werden geloggt.
                         ForEach(clusters.indices, id: \.self) { clusterIndex in
                             let cluster = clusters[clusterIndex]
                             let columnCount = CGFloat(max(1, cluster.columns.count))
                             ForEach(cluster.columns.indices, id: \.self) { columnIndex in
                                 ForEach(cluster.columns[columnIndex]) { event in
-                                    let width = availableWidth / columnCount
-                                        - (columnCount > 1 ? 6 : 0)
+                                    let width = max(60, availableWidth / columnCount
+                                        - (columnCount > 1 ? 6 : 0))
+                                    let height = blockHeight(for: event)
+                                    let y = offsetY(for: event)
+                                    if event.href == highlightEvent.href {
+                                        SouveraLog.write("PopupDay", "block \(event.title): y=\(y) h=\(height)")
+                                    }
                                     block(for: event)
-                                        .frame(width: max(60, width),
-                                               height: blockHeight(for: event))
-                                        .offset(
-                                            x: labelWidth + 8
+                                        .frame(width: width, height: height)
+                                        .position(
+                                            x: labelWidth + 8 + availableWidth / columnCount / 2
                                                 + CGFloat(columnIndex) * (availableWidth / columnCount),
-                                            y: offsetY(for: event))
+                                            y: y + height / 2)
                                 }
                             }
                         }
@@ -229,9 +236,16 @@ struct SouveraDayPreviewPopup: View {
                     .padding(.vertical, 8)
                 }
                 .onAppear {
+                    // Run 19.09. (Feedback): Auto-Position auf den
+                    // Einladungstermin, mit Retry nach dem Layout-Commit -
+                    // danach ist freies Scrollen uneingeschraenkt.
                     let hour = Calendar.current.component(.hour, from: highlightEvent.start)
-                    let y = CGFloat(max(0, hour - 1)) * hourHeight
-                    proxy.scrollTo(y, anchor: .top)
+                    let target = CGFloat(max(0, hour - 1)) * hourHeight
+                    for delay in [0.0, 0.15, 0.4] {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                            proxy.scrollTo(target, anchor: .top)
+                        }
+                    }
                 }
             }
         }

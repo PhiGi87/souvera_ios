@@ -1270,3 +1270,7 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_cancel_remove_" = "Remove event from calendar";
 "_invitations_cancel_removed_" = "Event removed from calendar.";
 "_loading_" = "Loading…";
+"_invitations_title_detail_" = "Invitation";
+"_invitations_event_title_" = "Event";
+"_invitations_cancel_title_" = "Cancellation";
+"_invitations_cancel_not_found_" = "Event not found in the calendar.";

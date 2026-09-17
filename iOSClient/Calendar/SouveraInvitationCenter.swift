@@ -107,10 +107,49 @@ final class SouveraInvitationCenter: ObservableObject {
         set { UserDefaults.standard.set(Array(newValue), forKey: answeredKey) }
     }
 
-    static func markAnswered(messageId: String) {
+    /// Run 19.09. (Feedback): Einladungsdaten (Antworten, Sequences,
+    /// Cancel-Markierungen) werden geloescht, sobald der Termin vorbei ist
+    /// - besonders abgelehnte Einladungen hinterlassen keine Reste.
+    static func cleanupExpired(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-86400) // 1 Tag Toleranz
+        var answered = answeredMessageIds
+        var ends = UserDefaults.standard.dictionary(forKey: answeredEndKey) as? [String: Double] ?? [:]
+        let expiredIds = ends.filter { Date(timeIntervalSince1970: $0.value) < cutoff }.map(\.key)
+        for id in expiredIds {
+            answered.remove(id)
+            ends.removeValue(forKey: id)
+        }
+        if !expiredIds.isEmpty {
+            answeredMessageIds = answered
+            UserDefaults.standard.set(ends, forKey: answeredEndKey)
+        }
+        var byUid = UserDefaults.standard.dictionary(forKey: answeredSequenceKey) as? [String: Int] ?? [:]
+        var uidEnds = UserDefaults.standard.dictionary(forKey: "invitations_uid_enddates") as? [String: Double] ?? [:]
+        let expiredUids = uidEnds.filter { Date(timeIntervalSince1970: $0.value) < cutoff }.map(\.key)
+        for uid in expiredUids {
+            byUid.removeValue(forKey: uid)
+            uidEnds.removeValue(forKey: uid)
+        }
+        if !expiredUids.isEmpty {
+            UserDefaults.standard.set(byUid, forKey: answeredSequenceKey)
+            UserDefaults.standard.set(uidEnds, forKey: "invitations_uid_enddates")
+        }
+        if !expiredIds.isEmpty || !expiredUids.isEmpty {
+            SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs entfernt (Termin vorbei)")
+        }
+    }
+
+    static func markAnswered(messageId: String, eventEnd: Date? = nil) {
         var ids = answeredMessageIds
         ids.insert(messageId)
         answeredMessageIds = ids
+        // Run 19.09.: End-Zeitpunkt merken (Basis fuer das Cleanup
+        // abgelaufener Einladungsdaten).
+        if let eventEnd {
+            var ends = UserDefaults.standard.dictionary(forKey: answeredEndKey) as? [String: Double] ?? [:]
+            ends[messageId] = eventEnd.timeIntervalSince1970
+            UserDefaults.standard.set(ends, forKey: answeredEndKey)
+        }
         Task { @MainActor in
             SouveraInvitationCenter.shared.removeMailInvitation(messageId)
         }
@@ -129,6 +168,8 @@ final class SouveraInvitationCenter: ObservableObject {
                          client: JmapClient,
                          api: JmapApi) async {
         resetForAccountSwitch(accountKey)
+        // Run 19.09.: abgelaufene Einladungsdaten aufraeumen.
+        Self.cleanupExpired()
 
         let answered = Self.answeredMessageIds
         var invites: [SouveraMailInvitation] = []
@@ -245,7 +286,7 @@ final class SouveraInvitationCenter: ObservableObject {
         let sent = await sendReply(invitation: resolved, statusWord: statusWord,
                                    altProposal: altProposal)
         if !sent { return false }
-        markAnswered(messageId: resolved.messageId)
+        markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }

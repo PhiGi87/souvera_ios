@@ -2727,7 +2727,7 @@ struct MailInvitationButtonIcon: View {
     var body: some View {
         Image(systemName: "calendar.badge.exclamationmark")
             .font(.system(size: 22, weight: .semibold))
-            .foregroundStyle(colorScheme == .dark ? Color.white : Color(red: 0.05, green: 0.15, blue: 0.35))
+            .foregroundStyle(Color.white)
             .frame(width: 56, height: 56)
             .modifier(SouveraInvitationFABBackground())
     }

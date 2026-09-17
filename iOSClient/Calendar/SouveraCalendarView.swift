@@ -207,7 +207,16 @@ struct SouveraCalendarView: View {
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
                 onBack: {
-                    openedMailInvite = nil
+                    // Run 19.09. (Feedback): Zurück zur Einladungs-Übersicht,
+                    // wenn von dort gekommen.
+                    if detailFromInvitations {
+                        openedMailInvite = nil
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
+                            showInvitationSheet = true
+                        }
+                    } else {
+                        openedMailInvite = nil
+                    }
                 },
                 overlapProvider: { day in
                     await viewModel.load()
@@ -227,9 +236,11 @@ struct SouveraCalendarView: View {
                     editState = EditSheetState(draft: draft, existing: event)
                 },
                 onBackToInvitations: detailFromInvitations ? {
-                    detailEvent = nil
+                    // Run 19.09. (Feedback): Kein gestapeltes Praesentieren -
+                    // die Übersicht oeffnet erst nach dem Dismiss des
+                    // Details, damit es keine doppelten Toolbars gibt.
                     detailFromInvitations = false
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.55) {
                         showInvitationSheet = true
                     }
                 } : nil
@@ -1323,13 +1334,16 @@ private struct CalendarEventDetailSheet: View {
                 if CalendarViewModel.isForeignOrganizer(event) {
                     Section {
                         if let status = SouveraRSVPStatus.label(for: event.ownPartstat) {
-                            // Run 18.09. (Feedback): Vergangenheitsform +
-                            // Farbe/Icon.
+                            // Run 19.09. (Feedback): Vergangenheitsform +
+                            // KORREKTE Farbe/das KORREKTE Icon.
                             Label(status.text, systemImage: status.icon)
                                 .foregroundStyle(status.color)
                                 .font(.subheadline.weight(.medium))
                         }
-                        if event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty {
+                        // Run 19.09. (Feedback): nach der Antwort bleiben
+                        // Aenderungs-Buttons: Ablehnen IMMER, plus die
+                        // von der aktuellen Antwort abweichende Option.
+                        if event.ownPartstat == "needs-action" || event.ownPartstat.isEmpty || !allowedRsvpOptions.isEmpty {
                         HStack(spacing: 12) {
                             ForEach(allowedRsvpOptions, id: \.rawValue) { rsvp in
                                 Button {
@@ -1442,15 +1456,19 @@ private struct CalendarEventDetailSheet: View {
     }
 
     private var dateLabel: String {
+        // Run 19.09. (Feedback): Start UND Ende anzeigen.
         let formatter = DateFormatter()
         if event.allDay {
             formatter.dateStyle = .long
             formatter.timeStyle = .none
-        } else {
-            formatter.dateStyle = .medium
-            formatter.timeStyle = .short
+            return formatter.string(from: event.start)
         }
-        return formatter.string(from: event.start)
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        let endFormatter = DateFormatter()
+        endFormatter.dateStyle = .none
+        endFormatter.timeStyle = .short
+        return "\(formatter.string(from: event.start)) – \(endFormatter.string(from: event.end))"
     }
 }
 

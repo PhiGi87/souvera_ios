@@ -14,11 +14,9 @@ struct SouveraInvitationFABBackground: ViewModifier {
     func body(content: Content) -> some View {
         content
             .background(
-                Circle().fill(
-                    LinearGradient(colors: SouveraAppearance.gradientColors,
-                                   startPoint: .top, endPoint: .bottom)
-                        .opacity(colorScheme == .dark ? 0.45 : 0.30)
-                )
+                // Run 19.09. (Feedback): leichtes ORANGE statt blau - der
+                // pulsierende Button hebt sich so klar ab.
+                Circle().fill(Color.orange.opacity(colorScheme == .dark ? 0.55 : 0.40))
             )
             .modifier(SouveraHeaderGlass(shape: Circle()))
     }
@@ -30,9 +28,9 @@ struct SouveraInvitationFAB: View {
     @Environment(\.colorScheme) private var colorScheme
 
     private var iconColor: Color {
-        // Dunkelblau auf hellem Glas, Weiss im Dunkelmodus - in beiden
-        // Modi kontraststark auf dem blaeulichen Glas.
-        colorScheme == .dark ? .white : Color(red: 0.05, green: 0.15, blue: 0.35)
+        // Run 19.09.: Weiss auf dem orangen Glas - kontraststark in
+        // Hell- und Dunkelmodus.
+        Color.white
     }
 
     var body: some View {
@@ -44,6 +42,9 @@ struct SouveraInvitationFAB: View {
                         .foregroundStyle(iconColor)
                         .frame(width: 56, height: 56)
                         .modifier(SouveraInvitationFABBackground())
+                        // Run 19.09. (Feedback): auch der Kalender-FAB
+                        // pulsiert sichtbar.
+                        .modifier(SouveraPulseEffect())
                     Text("\(min(center.totalCount, 99))")
                         .font(.caption2.weight(.bold))
                         .foregroundStyle(.white)

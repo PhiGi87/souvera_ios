@@ -1273,7 +1273,8 @@ final class MailViewModel: ObservableObject {
                 keywordsToAdd: ["$seen": true]
             )
         }
-        SouveraInvitationCenter.markAnswered(messageId: resolved.messageId)
+        SouveraInvitationCenter.markAnswered(
+            messageId: resolved.messageId, eventEnd: resolved.event?.end)
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }
