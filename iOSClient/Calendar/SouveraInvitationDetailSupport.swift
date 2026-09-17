@@ -208,28 +208,9 @@ struct SouveraDayPreviewPopup: View {
                         }
                         // Terminblöcke (clusterweise, volle Breite wenn
                         // solo) - Run 19.09.: .position mit explizitem
-                        // ZENTRUM (mathematisch eindeutig, kein Offset-
-                        // Drift mehr); Y-Werte werden geloggt.
+                        // ZENTRUM (mathematisch eindeutig, kein Offset-Drift).
                         ForEach(clusters.indices, id: \.self) { clusterIndex in
-                            let cluster = clusters[clusterIndex]
-                            let columnCount = CGFloat(max(1, cluster.columns.count))
-                            ForEach(cluster.columns.indices, id: \.self) { columnIndex in
-                                ForEach(cluster.columns[columnIndex]) { event in
-                                    let width = max(60, availableWidth / columnCount
-                                        - (columnCount > 1 ? 6 : 0))
-                                    let height = blockHeight(for: event)
-                                    let y = offsetY(for: event)
-                                    if event.href == highlightEvent.href {
-                                        SouveraLog.write("PopupDay", "block \(event.title): y=\(y) h=\(height)")
-                                    }
-                                    block(for: event)
-                                        .frame(width: width, height: height)
-                                        .position(
-                                            x: labelWidth + 8 + availableWidth / columnCount / 2
-                                                + CGFloat(columnIndex) * (availableWidth / columnCount),
-                                            y: y + height / 2)
-                                }
-                            }
+                            clusterBlocks(clusters[clusterIndex], clusterIndex: clusterIndex)
                         }
                     }
                     .frame(height: 24 * hourHeight)
@@ -307,6 +288,25 @@ struct SouveraDayPreviewPopup: View {
         formatter.dateStyle = .full
         formatter.timeStyle = .none
         return formatter.string(from: day)
+    }
+
+    // Run 19.09.: Cluster-Rendering ausgelagert (Typ-Checker).
+    @ViewBuilder
+    private func clusterBlocks(_ cluster: Cluster, clusterIndex: Int) -> some View {
+        let columnCount = CGFloat(max(1, cluster.columns.count))
+        ForEach(cluster.columns.indices, id: \.self) { columnIndex in
+            ForEach(cluster.columns[columnIndex]) { event in
+                let width = max(60, availableWidth / columnCount - (columnCount > 1 ? 6 : 0))
+                let height = blockHeight(for: event)
+                let y = offsetY(for: event)
+                block(for: event)
+                    .frame(width: width, height: height)
+                    .position(
+                        x: labelWidth + 8 + availableWidth / columnCount / 2
+                            + CGFloat(columnIndex) * (availableWidth / columnCount),
+                        y: y + height / 2)
+            }
+        }
     }
 }
 

@@ -88,6 +88,7 @@ final class SouveraInvitationCenter: ObservableObject {
 
     private static let answeredKey = "invitations_answered_message_ids"
     private static let answeredSequenceKey = "invitations_answered_sequence_by_uid"
+    private static let answeredEndKey = "invitations_answered_enddates"
 
     /// Run 18.09.: SEQUENCE-Buchhaltung je UID. Eine verschobene Einladung
     /// kommt als NEUE Mail (neue messageId) und wird daher vom Scan
