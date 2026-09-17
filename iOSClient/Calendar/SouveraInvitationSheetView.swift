@@ -206,7 +206,7 @@ struct SouveraInvitationDetailView: View {
     /// Einladungs-Übersicht geöffnet.
     var onBack: (() -> Void)? = nil
     /// Überschneidungsprüfungs-Basis (nil = keine Prüfung möglich).
-    var overlapEvents: [CalendarEventModel] = []
+    @State var overlapEvents: [CalendarEventModel] = []
     /// Run 18.09.: Liefert die Termine eines Tages on-demand (Mail-
     /// Direktdetail: Kalenderstand wird lazy geladen).
     var overlapProvider: ((Date) async -> [CalendarEventModel])? = nil

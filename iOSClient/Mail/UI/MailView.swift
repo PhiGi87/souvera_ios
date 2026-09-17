@@ -167,29 +167,17 @@ struct MailView: View {
             }
         }
         .sheet(item: $showInvitationDetail) { invite in
-            // Run 17.09.: Live-Stand aus dem Center (Lazy-Resolve aktualisiert
-            // die Einladung; Zeitraum erscheint ohne Nein-Oeffnen).
-            let live = invitationCenter.mailInvites.first(where: { $0.id == invite.id }) ?? invite
-            SouveraInvitationDetailView(
-                event: live.event ?? SouveraInvitationCenter.placeholderEvent(for: live),
-                organizerFallback: live.displayOrganizer,
+            MailInvitationDetailSheet(
+                invitation: invite,
                 respond: { rsvp, reminders, altProposal, calendarHref in
-                    return await viewModel.respondToMailInvitation(
-                        live, status: rsvp,
+                    await viewModel.respondToMailInvitation(
+                        invite, status: rsvp,
                         calendarHref: calendarHref,
                         reminderMinutes: reminders,
                         altProposal: altProposal)
                 },
-                overlapProvider: { day in
-                    await loadOverlapEvents(for: day)
-                },
-                onBack: {
-                    showInvitationDetail = nil
-                }
+                onBack: { showInvitationDetail = nil }
             )
-            .task {
-                _ = await invitationCenter.resolveInvitation(live)
-            }
         }
         .onChange(of: viewModel.sendFeedback) { _, feedback in
             guard feedback != nil else { return }
@@ -2767,5 +2755,30 @@ extension MailView {
             }
         }
         return events
+    }
+}
+
+
+/// Run 18.09.: Ausgelagertes Einladungs-Detail-Sheet (Mail) - der
+/// MailView-body wurde zu komplex fuer den Typ-Checker.
+struct MailInvitationDetailSheet: View {
+    let invitation: SouveraMailInvitation
+    let respond: (CalendarViewModel.CalendarRSVP, [Int]?, String?, String?) async -> Bool?
+    let onBack: () -> Void
+    @ObservedObject private var center = SouveraInvitationCenter.shared
+
+    var body: some View {
+        let live = center.mailInvites.first(where: { $0.id == invitation.id }) ?? invitation
+        return SouveraInvitationDetailView(
+            event: live.event ?? SouveraInvitationCenter.placeholderEvent(for: live),
+            organizerFallback: live.displayOrganizer,
+            respond: { rsvp, reminders, altProposal, calendarHref in
+                await respond(rsvp, reminders, altProposal, calendarHref)
+            },
+            onBack: onBack
+        )
+        .task {
+            _ = await center.resolveInvitation(live)
+        }
     }
 }
