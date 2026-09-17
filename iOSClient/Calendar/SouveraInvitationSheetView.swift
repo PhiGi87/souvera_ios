@@ -198,6 +198,7 @@ struct SouveraInvitationSheetView: View {
 // (B7/B8), Erinnerungs-Editor (B4), zustandsabhängiges RSVP (B6) und
 // optionaler Alternativvorschlag beim Ablehnen (B9).
 struct SouveraInvitationDetailView: View {
+    @ObservedObject var center: SouveraInvitationCenter = .shared
     let event: CalendarEventModel
     let organizerFallback: String
     /// nil = Antworten hier nicht moeglich (Hinweis statt Buttons).
