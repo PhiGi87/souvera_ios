@@ -285,7 +285,8 @@ final class SouveraInvitationCenter: ObservableObject {
             id: invitation.id, messageId: invitation.messageId, accountId: invitation.accountId,
             subject: invitation.subject, from: invitation.from,
             organizerEmail: event.organizerEmail,
-            event: event, rawICS: nil, resolved: true, receivedAt: invitation.receivedAt)
+            event: event, rawICS: nil, resolved: true,
+            receivedAt: invitation.receivedAt)
     }
 
     func updateInvite(_ invitation: SouveraMailInvitation) {

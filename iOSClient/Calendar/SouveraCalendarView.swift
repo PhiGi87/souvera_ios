@@ -202,10 +202,10 @@ struct SouveraCalendarView: View {
                     return await SouveraInvitationCenter.respondViaMail(
                         live, rsvp, reminders, altProposal, calendarHref: calendarHref)
                 },
-                overlapEvents: live.event != nil ? overlapBasis(live.event!) : [],
                 onBack: {
                     openedMailInvite = nil
-                }
+                },
+                overlapEvents: live.event != nil ? overlapBasis(live.event!) : []
             )
             .task {
                 _ = await SouveraInvitationCenter.shared.resolveInvitation(live)
