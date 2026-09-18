@@ -363,6 +363,15 @@ final class CalendarViewModel: ObservableObject {
         // Run 16.09.: offene Einladungen (ownPartstat = needs-action) an
         // den zentralen InvitationCenter melden (FAB-Badge + Sheet).
         let pending = sortedAll.filter { $0.ownPartstat == "needs-action" }
+        // Run 19.09. (Feedback Cross-Device): Server-beantwortete UIDs
+        // melden - damit werden auf anderen Geraeten beantwortete
+        // Mail-Einladungen ebenfalls ausgeblendet.
+        let serverAnswered = Set(
+            sortedAll
+                .filter { !$0.ownPartstat.isEmpty && $0.ownPartstat != "needs-action" && !$0.uid.isEmpty }
+                .map { $0.uid.lowercased() }
+        )
+        SouveraInvitationCenter.shared.setServerAnsweredUids(serverAnswered)
         await SouveraInvitationCenter.shared.setCalendarInvites(pending, accountKey: Self.stableAccountKey())
         // Redundanz-Guard: identische Event-Stände nicht erneut setzen.
         let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")

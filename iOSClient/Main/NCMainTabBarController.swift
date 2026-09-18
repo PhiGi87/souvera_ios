@@ -552,6 +552,22 @@ class NCMainTabBarController: UITabBarController {
             get { SouveraAppearance.useBridgeHeader ? false : super.isNavigationBarHidden }
             set { super.isNavigationBarHidden = newValue }
         }
+
+        /// Run 19.09. (Feedback iPad-Header): Die blaue Appearance auf
+        /// dem iPad bei jedem Erscheinen/Layout neu erzwingen - iOS 26
+        /// (Liquid Glass) setzt sie sonst asynchron zurueck (Farben
+        /// "verfaelscht", hellblaue Glas-Bar).
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            guard SouveraAppearance.useBridgeHeader else { return }
+            SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+        }
+
+        override func viewDidLayoutSubviews() {
+            super.viewDidLayoutSubviews()
+            guard SouveraAppearance.useBridgeHeader else { return }
+            SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+        }
     }
 
     private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
@@ -565,15 +581,9 @@ class NCMainTabBarController: UITabBarController {
         // Nur auf dem iPad (bridge mode); auf dem iPhone bleibt die
         // aeussere Bar hidden - dort zeichnet der Glas-Header.
         navigationController.setNavigationBarHidden(!SouveraAppearance.useBridgeHeader, animated: false)
-        navigationController.navigationBar.standardAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.scrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.compactAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.compactScrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationController.navigationBar.isTranslucent = false
-        // Run 19.09. (Feedback iPad-Header): dunkle Icons 1:1 Mehr/Dateien
-        // (Titeltext bleibt weiss - wie bei Mehr/Dateien).
-        navigationController.navigationBar.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
-        navigationController.navigationBar.overrideUserInterfaceStyle = .light
+        // Run 19.09.: gemeinsamer Appearance-Helper (alle vier Slots,
+        // deckend, dunkle Icons) - 1:1 Mehr/Dateien.
+        SouveraAppearance.applyBlueNavigationBar(to: navigationController.navigationBar)
         navigationController.setNavigationBarHidden(false, animated: false)
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),

@@ -74,6 +74,24 @@ enum SouveraAppearance {
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
         return appearance
     }
+
+    /// Run 19.09. (Feedback iPad-Header: Farben verfaelscht): Wendet die
+    /// blaue Appearance auf ALLE vier Appearance-Slots an und erzwingt
+    /// deckend + hell. Als gemeinsamer Helper fuer Dateien, Mehr und die
+    /// gebrueckten Module, damit die Bar ueber alle iOS-Versionen gleich
+    /// aussieht. `tint` ist standardmaessig dunkel (Liquid-Glass-Items);
+    /// Dateien/Mehr setzen weiss.
+    static func applyBlueNavigationBar(to navigationBar: UINavigationBar,
+                                       tint: UIColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)) {
+        let appearance = blueNavigationBarAppearance()
+        navigationBar.standardAppearance = appearance
+        navigationBar.scrollEdgeAppearance = appearance
+        navigationBar.compactAppearance = appearance
+        navigationBar.compactScrollEdgeAppearance = appearance
+        navigationBar.isTranslucent = false
+        navigationBar.tintColor = tint
+        navigationBar.overrideUserInterfaceStyle = .light
+    }
 }
 
 // MARK: - Souvera-Modul-Header (Run 15.09.)
@@ -325,18 +343,24 @@ final class SouveraBarCoordinator {
     func rebuild() {
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
         item.title = bridge.title.isEmpty ? nil : bridge.title
-        item.leadingItemGroups = Self.groups(bridge.leadingItems, bridge.leadingMenus,
-                                             bridge.leadingCustoms)
-        item.trailingItemGroups = Self.groups(bridge.trailingItems, bridge.trailingMenus,
-                                              bridge.trailingCustoms)
+        let leading = Self.bars(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
+        let trailing = Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
+        // Run 19.09. (Feedback iPad-Header: Buttons fehlten auf iOS 26):
+        // Einzelne Bar-Items statt einer UIBarButtonItemGroup - in einer
+        // Gruppe mit representativeItem nil wurden auf iOS 26 nicht alle
+        // Items gerendert. left/rightBarButtonItems zeigt sie zuverlaessig.
+        item.leftBarButtonItems = leading.isEmpty ? nil : leading
+        item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
+        item.leadingItemGroups = []
+        item.trailingItemGroups = []
+        SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count)")
     }
 
-    /// Run 18.09.: EINE Gruppe pro Seite (identisch zu Mehr/Dateien) -
-    /// iOS 26 rendert die Items darin als komfortable Glas-Pills;
-    /// Standard-Symbolgroesse (kein Medium-Config).
-    private static func groups(_ items: [SouveraHeaderBridge.Item],
-                               _ menus: [SouveraHeaderBridge.MenuGroup],
-                               _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItemGroup] {
+    /// Run 19.09.: Baut die einzelnen Bar-Items (Items, Menues, Custom-
+    /// Views). Custom-Views zuerst (Ring/Status), damit sie innen liegen.
+    private static func bars(_ items: [SouveraHeaderBridge.Item],
+                             _ menus: [SouveraHeaderBridge.MenuGroup],
+                             _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItem] {
         var bars: [UIBarButtonItem] = []
         for custom in customs {
             bars.append(UIBarButtonItem(customView: custom.view))
@@ -382,8 +406,7 @@ final class SouveraBarCoordinator {
             bar.accessibilityLabel = menu.accessibilityLabel
             bars.append(bar)
         }
-        guard !bars.isEmpty else { return [] }
-        return [UIBarButtonItemGroup(barButtonItems: bars, representativeItem: nil)]
+        return bars
     }
 }
 

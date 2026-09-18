@@ -18,6 +18,16 @@ final class SouveraInvitationCenter: ObservableObject {
     /// Account-Key, fuer den der aktuelle Stand gilt (Accountwechsel).
     @Published private(set) var accountKey: String = ""
 
+    /// Run 19.09. (Feedback Cross-Device): UIDs von Terminen, die laut
+    /// SERVER (CalDAV-PARTSTAT != needs-action) bereits beantwortet sind.
+    /// Damit lassen sich auf einem anderen Geraet beantwortete
+    /// Mail-Einladungen auch hier ausblenden.
+    private(set) var serverAnsweredUids: Set<String> = []
+
+    func setServerAnsweredUids(_ uids: Set<String>) {
+        serverAnsweredUids = uids
+    }
+
     var totalCount: Int { calendarInvites.count + mailInvites.count }
 
     func setCalendarInvites(_ events: [CalendarEventModel], accountKey: String) {
@@ -59,6 +69,7 @@ final class SouveraInvitationCenter: ObservableObject {
         guard self.accountKey != accountKey else { return }
         calendarInvites = []
         mailInvites = []
+        serverAnsweredUids = []
         self.accountKey = accountKey
     }
 
@@ -299,6 +310,21 @@ final class SouveraInvitationCenter: ObservableObject {
                 }
             }
 
+            // Run 19.09. (Feedback Cross-Device: "auf iPhone beantwortet,
+            // iPad zeigt sie weiter"): Ist der Termin laut Server bereits
+            // beantwortet (PARTSTAT != needs-action), die Mail-Einladung
+            // hier ausblenden UND die Mail in den Papierkorb verschieben -
+            // damit ist der Stand geraeteuebergreifend konsistent.
+            let candidateUID = parsedEvent?.uid
+                ?? invitationICS.flatMap { Self.quickExtract($0, key: "UID") }
+                ?? ""
+            if !candidateUID.isEmpty,
+               serverAnsweredUids.contains(candidateUID.lowercased()) {
+                SouveraLog.write("Invitations", "skip server-answered invite uid=\(candidateUID) mail=\(messageId)")
+                Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: messageId) }
+                continue
+            }
+
             // Run 18.09.: METHOD/SEQUENCE erkennen (CANCEL + erneute
             // Antwort-Wahl bei hoeherer SEQUENCE).
             var kind: SouveraMailInvitation.Kind = cancelHint ? .cancel : .invitation
@@ -311,6 +337,13 @@ final class SouveraInvitationCenter: ObservableObject {
                     Self.resetAnsweredIfNewerSequence(uid: uid, sequence: sequence)
                 }
             }
+            // Run 19.09. (Feedback Absage ohne ICS): rawICS AUCH bei
+            // Parse-Fehler behalten - eventUID/quickExtract findet die
+            // echte UID dann trotzdem (Absage-Entfernen scheiterte sonst
+            // mit uid=).
+            if kind == .cancel {
+                SouveraLog.write("Invitations", "cancel mail \(messageId): ics=\(invitationICS != nil) parsed=\(parsedEvent != nil)")
+            }
             invites.append(SouveraMailInvitation(
                 id: messageId,
                 messageId: messageId,
@@ -319,7 +352,7 @@ final class SouveraInvitationCenter: ObservableObject {
                 from: from,
                 organizerEmail: parsedEvent?.organizerEmail ?? from,
                 event: parsedEvent,
-                rawICS: parsedEvent != nil ? invitationICS : nil,
+                rawICS: invitationICS,
                 receivedAt: Date(),
                 kind: kind, sequence: sequence))
         }
@@ -389,6 +422,10 @@ final class SouveraInvitationCenter: ObservableObject {
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }
+        // Run 19.09. (Feedback): Einladungsmail nach der Antwort serverseitig
+        // in den Papierkorb - geraeteuebergreifend konsistent.
+        let trashed = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
+        SouveraLog.write("Invitations", "mail RSVP \(status.rawValue) uid=\(resolved.eventUID) mail->trash=\(trashed)")
         return true
     }
 
@@ -648,7 +685,7 @@ final class SouveraInvitationCenter: ObservableObject {
                 if !uid.isEmpty,
                    entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
                     matches = true
-                } else if !normalizedTitle.isEmpty, let refStart = start, let refEnd = end {
+                } else if !normalizedTitle.isEmpty {
                     let candidate = ICSParser.parseEvents(
                         entry.ics, calendarHref: cal.href, href: entry.href,
                         etag: entry.etag).first
@@ -656,10 +693,19 @@ final class SouveraInvitationCenter: ObservableObject {
                         let candidateTitle = candidate.title.lowercased()
                             .components(separatedBy: CharacterSet.alphanumerics.inverted)
                             .filter { !$0.isEmpty }.joined(separator: " ")
-                        let startDelta = abs(candidate.start.timeIntervalSince(refStart))
-                        let endDelta = abs(candidate.end.timeIntervalSince(refEnd))
-                        matches = candidateTitle == normalizedTitle
-                            && startDelta <= 300 && endDelta <= 300
+                        if candidateTitle == normalizedTitle {
+                            // Run 19.09. (Feedback Absage ohne ICS): Mit
+                            // Zeitraum praezise (±5 min), OHNE Zeitraum
+                            // (reine Betreff-Absage) nur der normalisierte
+                            // Titel - sonst wurde nie entfernt.
+                            if let refStart = start, let refEnd = end {
+                                let startDelta = abs(candidate.start.timeIntervalSince(refStart))
+                                let endDelta = abs(candidate.end.timeIntervalSince(refEnd))
+                                matches = startDelta <= 300 && endDelta <= 300
+                            } else {
+                                matches = true
+                            }
+                        }
                     }
                 }
                 if matches {
@@ -671,6 +717,27 @@ final class SouveraInvitationCenter: ObservableObject {
         }
         if !removed {
             SouveraLog.write("Invitations", "cancel remove: kein Match (uid=\(uid) title=\(title))")
+        }
+        return removed
+    }
+
+    /// Run 19.09. (Feedback Absage): Absage-Mail aufloesen (ICS/UID per
+    /// Lazy-Fetch) und den Termin entfernen; danach Mail in den Papierkorb.
+    /// Ein Pfad fuer Detail- und Uebersichts-Button.
+    @discardableResult
+    func removeCancelledMail(_ invitation: SouveraMailInvitation) async -> Bool {
+        let resolved = await resolveInvitation(invitation)
+        let removed = await removeCancelledEvent(
+            uid: resolved.eventUID,
+            title: resolved.displayTitle,
+            start: resolved.event?.start,
+            end: resolved.event?.end)
+        if removed {
+            Self.markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
+            await MainActor.run {
+                SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
+            }
+            _ = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
         }
         return removed
     }
@@ -789,6 +856,12 @@ final class SouveraInvitationCenter: ObservableObject {
                 }
                 let ok = await client.updateEvent(entry, ics: updated)
                 SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): \(ok)")
+                // Run 19.09. (Feedback): ICS zuruecklesen und den
+                // serverseitigen PARTSTAT loggen (Cross-Device-Diagnose).
+                if ok, let verify = await client.fetchEventICS(entry) {
+                    let server = CalendarViewModel.serverPartstat(ics: verify, attendeeEmail: me)
+                    SouveraLog.write("Invitations", "RSVP verify uid=\(uid): server PARTSTAT=\(server)")
+                }
                 return ok
             }
         }

@@ -1285,6 +1285,12 @@ final class MailViewModel: ObservableObject {
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
         }
+        // Run 19.09. (Feedback: Einladungen bleiben auf dem iPad): Die
+        // Einladungsmail nach JEDER Antwort serverseitig in den Papierkorb
+        // - so verschwindet die Einladung auf allen Geraeten. Die
+        // Gesendet-Kopie der Antwort bleibt unberuehrt.
+        let trashed = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
+        SouveraLog.write("Invitations", "mail RSVP \(status.rawValue) uid=\(resolved.eventUID) mail->trash=\(trashed)")
         return true
     }
 

@@ -51,7 +51,21 @@ extension SouveraMailInvitation {
 
 extension SouveraMailInvitation {
     var displayTitle: String {
-        event?.title ?? subject
+        if let event, !event.title.isEmpty { return event.title }
+        return Self.strippedSubjectPrefix(subject)
+    }
+
+    /// Run 19.09. (Feedback Absage): Betreff-Praefixe wie "Abgesagt:"/
+    /// "Cancelled:" fuer Anzeige und Titel-Match entfernen.
+    static func strippedSubjectPrefix(_ subject: String) -> String {
+        let prefixes = ["abgesagt:", "abgesagt ", "cancelled:", "canceled:",
+                        "cancelled ", "canceled ", "einladung:", "invitation:",
+                        "invito:"]
+        let lower = subject.lowercased()
+        for prefix in prefixes where lower.hasPrefix(prefix) {
+            return String(subject.dropFirst(prefix.count)).trimmingCharacters(in: .whitespaces)
+        }
+        return subject
     }
 
     var displayOrganizer: String {

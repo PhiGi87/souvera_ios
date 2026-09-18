@@ -53,18 +53,20 @@ class NCMoreNavigationController: NCMainNavigationController {
 
     /// Blauer Header ohne Logo (alle aus dem Mehr-Menü gepushten Screens).
     private func applyBlueHeader() {
-        let appearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationBar.standardAppearance = appearance
-        navigationBar.scrollEdgeAppearance = appearance
-        navigationBar.compactAppearance = appearance
-        navigationBar.compactScrollEdgeAppearance = appearance
-        navigationBar.isTranslucent = false
-        navigationBar.tintColor = .white
-        navigationBar.overrideUserInterfaceStyle = .light
+        // Run 19.09.: gemeinsamer Helper (alle vier Slots, deckend, hell).
+        SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
+    }
+
+    /// Run 19.09. (Feedback iPad-Header): Appearance bei jedem Erscheinen/
+    /// Layout neu erzwingen (iOS 26 setzt sie sonst asynchron zurueck).
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyBlueHeader()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        applyBlueHeader()
         layoutSouveraLogo()
     }
 

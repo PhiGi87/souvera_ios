@@ -156,19 +156,11 @@ struct SouveraInvitationSheetView: View {
                     Button {
                         cancelRemoveId = invite.id
                         Task {
-                            let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
-                                uid: invite.event?.uid ?? "",
-                                title: invite.displayTitle,
-                                start: invite.event?.start,
-                                end: invite.event?.end)
+                            // Run 19.09. (Feedback Absage ohne ICS): aufloesen
+                            // und entfernen in einem Pfad (Titel-Fallback).
+                            let ok = await SouveraInvitationCenter.shared.removeCancelledMail(invite)
                             if ok {
                                 removedIds.insert(invite.id)
-                                SouveraInvitationCenter.markAnswered(
-                                    messageId: invite.messageId, eventEnd: invite.event?.end)
-                                SouveraInvitationCenter.shared.removeMailInvitation(invite.id)
-                                // Run 19.09.: Absage-Mail serverseitig in
-                                // den Papierkorb (alle Geräte).
-                                Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: invite.messageId) }
                             }
                             cancelRemoveId = nil
                         }
@@ -647,11 +639,21 @@ struct SouveraInvitationDetailView: View {
                 Button {
                     cancelBusy = true
                     Task {
-                        let ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
-                            uid: displayEvent.uid,
-                            title: displayEvent.title,
-                            start: displayEvent.start,
-                            end: displayEvent.end)
+                        // Run 19.09. (Feedback Absage ohne ICS): zuerst die
+                        // echte Mail-Absage aufloesen (UID/ICS per Lazy-
+                        // Fetch) - sonst blieb "kein Match".
+                        let liveInvite = SouveraInvitationCenter.shared.mailInvites
+                            .first(where: { $0.id == event.href })
+                        let ok: Bool
+                        if let liveInvite {
+                            ok = await SouveraInvitationCenter.shared.removeCancelledMail(liveInvite)
+                        } else {
+                            ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
+                                uid: displayEvent.uid,
+                                title: displayEvent.title,
+                                start: displayEvent.start,
+                                end: displayEvent.end)
+                        }
                         cancelBusy = false
                         var notFound = Set(UserDefaults.standard.stringArray(
                             forKey: Self.notInCalendarKey) ?? [])

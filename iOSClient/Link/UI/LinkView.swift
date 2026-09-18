@@ -99,6 +99,10 @@ struct LinkView: View {
             populateHeaderBridge()
         }
         .onAppear {
+            // Run 19.09. (Feedback iPad-Header): Bridge auch beim ERSTEN
+            // Anzeigen befuellen - die Buttons der Link-Home fehlten, weil
+            // populateHeaderBridge nur bei route/hasCall/lobbyState lief.
+            populateHeaderBridge()
             viewModel.start()
             viewModel.reconnectSignalingIfNeeded()
             viewModel.startRoomPolling()

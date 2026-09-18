@@ -44,16 +44,21 @@ class NCFilesNavigationController: NCMainNavigationController {
     }
 
     private func applyBlueHeader() {
-        let appearance = SouveraAppearance.blueNavigationBarAppearance()
-        navigationBar.standardAppearance = appearance
-        navigationBar.scrollEdgeAppearance = appearance
-        navigationBar.compactAppearance = appearance
-        navigationBar.compactScrollEdgeAppearance = appearance
-        navigationBar.isTranslucent = false
-        navigationBar.tintColor = .white
-        // 1:1 mit dem Mehr-Menue: helles Glas mit dunklen Icons, auch im
-        // Dark Mode (Run 15.09.).
-        navigationBar.overrideUserInterfaceStyle = .light
+        // Run 19.09.: gemeinsamer Helper (alle vier Slots, deckend, hell).
+        SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
+    }
+
+    /// Run 19.09. (Feedback Dateien-Header verfaelscht): Appearance bei
+    /// jedem Erscheinen/Layout neu erzwingen (iOS 26 setzt sie sonst
+    /// asynchron zurueck -> hellblaue Glas-Bar).
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        applyBlueHeader()
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyBlueHeader()
     }
 
     // MARK: - Right
