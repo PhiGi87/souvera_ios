@@ -353,7 +353,9 @@ final class SouveraBarCoordinator {
         item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
         item.leadingItemGroups = []
         item.trailingItemGroups = []
+        #if !EXTENSION
         SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count)")
+        #endif
     }
 
     /// Run 19.09.: Baut die einzelnen Bar-Items (Items, Menues, Custom-
