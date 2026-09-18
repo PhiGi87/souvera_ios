@@ -75,18 +75,34 @@ enum SouveraReminderScheduler {
             // des App-Downloads gerade verpasst worden sein. Bei diesem
             // Foreground-Laden sofort nachliefern (Fenster: letzte 10 min,
             // Termin muss noch in der Zukunft liegen).
-            let missed = events.filter { event in
-                guard event.start > now, !event.reminders.isEmpty else { return false }
-                return event.reminders.contains { minutes in
-                    let fire = event.start.addingTimeInterval(-Double(minutes) * 60)
-                    return fire <= now && now.timeIntervalSince(fire) <= 600
+            // Run 19.09. (Feedback: "Beginnt in 10 min" DOPPELT zur
+            // 15-Min-Erinnerung, Log d13eaaa3x7): Der Catch-up darf nur
+            // nachliefern, wenn die EIGENTLICHE Erinnerung NICHT bereits
+            // zugestellt (delivered) oder noch geplant (pending) ist -
+            // sonst dupliziert jeder Sync im 10-min-Fenster die Erinnerung.
+            center.getDeliveredNotificationRequests { delivered in
+                let deliveredIds = Set(delivered.map(\.identifier))
+                let pendingIds = Set(existing.map(\.identifier))
+                var missed: [(event: CalendarEventModel, minutes: Int)] = []
+                for event in events {
+                    guard event.start > now, !event.reminders.isEmpty else { continue }
+                    for minutes in event.reminders {
+                        let fire = event.start.addingTimeInterval(-Double(minutes) * 60)
+                        guard fire <= now, now.timeIntervalSince(fire) <= 600 else { continue }
+                        let standardId = "\(prefix)\(event.uid)_\(minutes)"
+                        let catchupId = "\(prefix)catchup_\(event.uid)_\(minutes)"
+                        // Stabile Catch-up-ID (statt Zeitstempel) - der
+                        // Delivered-Check erkennt damit auch wiederholte
+                        // Catch-ups desselben Ereignisses.
+                        if pendingIds.contains(standardId) || pendingIds.contains(catchupId) { continue }
+                        if deliveredIds.contains(standardId) || deliveredIds.contains(catchupId) { continue }
+                        missed.append((event, minutes))
+                    }
                 }
-            }
-            for event in missed {
-                let minutes = event.reminders
-                    .map { Int(now.timeIntervalSince(event.start.addingTimeInterval(-Double($0) * 60))) }
-                    .min() ?? 0
-                let content = UNMutableNotificationContent()
+                for miss in missed {
+                    let event = miss.event
+                    let minutes = miss.minutes
+                    let content = UNMutableNotificationContent()
                 let name = event.title.trimmingCharacters(in: .whitespacesAndNewlines)
                 content.title = SouveraNotificationText.title(
                     String(format: NSLocalizedString("_push_event_title_", comment: ""), name.isEmpty ? "—" : name)
@@ -101,15 +117,16 @@ enum SouveraReminderScheduler {
                     "start": event.start.timeIntervalSince1970,
                     "account": account
                 ]
-                let request = UNNotificationRequest(
-                    identifier: "\(prefix)catchup_\(event.uid)_\(Int(now.timeIntervalSince1970))",
-                    content: content,
-                    trigger: nil // sofort
-                )
-                center.add(request)
-            }
-            if !missed.isEmpty {
-                JmapLog.write("Calendar reminders: catch-up delivered for \(missed.count) event(s)")
+                    let request = UNNotificationRequest(
+                        identifier: "\(prefix)catchup_\(event.uid)_\(minutes)",
+                        content: content,
+                        trigger: nil // sofort
+                    )
+                    center.add(request)
+                }
+                if !missed.isEmpty {
+                    JmapLog.write("Calendar reminders: catch-up delivered for \(missed.count) event(s)")
+                }
             }
         }
     }

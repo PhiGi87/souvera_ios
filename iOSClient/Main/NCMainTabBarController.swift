@@ -570,7 +570,9 @@ class NCMainTabBarController: UITabBarController {
         navigationController.navigationBar.compactAppearance = SouveraAppearance.blueNavigationBarAppearance()
         navigationController.navigationBar.compactScrollEdgeAppearance = SouveraAppearance.blueNavigationBarAppearance()
         navigationController.navigationBar.isTranslucent = false
-        navigationController.navigationBar.tintColor = .white
+        // Run 19.09. (Feedback iPad-Header): dunkle Icons 1:1 Mehr/Dateien
+        // (Titeltext bleibt weiss - wie bei Mehr/Dateien).
+        navigationController.navigationBar.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
         navigationController.navigationBar.overrideUserInterfaceStyle = .light
         navigationController.setNavigationBarHidden(false, animated: false)
         navigationController.tabBarItem = UITabBarItem(

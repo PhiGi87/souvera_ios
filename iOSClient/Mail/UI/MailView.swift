@@ -97,6 +97,14 @@ struct MailView: View {
         .onChange(of: viewModel.route) { _, _ in
             populateHeaderBridge()
         }
+        // Run 19.09. (Feedback iPad-Header): Bridge aktuell halten -
+        // Sortierungs-Menü (Häkchen) und "Bearbeiten"-Sichtbarkeit.
+        .onChange(of: viewModel.sortOrder) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: listMessagesEmpty) { _, _ in
+            populateHeaderBridge()
+        }
         // Run 15.09.: Rueckkehr aus dem Hintergrund = Refresh (onAppear
         // feuert beim Foreground-Wechsel nicht). refreshOnEntry throttled
         // intern auf 8 s.
@@ -495,20 +503,38 @@ struct MailView: View {
         }
         if case .messages = viewModel.route {
             // "..."-Menü (Bearbeiten/Sortierung/Papierkorb leeren) + Compose.
+            // Run 19.09. (Feedback iPad-Header): 1:1 iPhone-Header -
+            // "Bearbeiten" entfällt bei leerer Liste, "Papierkorb leeren"
+            // erscheint nur IM PAPIERKORB.
+            var moreEntries: [SouveraHeaderBridge.MenuEntry] = []
+            if !listMessagesEmpty {
+                moreEntries.append(.init(id: "edit", title: NSLocalizedString("_edit_", comment: ""), icon: "checklist") {
+                    listEditing = true
+                })
+            }
+            if viewModel.currentMailbox?.kind == .trash {
+                moreEntries.append(.init(id: "emptytrash", title: NSLocalizedString("_mail_trash_empty_", comment: ""), icon: "trash.slash", isDestructive: true) {
+                    listShowEmptyTrashConfirm = true
+                })
+            }
+            if !moreEntries.isEmpty {
+                menus.append(SouveraHeaderBridge.MenuGroup(
+                    id: "messages-more", icon: "ellipsis.circle",
+                    accessibilityLabel: NSLocalizedString("_mail_more_", comment: ""),
+                    entries: moreEntries
+                ))
+            }
+            // Run 19.09.: Sortierung als EIGENES Untermenü mit allen
+            // Sortierungen + Häkchen (statt Einzeltipp) - 1:1 iPhone.
             menus.append(SouveraHeaderBridge.MenuGroup(
-                id: "messages-more", icon: "ellipsis.circle",
-                accessibilityLabel: NSLocalizedString("_mail_more_", comment: ""),
-                entries: [
-                    .init(id: "edit", title: NSLocalizedString("_edit_", comment: ""), icon: "checklist") {
-                        listEditing = true
-                    },
-                    .init(id: "sort", title: NSLocalizedString("_mail_sort_", comment: ""), icon: "arrow.up.arrow.down") {
-                        viewModel.sortOrder = viewModel.sortOrder.next()
-                    },
-                    .init(id: "emptytrash", title: NSLocalizedString("_mail_trash_empty_", comment: ""), icon: "trash.slash", isDestructive: true) {
-                        listShowEmptyTrashConfirm = true
+                id: "sort", icon: "arrow.up.arrow.down",
+                accessibilityLabel: NSLocalizedString("_mail_sort_", comment: ""),
+                entries: MailSortOrder.allCases.map { order in
+                    .init(id: order.rawValue, title: NSLocalizedString(order.titleKey, comment: ""),
+                          isChecked: viewModel.sortOrder == order) {
+                        viewModel.sortOrder = order
                     }
-                ]
+                }
             ))
             trailing.append(SouveraHeaderBridge.Item(
                 id: "compose", icon: "square.and.pencil",

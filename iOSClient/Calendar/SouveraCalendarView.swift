@@ -2201,14 +2201,18 @@ extension SouveraCalendarView {
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         bridge.title = ""
+        // Run 19.09. (Feedback iPad-Header): 1:1 iPhone-Header - "Heute"
+        // als TEXT-Button (fehlte komplett, leeres Icon wurde übersprungen).
         bridge.leadingItems = [
-            .init(id: "today", icon: "", accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")) {
+            .init(id: "today", icon: "",
+                  text: NSLocalizedString("_calendar_today_", comment: ""),
+                  accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")) {
                 selectedDay = Date()
                 viewModel.visibleMonth = Date()
                 scrollToNowTrigger += 1
             },
             .init(id: "search", icon: "magnifyingglass",
-                  accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
+                  accessibilityLabel: NSLocalizedString("_calendar_search_hint_", comment: "")) {
                 searchActive = true
             },
             .init(id: "picker", icon: "calendar.badge.checkmark",
@@ -2222,12 +2226,15 @@ extension SouveraCalendarView {
                 editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
             }
         ]
-        // Ansichts-Menü als MenuGroup.
+        // Run 19.09.: Ansichts-Menü als TEXT-Button mit aktivem Modus +
+        // Häkchen - 1:1 iPhone-Header.
         bridge.trailingMenus = [
             .init(id: "viewmode", icon: "calendar",
+                  title: viewMode.title,
                   accessibilityLabel: NSLocalizedString("_settings_calendar_default_view_", comment: ""),
                   entries: CalendarViewMode.allCases.map { mode in
-                      .init(id: mode.rawValue, title: mode.title) { viewMode = mode }
+                      .init(id: mode.rawValue, title: mode.title,
+                            isChecked: mode == viewMode) { viewMode = mode }
                   })
         ]
     }

@@ -225,16 +225,21 @@ final class SouveraHeaderBridge: ObservableObject {
     struct Item: Identifiable {
         let id: String
         let icon: String
+        /// Run 19.09. (Feedback iPad-Header): Text-Item (z. B. "Heute",
+        /// Ansichts-Modus) statt Icon - 1:1 wie der iPhone-Glas-Header.
+        let text: String?
         let accessibilityLabel: String
         let isGreen: Bool
         let isDestructive: Bool
         let handler: () -> Void
 
-        init(id: String, icon: String, accessibilityLabel: String = "",
+        init(id: String, icon: String, text: String? = nil,
+             accessibilityLabel: String = "",
              isGreen: Bool = false, isDestructive: Bool = false,
              handler: @escaping () -> Void) {
             self.id = id
             self.icon = icon
+            self.text = text
             self.accessibilityLabel = accessibilityLabel
             self.isGreen = isGreen
             self.isDestructive = isDestructive
@@ -246,14 +251,17 @@ final class SouveraHeaderBridge: ObservableObject {
         let id: String
         let title: String
         let icon: String?
+        let isChecked: Bool
         let isDestructive: Bool
         let handler: () -> Void
 
         init(id: String, title: String, icon: String? = nil,
-             isDestructive: Bool = false, handler: @escaping () -> Void) {
+             isChecked: Bool = false, isDestructive: Bool = false,
+             handler: @escaping () -> Void) {
             self.id = id
             self.title = title
             self.icon = icon
+            self.isChecked = isChecked
             self.isDestructive = isDestructive
             self.handler = handler
         }
@@ -261,12 +269,16 @@ final class SouveraHeaderBridge: ObservableObject {
     struct MenuGroup: Identifiable {
         let id: String
         let icon: String
+        /// Run 19.09.: Text-Button (z. B. "Woche") statt Icon - 1:1 iPhone.
+        let title: String?
         let accessibilityLabel: String
         let entries: [MenuEntry]
 
-        init(id: String, icon: String, accessibilityLabel: String = "", entries: [MenuEntry]) {
+        init(id: String, icon: String, title: String? = nil,
+             accessibilityLabel: String = "", entries: [MenuEntry]) {
             self.id = id
             self.icon = icon
+            self.title = title
             self.accessibilityLabel = accessibilityLabel
             self.entries = entries
         }
@@ -329,30 +341,44 @@ final class SouveraBarCoordinator {
         for custom in customs {
             bars.append(UIBarButtonItem(customView: custom.view))
         }
-        for item in items where !item.icon.isEmpty {
-            let bar = UIBarButtonItem(
-                image: UIImage(systemName: item.icon),
-                style: .plain,
-                target: nil,
-                action: nil
-            )
-            bar.primaryAction = UIAction { _ in item.handler() }
-            bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : .white)
+        // Run 19.09. (Feedback iPad-Header): DUNKLE Icons - 1:1 mit dem
+        // iPhone-Glas-Header und dem Mehr-Menue (die hellen Icons passten
+        // nicht zur Bar). Gruen (Telefon) / rot (destruktiv) bleiben.
+        let itemTint = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+        for item in items where !item.icon.isEmpty || !(item.text ?? "").isEmpty {
+            let bar: UIBarButtonItem
+            if let text = item.text, !text.isEmpty {
+                bar = UIBarButtonItem(title: text, style: .plain, target: nil, action: nil)
+                bar.primaryAction = UIAction(title: text) { _ in item.handler() }
+            } else {
+                bar = UIBarButtonItem(
+                    image: UIImage(systemName: item.icon),
+                    style: .plain,
+                    target: nil,
+                    action: nil
+                )
+                bar.primaryAction = UIAction { _ in item.handler() }
+            }
+            bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : itemTint)
             bar.accessibilityLabel = item.accessibilityLabel
             bars.append(bar)
         }
-        for menu in menus where !menu.icon.isEmpty {
-            let bar = UIBarButtonItem(
-                image: UIImage(systemName: menu.icon),
-                menu: UIMenu(children: menu.entries.map { entry in
-                    UIAction(title: entry.title,
-                             image: entry.icon.flatMap { UIImage(systemName: $0) },
-                             attributes: entry.isDestructive ? .destructive : []) { _ in
-                        entry.handler()
-                    }
-                })
-            )
-            bar.tintColor = .white
+        for menu in menus where !menu.icon.isEmpty || !(menu.title ?? "").isEmpty {
+            let bar: UIBarButtonItem
+            if let title = menu.title, !title.isEmpty {
+                bar = UIBarButtonItem(title: title, style: .plain, target: nil, action: nil)
+            } else {
+                bar = UIBarButtonItem(image: UIImage(systemName: menu.icon))
+            }
+            bar.menu = UIMenu(children: menu.entries.map { entry in
+                UIAction(title: entry.title,
+                         image: entry.icon.flatMap { UIImage(systemName: $0) },
+                         state: entry.isChecked ? .on : .off,
+                         attributes: entry.isDestructive ? .destructive : []) { _ in
+                    entry.handler()
+                }
+            })
+            bar.tintColor = itemTint
             bar.accessibilityLabel = menu.accessibilityLabel
             bars.append(bar)
         }
