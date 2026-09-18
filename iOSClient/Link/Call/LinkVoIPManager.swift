@@ -40,6 +40,10 @@ final class LinkVoIPManager: NSObject {
     private(set) var activeCallInfo: (token: String, title: String, withVideo: Bool)?
     /// Room token of the call currently reported to CallKit, keyed by CallKit UUID.
     private var activeCalls: [UUID: String] = [:]
+    /// Run 19.09.: UUID des Fallback-Calls (leerer Token, iOS-Pflicht-Report
+    /// wenn die Entschlüsselung noch nicht fertig ist) - wird beendet,
+    /// sobald der echte Token bekannt ist.
+    private var fallbackCallUUID: UUID?
 
     private override init() {
         let configuration = CXProviderConfiguration()
@@ -678,7 +682,11 @@ final class LinkVoIPManager: NSObject {
     private func reportIncomingCall(roomToken: String, displayName: String, hasVideo: Bool, completion: @escaping () -> Void) {
         let uuid = UUID()
         activeCalls[uuid] = roomToken
-        pendingIncomingCall = (roomToken, displayName, hasVideo)
+        // Run 19.09. (Feedback): Der Fallback-Call (leerer Token) darf den
+        // echten Token NICHT überschreiben - die Annahme braucht ihn.
+        if !roomToken.isEmpty || pendingIncomingCall == nil {
+            pendingIncomingCall = (roomToken, displayName, hasVideo)
+        }
         let update = CXCallUpdate()
         update.remoteHandle = CXHandle(type: .generic, value: displayName)
         update.hasVideo = hasVideo
@@ -700,6 +708,13 @@ final class LinkVoIPManager: NSObject {
             self.ringingTimeoutTimer?.invalidate()
             self.ringingTimeoutTimer = Timer.scheduledTimer(withTimeInterval: 45, repeats: false) { [weak self] _ in
                 guard let self, self.pendingIncomingCall != nil else { return }
+                // Run 19.09. (Feedback: gejointer Call wurde gekillt): Der
+                // Timeout darf die Session des Nutzers NICHT beenden - er
+                // gilt nur, wenn (noch) keine Session läuft.
+                if let session = self.activeSession, !session.hasEnded {
+                    CallDebugLog.log("LinkVoIPManager", "ringing timeout skipped (session active)")
+                    return
+                }
                 CallDebugLog.log("LinkVoIPManager", "ringing timeout - ending unanswered call")
                 self.pendingIncomingCall = nil
                 self.activeCalls[uuid] = nil
@@ -766,9 +781,31 @@ extension LinkVoIPManager: PKPushRegistryDelegate {
             // P68g: Settings VOR der Annahme vorwärmen (joinRoom bleibt
             // der Annahme vorbehalten - Session-Frische ist kritisch).
             prewarmSettings(for: call.roomToken)
+            // Run 19.09. (Feedback: Anruf angenommen, aber Call startet
+            // nicht): EIN CallKit-Call pro Talk-Raum - wiederkehrende
+            // Pushes für denselben Raum aktualisieren den bestehenden
+            // Call, statt neue UUIDs zu stapeln (6 Calls für EINEN
+            // Anruf im Log d12qaaa3xf).
+            if let existing = activeCalls.first(where: { $0.value == call.roomToken }) {
+                pendingIncomingCall = (call.roomToken, call.displayName, call.hasVideo)
+                completion()
+                return
+            }
+            // Run 19.09.: Läuft noch ein Fallback-Call (leerer Token),
+            // wird er beendet und der echte gemeldet.
+            if let fallback = fallbackCallUUID, activeCalls[fallback] != nil {
+                provider.reportCall(with: fallback, endedAt: Date(), reason: .remoteEnded)
+                activeCalls[fallback] = nil
+                fallbackCallUUID = nil
+            }
             reportIncomingCall(roomToken: call.roomToken, displayName: call.displayName, hasVideo: call.hasVideo, completion: completion)
         } else {
+            // Run 19.09.: Fallback-Call (leerer Token, iOS-Pflicht-Report
+            // wenn die Entschlüsselung noch nicht fertig ist) - DER
+            // pendingIncomingCall-Token darf hier NICHT überschrieben
+            // werden (sonst geht der echte Token verloren).
             reportIncomingCall(roomToken: "", displayName: NSLocalizedString("_link_incoming_call_", comment: ""), hasVideo: true, completion: completion)
+            fallbackCallUUID = activeCalls.first(where: { $0.value.isEmpty })?.key
         }
     }
 }
@@ -790,8 +827,15 @@ extension LinkVoIPManager: CXProviderDelegate {
         defer {
             if bgTask != .invalid { UIApplication.shared.endBackgroundTask(bgTask) }
         }
-        let roomToken = activeCalls[action.callUUID] ?? ""
+        // Run 19.09. (Feedback: Call startet nicht nach Annahme): Wenn der
+        // angenommene Call der Fallback-Call (leerer Token) ist, den
+        // letzten bekannten echten Token aus pendingIncomingCall nutzen.
+        var roomToken = activeCalls[action.callUUID] ?? ""
+        if roomToken.isEmpty, let pending = pendingIncomingCall, !pending.token.isEmpty {
+            roomToken = pending.token
+        }
         activeCalls[action.callUUID] = nil
+        if roomToken.isEmpty { fallbackCallUUID = nil }
         // CallKit-UUID behalten: Der System-Call läuft weiter und wird
         // beim App-seitigen Auflegen via reportCall beendet.
         activeCallUUID = action.callUUID

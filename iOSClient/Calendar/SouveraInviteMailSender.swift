@@ -249,3 +249,35 @@ extension SouveraInviteMailSender {
         return (title, start, end)
     }
 }
+
+extension SouveraInviteMailSender {
+    /// Run 19.09. (Feedback): Absage-Mail in den Papierkorb verschieben -
+    /// SERVERSEITIG, damit sie auf allen Geräten aus dem Posteingang
+    /// verschwindet (der Scan findet sie nicht mehr).
+    func moveToTrash(messageId: String) async -> Bool {
+        do {
+            let manager = SouveraMailCredentialManager()
+            guard let account = await manager.renewCredential() else { return false }
+            let client = JmapClient(
+                baseUrl: account.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                username: account.saslUser,
+                password: account.mailPassword
+            )
+            let api = JmapApi(client: client)
+            let session = try await client.refreshSession()
+            let accId = session.primaryAccountId
+            let mailboxes = try await api.getMailboxes(accountId: accId)
+            guard let trashId = mailboxes.first(where: { ($0["role"] as? String) == "trash" })?["id"] as? String else {
+                SouveraLog.write("Invitations", "moveToTrash: keine Trash-Mailbox")
+                return false
+            }
+            _ = try? await api.moveEmails(accountId: accId, emailIds: [messageId],
+                                          targetMailboxId: trashId, markRead: true)
+            SouveraLog.write("Invitations", "cancel mail moved to trash: \(messageId)")
+            return true
+        } catch {
+            SouveraLog.write("Invitations", "moveToTrash failed: \(error)")
+            return false
+        }
+    }
+}

@@ -231,6 +231,22 @@ final class CalDavClient {
         return (200..<300).contains(status)
     }
 
+    /// Run 19.09. (Feedback): ICS nach dem RSVP-PUT zuruecklesen, um den
+    /// serverseitigen PARTSTAT zu verifizieren (Diagnose fuer den
+    /// Cross-Device-Status).
+    func fetchEventICS(_ entry: CalDavEventEntry) async -> String? {
+        guard let home = calendarHomeURLs().first,
+              let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,
+              let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return nil }
+        let req = authorizedRequest(for: url, method: "GET")
+        guard let (data, response) = try? await urlSession.data(for: req),
+              (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0) else {
+            JmapLog.write("CalDAV fetchEventICS \(url.absoluteString) -> Fehler")
+            return nil
+        }
+        return String(data: data, encoding: .utf8)
+    }
+
     func deleteEvent(_ entry: CalDavEventEntry) async -> Bool {
         guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,

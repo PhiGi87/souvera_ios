@@ -166,6 +166,9 @@ struct SouveraInvitationSheetView: View {
                                 SouveraInvitationCenter.markAnswered(
                                     messageId: invite.messageId, eventEnd: invite.event?.end)
                                 SouveraInvitationCenter.shared.removeMailInvitation(invite.id)
+                                // Run 19.09.: Absage-Mail serverseitig in
+                                // den Papierkorb (alle Geräte).
+                                Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: invite.messageId) }
                             }
                             cancelRemoveId = nil
                         }
@@ -659,6 +662,9 @@ struct SouveraInvitationDetailView: View {
                             SouveraInvitationCenter.markAnswered(
                                 messageId: displayEvent.href, eventEnd: displayEvent.end)
                             SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                            // Run 19.09.: Absage-Mail serverseitig in den
+                            // Papierkorb (alle Geräte).
+                            Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: displayEvent.href) }
                             // Run 19.09. (Feedback): Ergebnis-Popup.
                             cancelResultAlert = NSLocalizedString("_invitations_cancel_removed_", comment: "")
                         } else {

@@ -765,6 +765,14 @@ final class CalendarViewModel: ObservableObject {
         let ok = await client.updateEvent(entry, ics: updated)
         if ok {
             JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
+            // Run 19.09. (Feedback): ICS zuruecklesen und den serverseitigen
+            // PARTSTAT loggen - Diagnose fuer den Cross-Device-Status.
+            if let verify = await client.fetchEventICS(entry) {
+                let serverPartstat = Self.serverPartstat(ics: verify, attendeeEmail: me)
+                JmapLog.write("Invitation RSVP verify \(event.uid): server PARTSTAT=\(serverPartstat)")
+            } else {
+                JmapLog.write("Invitation RSVP verify \(event.uid): ICS nicht lesbar")
+            }
             // Run 19.09. (Feedback): Eine ABLEHNUNG entfernt den Termin
             // komplett aus dem Kalender (nach dem PARTSTAT-PUT, damit der
             // Organisator die iTIP-Absage erhaelt).
@@ -911,6 +919,34 @@ final class CalendarViewModel: ObservableObject {
 
     /// Schreibt PARTSTAT im eigenen ATTENDEE um (Case-insensitiver
     /// mailto:-Match, bestehenden PARTSTAT-Parameter ersetzen).
+    /// Run 19.09.: PARTSTAT des eigenen Attendees aus einer ICS lesen
+    /// (Server-Ruecklese-Diagnose).
+    static func serverPartstat(ics: String, attendeeEmail: String) -> String {
+        let unfolded = ics.replacingOccurrences(of: "\r\n ", with: "")
+            .replacingOccurrences(of: "\r\n\t", with: "")
+        let me = attendeeEmail.lowercased()
+        var inAttendeeBlock = false
+        for rawLine in unfolded.components(separatedBy: .newlines) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            let upper = line.uppercased()
+            if upper.hasPrefix("BEGIN:VALARM") || upper.hasPrefix("END:VEVENT") {
+                inAttendeeBlock = false
+                continue
+            }
+            if upper.hasPrefix("ATTENDEE") {
+                inAttendeeBlock = line.lowercased().contains("mailto:\(me)")
+                if inAttendeeBlock,
+                   let range = line.range(of: "PARTSTAT=", options: .caseInsensitive) {
+                    return String(line[range.upperBound...])
+                        .split(separator: ";").first.map(String.init) ?? "unset"
+                }
+            } else if !upper.hasPrefix(" ") && !upper.isEmpty {
+                inAttendeeBlock = false
+            }
+        }
+        return "attendee-not-found"
+    }
+
     static func updatePartstat(ics: String, attendeeEmail: String, status: String) -> String? {
         let target = attendeeEmail.lowercased()
         var found = false

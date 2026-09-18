@@ -99,6 +99,29 @@ final class SouveraInvitationCenter: ObservableObject {
     /// NEEDS-ACTION liefert.
     private static let answeredUidsKey = "invitations_answered_uids"
 
+    /// Run 19.09. (Feedback): Einmaliger Reset aller LOKALEN Einladungs-
+    /// Daten nach dem Update - damit ist der Stand GERAETUEBERGREIFEND
+    /// server-first (Cross-Device-Test). Der Guard-Key sorgt dafuer, dass
+    /// der Reset GENAU EINMAL pro Installation laeuft.
+    static func resetLocalStateOnce() {
+        let guardKey = "invitations_local_state_cleared_v1"
+        guard !UserDefaults.standard.bool(forKey: guardKey) else { return }
+        let keys = [
+            "invitations_answered_message_ids",
+            "invitations_answered_sequence_by_uid",
+            "invitations_answered_enddates",
+            "invitations_answered_uids",
+            "invitations_answered_status_uid",
+            "invitations_uid_enddates",
+            "invitations_not_in_calendar_ids",
+            "invitations_reminder_overrides",
+            "invitations_reminder_overrides_uid"
+        ]
+        for key in keys { UserDefaults.standard.removeObject(forKey: key) }
+        UserDefaults.standard.set(true, forKey: guardKey)
+        SouveraLog.write("Invitations", "local invitation state cleared once (v1)")
+    }
+
     static func answeredUids() -> Set<String> {
         Set(UserDefaults.standard.stringArray(forKey: answeredUidsKey) ?? [])
     }
@@ -222,6 +245,9 @@ final class SouveraInvitationCenter: ObservableObject {
                          client: JmapClient,
                          api: JmapApi) async {
         resetForAccountSwitch(accountKey)
+        // Run 19.09. (Feedback): einmaliger Lokal-Reset nach dem Update -
+        // danach ist der Stand server-first (Cross-Device konsistent).
+        Self.resetLocalStateOnce()
         // Run 19.09.: abgelaufene Einladungsdaten aufraeumen.
         Self.cleanupExpired()
 
