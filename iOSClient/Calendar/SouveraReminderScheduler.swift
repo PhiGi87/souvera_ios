@@ -80,8 +80,8 @@ enum SouveraReminderScheduler {
             // nachliefern, wenn die EIGENTLICHE Erinnerung NICHT bereits
             // zugestellt (delivered) oder noch geplant (pending) ist -
             // sonst dupliziert jeder Sync im 10-min-Fenster die Erinnerung.
-            center.getDeliveredNotificationRequests { delivered in
-                let deliveredIds = Set(delivered.map(\.identifier))
+            center.getDeliveredNotifications { delivered in
+                let deliveredIds = Set(delivered.map { $0.request.identifier })
                 let pendingIds = Set(existing.map(\.identifier))
                 var missed: [(event: CalendarEventModel, minutes: Int)] = []
                 for event in events {
