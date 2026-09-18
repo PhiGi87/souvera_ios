@@ -373,8 +373,8 @@ final class SouveraBarCoordinator {
             bar.menu = UIMenu(children: menu.entries.map { entry in
                 UIAction(title: entry.title,
                          image: entry.icon.flatMap { UIImage(systemName: $0) },
-                         state: entry.isChecked ? .on : .off,
-                         attributes: entry.isDestructive ? .destructive : []) { _ in
+                         attributes: entry.isDestructive ? .destructive : [],
+                         state: entry.isChecked ? .on : .off) { _ in
                     entry.handler()
                 }
             })
