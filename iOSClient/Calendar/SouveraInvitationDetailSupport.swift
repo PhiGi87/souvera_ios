@@ -297,17 +297,16 @@ struct SouveraDayPreviewPopup: View {
                         timeFormatter.dateStyle = .none
                         timeFormatter.timeStyle = .short
                         let innerWidth = rect.width - 12
+                        // Run 19.09. (Feedback): Texte in der Blockbreite
+                        // zeichnen - der layer.clip schneidet Überstände
+                        // zuverlässig ab.
                         let timeText = Text("\(timeFormatter.string(from: event.start)) – \(timeFormatter.string(from: event.end))")
                             .font(.caption2)
                             .foregroundStyle(Color.secondary)
-                            .lineLimit(1)
-                            .frame(width: innerWidth, alignment: .leading)
-                        layer.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 12), anchor: .topLeading)
+                        layer.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 10), anchor: .topLeading)
                         let titleText = Text(event.title)
                             .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
                             .foregroundStyle(Color.primary)
-                            .lineLimit(2)
-                            .frame(width: innerWidth, alignment: .leading)
                         layer.draw(titleText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 24), anchor: .topLeading)
                     }
                 }

@@ -682,8 +682,8 @@ final class CalendarViewModel: ObservableObject {
                                etag: entryUnwrapped.etag, ics: updated)
             : entryUnwrapped
         if ok, let idx = cachedEntries.firstIndex(where: { $0.href == entryUnwrapped.href }) {
-            cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
-                                                  href: entry.href, etag: entry.etag, ics: updated)
+            cachedEntries[idx] = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
+                                                  href: entryUnwrapped.href, etag: entryUnwrapped.etag, ics: updated)
             if case var .success(list) = events {
                 let refreshed = Self.parseEntries([CalDavEventEntry(
                     calendarHref: entryFinal.calendarHref, href: entryFinal.href,

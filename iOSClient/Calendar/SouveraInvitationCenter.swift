@@ -185,7 +185,7 @@ final class SouveraInvitationCenter: ObservableObject {
             for uid in expiredUids { answered.remove(uid) }
             UserDefaults.standard.set(Array(answered), forKey: answeredUidsKey)
             var remOverrides = UserDefaults.standard.dictionary(forKey: reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
-            for uid in expiredUids { remOverrides.remove(uid) }
+            for uid in expiredUids { remOverrides.removeValue(forKey: uid) }
             UserDefaults.standard.set(remOverrides, forKey: reminderOverridesUIDKey)
         }
         if !expiredIds.isEmpty || !expiredUids.isEmpty {
@@ -709,15 +709,10 @@ final class SouveraInvitationCenter: ObservableObject {
         dict[invitation.id] = minutes
         UserDefaults.standard.set(dict, forKey: Self.reminderOverridesKey)
         // Run 19.09. (Feedback): zusaetzlich PERSISTENT per UID merken.
-        let uid = invitation.eventUID
-        if !uid.isEmpty {
-            var byUid = UserDefaults.standard.dictionary(forKey: Self.reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
-            byUid[uid.lowercased()] = minutes
-            UserDefaults.standard.set(byUid, forKey: Self.reminderOverridesUIDKey)
-        }
+        
 
-        let uid = invitation.eventUID
-        guard !uid.isEmpty else { return true }
+        let eventUID = invitation.eventUID
+        guard !eventUID.isEmpty else { return true }
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let calendar = Calendar.current
@@ -727,10 +722,10 @@ final class SouveraInvitationCenter: ObservableObject {
                 calendarHref: cal.href,
                 start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
                 end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
-            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+            for entry in fetched where entry.ics.uppercased().contains("UID:\(eventUID.uppercased())") {
                 let updated = CalendarViewModel.setValarms(ics: entry.ics, minutes: minutes)
                 let ok = await client.updateEvent(entry, ics: updated)
-                SouveraLog.write("Invitations", "reminders update uid=\(uid): \(ok)")
+                SouveraLog.write("Invitations", "reminders update uid=\(eventUID): \(ok)")
                 return ok
             }
         }
