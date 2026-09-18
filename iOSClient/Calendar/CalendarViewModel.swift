@@ -651,22 +651,44 @@ final class CalendarViewModel: ObservableObject {
     /// Einladungen, auch nach dem Antworten.
     @discardableResult
     func updateReminders(_ event: CalendarEventModel, minutes: [Int]) async -> Bool {
-        guard let entry = cachedEntries.first(where: { $0.href == event.href }) else {
+        // Run 19.09. (Feedback: Erinnerungen kommen nicht am Server an):
+        // UID-Fallback wie in respondToInvitation - bei per UID eingepflegten
+        // Einladungen (href = Mail-ID) findet die href-Suche den Eintrag
+        // nicht und der PUT wurde still ausgelassen.
+        var entry = cachedEntries.first(where: { $0.href == event.href })
+        if entry == nil, !event.uid.isEmpty {
+            entry = cachedEntries.first(where: {
+                $0.ics.uppercased().contains("UID:\(event.uid.uppercased())")
+            })
+        }
+        guard var entryUnwrapped = entry, !entryUnwrapped.ics.isEmpty else {
+            JmapLog.write("updateReminders: kein Eintrag (href=\(event.href) uid=\(event.uid))")
             actionFeedback = CalendarActionFeedback(
                 success: false,
                 message: NSLocalizedString("_calendar_reminder_save_failed_", comment: ""))
             return false
         }
-        let updated = Self.setValarms(ics: entry.ics, minutes: minutes)
-        let ok = await client.updateEvent(entry, ics: updated)
-        if ok, let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
+        let updated = Self.setValarms(ics: entryUnwrapped.ics, minutes: minutes)
+        var ok = await client.updateEvent(entryUnwrapped, ics: updated)
+        if !ok {
+            // 412 (stale ETag): ohne If-Match wiederholen.
+            JmapLog.write("updateReminders: PUT fehlgeschlagen - Retry ohne If-Match")
+            let retryEntry = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
+                                              href: entryUnwrapped.href, etag: nil, ics: entryUnwrapped.ics)
+            ok = await client.updateEvent(retryEntry, ics: updated)
+        }
+        let entryFinal = ok
+            ? CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref, href: entryUnwrapped.href,
+                               etag: entryUnwrapped.etag, ics: updated)
+            : entryUnwrapped
+        if ok, let idx = cachedEntries.firstIndex(where: { $0.href == entryUnwrapped.href }) {
             cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
                                                   href: entry.href, etag: entry.etag, ics: updated)
             if case var .success(list) = events {
                 let refreshed = Self.parseEntries([CalDavEventEntry(
-                    calendarHref: entry.calendarHref, href: entry.href,
-                    etag: entry.etag, ics: updated)], ownEmail: Self.ownAttendeeEmail())
-                list.removeAll { $0.href == event.href }
+                    calendarHref: entryFinal.calendarHref, href: entryFinal.href,
+                    etag: entryFinal.etag, ics: updated)], ownEmail: Self.ownAttendeeEmail())
+                list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
                 list.append(contentsOf: refreshed)
                 events = .success(list.sorted { $0.start < $1.start })
             }
@@ -802,7 +824,8 @@ final class CalendarViewModel: ObservableObject {
             // Run 19.09.: Antwort lokal markieren (Uebersicht-Filter +
             // Schraffur sind sofort korrekt, unabhaengig vom Serverstand).
             if !event.uid.isEmpty {
-                SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end)
+                SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                        status: status.rawValue)
             }
             // B6: Externer Organisator - Server-iTIP erreicht ihn nicht,
             // deshalb zusaetzlich die normale Antwort-Mail.

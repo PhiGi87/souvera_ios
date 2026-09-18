@@ -23,12 +23,17 @@ final class SouveraInvitationCenter: ObservableObject {
     func setCalendarInvites(_ events: [CalendarEventModel], accountKey: String) {
         guard self.accountKey == accountKey || calendarInvites.isEmpty || self.accountKey.isEmpty else { return }
         self.accountKey = accountKey
-        // Signaturen vergleichen, damit das @Published-Objekt nicht bei
-        // jedem 30-s-Sync die UI triggert.
-        let newSig = events.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
+        // Run 19.09. (Feedback): beantwortete Einladungen (UID-Marker oder
+        // PARTSTAT != needs-action) erscheinen NICHT mehr im Center - der
+        // Einladungs-Button/Badge verschwindet sofort nach der Antwort.
+        let answered = Self.answeredUids()
+        let pending = events.filter {
+            $0.ownPartstat == "needs-action" && !Self.isAnswered(uid: $0.uid)
+        }
+        let newSig = pending.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
         let oldSig = calendarInvites.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
         if newSig != oldSig {
-            calendarInvites = events
+            calendarInvites = pending
         }
     }
 
@@ -103,7 +108,7 @@ final class SouveraInvitationCenter: ObservableObject {
         return answeredUids().contains(uid.lowercased())
     }
 
-    static func markAnsweredUid(_ uid: String, end: Date?) {
+    static func markAnsweredUid(_ uid: String, end: Date?, status: String? = nil) {
         guard !uid.isEmpty else { return }
         var uids = answeredUids()
         uids.insert(uid.lowercased())
@@ -113,6 +118,20 @@ final class SouveraInvitationCenter: ObservableObject {
             ends[uid.lowercased()] = end.timeIntervalSince1970
             UserDefaults.standard.set(ends, forKey: "invitations_uid_enddates")
         }
+        // Run 19.09. (Feedback): gegebene Antwort pro UID merken - die
+        // Termin-Ansicht zeigt spaeter den Status, auch wenn der Server
+        // (noch) NEEDS-ACTION liefert.
+        if let status {
+            var statuses = UserDefaults.standard.dictionary(forKey: "invitations_answered_status_uid") as? [String: String] ?? [:]
+            statuses[uid.lowercased()] = status.lowercased()
+            UserDefaults.standard.set(statuses, forKey: "invitations_answered_status_uid")
+        }
+    }
+
+    /// Gegebene Antwort fuer eine Termin-UID (falls lokal gemerkt).
+    static func answeredStatus(forUID uid: String) -> String? {
+        guard !uid.isEmpty else { return nil }
+        return (UserDefaults.standard.dictionary(forKey: "invitations_answered_status_uid") as? [String: String])?[uid.lowercased()]
     }
 
     /// Run 18.09.: SEQUENCE-Buchhaltung je UID. Eine verschobene Einladung
@@ -160,11 +179,14 @@ final class SouveraInvitationCenter: ObservableObject {
             UserDefaults.standard.set(byUid, forKey: answeredSequenceKey)
             UserDefaults.standard.set(uidEnds, forKey: "invitations_uid_enddates")
         }
-        // answered-UID-Marker ebenfalls aufraeumen.
+        // answered-UID-Marker + Erinnerungs-Overrides aufraeumen.
         if !expiredUids.isEmpty {
             var answered = answeredUids()
             for uid in expiredUids { answered.remove(uid) }
             UserDefaults.standard.set(Array(answered), forKey: answeredUidsKey)
+            var remOverrides = UserDefaults.standard.dictionary(forKey: reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
+            for uid in expiredUids { remOverrides.remove(uid) }
+            UserDefaults.standard.set(remOverrides, forKey: reminderOverridesUIDKey)
         }
         if !expiredIds.isEmpty || !expiredUids.isEmpty {
             SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs entfernt (Termin vorbei)")
@@ -329,7 +351,8 @@ final class SouveraInvitationCenter: ObservableObject {
             }
         }
         if !resolved.isCancellation, !resolved.eventUID.isEmpty {
-            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end)
+            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end,
+                                                    status: status.rawValue)
         }
         let statusWord = NSLocalizedString(status.titleKey, comment: "")
         // Run 18.09.: Antwort-Mail IMMER (auch ohne geparstes Event).
@@ -485,9 +508,15 @@ final class SouveraInvitationCenter: ObservableObject {
         // ist trotzdem valide).
         let uid = Self.quickExtract(ics, key: "UID") ?? invitation.messageId
         let me = CalendarViewModel.ownAttendeeEmail()
+        // Run 19.09. (Feedback: erstellter Termin traegt NEEDS-ACTION
+        // statt der Antwort, Log: createEvent -> 415): Die ICS ZUERST
+        // normalisieren (CRLF, kein METHOD, keine Leerzeilen) - die 415
+        // kam vom Roh-ICS. Erst DANACH PARTSTAT + VALARM aufsetzen, damit
+        // der erstellte Termin die Antwort traegt.
+        let normalized = Self.normalizeForCalendar(ics)
         guard !me.isEmpty,
-              var updated = CalendarViewModel.updatePartstat(ics: ics, attendeeEmail: me, status: status) else {
-            SouveraLog.write("Invitations", "calendar create: own attendee not found")
+              var updated = CalendarViewModel.updatePartstat(ics: normalized, attendeeEmail: me, status: status) else {
+            SouveraLog.write("Invitations", "calendar create: own attendee not found (uid=\(uid))")
             return false
         }
         let effectiveReminders = reminderMinutes ?? Self.reminderOverrides(invitation.id)
@@ -496,11 +525,6 @@ final class SouveraInvitationCenter: ObservableObject {
         } else {
             updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
         }
-        // Run 18.09. (Feedback: Create schlägt fehl, am "Neuer Termin"-
-        // Weg orientieren): Die externe ICS NORMALISIEREN (CRLF, kein
-        // METHOD, keine Leerzeilen-Artefakte) - gleiche Struktur wie
-        // buildICS. Fehlschlaege: Fallback auf frisch gebaute ICS.
-        let normalized = Self.normalizeForCalendar(ics)
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let chosen: CalDavCalendar? =
@@ -652,6 +676,7 @@ final class SouveraInvitationCenter: ObservableObject {
     // MARK: - Erinnerungen (Run 19.09., einheitlich)
 
     private static let reminderOverridesKey = "invitations_reminder_overrides"
+    private static let reminderOverridesUIDKey = "invitations_reminder_overrides_uid"
 
     /// Gespeicherte Erinnerungen einer Einladung (vor dem Kalender-Create).
     static func reminderOverrides(_ inviteId: String) -> [Int]? {
@@ -659,10 +684,13 @@ final class SouveraInvitationCenter: ObservableObject {
         return dict?[inviteId]
     }
 
-    /// Erinnerungen ueber die Termin-UID finden (alle Einladungen der
-    /// aktuellen Session durchsuchen).
-    @MainActor
+    /// Erinnerungen ueber die Termin-UID finden - Run 19.09. (Feedback):
+    /// PERSISTENT per UID gespeichert (funktioniert ueber App-Neustarts
+    /// und Modulgrenzen hinweg), Fallback: Session-Einladungen.
     static func reminderOverride(forUID uid: String) -> [Int]? {
+        guard !uid.isEmpty else { return nil }
+        let byUid = UserDefaults.standard.dictionary(forKey: reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
+        if let minutes = byUid[uid.lowercased()] { return minutes }
         let dict = UserDefaults.standard.dictionary(forKey: reminderOverridesKey) as? [String: [Int]] ?? [:]
         for invite in SouveraInvitationCenter.shared.mailInvites
         where invite.eventUID.caseInsensitiveCompare(uid) == .orderedSame {
@@ -680,6 +708,13 @@ final class SouveraInvitationCenter: ObservableObject {
         var dict = UserDefaults.standard.dictionary(forKey: Self.reminderOverridesKey) as? [String: [Int]] ?? [:]
         dict[invitation.id] = minutes
         UserDefaults.standard.set(dict, forKey: Self.reminderOverridesKey)
+        // Run 19.09. (Feedback): zusaetzlich PERSISTENT per UID merken.
+        let uid = invitation.eventUID
+        if !uid.isEmpty {
+            var byUid = UserDefaults.standard.dictionary(forKey: Self.reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
+            byUid[uid.lowercased()] = minutes
+            UserDefaults.standard.set(byUid, forKey: Self.reminderOverridesUIDKey)
+        }
 
         let uid = invitation.eventUID
         guard !uid.isEmpty else { return true }

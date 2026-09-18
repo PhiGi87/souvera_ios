@@ -199,8 +199,8 @@ struct SouveraDayPreviewPopup: View {
                         .frame(height: 24 * hourHeight)
                         // Unsichtbarer Fokus-Anker fuer den Auto-Scroll.
                         Color.clear
-                            .frame(height: 1)
-                            .offset(y: focusY)
+                            .frame(width: 1, height: 1)
+                            .padding(.top, focusY)
                             .id("focus")
                     }
                     .frame(height: 24 * hourHeight)
@@ -244,7 +244,7 @@ struct SouveraDayPreviewPopup: View {
             let label = Text(String(format: "%02d:00", hour))
                 .font(.caption2)
                 .foregroundStyle(Color.secondary)
-            context.draw(label, at: CGPoint(x: labelWidth / 2, y: y - 8), anchor: .center)
+            context.draw(label, at: CGPoint(x: labelWidth / 2, y: y), anchor: .center)
             var line = Path()
             line.move(to: CGPoint(x: labelWidth + 8, y: y))
             line.addLine(to: CGPoint(x: size.width - 12, y: y))
@@ -288,18 +288,28 @@ struct SouveraDayPreviewPopup: View {
                     if isInvite || isCollision {
                         context.stroke(path, with: .color(border), lineWidth: 1.5)
                     }
-                    // Texte
-                    let timeFormatter = DateFormatter()
-                    timeFormatter.dateStyle = .none
-                    timeFormatter.timeStyle = .short
-                    let timeText = Text("\(timeFormatter.string(from: event.start)) – \(timeFormatter.string(from: event.end))")
-                        .font(.caption2)
-                        .foregroundStyle(Color.secondary)
-                    context.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 12), anchor: .leading)
-                    let titleText = Text(event.title)
-                        .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
-                        .foregroundStyle(Color.primary)
-                    context.draw(titleText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 28), anchor: .leading)
+                    // Texte - Run 19.09. (Feedback): auf die Blockbreite
+                    // begrenzt und in den Slot geclippt - kein Text mehr
+                    // ausserhalb des farbigen Blocks.
+                    context.drawLayer { layer in
+                        layer.clip(to: path)
+                        let timeFormatter = DateFormatter()
+                        timeFormatter.dateStyle = .none
+                        timeFormatter.timeStyle = .short
+                        let innerWidth = rect.width - 12
+                        let timeText = Text("\(timeFormatter.string(from: event.start)) – \(timeFormatter.string(from: event.end))")
+                            .font(.caption2)
+                            .foregroundStyle(Color.secondary)
+                            .lineLimit(1)
+                            .frame(width: innerWidth, alignment: .leading)
+                        layer.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 12), anchor: .topLeading)
+                        let titleText = Text(event.title)
+                            .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
+                            .foregroundStyle(Color.primary)
+                            .lineLimit(2)
+                            .frame(width: innerWidth, alignment: .leading)
+                        layer.draw(titleText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 24), anchor: .topLeading)
+                    }
                 }
             }
         }
@@ -324,36 +334,6 @@ struct SouveraDayPreviewPopup: View {
         return max(26, CGFloat(minutes) / 60 * hourHeight)
     }
 
-    private func block(for event: CalendarEventModel) -> some View {
-        let isInvite = event.href == highlightEvent.href
-        let isCollision = event.href == collidingEvent.href
-        let formatter = DateFormatter()
-        formatter.dateStyle = .none
-        formatter.timeStyle = .short
-        let border: Color = isInvite ? .blue : (isCollision ? .orange : .clear)
-        let fill: Color = isInvite ? Color.blue.opacity(0.10) : (isCollision ? Color.orange.opacity(0.12) : Color(.systemGray6))
-        return VStack(alignment: .leading, spacing: 2) {
-            if !event.allDay {
-                Text("\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-            Text(event.title)
-                .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
-                .lineLimit(2)
-        }
-        .padding(6)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 7).fill(fill))
-        // Schraffur AUSSCHLIESSLICH fuer unbeantwortete Einladungen.
-        .overlay(
-            SouveraHatchOverlay()
-                .clipShape(RoundedRectangle(cornerRadius: 7))
-                .opacity(event.ownPartstat == "needs-action"
-                         && !SouveraInvitationCenter.isAnswered(uid: event.uid) ? 0.35 : 0)
-        )
-        .overlay(RoundedRectangle(cornerRadius: 7).stroke(border, lineWidth: isInvite || isCollision ? 1.5 : 0))
-    }
 
     private var dayTitle: String {
         let formatter = DateFormatter()
@@ -361,26 +341,8 @@ struct SouveraDayPreviewPopup: View {
         formatter.timeStyle = .none
         return formatter.string(from: day)
     }
-
-    // Run 19.09.: Cluster-Rendering ausgelagert (Typ-Checker).
-    @ViewBuilder
-    private func clusterBlocks(_ cluster: Cluster, clusterIndex: Int) -> some View {
-        let columnCount = CGFloat(max(1, cluster.columns.count))
-        ForEach(cluster.columns.indices, id: \.self) { columnIndex in
-            ForEach(cluster.columns[columnIndex]) { event in
-                let width = max(60, availableWidth / columnCount - (columnCount > 1 ? 6 : 0))
-                let height = blockHeight(for: event)
-                let y = offsetY(for: event)
-                block(for: event)
-                    .frame(width: width, height: height)
-                    .position(
-                        x: labelWidth + 8 + availableWidth / columnCount / 2
-                            + CGFloat(columnIndex) * (availableWidth / columnCount),
-                        y: y + height / 2)
-            }
-        }
-    }
 }
+
 
 /// Schraffur-Overlay (diagonale Streifen) fuer offene Termine.
 struct SouveraHatchOverlay: View {

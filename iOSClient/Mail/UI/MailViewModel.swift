@@ -1258,7 +1258,8 @@ final class MailViewModel: ObservableObject {
             }
         }
         if !resolved.isCancellation, !resolved.eventUID.isEmpty {
-            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end)
+            SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end,
+                                                    status: status.rawValue)
         }
         // B1: Moderne Antwort-Mail - Run 19.09. EIN Pfad ueber den Center
         // (korrekter Betreff in Vergangenheitsform, Submission-

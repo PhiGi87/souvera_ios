@@ -1221,7 +1221,13 @@ private struct CalendarEventDetailSheet: View {
     @State private var dayPreviewOverlap: SouveraOverlap?
 
     private var effectivePartstat: String {
-        answeredRSVP?.rawValue.lowercased() ?? event.ownPartstat
+        if let answeredRSVP { return answeredRSVP.rawValue.lowercased() }
+        // Run 19.09. (Feedback): gegebene Antwort aus dem lokalen Marker,
+        // falls der Server (noch) NEEDS-ACTION liefert.
+        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid) {
+            return stored
+        }
+        return event.ownPartstat
     }
 
     private var currentRsvpStatusKey: String? {
