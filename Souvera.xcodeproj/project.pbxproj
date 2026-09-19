@@ -215,6 +215,7 @@
 		F34BDB3A2F5744EC007A222C /* UINavigationItem+Extension.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34BDB392F5744E5007A222C /* UINavigationItem+Extension.swift */; };
 		F34BDB3C2F574A58007A222C /* BidiSafeFilenameTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34BDB3B2F574A58007A222C /* BidiSafeFilenameTests.swift */; };
 		BAE03CDF413B4A71AA96C711 /* PushNotificationProxyConfigTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42EEEAA02F57458395B3D9E2 /* PushNotificationProxyConfigTests.swift */; };
+		F34BDC012F58AA11007A222C /* SouveraInvitationMechanicsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34BDC002F58AA11007A222C /* SouveraInvitationMechanicsTests.swift */; };
 		F34E1AD72ECB937D00FA10C3 /* NCStatusMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34E1AD62ECB937D00FA10C3 /* NCStatusMessageView.swift */; };
 		F34E1AD92ECC839100FA10C3 /* EmojiTextField.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34E1AD82ECC839100FA10C3 /* EmojiTextField.swift */; };
 		F34E1ADB2ECC842B00FA10C3 /* NCStatusMessageModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F34E1ADA2ECC842200FA10C3 /* NCStatusMessageModel.swift */; };
@@ -1523,6 +1524,7 @@
 		F34BDB392F5744E5007A222C /* UINavigationItem+Extension.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "UINavigationItem+Extension.swift"; sourceTree = "<group>"; };
 		F34BDB3B2F574A58007A222C /* BidiSafeFilenameTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BidiSafeFilenameTests.swift; sourceTree = "<group>"; };
 		42EEEAA02F57458395B3D9E2 /* PushNotificationProxyConfigTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PushNotificationProxyConfigTests.swift; sourceTree = "<group>"; };
+		F34BDC002F58AA11007A222C /* SouveraInvitationMechanicsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraInvitationMechanicsTests.swift; sourceTree = "<group>"; };
 		F34E1AD62ECB937D00FA10C3 /* NCStatusMessageView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCStatusMessageView.swift; sourceTree = "<group>"; };
 		F34E1AD82ECC839100FA10C3 /* EmojiTextField.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EmojiTextField.swift; sourceTree = "<group>"; };
 		F34E1ADA2ECC842200FA10C3 /* NCStatusMessageModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCStatusMessageModel.swift; sourceTree = "<group>"; };
@@ -2454,6 +2456,7 @@
 			children = (
 				F34BDB3B2F574A58007A222C /* BidiSafeFilenameTests.swift */,
 				42EEEAA02F57458395B3D9E2 /* PushNotificationProxyConfigTests.swift */,
+				F34BDC002F58AA11007A222C /* SouveraInvitationMechanicsTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
 			);
 			path = NextcloudUnitTests;
@@ -4753,6 +4756,7 @@
 				AA52EB472D42AC9E0089C348 /* Placeholder.swift in Sources */,
 				F34BDB3C2F574A58007A222C /* BidiSafeFilenameTests.swift in Sources */,
 				BAE03CDF413B4A71AA96C711 /* PushNotificationProxyConfigTests.swift in Sources */,
+				F34BDC012F58AA11007A222C /* SouveraInvitationMechanicsTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
 				F78E2D6C29AF02DB0024D4F3 /* Database.swift in Sources */,
 			);

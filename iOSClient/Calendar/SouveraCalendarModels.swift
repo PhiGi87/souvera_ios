@@ -166,7 +166,10 @@ enum ICSParser {
                 } else if keyPart == "DESCRIPTION" {
                     notes = value
                 } else if keyPart.hasPrefix("ATTENDEE") {
-                    let email = value.replacingOccurrences(of: "mailto:", with: "")
+                    // Run 19.09.: mailto:-Praefix case-insensitiv entfernen -
+                    // ein "MAILTO:" verhinderte sonst die Einladungserkennung.
+                    let email = value.replacingOccurrences(of: "mailto:", with: "",
+                                                            options: .caseInsensitive)
                         .trimmingCharacters(in: .whitespaces)
                     if email.contains("@") && !attendees.contains(email.lowercased()) {
                         attendees.append(email.lowercased())

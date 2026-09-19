@@ -624,7 +624,9 @@ struct SouveraInvitationDetailView: View {
             } else {
                 Picker(NSLocalizedString("_calendar_", comment: ""),
                        selection: $selectedCalendarHref) {
-                    ForEach(calendars.filter { $0.canWrite }, id: \.href) { calendar in
+                    // Run 19.09.: Deck-Boards ausschliessen (VEVENT- Create
+                    // gegen ein VTODO-Board schlaegt mit 415 fehl).
+                    ForEach(calendars.filter { $0.canWrite && !$0.href.contains("app-generated--deck") }, id: \.href) { calendar in
                         Text(calendar.displayName).tag(calendar.href as String?)
                     }
                 }
@@ -654,20 +656,26 @@ struct SouveraInvitationDetailView: View {
                         // Fetch) - sonst blieb "kein Match".
                         let liveInvite = SouveraInvitationCenter.shared.mailInvites
                             .first(where: { $0.id == event.href })
-                        let ok: Bool
+                        // Run 19.09. (Feedback): echtes "nicht gefunden" vs.
+                        // Fehler (412/Netz) unterscheiden - nur bei ersterem
+                        // dauerhaft quittieren.
+                        var handled = false
                         if let liveInvite {
-                            ok = await SouveraInvitationCenter.shared.removeCancelledMail(liveInvite)
+                            handled = await SouveraInvitationCenter.shared.removeCancelledMail(liveInvite)
                         } else {
-                            ok = await SouveraInvitationCenter.shared.removeCancelledEvent(
+                            switch await SouveraInvitationCenter.shared.removeCancelledEvent(
                                 uid: displayEvent.uid,
                                 title: displayEvent.title,
                                 start: displayEvent.start,
-                                end: displayEvent.end)
+                                end: displayEvent.end) {
+                            case .removed, .notFound: handled = true
+                            case .failed: handled = false
+                            }
                         }
                         cancelBusy = false
                         var notFound = Set(UserDefaults.standard.stringArray(
                             forKey: Self.notInCalendarKey) ?? [])
-                        if ok {
+                        if handled {
                             cancelRemoved = true
                             notFound.remove(event.href)
                             UserDefaults.standard.set(Array(notFound), forKey: Self.notInCalendarKey)
@@ -680,15 +688,9 @@ struct SouveraInvitationDetailView: View {
                             // Run 19.09. (Feedback): Ergebnis-Popup.
                             cancelResultAlert = NSLocalizedString("_invitations_cancel_removed_", comment: "")
                         } else {
-                            // "Nicht im Kalender" PERSISTENT merken -> Button
-                            // bleibt dauerhaft weg; sichtbares Popup.
-                            notFound.insert(event.href)
-                            UserDefaults.standard.set(Array(notFound), forKey: Self.notInCalendarKey)
-                            cancelNotFound = true
-                            SouveraInvitationCenter.markAnswered(
-                                messageId: displayEvent.href, eventEnd: displayEvent.end)
-                            SouveraInvitationCenter.shared.removeMailInvitation(event.href)
-                            cancelResultAlert = NSLocalizedString("_invitations_cancel_not_found_", comment: "")
+                            // Echter Fehler: Zeile BEHALTEN, Fehler zeigen,
+                            // NICHT dauerhaft als "nicht im Kalender" merken.
+                            cancelResultAlert = NSLocalizedString("_error_occurred_", comment: "")
                         }
                     }
                 } label: {

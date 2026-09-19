@@ -187,8 +187,15 @@ final class CalDavClient {
     @discardableResult
     func createEvent(calendarHref: String, ics: String, uid: String) async -> CalDavEventEntry? {
         guard let home = calendarHomeURLs().first,
-              let calendarURL = URL(string: calendarHref, relativeTo: home)?.absoluteURL,
-              let url = URL(string: "\(uid).ics", relativeTo: calendarURL)?.absoluteURL else {
+              let calendarURL = URL(string: calendarHref, relativeTo: home)?.absoluteURL else {
+            JmapLog.write("CalDAV createEvent: URL-Aufbau fehlgeschlagen (\(calendarHref))")
+            return nil
+        }
+        // Run 19.09.: Dateiname aus der UID bereinigen - UIDs mit "/",
+        // Leerzeichen o. Ä. liessen den URL-Aufbau scheitern.
+        let fileBase = uid.isEmpty ? UUID().uuidString
+            : uid.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        guard let url = URL(string: "\(fileBase).ics", relativeTo: calendarURL)?.absoluteURL else {
             JmapLog.write("CalDAV createEvent: URL-Aufbau fehlgeschlagen (\(calendarHref))")
             return nil
         }
@@ -207,7 +214,7 @@ final class CalDavClient {
         }
         let etag = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
         JmapLog.write("CalDAV createEvent \(url.absoluteString) -> \(status)")
-        return CalDavEventEntry(calendarHref: calendarHref, href: "\(uid).ics", etag: etag, ics: ics)
+        return CalDavEventEntry(calendarHref: calendarHref, href: "\(fileBase).ics", etag: etag, ics: ics)
     }
 
     func updateEvent(_ entry: CalDavEventEntry, ics: String) async -> Bool {
@@ -256,7 +263,10 @@ final class CalDavClient {
             req.setValue(etag, forHTTPHeaderField: "If-Match")
         }
         guard let (_, response) = try? await urlSession.data(for: req) else { return false }
-        return (200..<300).contains((response as? HTTPURLResponse)?.statusCode ?? 0)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        // Run 19.09.: 404/410 = bereits entfernt -> Erfolg (sonst blieb der
+        // Termin als "nicht loeschbar" haengen).
+        return (200..<300).contains(status) || status == 404 || status == 410
     }
 
     // MARK: - XML bodies

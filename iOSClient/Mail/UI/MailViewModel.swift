@@ -1241,7 +1241,10 @@ final class MailViewModel: ObservableObject {
             // Run 19.09. (Feedback): Ablehnung entfernt den Termin
             // komplett aus dem Kalender.
             if status == .declined {
-                _ = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+                let removed = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+                if !removed, !resolved.eventUID.isEmpty {
+                    SouveraInvitationCenter.addPendingRemoval(resolved.eventUID)
+                }
             }
         }
         if status != .declined, !resolved.isCancellation, !handledExisting {
@@ -2765,20 +2768,12 @@ final class MailViewModel: ObservableObject {
             rawMailboxEmails[mailbox.id] = mirror
         }
         if useJmap, let mailbox = currentMailbox {
-            let queryState = queryStates[mailbox.id]
             let acc = cacheAccountKey
             let mid = mailbox.id
-            let mirrorEmails = rawMailboxEmails[mailbox.id].map { Array($0.values) }
+            let queryState = queryStates[mailbox.id]
             let removedIds = removed
-            Task.detached(priority: .utility) {
-                let emails = mirrorEmails
-                    ?? MailCache.loadMessages(account: acc, mailboxId: mid)?.emails
-                    ?? []
-                guard !emails.isEmpty else { return }
-                let filtered = emails.filter { !removedIds.contains($0.optString("id") ?? "") }
-                await MailCache.saveMessagesOffMain(account: acc, mailboxId: mid,
-                                                    emails: filtered, queryState: queryState)
-            }
+            Task { await MailCache.pruneMessagesOffMain(account: acc, mailboxId: mid,
+                                                        removing: removedIds, queryState: queryState) }
         }
         if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
            case let .success(list) = messages {
@@ -2940,16 +2935,8 @@ final class MailViewModel: ObservableObject {
             let mid = mailbox.id
             let queryState = queryStates[mid]
             let removedSet = Set(removedIds)
-            let mirrorEmails = rawMailboxEmails[mid].map { Array($0.values) }
-            Task.detached(priority: .utility) {
-                let emails = mirrorEmails
-                    ?? MailCache.loadMessages(account: acc, mailboxId: mid)?.emails
-                    ?? []
-                guard !emails.isEmpty else { return }
-                let filtered = emails.filter { !removedSet.contains($0.optString("id") ?? "") }
-                await MailCache.saveMessagesOffMain(account: acc, mailboxId: mid,
-                                                    emails: filtered, queryState: queryState)
-            }
+            Task { await MailCache.pruneMessagesOffMain(account: acc, mailboxId: mid,
+                                                        removing: removedSet, queryState: queryState) }
         }
         // Badge sofort: entfernte ungelesene Nachrichten des Posteingangs abziehen.
         if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,

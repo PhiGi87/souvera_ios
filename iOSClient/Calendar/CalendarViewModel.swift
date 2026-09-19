@@ -76,6 +76,9 @@ final class CalendarViewModel: ObservableObject {
         customCalendarColors = [:]
         sessionDeselectedHrefs = []
         offlineNotice = nil
+        // Run 19.09.: Einladungs-Center mit zuruecksetzen (sonst bleiben
+        // die Einladungen des alten Accounts sichtbar).
+        SouveraInvitationCenter.shared.resetForNewAccount()
         Task { await self.load() }
     }
 
@@ -310,6 +313,13 @@ final class CalendarViewModel: ObservableObject {
         for entry in cachedEntries {
             previousByHref[entry.calendarHref, default: 0] += 1
         }
+        // Run 19.09. (Feedback): Fuer "suspicious empty" die vorherigen
+        // Eintraege des Kalenders bereithalten (nicht nur zaehlen), damit
+        // offene Einladungen nicht kurzzeitig verschwinden.
+        var cachedByHref: [String: [CalDavEventEntry]] = [:]
+        for entry in cachedEntries {
+            cachedByHref[entry.calendarHref, default: []].append(entry)
+        }
 
         // Run 15.09.: Queries PARALLEL (TaskGroup) statt sequenziell —
         // die Gesamtladezeit ist jetzt die langsamste Einzelquery statt
@@ -340,6 +350,8 @@ final class CalendarViewModel: ObservableObject {
                 } else {
                     JmapLog.write("Calendar SUSPICIOUS empty result for \(href) (previous=\(previous))")
                 }
+                // Vorstand dieses Kalenders BEHALTEN (Run 19.09.).
+                entries += cachedByHref[href] ?? []
                 continue
             }
             entries += fetched
@@ -373,6 +385,9 @@ final class CalendarViewModel: ObservableObject {
         )
         SouveraInvitationCenter.shared.setServerAnsweredUids(serverAnswered)
         await SouveraInvitationCenter.shared.setCalendarInvites(pending, accountKey: Self.stableAccountKey())
+        // Run 19.09.: zuvor fehlgeschlagene Termin-Entfernungen (nach
+        // Ablehnung) erneut versuchen.
+        Task { await SouveraInvitationCenter.shared.retryPendingRemovals() }
         // Redundanz-Guard: identische Event-Stände nicht erneut setzen.
         let signature = entries.map { "\($0.href):\($0.etag)" }.joined(separator: ",")
         if signature != eventsSignature {
@@ -667,7 +682,7 @@ final class CalendarViewModel: ObservableObject {
         var entry = cachedEntries.first(where: { $0.href == event.href })
         if entry == nil, !event.uid.isEmpty {
             entry = cachedEntries.first(where: {
-                $0.ics.uppercased().contains("UID:\(event.uid.uppercased())")
+                SouveraInvitationCenter.icsHasUID($0.ics, event.uid)
             })
         }
         guard var entryUnwrapped = entry, !entryUnwrapped.ics.isEmpty else {
@@ -752,7 +767,7 @@ final class CalendarViewModel: ObservableObject {
             // Run 16.09.: Mail-Einladung - der Server-Sync hat den Termin
             // vielleicht bereits unter anderer href eingespielt (UID-Match).
             entry = cachedEntries.first(where: {
-                $0.ics.uppercased().contains("UID:\(event.uid.uppercased())")
+                SouveraInvitationCenter.icsHasUID($0.ics, event.uid)
             })
         }
         guard let entry, !entry.ics.isEmpty else {
@@ -771,7 +786,14 @@ final class CalendarViewModel: ObservableObject {
         } else {
             updated = Self.ensureDefaultReminder(ics: updated, status: status.rawValue)
         }
-        let ok = await client.updateEvent(entry, ics: updated)
+        var ok = await client.updateEvent(entry, ics: updated)
+        if !ok {
+            // Run 19.09.: 412-Retry ohne If-Match (stale ETag).
+            let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                          href: entry.href, etag: nil, ics: entry.ics)
+            ok = await client.updateEvent(noEtag, ics: updated)
+            JmapLog.write("Invitation RSVP \(status.rawValue) retry(no-etag) for \(event.uid): \(ok)")
+        }
         if ok {
             JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
             // Run 19.09. (Feedback): ICS zuruecklesen und den serverseitigen
@@ -784,10 +806,24 @@ final class CalendarViewModel: ObservableObject {
             }
             // Run 19.09. (Feedback): Eine ABLEHNUNG entfernt den Termin
             // komplett aus dem Kalender (nach dem PARTSTAT-PUT, damit der
-            // Organisator die iTIP-Absage erhaelt).
+            // Organisator die iTIP-Absage erhaelt). Lokal wird aber NUR
+            // entfernt, wenn der Server wirklich geloescht hat - sonst
+            // waere der Termin nur scheinbar weg und beim naechsten Laden
+            // wieder da.
             if status == .declined, Self.isForeignOrganizer(event) {
                 let removed = await Self.deleteEventEntry(entry, client: client)
                 JmapLog.write("Invitation RSVP DECLINED -> removed from calendar: \(removed)")
+                guard removed else {
+                    if !event.uid.isEmpty {
+                        SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                                status: status.rawValue)
+                        SouveraInvitationCenter.addPendingRemoval(event.uid)
+                    }
+                    actionFeedback = CalendarActionFeedback(
+                        success: false,
+                        message: NSLocalizedString("_error_occurred_", comment: ""))
+                    return false
+                }
                 cachedEntries.removeAll { $0.href == entry.href }
                 if case var .success(list) = events {
                     list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
@@ -795,6 +831,7 @@ final class CalendarViewModel: ObservableObject {
                 }
                 if !event.uid.isEmpty {
                     SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end)
+                    SouveraInvitationCenter.removePendingRemoval(event.uid)
                 }
                 let remaining: [CalendarEventModel] = {
                     if case let .success(list) = events {
@@ -832,8 +869,18 @@ final class CalendarViewModel: ObservableObject {
                 list.append(contentsOf: refreshed)
                 events = .success(list.sorted { $0.start < $1.start })
             }
+            // Run 19.09. (Feedback: Annehmen leerte die Liste): ALLE
+            // verbleibenden offenen Einladungen uebergeben - vorher wurde
+            // nur das eine (jetzt beantwortete) Event gemeldet, wodurch
+            // die Uebersicht kurz komplett leer war.
+            let remainingInvites: [CalendarEventModel] = {
+                if case let .success(list) = events {
+                    return list.filter { $0.ownPartstat == "needs-action" }
+                }
+                return []
+            }()
             await SouveraInvitationCenter.shared.setCalendarInvites(
-                refreshed.filter { $0.ownPartstat == "needs-action" },
+                remainingInvites,
                 accountKey: Self.stableAccountKey())
             actionFeedback = CalendarActionFeedback(
                 success: true,

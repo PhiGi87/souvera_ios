@@ -75,6 +75,21 @@ enum MailCache {
         }.value
     }
 
+    /// Run 19.09. (Feedback: Freeze beim Loeschen): Laedt den Snapshot,
+    /// entfernt die IDs und schreibt ihn - komplett OFF-MAIN. Es werden nur
+    /// Sendable-Werte (Strings) uebergeben, nicht die JSON-Dicts.
+    static func pruneMessagesOffMain(account: String, mailboxId: String,
+                                     removing removedIds: Set<String>,
+                                     queryState: String?) async {
+        let acc = account, mid = mailboxId, rem = removedIds, qs = queryState
+        await Task.detached(priority: .utility) {
+            guard let snapshot = loadMessages(account: acc, mailboxId: mid) else { return }
+            let filtered = snapshot.emails.filter { !rem.contains($0.optString("id") ?? "") }
+            saveMessages(account: acc, mailboxId: mid, emails: filtered,
+                         queryState: qs ?? snapshot.queryState)
+        }.value
+    }
+
     static func saveMessages(account: String, mailboxId: String, emails: [[String: Any]], queryState: String?) {
         guard let fileURL = fileURL(account: account, mailboxId: mailboxId) else {
             JmapLog.write("messages cache save: SKIPPED (empty account/mailboxId)")

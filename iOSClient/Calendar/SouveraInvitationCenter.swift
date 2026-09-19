@@ -28,6 +28,16 @@ final class SouveraInvitationCenter: ObservableObject {
         serverAnsweredUids = uids
     }
 
+    /// Run 19.09. (Feedback Accountwechsel): kompletten Stand verwerfen -
+    /// die alten accountKey-Guards liessen sonst die Einladungen des
+    /// vorherigen Accounts stehen bzw. blockierten das Update.
+    func resetForNewAccount() {
+        calendarInvites = []
+        mailInvites = []
+        serverAnsweredUids = []
+        accountKey = ""
+    }
+
     var totalCount: Int { calendarInvites.count + mailInvites.count }
 
     func setCalendarInvites(_ events: [CalendarEventModel], accountKey: String) {
@@ -50,10 +60,18 @@ final class SouveraInvitationCenter: ObservableObject {
     func setMailInvites(_ invites: [SouveraMailInvitation], accountKey: String) {
         guard self.accountKey == accountKey || mailInvites.isEmpty || self.accountKey.isEmpty else { return }
         self.accountKey = accountKey
-        let newSig = invites.map { $0.id }.sorted().joined(separator: ",")
+        // Run 19.09. (Feedback): keine Doppelanzeige - eine Mail-Einladung,
+        // deren Termin bereits als offene Kalender-Einladung vorliegt,
+        // wird ausgeblendet (UID-basiert).
+        let openCalendarUids = Set(calendarInvites.map { $0.uid.lowercased() }.filter { !$0.isEmpty })
+        let deduped = invites.filter { invite in
+            let uid = invite.eventUID.lowercased()
+            return uid.isEmpty || !openCalendarUids.contains(uid)
+        }
+        let newSig = deduped.map { $0.id }.sorted().joined(separator: ",")
         let oldSig = mailInvites.map { $0.id }.sorted().joined(separator: ",")
         if newSig != oldSig {
-            mailInvites = invites
+            mailInvites = deduped
         }
     }
 
@@ -221,6 +239,19 @@ final class SouveraInvitationCenter: ObservableObject {
             var remOverrides = UserDefaults.standard.dictionary(forKey: reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
             for uid in expiredUids { remOverrides.removeValue(forKey: uid) }
             UserDefaults.standard.set(remOverrides, forKey: reminderOverridesUIDKey)
+            // Run 19.09.: auch den Antwort-Status-Marker aufraeumen (wurde
+            // bisher nie entfernt und wuchs unbefristet).
+            var statuses = UserDefaults.standard.dictionary(forKey: "invitations_answered_status_uid") as? [String: String] ?? [:]
+            for uid in expiredUids { statuses.removeValue(forKey: uid) }
+            UserDefaults.standard.set(statuses, forKey: "invitations_answered_status_uid")
+            // Und den persistenten "nicht im Kalender"-Marker.
+            var notInCal = Set(UserDefaults.standard.stringArray(forKey: "invitations_not_in_calendar_ids") ?? [])
+            for uid in expiredUids { notInCal.remove(uid) }
+            UserDefaults.standard.set(Array(notInCal), forKey: "invitations_not_in_calendar_ids")
+            // Ausstehende Entfernungen abgelaufener Termine verwerfen.
+            var pending = Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
+            for uid in expiredUids { pending.remove(uid) }
+            UserDefaults.standard.set(Array(pending), forKey: pendingRemovalKey)
         }
         if !expiredIds.isEmpty || !expiredUids.isEmpty {
             SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs entfernt (Termin vorbei)")
@@ -396,9 +427,13 @@ final class SouveraInvitationCenter: ObservableObject {
                 uid: resolved.eventUID, status: status.rawValue,
                 reminderMinutes: reminderMinutes)
             // Run 19.09. (Feedback): Ablehnung entfernt den Termin
-            // komplett aus dem Kalender.
+            // komplett aus dem Kalender. Schlaegt das fehl, wird es
+            // vorgemerkt und beim naechsten Load erneut versucht.
             if status == .declined {
-                _ = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+                let removed = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
+                if !removed, !resolved.eventUID.isEmpty {
+                    SouveraInvitationCenter.addPendingRemoval(resolved.eventUID)
+                }
             }
         }
         if status != .declined, !resolved.isCancellation, !handledExisting {
@@ -667,10 +702,15 @@ final class SouveraInvitationCenter: ObservableObject {
         return nil
     }
 
+    /// Ergebnis einer Absage-Entfernung (Run 19.09.): unterscheidet echtes
+    /// "nicht gefunden" von einem Fehler (412/Netz) - nur ersteres darf
+    /// dauerhaft quittiert werden.
+    enum CancelRemovalResult { case removed, notFound, failed }
+
     /// Run 18.09. (Feedback): Matching UID ODER exakt Titel (normalisiert)
     /// + Start/Ende ±5 min - ohne ICS kein blur-Raten.
     func removeCancelledEvent(uid: String, title: String = "",
-                              start: Date? = nil, end: Date? = nil) async -> Bool {
+                              start: Date? = nil, end: Date? = nil) async -> CancelRemovalResult {
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let calendar = Calendar.current
@@ -679,6 +719,8 @@ final class SouveraInvitationCenter: ObservableObject {
             .components(separatedBy: CharacterSet.alphanumerics.inverted)
             .filter { !$0.isEmpty }.joined(separator: " ")
         var removed = false
+        var found = false
+        var deleteFailed = false
         for cal in calendars {
             let fetched = await client.fetchEvents(
                 calendarHref: cal.href,
@@ -687,7 +729,7 @@ final class SouveraInvitationCenter: ObservableObject {
             for entry in fetched {
                 var matches = false
                 if !uid.isEmpty,
-                   entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+                   Self.icsHasUID(entry.ics, uid) {
                     matches = true
                 } else if !normalizedTitle.isEmpty {
                     let candidate = ICSParser.parseEvents(
@@ -713,41 +755,56 @@ final class SouveraInvitationCenter: ObservableObject {
                     }
                 }
                 if matches {
-                    let ok = await client.deleteEvent(entry)
+                    found = true
+                    // Run 19.09.: ETag-Retry wie beim Ablehnen.
+                    let ok = await CalendarViewModel.deleteEventEntry(entry, client: client)
                     SouveraLog.write("Invitations", "cancel remove uid=\(uid) title=\(title): \(ok)")
-                    if ok { removed = true }
+                    if ok { removed = true } else { deleteFailed = true }
                 }
             }
         }
-        if !removed {
-            SouveraLog.write("Invitations", "cancel remove: kein Match (uid=\(uid) title=\(title))")
+        if removed { return .removed }
+        if found || deleteFailed {
+            SouveraLog.write("Invitations", "cancel remove FAILED (uid=\(uid) title=\(title))")
+            return .failed
         }
-        return removed
+        SouveraLog.write("Invitations", "cancel remove: kein Match (uid=\(uid) title=\(title))")
+        return .notFound
     }
 
     /// Run 19.09. (Feedback Absage): Absage-Mail aufloesen (ICS/UID per
     /// Lazy-Fetch) und den Termin entfernen; danach Mail in den Papierkorb.
     /// Ein Pfad fuer Detail- und Uebersichts-Button.
+    /// Liefert true, wenn quittiert werden darf (entfernt ODER echt nicht
+    /// gefunden); false nur bei echtem Fehler (Zeile bleibt stehen).
     @discardableResult
     func removeCancelledMail(_ invitation: SouveraMailInvitation) async -> Bool {
         let resolved = await resolveInvitation(invitation)
-        let removed = await removeCancelledEvent(
+        let result = await removeCancelledEvent(
             uid: resolved.eventUID,
             title: resolved.displayTitle,
             start: resolved.event?.start,
             end: resolved.event?.end)
-        if removed {
+        switch result {
+        case .removed, .notFound:
+            // Run 19.09.: Antwort/Entfernen gilt als erledigt - Mail
+            // serverseitig in den Papierkorb (geraeteuebergreifend).
             Self.markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
             await MainActor.run {
                 SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
             }
             _ = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
+            return true
+        case .failed:
+            // Echter Fehler: Zeile behalten, kein Trash, kein Marker.
+            return false
         }
-        return removed
     }
 
     /// Run 19.09. (Feedback): Termin nach einer Ablehnung aus dem Kalender
-    /// entfernen (DELETE mit ETag-Retry).
+    /// entfernen (DELETE mit ETag-Retry). Exakter UID-Match; entfernt ALLE
+    /// Treffer (nicht nur den ersten) und meldet Erfolg, wenn mindestens
+    /// einer geloescht wurde.
     @discardableResult
     func removeEventByUID(_ uid: String) async -> Bool {
         guard !uid.isEmpty else { return false }
@@ -755,19 +812,83 @@ final class SouveraInvitationCenter: ObservableObject {
         let calendars = await client.fetchCalendars()
         let calendar = Calendar.current
         let now = Date()
+        var removedAny = false
+        var found = false
         for cal in calendars {
             let fetched = await client.fetchEvents(
                 calendarHref: cal.href,
                 start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
                 end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
-            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+            for entry in fetched where Self.icsHasUID(entry.ics, uid) {
+                found = true
                 let ok = await CalendarViewModel.deleteEventEntry(entry, client: client)
                 SouveraLog.write("Invitations", "decline remove uid=\(uid): \(ok)")
-                return ok
+                if ok { removedAny = true }
             }
         }
-        SouveraLog.write("Invitations", "decline remove uid=\(uid): nicht im Kalender")
+        if !found {
+            SouveraLog.write("Invitations", "decline remove uid=\(uid): nicht im Kalender")
+        }
+        return removedAny
+    }
+
+    // MARK: - Exakter UID-Match (Run 19.09.)
+    //
+    // Ersetzt das frühere `ics.contains("UID:<uid>")`, das UID-Praefixe
+    // falsch traf (UID "abc" matchte "UID:abcd").
+
+    nonisolated static func icsHasUID(_ ics: String, _ uid: String) -> Bool {
+        let target = uid.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !target.isEmpty else { return false }
+        let unfolded = ics
+            .replacingOccurrences(of: "\r\n ", with: "")
+            .replacingOccurrences(of: "\r\n\t", with: "")
+            .replacingOccurrences(of: "\n ", with: "")
+        for raw in unfolded.components(separatedBy: .newlines) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            guard line.count > 4, line.prefix(4).uppercased() == "UID:" else { continue }
+            let value = String(line.dropFirst(4)).trimmingCharacters(in: .whitespaces).lowercased()
+            if value == target { return true }
+        }
         return false
+    }
+
+    // MARK: - Ausstehende Entfernungen (Run 19.09.)
+    //
+    // Schlaegt das Löschen eines abgelehnten Termins fehl (412/Netz),
+    // wird die UID gemerkt und beim naechsten Kalender-Load erneut
+    // versucht - die Antwort selbst gilt bereits als erteilt.
+
+    private static let pendingRemovalKey = "invitations_pending_removal_uids"
+
+    nonisolated static func addPendingRemoval(_ uid: String) {
+        guard !uid.isEmpty else { return }
+        var uids = Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
+        uids.insert(uid.lowercased())
+        UserDefaults.standard.set(Array(uids), forKey: pendingRemovalKey)
+    }
+
+    nonisolated static func removePendingRemoval(_ uid: String) {
+        guard !uid.isEmpty else { return }
+        var uids = Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
+        uids.remove(uid.lowercased())
+        UserDefaults.standard.set(Array(uids), forKey: pendingRemovalKey)
+    }
+
+    nonisolated static func pendingRemovals() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
+    }
+
+    /// Wird beim Kalender-Load aufgerufen; entfernt erfolgreich die
+    /// vorgemerkten Termine und raeumt die Liste.
+    func retryPendingRemovals() async {
+        let pending = Self.pendingRemovals()
+        guard !pending.isEmpty else { return }
+        for uid in pending {
+            if await removeEventByUID(uid) {
+                Self.removePendingRemoval(uid)
+            }
+        }
     }
 
     // MARK: - Erinnerungen (Run 19.09., einheitlich)
@@ -806,9 +927,14 @@ final class SouveraInvitationCenter: ObservableObject {
         dict[invitation.id] = minutes
         UserDefaults.standard.set(dict, forKey: Self.reminderOverridesKey)
         // Run 19.09. (Feedback): zusaetzlich PERSISTENT per UID merken.
-        
-
+        // Der Key wurde zuvor nur gelesen/aufgeraeumt, nie geschrieben -
+        // die gewaehlte Erinnerung ging bei Neustart/Resolve verloren.
         let eventUID = invitation.eventUID
+        if !eventUID.isEmpty {
+            var byUid = UserDefaults.standard.dictionary(forKey: Self.reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
+            byUid[eventUID.lowercased()] = minutes
+            UserDefaults.standard.set(byUid, forKey: Self.reminderOverridesUIDKey)
+        }
         guard !eventUID.isEmpty else { return true }
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
@@ -819,10 +945,17 @@ final class SouveraInvitationCenter: ObservableObject {
                 calendarHref: cal.href,
                 start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
                 end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
-            for entry in fetched where entry.ics.uppercased().contains("UID:\(eventUID.uppercased())") {
+            for entry in fetched where Self.icsHasUID(entry.ics, eventUID) {
                 let updated = CalendarViewModel.setValarms(ics: entry.ics, minutes: minutes)
-                let ok = await client.updateEvent(entry, ics: updated)
-                SouveraLog.write("Invitations", "reminders update uid=\(eventUID): \(ok)")
+                if await client.updateEvent(entry, ics: updated) {
+                    SouveraLog.write("Invitations", "reminders update uid=\(eventUID): true")
+                    return true
+                }
+                // Run 19.09.: 412-Retry ohne If-Match (stale ETag).
+                let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                              href: entry.href, etag: nil, ics: entry.ics)
+                let ok = await client.updateEvent(noEtag, ics: updated)
+                SouveraLog.write("Invitations", "reminders update uid=\(eventUID): \(ok) (retry)")
                 return ok
             }
         }
@@ -848,7 +981,7 @@ final class SouveraInvitationCenter: ObservableObject {
                 calendarHref: cal.href,
                 start: calendar.date(byAdding: .day, value: -90, to: now) ?? now,
                 end: calendar.date(byAdding: .day, value: 730, to: now) ?? now)
-            for entry in fetched where entry.ics.uppercased().contains("UID:\(uid.uppercased())") {
+            for entry in fetched where Self.icsHasUID(entry.ics, uid) {
                 guard let partstat = CalendarViewModel.updatePartstat(
                     ics: entry.ics, attendeeEmail: me, status: status) else { continue }
                 var updated = partstat
@@ -860,13 +993,23 @@ final class SouveraInvitationCenter: ObservableObject {
                 }
                 let ok = await client.updateEvent(entry, ics: updated)
                 SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): \(ok)")
+                // Run 19.09.: 412-Retry ohne If-Match (stale ETag).
+                let finalOk: Bool
+                if ok {
+                    finalOk = true
+                } else {
+                    let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                                  href: entry.href, etag: nil, ics: entry.ics)
+                    finalOk = await client.updateEvent(noEtag, ics: updated)
+                    SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): \(finalOk) (retry)")
+                }
                 // Run 19.09. (Feedback): ICS zuruecklesen und den
                 // serverseitigen PARTSTAT loggen (Cross-Device-Diagnose).
-                if ok, let verify = await client.fetchEventICS(entry) {
+                if finalOk, let verify = await client.fetchEventICS(entry) {
                     let server = CalendarViewModel.serverPartstat(ics: verify, attendeeEmail: me)
                     SouveraLog.write("Invitations", "RSVP verify uid=\(uid): server PARTSTAT=\(server)")
                 }
-                return ok
+                return finalOk
             }
         }
         SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): nicht im Kalender")
