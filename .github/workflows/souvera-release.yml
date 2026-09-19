@@ -71,7 +71,6 @@ jobs:
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath "DerivedDataTests" \
             -skipPackagePluginValidation \
-            CODE_SIGNING_ALLOWED=NO \
             2>&1 | tee build-for-testing.log
 
       - name: Run unit tests
