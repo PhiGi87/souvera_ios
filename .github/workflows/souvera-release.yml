@@ -62,30 +62,39 @@ jobs:
           xcrun simctl boot "iPhone 16" || true
           xcrun simctl bootstatus "iPhone 16" || true
 
-      - name: Run unit tests
+      - name: Build for testing
         run: |
           set -o pipefail
-          set +e
-          xcodebuild test \
+          xcodebuild build-for-testing \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
             -destination 'platform=iOS Simulator,name=iPhone 16' \
             -derivedDataPath "DerivedDataTests" \
-            -only-testing:NextcloudUnitTests \
             -skipPackagePluginValidation \
             CODE_SIGNING_ALLOWED=NO \
-            2>&1 | tee test.log | grep -E 'Test Suite|Test Case|error:|failed|passed|\*\* TEST' || true
-          EXIT=${PIPESTATUS[0]}
-          set -e
-          echo "=== xcodebuild test exit: $EXIT ==="
-          [ "$EXIT" -eq 0 ]
+            2>&1 | tee build-for-testing.log
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          XCTESTRUN=$(find DerivedDataTests -type f -name '*.xctestrun' | head -1)
+          echo "xctestrun=$XCTESTRUN"
+          xcodebuild test-without-building \
+            -xctestrun "$XCTESTRUN" \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "DerivedDataTests" \
+            -only-testing:NextcloudUnitTests \
+            -resultBundlePath "TestResult.xcresult" \
+            2>&1 | tee test.log
 
       - name: Upload test log
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: unit-test-log
-          path: test.log
+          path: |
+            test.log
+            build-for-testing.log
           retention-days: 7
 
   build-check:
