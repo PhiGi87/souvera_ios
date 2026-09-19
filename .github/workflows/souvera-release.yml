@@ -23,6 +23,11 @@ on:
         options:
           - testflight
           - appstore
+      run_tests:
+        description: 'Run unit tests (NextcloudUnitTests)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   PROJECT: Souvera.xcodeproj
@@ -33,6 +38,56 @@ env:
   SIM_DERIVED_DATA: DerivedDataSim
 
 jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: macos-15
+    timeout-minutes: 60
+    if: |
+      github.event_name == 'workflow_dispatch' &&
+      github.event.inputs.run_tests == 'true'
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download GoogleService-Info.plist
+        run: wget "https://raw.githubusercontent.com/firebase/quickstart-ios/master/mock-GoogleService-Info.plist" -O GoogleService-Info.plist
+
+      - name: Setup Xcode
+        uses: maxim-lobanov/setup-xcode@60606e260d2fc5762a71e64e74b2174e8ea3c8bd # v1.6.0
+        with:
+          xcode-version: ${{ env.XCODE_VERSION }}
+
+      - name: Boot simulator
+        run: |
+          xcrun simctl boot "iPhone 16" || true
+          xcrun simctl bootstatus "iPhone 16" || true
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          set +e
+          xcodebuild test \
+            -project "$PROJECT" \
+            -scheme "$SCHEME" \
+            -destination 'platform=iOS Simulator,name=iPhone 16' \
+            -derivedDataPath "DerivedDataTests" \
+            -only-testing:NextcloudUnitTests \
+            -skipPackagePluginValidation \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee test.log | grep -E 'Test Suite|Test Case|error:|failed|passed|\*\* TEST' || true
+          EXIT=${PIPESTATUS[0]}
+          set -e
+          echo "=== xcodebuild test exit: $EXIT ==="
+          [ "$EXIT" -eq 0 ]
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-log
+          path: test.log
+          retention-days: 7
+
   build-check:
     name: Compile check (no signing)
     runs-on: macos-15
