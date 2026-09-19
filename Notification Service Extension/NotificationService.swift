@@ -132,6 +132,9 @@ class NotificationService: UNNotificationServiceExtension {
                                     ?? (json["id"] as? String)
                                     ?? ""
                                 let isMailPush = (appName == "souvera_mail" || objectType == "souvera_mail")
+                                // Run 19.09.: Kalender-Pushes fuer die
+                                // timeSensitive-Markierung erkennen.
+                                let isCalendarPush = (appName == "souvera_calendar" || objectType == "souvera_calendar")
                                 // P62g: Mail-Push -> Flag für den nächsten
                                 // Modul-Eintritt setzen (Refresh auch ohne
                                 // Tap auf die Notification).
@@ -185,6 +188,12 @@ class NotificationService: UNNotificationServiceExtension {
                                 // Wert bleibt die Benachrichtigung stumm
                                 // (Feedback 05.09.). Nur bei echtem Inhalt.
                                 bestAttemptContent.sound = UNNotificationSound.default
+                                // Run 19.09.: Mail-/Kalender-Pushes NICHT von
+                                // Fokus/Mitteilungszusammenfassung verzögern
+                                // lassen (Talk/Admin/Deck unverändert).
+                                if isMailPush || isCalendarPush {
+                                    bestAttemptContent.interruptionLevel = .timeSensitive
+                                }
                                 // Link-Push: Raum-Token (json["id"] = Raum-
                                 // token) + Konto in die userInfo - die App
                                 // unterdrückt damit Banner für den AKTUELL

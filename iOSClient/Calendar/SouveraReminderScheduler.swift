@@ -45,6 +45,10 @@ enum SouveraReminderScheduler {
                     )
                     content.sound = SouveraCalendarReminderSound.sound(account: account).sound // Deep-Link-Payload: Tap öffnet direkt die Detail-Ansicht
                     // des Termins.
+                    // Run 19.09. (Feedback: Banner teils erst spät): Fokus/
+                    // Mitteilungszusammenfassung dürfen Kalender-Erinnerungen
+                    // NICHT verzögern.
+                    content.interruptionLevel = .timeSensitive
                     content.userInfo = [
                         "uid": event.uid,
                         "start": event.start.timeIntervalSince1970,
@@ -112,6 +116,7 @@ enum SouveraReminderScheduler {
                     String(format: NSLocalizedString("_push_event_catchup_", comment: ""), minutesLeft)
                 )
                 content.sound = SouveraCalendarReminderSound.sound(account: account).sound
+                content.interruptionLevel = .timeSensitive
                 content.userInfo = [
                     "uid": event.uid,
                     "start": event.start.timeIntervalSince1970,

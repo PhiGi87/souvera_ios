@@ -204,6 +204,9 @@ final class SouveraBackgroundSync {
             content.title = sender
             content.body = SouveraNotificationText.body(subject)
             content.sound = .default
+            // Run 19.09.: Neue Mails NICHT in Fokus/Mitteilungs-
+            // zusammenfassung verzögern lassen.
+            content.interruptionLevel = .timeSensitive
             // Gruppierung pro E-Mail-Thread im Sperrbildschirm (wie Talk
             // pro Raum) - fehlt die threadId, bleibt das Feld leer.
             if let threadId = email.optString("threadId"), !threadId.isEmpty {
