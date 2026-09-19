@@ -1317,8 +1317,14 @@ final class MailViewModel: ObservableObject {
             let detailed = try await api.getEmails(
                 accountId: accId,
                 ids: ids,
-                bodyProperties: ["subject", "from", "keywords", "attachments"],
-                fetchAllBodyValues: false
+                // Run 19.09. (Feedback: Zeiten erst nach Klick): dieselben
+                // Part-Felder wie fetchInvitationDetails anfordern - die
+                // blosse "attachments"-Property lieferte den text/calendar-
+                // Part nicht immer (inline/typisiert), wodurch die
+                // Einladung ohne Termindaten (und ohne Zeit) in der
+                // Uebersicht landete.
+                bodyProperties: ["subject", "from", "keywords", "attachments", "partId", "blobId", "size", "type", "name", "disposition", "cid"],
+                fetchAllBodyValues: true
             )
             await SouveraInvitationCenter.shared.scanMailInvites(
                 accountId: accId,
@@ -1946,6 +1952,18 @@ final class MailViewModel: ObservableObject {
     /// P62d: Debounce-Task für den Refresh nach Mutationen (Löschen/
     /// Verschieben) - ein Refresh nach der LETZTEN Mutation statt pro Swipe.
     private var mutationRefreshTask: Task<Void, Never>?
+    /// Run 19.09. (Feedback Freeze): debounced Postfachlisten-Refresh nach
+    /// Mutationen - verhindert den Full-Refetch aller Ordner pro Loeschung.
+    private var mailboxListRefreshTask: Task<Void, Never>?
+
+    private func scheduleMailboxListRefresh() {
+        mailboxListRefreshTask?.cancel()
+        mailboxListRefreshTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            await self?.loadMailboxes(autoOpenInbox: false)
+        }
+    }
     /// Run 19.09.: Letzter Komplett-Mirror-Refetch je Mailbox (5-min-
     /// Drossel fuer den inkrementellen Sync).
     private var lastDeepMirrorRefresh: [String: Date] = [:]
@@ -2264,12 +2282,21 @@ final class MailViewModel: ObservableObject {
     /// geteilte Identitäten. Der alte Pfad zählte nur die Inbox des
     /// primären Accounts; die Pill einer geteilten Inbox (z. B. "Eingang"
     /// für mail@arrt-it.de) blieb dadurch dauerhaft stehen.
+    /// Run 19.09.: verhindert gestapelte 138-Ordner-Zaehlungen.
+    private var perInboxUnreadRefreshInFlight = false
+
     func refreshPerInboxUnreadCounts() async {
         guard let api = jmapApi else { return }
         // Run 15.09. (2. Runde): ALLE Ordner - Unterordner-Pills (z. B.
         // INBOX/Inkasso) wurden vorher nie autoritativ aktualisiert.
         let targets = allMailboxes.filter { $0.jmapId != nil }
         guard !targets.isEmpty else { return }
+        // Run 19.09. (Feedback Freeze): nicht mehrfach parallel/gestapelt
+        // laufen lassen - der Badge-Sync und Mutationen riefen die
+        // 138-Ordner-Zaehlung sonst mehrfach gleichzeitig auf.
+        guard !perInboxUnreadRefreshInFlight else { return }
+        perInboxUnreadRefreshInFlight = true
+        defer { perInboxUnreadRefreshInFlight = false }
         var counts: [String: Int] = [:]
         for box in targets {
             guard let jmapId = box.jmapId else { continue }
@@ -2729,11 +2756,28 @@ final class MailViewModel: ObservableObject {
         guard !removed.isEmpty else { return }
         // P62f: bis zum bestätigenden Refresh filtern Syncs die IDs aus.
         pendingRemovedIds.formUnion(removed)
+        // Run 19.09. (Feedback: Freeze beim Loeschen): Roh-Spiegel ZUERST
+        // synchron saeubern (billig), dann die Persistenz OFF-MAIN
+        // schreiben - das fruehere loadMessages+saveMessages (JSON+gzip)
+        // lief fuer jede Mutation auf dem Main-Thread und blockierte die UI.
+        if let mailbox = currentMailbox, var mirror = rawMailboxEmails[mailbox.id] {
+            for id in removed { mirror.removeValue(forKey: id) }
+            rawMailboxEmails[mailbox.id] = mirror
+        }
         if useJmap, let mailbox = currentMailbox {
-            let accountName = mailAccount?.account ?? ""
-            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
-                let filtered = snapshot.emails.filter { !removed.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+            let queryState = queryStates[mailbox.id]
+            let acc = cacheAccountKey
+            let mid = mailbox.id
+            let mirrorEmails = rawMailboxEmails[mailbox.id].map { Array($0.values) }
+            let removedIds = removed
+            Task.detached(priority: .utility) {
+                let emails = mirrorEmails
+                    ?? MailCache.loadMessages(account: acc, mailboxId: mid)?.emails
+                    ?? []
+                guard !emails.isEmpty else { return }
+                let filtered = emails.filter { !removedIds.contains($0.optString("id") ?? "") }
+                await MailCache.saveMessagesOffMain(account: acc, mailboxId: mid,
+                                                    emails: filtered, queryState: queryState)
             }
         }
         if currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal,
@@ -2753,21 +2797,12 @@ final class MailViewModel: ObservableObject {
             results.removeAll { removed.contains($0.emailId) }
             searchResults = .success(results)
         }
-        // Run 15.09.: AUCH den Roh-Spiegel säubern - sonst reint der
-        // nächste Inkremental-Sync die (verschobenen/gelöschten) Einträge
-        // aus dem Spiegel in die Liste zurück (Flapping-Fix).
-        if let mailbox = currentMailbox, var mirror = rawMailboxEmails[mailbox.id] {
-            for id in removed { mirror.removeValue(forKey: id) }
-            rawMailboxEmails[mailbox.id] = mirror
-        }
         // FINALE Flapping-Fix (Log d0reaaa3mk): jede Mutation bricht
-        // LAUFENDE Syncs an den Generations-Guards ab und queued EINEN
-        // frischen Sync mit dem sauberen Spiegel — ein Sync kann nie
-        // einen vor der Mutation liegenden Stand publizieren.
+        // LAUFENDE Syncs an den Generations-Guards ab. Den Sync selbst
+        // uebernimmt afterListMutation (debounced, inkrementell) - der
+        // frueher hier zusaetzlich gestartete Voll-/Inkremental-Sync pro
+        // Mutation verstaerkte den Sync-Sturm beim Massen-Loeschen.
         listGeneration += 1
-        Task { [weak self] in
-            await self?.syncMessages()
-        }
     }
 
     func delete(_ messagesToDelete: [MailMessage]) {
@@ -2898,12 +2933,22 @@ final class MailViewModel: ObservableObject {
         // Quell-Cache bereinigen: Ohne diesen Schritt würde der nächste
         // Cache-first-Publish (Full-Refresh nach der Mutation) die
         // verschobene/gelöschte Mail wieder einblenden - der Cache-Snapshot
-        // enthält sie ja noch.
+        // enthält sie ja noch. Run 19.09.: OFF-MAIN (kein Main-Thread-gzip)
+        // und aus dem Roh-Spiegel statt erneutem loadMessages.
         if useJmap, let mailbox = currentMailbox {
-            let accountName = mailAccount?.account ?? ""
-            if let snapshot = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
-                let filtered = snapshot.emails.filter { !removedIds.contains($0.optString("id") ?? "") }
-                MailCache.saveMessages(account: cacheAccountKey, mailboxId: mailbox.id, emails: filtered, queryState: snapshot.queryState)
+            let acc = cacheAccountKey
+            let mid = mailbox.id
+            let queryState = queryStates[mid]
+            let removedSet = Set(removedIds)
+            let mirrorEmails = rawMailboxEmails[mid].map { Array($0.values) }
+            Task.detached(priority: .utility) {
+                let emails = mirrorEmails
+                    ?? MailCache.loadMessages(account: acc, mailboxId: mid)?.emails
+                    ?? []
+                guard !emails.isEmpty else { return }
+                let filtered = emails.filter { !removedSet.contains($0.optString("id") ?? "") }
+                await MailCache.saveMessagesOffMain(account: acc, mailboxId: mid,
+                                                    emails: filtered, queryState: queryState)
             }
         }
         // Badge sofort: entfernte ungelesene Nachrichten des Posteingangs abziehen.
@@ -2916,7 +2961,10 @@ final class MailViewModel: ObservableObject {
                 postUnreadBadge(personalInboxUnread - unreadRemoved)
             }
         }
-        Task { await loadMailboxes(autoOpenInbox: false) }
+        // Run 19.09. (Feedback Freeze): Postfach-Liste NICHT mehr pro
+        // Mutation neu laden (Full-Refetch aller Ordner + 138 Unread-
+        // Queries) - debounced und zusammengefasst.
+        scheduleMailboxListRefresh()
         // Remove from the visible list (server confirms the change).
         if case var .success(list) = messages {
             list.removeAll { removedIds.contains($0.emailId) }

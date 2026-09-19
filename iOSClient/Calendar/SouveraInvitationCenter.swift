@@ -289,7 +289,11 @@ final class SouveraInvitationCenter: ObservableObject {
             // listet beide in "attachments", unsere Mapper teilen sie
             // nur fuer die ANZEIGE) - deshalb im rohen attachments-Array
             // suchen, das deckt beide Dispositionen ab.
-            let attachments = (json["attachments"] as? [[String: Any]]) ?? []
+            // Run 19.09. (Feedback: Zeiten erst nach Klick): zusaetzlich
+            // inlineAttachments pruefen - fetchInvitationDetails findet
+            // den Part dort, der Scan bisher nicht.
+            let attachments = ((json["attachments"] as? [[String: Any]]) ?? [])
+                + ((json["inlineAttachments"] as? [[String: Any]]) ?? [])
             let icsAttachment = attachments.first(where: {
                 ($0["type"] as? String)?.lowercased().contains("calendar") == true
                     || (($0["name"] as? String)?.lowercased().hasSuffix(".ics") == true)

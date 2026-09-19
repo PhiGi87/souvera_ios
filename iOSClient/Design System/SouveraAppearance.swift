@@ -329,6 +329,7 @@ final class SouveraBarCoordinator {
     private weak var navigationController: UINavigationController?
     private let bridge: SouveraHeaderBridge
     private var cancellables = Set<AnyCancellable>()
+    private var lastSignature: String?
 
     init(navigationController: UINavigationController, bridge: SouveraHeaderBridge) {
         self.navigationController = navigationController
@@ -342,20 +343,44 @@ final class SouveraBarCoordinator {
 
     func rebuild() {
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
+        // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
+        // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
+        // Nur bei echter Inhaltsaenderung neu bauen/loggen.
+        let signature = Self.signature(bridge)
+        if signature == lastSignature { return }
+        lastSignature = signature
         item.title = bridge.title.isEmpty ? nil : bridge.title
         let leading = Self.bars(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
         let trailing = Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
         // Run 19.09. (Feedback iPad-Header: Buttons fehlten auf iOS 26):
-        // Einzelne Bar-Items statt einer UIBarButtonItemGroup - in einer
-        // Gruppe mit representativeItem nil wurden auf iOS 26 nicht alle
-        // Items gerendert. left/rightBarButtonItems zeigt sie zuverlaessig.
-        item.leftBarButtonItems = leading.isEmpty ? nil : leading
-        item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
-        item.leadingItemGroups = []
-        item.trailingItemGroups = []
+        // iPadOS 26 rendert left/rightBarButtonItems in der zentrierten
+        // Tab-Pill-Bar NICHT - die Items erscheinen nur ueber
+        // leading/trailingItemGroups. Eine Gruppe PRO Item verhindert,
+        // dass ein Text-Item die uebrigen Items verschluckt.
+        item.leftBarButtonItems = nil
+        item.rightBarButtonItems = nil
+        item.leadingItemGroups = leading.map {
+            UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+        }
+        item.trailingItemGroups = trailing.map {
+            UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+        }
         #if !EXTENSION
         SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count)")
         #endif
+    }
+
+    /// Inhaltssignatur der Bridge (IDs + Icons/Titel/Texte) - erkennt echte
+    /// Aenderungen, ignoriert die sieben Einzel-Publishes.
+    private static func signature(_ bridge: SouveraHeaderBridge) -> String {
+        func item(_ i: SouveraHeaderBridge.Item) -> String { "\(i.id):\(i.icon):\(i.text ?? ""):\(i.isGreen):\(i.isDestructive)" }
+        func menu(_ m: SouveraHeaderBridge.MenuGroup) -> String {
+            "\(m.id):\(m.icon):\(m.title ?? ""):" + m.entries.map { "\($0.id):\($0.title):\($0.isChecked):\($0.isDestructive)" }.joined(separator: ";")
+        }
+        let parts = [bridge.title]
+            + bridge.leadingItems.map(item) + bridge.leadingMenus.map(menu) + bridge.leadingCustoms.map(\.id)
+            + bridge.trailingItems.map(item) + bridge.trailingMenus.map(menu) + bridge.trailingCustoms.map(\.id)
+        return parts.joined(separator: "|")
     }
 
     /// Run 19.09.: Baut die einzelnen Bar-Items (Items, Menues, Custom-

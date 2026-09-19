@@ -64,6 +64,16 @@ struct SouveraInvitationSheetView: View {
             }
         }
         .preferredColorScheme(.light)
+        // Run 19.09. (Feedback: Zeiten erst nach Klick): Mail-Einladungen
+        // ohne geparsten Termin beim Oeffnen im Hintergrund aufloesen,
+        // damit von-bis sofort erscheint (Scan deckt mit dem Part-Fix den
+        // Regelfall ab, dies ist der Fallback ohne ICS).
+        .task {
+            let unresolved = center.mailInvites.filter { $0.event == nil && !$0.resolved && !$0.isCancellation }
+            for invite in unresolved.prefix(8) {
+                _ = await SouveraInvitationCenter.shared.resolveInvitation(invite)
+            }
+        }
     }
 
     // MARK: - Zeilen
