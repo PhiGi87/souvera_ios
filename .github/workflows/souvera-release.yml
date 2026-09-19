@@ -68,20 +68,19 @@ jobs:
           xcodebuild build-for-testing \
             -project "$PROJECT" \
             -scheme "$SCHEME" \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -derivedDataPath "DerivedDataTests" \
-            -skipPackagePluginValidation \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -derivedDataPath "DerivedData" \
             2>&1 | tee build-for-testing.log
 
       - name: Run unit tests
         run: |
           set -o pipefail
-          XCTESTRUN=$(find DerivedDataTests -type f -name '*.xctestrun' | head -1)
+          XCTESTRUN=$(find DerivedData -type f -name '*.xctestrun' | head -1)
           echo "xctestrun=$XCTESTRUN"
           xcodebuild test-without-building \
             -xctestrun "$XCTESTRUN" \
-            -destination 'platform=iOS Simulator,name=iPhone 16' \
-            -derivedDataPath "DerivedDataTests" \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=18.5' \
+            -derivedDataPath "DerivedData" \
             -only-testing:NextcloudUnitTests \
             -resultBundlePath "TestResult.xcresult" \
             2>&1 | tee test.log
