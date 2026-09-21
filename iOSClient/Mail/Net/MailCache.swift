@@ -45,10 +45,31 @@ enum MailCache {
         guard !account.isEmpty, !mailboxId.isEmpty else { return nil }
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let safeMailbox = mailboxId.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        // v3: Nachrichten-Cache-Schlüssel wurden vereinheitlicht (mailboxId-
-        // Formate divergierten je Aufrufpfad) - legacy Dateien werden
-        // verworfen.
-        return rootDirectory.appendingPathComponent("\(safeAccount)_\(safeMailbox)-v3.json.gz")
+        // v4 (Run 21.09.): Ordner-IDs enthalten jetzt den VOLLEN Pfad
+        // (eindeutig je Unterordner) - v2/v3-Dateien werden bei der
+        // Migration einmalig verworfen.
+        return rootDirectory.appendingPathComponent("\(safeAccount)_\(safeMailbox)-v4.json.gz")
+    }
+
+    /// Run 21.09.: Einmalige Migration auf das v4-Cache-Schema (eindeutige
+    /// Ordner-Pfade). Loescht alte v2/v3-Dateien (Messages + Mailboxlisten);
+    /// die Caches bauen sich aus dem Server neu auf. Guard: genau einmal
+    /// pro Installation.
+    static func migrateSchemaOnce() {
+        let guardKey = "souvera_mail_cache_schema_v4_cleared"
+        guard !UserDefaults.standard.bool(forKey: guardKey) else { return }
+        var removed = 0
+        if let files = try? FileManager.default.contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil) {
+            for url in files where url.lastPathComponent.hasSuffix(".json.gz") {
+                let name = url.lastPathComponent
+                if name.contains("-v2.") || name.contains("-v3.") {
+                    try? FileManager.default.removeItem(at: url)
+                    removed += 1
+                }
+            }
+        }
+        UserDefaults.standard.set(true, forKey: guardKey)
+        JmapLog.write("Mail cache: migrated to v4, removed \(removed) legacy file(s)")
     }
 
     /// Bereinigt Muell-Dateien aus dem Start-Race (Dateien, die mit "_"
@@ -195,8 +216,8 @@ enum MailCache {
         // LEERER Account-Key verboten (Kaltstart-Race, siehe fileURL).
         guard !account.isEmpty else { return nil }
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-        // v3: siehe messages-v3 (Postfach-IDs vereinheitlicht).
-        return rootDirectory.appendingPathComponent("\(safeAccount)_mailboxes-v3.json.gz")
+        // v4: siehe messages-v4 (Postfach-IDs mit vollem Pfad).
+        return rootDirectory.appendingPathComponent("\(safeAccount)_mailboxes-v4.json.gz")
     }
 
     static func saveMailboxes(account: String, boxes: [[String: Any]]) {

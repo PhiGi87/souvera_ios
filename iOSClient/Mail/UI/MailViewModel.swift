@@ -346,6 +346,8 @@ final class MailViewModel: ObservableObject {
         // Muell-Dateien aus dem frueheren Kaltstart-Race entfernen (leerer
         // Account-Teil, z. B. "_|Inbox-v3.json.gz").
         MailCache.cleanupEmptyAccountFiles()
+        // Run 21.09.: einmalige Cache-Migration auf v4 (volle Ordnerpfade).
+        MailCache.migrateSchemaOnce()
         // ALLES asynchron (Task statt synchron im SwiftUI-Update-Zyklus):
         // Der vorherige synchrone Cache-First-Block machte einen SYNC
         // Realm-Read auf dem Haupt-Thread (Crash 0xdead10cc am 04.09.,
@@ -768,10 +770,13 @@ final class MailViewModel: ObservableObject {
 
             // Personal mailboxes.
             let personalList = try await api.getMailboxes(accountId: primaryAccId)
+            // Run 21.09.: volle Pfade fuer Unterordner (eindeutige IDs).
+            let personalPaths = fullPaths(for: personalList)
             all += personalList.map {
-                JmapMapper.mapMailbox(account: accountName, accountId: primaryAccId, json: $0)
+                JmapMapper.mapMailbox(account: accountName, accountId: primaryAccId, json: $0,
+                                      path: personalPaths[$0.optString("id") ?? ""])
             }
-            rawBoxes += personalList.map { cacheMailboxJson($0, accountId: primaryAccId, path: nil, owner: nil, namespace: "personal") }
+            rawBoxes += personalList.map { cacheMailboxJson($0, accountId: primaryAccId, path: personalPaths[$0.optString("id") ?? ""], owner: nil, namespace: "personal") }
 
             // Shared mailboxes: session accounts with isPersonal=false.
             if let session {
@@ -779,9 +784,11 @@ final class MailViewModel: ObservableObject {
                     guard let sharedList = try? await api.getMailboxes(accountId: sharedAcc.id) else {
                         continue // shared mailbox might not be accessible
                     }
+                    let sharedPaths = fullPaths(for: sharedList)
                     for json in sharedList {
                         let name = json.optString("name") ?? "?"
-                        let path = "\(sharedAcc.name)/\(name)"
+                        let relative = sharedPaths[json.optString("id") ?? ""] ?? name
+                        let path = "\(sharedAcc.name)/\(relative)"
                         all.append(JmapMapper.mapMailbox(
                             account: accountName,
                             accountId: sharedAcc.id,
@@ -795,6 +802,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
 
+            logMailboxTreeDiagnostics(all)
             let sorted = sortMailboxGroups(filterNonStandardSentFolders(all))
             applyMailboxes(sorted)
             // Verbindung steht wieder: Recovery-Sperre zurücksetzen.
@@ -889,14 +897,43 @@ final class MailViewModel: ObservableObject {
 
     /// Builds the collapsible mailbox tree from the JMAP parentId hierarchy.
     func mailboxTree(for boxes: [Mailbox]) -> [MailboxNode] {
-        // Run 15.09.: (1) nicht abonnierte Ordner ausblenden (Stalwart
-        // legt user-Ordner wie "leer" unsubscribed an), (2) Rollen-Ordner
-        // IMMER auf Root-Ebene - Stalwart nestet "Junk Email" gelegentlich
-        // unter beliebige Eltern; alle anderen Clients zeigen Rollen-
-        // Ordner ebenfalls auf oberster Ebene.
-        let visible = boxes.filter { $0.isSubscribed || $0.role != nil }
+        // Run 21.09. (Feedback: Hierarchie wurde flach gerendert):
+        // (1) Eltern mit sichtbaren Kindern bleiben sichtbar (sonst
+        //     verschluckt ein unsubscribed-Elternteil seinen ganzen Zweig),
+        // (2) Kinder fehlender/unsichtbarer Eltern werden an Root adoptiert
+        //     (keine unsichtbaren Ordner / Luecken mehr),
+        // (3) Rollen-Ordner nur noch dann auf Root zwingen, wenn ihr echter
+        //     Eltern-Knoten nicht sichtbar ist.
+        var visible = boxes.filter { $0.isSubscribed || $0.role != nil }
+        var visibleIds = Set(visible.compactMap { $0.jmapId })
+        var byJmapId: [String: Mailbox] = [:]
+        for box in boxes {
+            if let id = box.jmapId, !id.isEmpty, byJmapId[id] == nil {
+                byJmapId[id] = box
+            }
+        }
+        for box in boxes {
+            var parentId = box.parentId
+            var hops = 0
+            while let pid = parentId, !pid.isEmpty, hops < 64 {
+                hops += 1
+                guard let parent = byJmapId[pid] else { break }
+                if visibleIds.contains(pid) { break }
+                visibleIds.insert(pid)
+                if !visible.contains(where: { $0.jmapId == pid }) {
+                    visible.append(parent)
+                }
+                parentId = parent.parentId
+            }
+        }
         let byParent = Dictionary(grouping: visible) { box -> String in
-            box.role != nil ? "" : (box.parentId ?? "")
+            // Rollen-Ordner bleiben IMMER auf Root (Stalwart nestet z. B.
+            // "Junk Email" gelegentlich unter beliebige Eltern); alle
+            // anderen: normale Einordnung, fehlende/unsichtbare Eltern
+            // werden per Orphan-Adoption an Root gehaengt.
+            if box.role != nil { return "" }
+            let pid = box.parentId ?? ""
+            return (pid.isEmpty || visibleIds.contains(pid)) ? pid : ""
         }
         func children(of id: String?) -> [MailboxNode] {
             let list = byParent[id ?? ""] ?? []
@@ -905,6 +942,59 @@ final class MailViewModel: ObservableObject {
                 .map { MailboxNode(mailbox: $0, children: children(of: $0.jmapId)) }
         }
         return children(of: nil)
+    }
+
+    /// Run 21.09.: Diagnose des Ordnerbaums (eine kompakte Zeile pro
+    /// Postfach-Load) - belegt, ob parentId im Modell ankommt.
+    private func logMailboxTreeDiagnostics(_ boxes: [Mailbox]) {
+        let ids = Set(boxes.compactMap { $0.jmapId })
+        let withParent = boxes.filter { box in
+            guard let pid = box.parentId, !pid.isEmpty else { return false }
+            return true
+        }
+        let orphans = withParent.filter { !ids.contains($0.parentId ?? "") }
+        let inboxId = boxes.first(where: { $0.kind == .inbox })?.jmapId ?? ""
+        let inboxChildren = withParent.filter { $0.parentId == inboxId }
+        JmapLog.write("Mail folder tree: boxes=\(boxes.count) withParentId=\(withParent.count) orphans=\(orphans.count) inboxChildren=\(inboxChildren.count)")
+    }
+
+    /// Run 21.09.: Voller Pfad je Mailbox aus der parentId-Kette. Macht
+    /// Mailbox.id eindeutig (Message-Cache/Expansion); Top-Level behaelt
+    /// den reinen Namen. Kollidieren zwei Pfade (gleiche Namen unter
+    /// verschiedenen Eltern), wird die JMAP-Id angehaengt.
+    private func fullPaths(for list: [[String: Any]]) -> [String: String] {
+        var nameById: [String: String] = [:]
+        var parentById: [String: String] = [:]
+        for json in list {
+            guard let id = json.optString("id"), !id.isEmpty else { continue }
+            nameById[id] = json.optString("name") ?? "?"
+            parentById[id] = json.optString("parentId") ?? ""
+        }
+        var result: [String: String] = [:]
+        for id in nameById.keys {
+            var parts: [String] = []
+            var current: String? = id
+            var hops = 0
+            while let cid = current, !cid.isEmpty, hops < 32 {
+                hops += 1
+                guard let name = nameById[cid] else { break }
+                parts.insert(name, at: 0)
+                let parent = parentById[cid] ?? ""
+                current = (parent == cid) ? nil : parent
+            }
+            result[id] = parts.joined(separator: "/")
+        }
+        var seen: [String: String] = [:]
+        for id in result.keys.sorted() {
+            guard let path = result[id] else { continue }
+            if let other = seen[path] {
+                result[id] = "\(path)#\(id)"
+                result[other] = "\(path)#\(other)"
+            } else {
+                seen[path] = id
+            }
+        }
+        return result
     }
 
     /// Personal mailboxes first (kind order), then shared groups by owner.
