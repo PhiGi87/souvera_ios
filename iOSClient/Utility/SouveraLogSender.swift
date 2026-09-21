@@ -206,14 +206,15 @@ enum SouveraLogSender {
             }
             let identities = try await api.getIdentities(accountId: accId)
             let identityId = identities.first?.optString("id") ?? ""
-            _ = try await api.submitEmail(accountId: accId, emailId: createdId, identityId: identityId)
+            let sentId = boxes.first(where: { ($0["role"] as? String) == "sent" })?.optString("id") ?? ""
+            _ = try await api.submitEmail(accountId: accId, emailId: createdId, identityId: identityId,
+                                          sentMailboxId: sentId)
             // $draft-Keyword entfernen, damit die gesendete Mail nicht als
             // Entwurf hängen bleibt (IMAP/Web "Drafts").
             _ = try? await api.setEmailFlags(accountId: accId, emailIds: [createdId], keywordsToRemove: ["$draft"])
             // Zusätzlich in den Sent-Ordner verschieben: sonst bleibt die Mail
             // in der Drafts-Mailbox sichtbar (auch ohne $draft-Keyword).
-            if let sent = boxes.first(where: { ($0["role"] as? String) == "sent" }),
-               let sentId = sent.optString("id"), !sentId.isEmpty {
+            if !sentId.isEmpty {
                 _ = try? await api.moveEmails(accountId: accId, emailIds: [createdId], targetMailboxId: sentId, markRead: true)
             }
             SouveraLog.write("LogSender", "logs sent to \(recipient)")

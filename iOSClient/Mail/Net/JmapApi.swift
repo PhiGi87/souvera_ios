@@ -315,16 +315,40 @@ final class JmapApi {
     func submitEmail(
         accountId: String,
         emailId: String,
-        identityId: String
+        identityId: String,
+        sentMailboxId: String? = nil
     ) async throws -> [String: Any] {
         var args: [String: Any] = [:]
         args["accountId"] = try resolveAccountArg(accountId)
         args["create"] = ["sendme": ["emailId": emailId, "identityId": identityId]]
-        return try await client.singleCall(
-            "EmailSubmission/set",
-            args: args,
-            using: [JmapCapabilities.core, JmapCapabilities.mail, JmapCapabilities.submission]
-        )
+        // Run 21.09. (Feedback: Entwuerfe gesendeter Mails blieben liegen):
+        // serverseitig ATOMAR nach Gesendet verschieben und $draft entfernen
+        // (RFC 8621 onSuccessUpdateEmail, Key = Submission-Creation-Id).
+        let patchKey = "#sendme"
+        if let sentMailboxId, !sentMailboxId.isEmpty {
+            args["onSuccessUpdateEmail"] = [
+                patchKey: [
+                    "mailboxIds": [sentMailboxId: true],
+                    "keywords/$draft": false,
+                    "keywords/$seen": true
+                ]
+            ]
+        }
+        let using: [String] = [JmapCapabilities.core, JmapCapabilities.mail, JmapCapabilities.submission]
+        let resp = try await client.singleCall("EmailSubmission/set", args: args, using: using)
+        // Defensiv: unterstuetzt der Server onSuccessUpdateEmail nicht
+        // (notCreated), OHNE Patch erneut submitten - kein Doppelversand,
+        // weil nur auf die notCreated-Antwort reagiert wird (nicht auf
+        // Netzfehler).
+        if sentMailboxId != nil,
+           let notCreated = resp["notCreated"] as? [String: Any],
+           notCreated["sendme"] != nil {
+            var plainArgs = args
+            plainArgs.removeValue(forKey: "onSuccessUpdateEmail")
+            JmapLog.write("submit: onSuccessUpdateEmail abgelehnt - Retry ohne Patch")
+            return try await client.singleCall("EmailSubmission/set", args: plainArgs, using: using)
+        }
+        return resp
     }
 
     /// Run 19.09. (Feedback: Antwort-Mail kam nicht an): Die Einreichung

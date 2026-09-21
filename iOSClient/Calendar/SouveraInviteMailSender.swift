@@ -94,7 +94,11 @@ actor SouveraInviteMailSender {
             }
             // Run 19.09. (Feedback: Mail kam nicht an): Einreichung
             // finalisieren (Undo-Fenster beenden) + Ergebnis loggen.
-            let submitResp = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identityId)
+            // Run 21.09.: Sent-Mailbox vorab - der Submit verschiebt die
+            // Antwort atomar dorthin und entfernt $draft.
+            let sentBoxId = mailboxes.first(where: { ($0["role"] as? String) == "sent" })?["id"] as? String ?? ""
+            let submitResp = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identityId,
+                                                       sentMailboxId: sentBoxId)
             let submissionId = ((submitResp["created"] as? [String: Any])?["sendme"] as? [String: Any])?.optString("id") ?? ""
             SouveraLog.write("Invitations", "reply submission email=\(emailId) submission=\(submissionId)")
             if !submissionId.isEmpty {
@@ -109,17 +113,25 @@ actor SouveraInviteMailSender {
                     SouveraLog.write("Invitations", "reply submission state: undo=\(status) delivered=\(delivery)")
                 }
             }
-            _ = try? await api.setEmailFlags(
-                accountId: accId,
-                emailIds: [emailId],
-                keywordsToRemove: ["$draft"]
-            )
-            // Run 19.09. (Feedback): Kopie nach "Gesendet" verschieben -
-            // die Antwort tauchte sonst nur in Entwuerfe auf.
-            if let sent = mailboxes.first(where: { ($0["role"] as? String) == "sent" })?["id"] as? String,
-               !sent.isEmpty {
-                _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId],
-                                              targetMailboxId: sent, markRead: true)
+            // Fallback (falls der Server den Atomar-Patch nicht
+            // unterstuetzt): $draft entfernen + Kopie nach "Gesendet" -
+            // mit Ergebnis-Logging statt stiller Fehler.
+            do {
+                _ = try await api.setEmailFlags(
+                    accountId: accId,
+                    emailIds: [emailId],
+                    keywordsToRemove: ["$draft"]
+                )
+            } catch {
+                SouveraLog.write("Invitations", "reply: $draft entfernen fehlgeschlagen: \(error)")
+            }
+            if !sentBoxId.isEmpty {
+                do {
+                    _ = try await api.moveEmails(accountId: accId, emailIds: [emailId],
+                                                 targetMailboxId: sentBoxId, markRead: true)
+                } catch {
+                    SouveraLog.write("Invitations", "reply: Sent-Verschiebung fehlgeschlagen: \(error)")
+                }
             }
             SouveraLog.write("Invitations", "reply sent to \(to)")
             return true

@@ -105,6 +105,11 @@ struct MailView: View {
         .onChange(of: listMessagesEmpty) { _, _ in
             populateHeaderBridge()
         }
+        // Run 21.09.: Bearbeiten/Fertig-Zustand im iPad-Bridge-Menue
+        // aktualisieren.
+        .onChange(of: listEditing) { _, _ in
+            populateHeaderBridge()
+        }
         // Run 15.09.: Rueckkehr aus dem Hintergrund = Refresh (onAppear
         // feuert beim Foreground-Wechsel nicht). refreshOnEntry throttled
         // intern auf 8 s.
@@ -377,9 +382,14 @@ struct MailView: View {
                     // + "Neue Mail".
                     SouveraHeaderPill {
                         Menu {
-                            if !listMessagesEmpty {
-                                Button { listEditing = true } label: {
-                                    Label(NSLocalizedString("_edit_", comment: ""), systemImage: "checklist")
+                            if !listMessagesEmpty || listEditing {
+                                // Run 21.09. (Feedback: Bearbeiten liess sich
+                                // nicht ausschalten): Toggle mit Fertig-Label.
+                                Button { listEditing.toggle() } label: {
+                                    Label(listEditing
+                                          ? NSLocalizedString("_done_", comment: "")
+                                          : NSLocalizedString("_edit_", comment: ""),
+                                          systemImage: listEditing ? "checkmark" : "checklist")
                                 }
                             }
                             Menu {
@@ -507,9 +517,14 @@ struct MailView: View {
             // "Bearbeiten" entfällt bei leerer Liste, "Papierkorb leeren"
             // erscheint nur IM PAPIERKORB.
             var moreEntries: [SouveraHeaderBridge.MenuEntry] = []
-            if !listMessagesEmpty {
-                moreEntries.append(.init(id: "edit", title: NSLocalizedString("_edit_", comment: ""), icon: "checklist") {
-                    listEditing = true
+            if !listMessagesEmpty || listEditing {
+                // Run 21.09.: Toggle statt Nur-Anschalten.
+                moreEntries.append(.init(id: "edit",
+                                         title: listEditing
+                                             ? NSLocalizedString("_done_", comment: "")
+                                             : NSLocalizedString("_edit_", comment: ""),
+                                         icon: listEditing ? "checkmark" : "checklist") {
+                    listEditing.toggle()
                 })
             }
             if viewModel.currentMailbox?.kind == .trash {
@@ -1338,48 +1353,58 @@ private struct MailMessageListView: View {
         }
 
         .safeAreaInset(edge: .bottom) {
-            if editing && !selected.isEmpty {
+            if editing {
                 HStack(spacing: 0) {
+                    // Run 21.09.: sichtbarer Ausweg aus dem Bearbeiten-Modus,
+                    // auch wenn nichts ausgewaehlt ist.
                     Button {
-                        let messages = selectedMessages
-                        Task {
-                            await viewModel.setRead(messages, true)
-                            selected.removeAll()
-                            editing = false
-                        }
-                    } label: {
-                        selectionAction(icon: "envelope.open", label: NSLocalizedString("_mail_mark_read_", comment: ""))
-                    }
-                    Button {
-                        let messages = selectedMessages
-                        Task {
-                            await viewModel.setRead(messages, false)
-                            selected.removeAll()
-                            editing = false
-                        }
-                    } label: {
-                        selectionAction(icon: "envelope", label: NSLocalizedString("_mail_mark_unread_", comment: ""))
-                    }
-                    Button {
-                        let messages = selectedMessages
-                        if let first = messages.first {
-                            moveTarget = (messages, viewModel.availableMailboxes.filter { $0.accountId == first.accountId })
-                        }
-                    } label: {
-                        selectionAction(icon: "folder", label: NSLocalizedString("_mail_move_", comment: ""))
-                    }
-                    Button(role: .destructive) {
-                        let messages = selectedMessages
-                        viewModel.delete(messages)
-                        selected.removeAll()
                         editing = false
+                        selected.removeAll()
                     } label: {
-                        selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
+                        selectionAction(icon: "checkmark.circle", label: NSLocalizedString("_done_", comment: ""))
                     }
-                    Button {
-                        blacklistTarget = selectedMessages
-                    } label: {
-                        selectionAction(icon: "exclamationmark.shield", label: NSLocalizedString("_mail_blacklist_short_", comment: ""))
+                    if !selected.isEmpty {
+                        Button {
+                            let messages = selectedMessages
+                            Task {
+                                await viewModel.setRead(messages, true)
+                                selected.removeAll()
+                                editing = false
+                            }
+                        } label: {
+                            selectionAction(icon: "envelope.open", label: NSLocalizedString("_mail_mark_read_", comment: ""))
+                        }
+                        Button {
+                            let messages = selectedMessages
+                            Task {
+                                await viewModel.setRead(messages, false)
+                                selected.removeAll()
+                                editing = false
+                            }
+                        } label: {
+                            selectionAction(icon: "envelope", label: NSLocalizedString("_mail_mark_unread_", comment: ""))
+                        }
+                        Button {
+                            let messages = selectedMessages
+                            if let first = messages.first {
+                                moveTarget = (messages, viewModel.availableMailboxes.filter { $0.accountId == first.accountId })
+                            }
+                        } label: {
+                            selectionAction(icon: "folder", label: NSLocalizedString("_mail_move_", comment: ""))
+                        }
+                        Button(role: .destructive) {
+                            let messages = selectedMessages
+                            viewModel.delete(messages)
+                            selected.removeAll()
+                            editing = false
+                        } label: {
+                            selectionAction(icon: "trash", label: NSLocalizedString("_delete_", comment: ""))
+                        }
+                        Button {
+                            blacklistTarget = selectedMessages
+                        } label: {
+                            selectionAction(icon: "exclamationmark.shield", label: NSLocalizedString("_mail_blacklist_short_", comment: ""))
+                        }
                     }
                 }
                 .padding(.vertical, 6)

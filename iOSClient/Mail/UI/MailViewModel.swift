@@ -1315,6 +1315,83 @@ final class MailViewModel: ObservableObject {
         if mailbox.kind == .inbox, useJmap {
             Task { await scanInvitations(mailbox: mailbox) }
         }
+        // Run 21.09. (Feedback: Entwuerfe gesendeter Mails): Selbstheilung
+        // im Entwuerfe-Ordner.
+        if mailbox.kind == .drafts, useJmap {
+            Task { await selfHealDrafts(mailbox) }
+        }
+    }
+
+    private var draftsSelfHealRunning = false
+
+    /// Run 21.09.: Raeumt den Entwuerfe-Ordner auf, ohne echte Entwuerfe
+    /// anzutasten:
+    /// - Mails OHNE `$draft` sind Reste gesendeter Mails -> nach Gesendet.
+    /// - Mails MIT `$draft`, deren Message-ID bereits in Gesendet existiert,
+    ///   sind Duplikate gesendeter Mails -> loeschen.
+    private func selfHealDrafts(_ mailbox: Mailbox) async {
+        guard !draftsSelfHealRunning, useJmap,
+              let api = jmapApi, let client = jmapClient,
+              let draftsId = mailbox.jmapId, !draftsId.isEmpty,
+              let session = try? await client.refreshSession() else { return }
+        draftsSelfHealRunning = true
+        defer { draftsSelfHealRunning = false }
+        let accId = mailbox.accountId.isEmpty ? session.primaryAccountId : mailbox.accountId
+        guard let sentId = allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId })?.jmapId,
+              !sentId.isEmpty else { return }
+        guard let draftQuery = try? await api.queryEmails(accountId: accId, inMailboxId: draftsId, limit: 0),
+              let draftIds = draftQuery["ids"] as? [String], !draftIds.isEmpty else { return }
+        let drafts = (try? await api.getEmails(accountId: accId, ids: Array(draftIds.prefix(500)),
+                                               bodyProperties: ["messageId", "keywords"],
+                                               fetchAllBodyValues: false)) ?? []
+        guard !drafts.isEmpty else { return }
+        // Message-IDs des Gesendet-Ordners sammeln (begrenzt, in Bloecken).
+        guard let sentQuery = try? await api.queryEmails(accountId: accId, inMailboxId: sentId, limit: 0),
+              let sentIds = sentQuery["ids"] as? [String] else { return }
+        var sentMessageIds = Set<String>()
+        let cappedSentIds = Array(sentIds.prefix(1000))
+        var index = 0
+        while index < cappedSentIds.count {
+            let chunk = Array(cappedSentIds[index..<min(index + 200, cappedSentIds.count)])
+            index += 200
+            if let list = try? await api.getEmails(accountId: accId, ids: chunk,
+                                                   bodyProperties: ["messageId"],
+                                                   fetchAllBodyValues: false) {
+                for json in list {
+                    for mid in Self.messageIds(json) { sentMessageIds.insert(mid) }
+                }
+            }
+        }
+        var toSent: [String] = []
+        var toDestroy: [String] = []
+        for json in drafts {
+            let id = json.optString("id") ?? ""
+            guard !id.isEmpty else { continue }
+            let keywords = json["keywords"] as? [String: Any]
+            let isDraft = (keywords?["$draft"] as? Bool) ?? false
+            if !isDraft {
+                toSent.append(id)
+            } else if !sentMessageIds.isEmpty,
+                      Self.messageIds(json).contains(where: { sentMessageIds.contains($0) }) {
+                toDestroy.append(id)
+            }
+        }
+        if !toDestroy.isEmpty {
+            _ = try? await api.deleteEmails(accountId: accId, emailIds: toDestroy)
+        }
+        if !toSent.isEmpty {
+            _ = try? await api.moveEmails(accountId: accId, emailIds: toSent, targetMailboxId: sentId, markRead: true)
+            invalidateCache(for: mailbox)
+        }
+        if !toDestroy.isEmpty || !toSent.isEmpty {
+            JmapLog.write("drafts self-heal: \(toSent.count) moved to sent, \(toDestroy.count) duplicates destroyed")
+        }
+    }
+
+    private static func messageIds(_ json: [String: Any]) -> [String] {
+        if let list = json["messageId"] as? [String] { return list }
+        if let single = json["messageId"] as? String, !single.isEmpty { return [single] }
+        return []
     }
 
     /// Beantwortet eine per Mail erhaltene Einladung: iTIP-REPLY-Mail an
@@ -3341,25 +3418,34 @@ final class MailViewModel: ObservableObject {
 
             let resolvedIdentity = identity(for: fromAddress) ?? identityId
             if !emailId.isEmpty, let identId = resolvedIdentity, !identId.isEmpty {
-                _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId)
+                // Run 21.09.: Sent-Mailbox vorab ermitteln - der Submit
+                // verschiebt die Mail atomar dorthin und entfernt $draft.
+                let sentBox = allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
+                    ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId })
+                let sentJmapId = sentBox?.jmapId ?? ""
+                _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId,
+                                              sentMailboxId: sentJmapId)
 
-                // $draft-Keyword entfernen: sonst taucht die gesendete Mail
-                // weiterhin in "Entwürfe" auf (IMAP/Web sichtbar). Der Submit
-                // allein entfernt es bei Stalwart nicht zuverlässig.
-                _ = try? await api.setEmailFlags(
-                    accountId: accId,
-                    emailIds: [emailId],
-                    keywordsToRemove: ["$draft"]
-                )
-
-                // Make sure the submitted mail lands in the Sent folder of
-                // this account (some servers do not move it automatically),
-                // and arrives there as read ($seen).
-                if let sent = allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
-                    ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }),
-                   let sentJmapId = sent.jmapId, !sentJmapId.isEmpty {
-                    _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId], targetMailboxId: sentJmapId, markRead: true)
-                    invalidateCache(for: sent)
+                // Fallback (falls der Server den Atomar-Patch nicht
+                // unterstuetzt): $draft entfernen und manuell nach Gesendet
+                // verschieben - mit Ergebnis-Logging statt stiller Fehler.
+                do {
+                    _ = try await api.setEmailFlags(
+                        accountId: accId,
+                        emailIds: [emailId],
+                        keywordsToRemove: ["$draft"]
+                    )
+                } catch {
+                    JmapLog.write("send: $draft entfernen fehlgeschlagen: \(error.localizedDescription)")
+                }
+                if let sentBox, !sentJmapId.isEmpty {
+                    do {
+                        _ = try await api.moveEmails(accountId: accId, emailIds: [emailId],
+                                                     targetMailboxId: sentJmapId, markRead: true)
+                        invalidateCache(for: sentBox)
+                    } catch {
+                        JmapLog.write("send: Sent-Verschiebung fehlgeschlagen: \(error.localizedDescription)")
+                    }
                 }
             }
             return .success(())
