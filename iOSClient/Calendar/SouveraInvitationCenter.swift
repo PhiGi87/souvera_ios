@@ -180,6 +180,21 @@ final class SouveraInvitationCenter: ObservableObject {
         }
     }
 
+    /// Run 22.09.: Erinnerungs-Overrides zu einer Antwort entfernen
+    /// (UID- und Message-Key).
+    nonisolated static func clearReminderOverride(uid: String, inviteId: String?) {
+        if !uid.isEmpty {
+            var byUid = UserDefaults.standard.dictionary(forKey: reminderOverridesUIDKey) as? [String: [Int]] ?? [:]
+            byUid.removeValue(forKey: uid.lowercased())
+            UserDefaults.standard.set(byUid, forKey: reminderOverridesUIDKey)
+        }
+        if let inviteId, !inviteId.isEmpty {
+            var dict = UserDefaults.standard.dictionary(forKey: reminderOverridesKey) as? [String: [Int]] ?? [:]
+            dict.removeValue(forKey: inviteId)
+            UserDefaults.standard.set(dict, forKey: reminderOverridesKey)
+        }
+    }
+
     /// Gegebene Antwort fuer eine Termin-UID (falls lokal gemerkt).
     static func answeredStatus(forUID uid: String) -> String? {
         guard !uid.isEmpty else { return nil }
@@ -839,20 +854,19 @@ final class SouveraInvitationCenter: ObservableObject {
             title: resolved.displayTitle,
             start: resolved.event?.start,
             end: resolved.event?.end)
-        switch result {
-        case .removed, .notFound:
-            // Run 19.09.: Antwort/Entfernen gilt als erledigt - Mail
-            // serverseitig in den Papierkorb (geraeteuebergreifend).
-            Self.markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
-            await MainActor.run {
-                SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
-            }
-            _ = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
-            return true
-        case .failed:
-            // Echter Fehler: Zeile behalten, kein Trash, kein Marker.
-            return false
+        // Run 22.09. (Feedback: Server-DELETE gestoert): Auch ein
+        // Serverfehler wird LOKAL quittiert (Absage fuer den Nutzer
+        // erledigt); der Termin wird fuer den gedrosselten Server-Retry
+        // vorgemerkt. Keine harte Fehlermeldung.
+        if case .failed = result, !resolved.eventUID.isEmpty {
+            Self.addPendingRemoval(resolved.eventUID)
         }
+        Self.markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
+        await MainActor.run {
+            SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
+        }
+        _ = await SouveraInviteMailSender.shared.moveToTrash(messageId: resolved.messageId)
+        return true
     }
 
     /// Run 19.09. (Feedback): Termin nach einer Ablehnung aus dem Kalender
@@ -1064,11 +1078,17 @@ final class SouveraInvitationCenter: ObservableObject {
                 guard let partstat = CalendarViewModel.updatePartstat(
                     ics: entry.ics, attendeeEmail: me, status: status) else { continue }
                 var updated = partstat
-                let override = reminderMinutes ?? Self.reminderOverride(forUID: uid)
-                if let override {
-                    updated = CalendarViewModel.setValarms(ics: updated, minutes: override)
+                if status.lowercased() == "declined" {
+                    // Run 22.09. (Feedback): Ablehnen entfernt ALLE Erinnerungen.
+                    updated = CalendarViewModel.setValarms(ics: updated, minutes: [])
+                    Self.clearReminderOverride(uid: uid, inviteId: nil)
                 } else {
-                    updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
+                    let override = reminderMinutes ?? Self.reminderOverride(forUID: uid)
+                    if let override {
+                        updated = CalendarViewModel.setValarms(ics: updated, minutes: override)
+                    } else {
+                        updated = CalendarViewModel.ensureDefaultReminder(ics: updated, status: status)
+                    }
                 }
                 let ok = await client.updateEvent(entry, ics: updated)
                 SouveraLog.write("Invitations", "RSVP existing event uid=\(uid): \(ok)")

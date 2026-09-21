@@ -430,6 +430,7 @@ struct SouveraCalendarView: View {
                 hourHeight: isWide ? 44 : 56,
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
+                partstatFor: { viewModel.effectivePartstat(for: $0) },
                 onCreate: createEventInSlot,
                 bottomPadding: isWide ? 12 : 40,
                 scrollTrigger: scrollTrigger
@@ -542,6 +543,7 @@ struct SouveraCalendarView: View {
                 eventsProvider: { viewModel.events(on: $0) },
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
+                partstatFor: { viewModel.effectivePartstat(for: $0) },
                 onCreate: createEventInSlot,
                 compact: isWide,
                 onPrev: { shiftSelectedDay(by: -3) },
@@ -578,7 +580,8 @@ struct SouveraCalendarView: View {
         Button {
             detailEvent = event
         } label: {
-            CalendarEventRow(event: event, color: viewModel.color(for: event))
+            CalendarEventRow(event: event, color: viewModel.color(for: event),
+                             partstat: viewModel.effectivePartstat(for: event))
         }
         .buttonStyle(.plain)
     }
@@ -671,6 +674,12 @@ struct SouveraCalendarView: View {
 private struct CalendarEventRow: View {
     let event: CalendarEventModel
     var color: Color = Color(NCBrandColor.shared.customer)
+    /// Run 22.09.: effektiver Teilnahme-Status (NC-Darstellung).
+    var partstat: String = "" 
+
+
+    private var isDeclined: Bool { partstat.lowercased() == "declined" }
+    private var isTentative: Bool { partstat.lowercased() == "tentative" }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -684,7 +693,9 @@ private struct CalendarEventRow: View {
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text(event.title).font(.subheadline).fontWeight(.medium).lineLimit(1)
+                    Text(event.title)
+                        .strikethrough(isDeclined)
+                        .font(.subheadline).fontWeight(.medium).lineLimit(1)
                     if !event.reminders.isEmpty {
                         Image(systemName: "bell.fill").font(.system(size: 9)).foregroundStyle(.secondary)
                     }
@@ -704,7 +715,23 @@ private struct CalendarEventRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
-        .padding(.vertical, 2)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 6)
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 6)
+            if isDeclined {
+                shape.fill(Color(.systemBackground))
+                    .overlay(shape.stroke(color, lineWidth: 1.5))
+            } else if isTentative {
+                shape.fill(color.opacity(0.10))
+                    .overlay(
+                        SouveraHatchOverlay(color: color.opacity(0.7), lineWidth: 1, spacing: 9)
+                            .clipShape(shape)
+                    )
+            } else {
+                Color.clear
+            }
+        }
     }
 
     private var timeLabel: String {
@@ -727,6 +754,7 @@ private struct TimelineDayView: View {
     var compactHeader: Bool = false
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    var partstatFor: (CalendarEventModel) -> String = { $0.ownPartstat }
     var onCreate: ((Date, Date) -> Void)? = nil
     var bottomPadding: CGFloat = 40
     /// Zählt bei jedem Erscheinen des Kalenders hoch (Tab-Wechsel) ->
@@ -744,7 +772,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, onCreate: onCreate, onSlotActive: { slotActive = $0 })
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 })
                     }
                 }
                 .padding(.bottom, bottomPadding)
@@ -845,6 +873,8 @@ private struct TimelineColumn: View {
     let hourHeight: CGFloat
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    /// Run 22.09.: effektiver Teilnahme-Status fuer die NC-Darstellung.
+    var partstatFor: (CalendarEventModel) -> String = { $0.ownPartstat }
     var onCreate: ((Date, Date) -> Void)? = nil
     var showTrailingBorder: Bool = false
     /// Meldet nach oben, ob gerade ein Terminslot gezeichnet wird - dann
@@ -981,12 +1011,18 @@ private struct TimelineColumn: View {
         let layout = columnLayouts()[event.id] ?? (0, 1)
         let width = containerWidth / CGFloat(layout.count)
         let x = CGFloat(layout.column) * width
+        // Run 22.09.: NC-Darstellung - abgelehnt (Rahmen + durchgestrichen),
+        // vielleicht (heller + Schraffur in Kalenderfarbe).
+        let status = partstatFor(event).lowercased()
+        let isDeclined = status == "declined"
+        let isTentative = status == "tentative"
 
         Button {
             onSelect(event)
         } label: {
             VStack(alignment: .leading, spacing: 1) {
                 Text(event.title)
+                    .strikethrough(isDeclined)
                     .font(.caption).fontWeight(.semibold)
                     .lineLimit(2)
                 if height > 40 {
@@ -1017,7 +1053,21 @@ private struct TimelineColumn: View {
         // Textinhalts (das war der Anzeigefehler: 1h-Termin wirkte wie
         // ~30-45 Minuten).
         .frame(width: max(width - 3, 0), height: max(height - 4, 28), alignment: .top)
-        .background(colorFor(event).opacity(0.22), in: RoundedRectangle(cornerRadius: 6))
+        .background {
+            let shape = RoundedRectangle(cornerRadius: 6)
+            if isDeclined {
+                shape.fill(Color(.systemBackground))
+                    .overlay(shape.stroke(colorFor(event), lineWidth: 1.5))
+            } else if isTentative {
+                shape.fill(colorFor(event).opacity(0.10))
+                    .overlay(
+                        SouveraHatchOverlay(color: colorFor(event).opacity(0.7), lineWidth: 1, spacing: 9)
+                            .clipShape(shape)
+                    )
+            } else {
+                shape.fill(colorFor(event).opacity(0.22))
+            }
+        }
         .offset(x: x, y: offsetY + 2)
         .zIndex(1)
     }
@@ -1092,6 +1142,7 @@ private struct ThreeDayTimelineView: View {
     let eventsProvider: (Date) -> [CalendarEventModel]
     let onSelect: (CalendarEventModel) -> Void
     var colorFor: (CalendarEventModel) -> Color = { _ in Color(NCBrandColor.shared.customer) }
+    var partstatFor: (CalendarEventModel) -> String = { $0.ownPartstat }
     var onCreate: ((Date, Date) -> Void)? = nil
     var compact: Bool = false
     var onPrev: () -> Void = {}
@@ -1163,6 +1214,7 @@ private struct ThreeDayTimelineView: View {
                                 hourHeight: hourHeight,
                                 onSelect: onSelect,
                                 colorFor: colorFor,
+                                partstatFor: partstatFor,
                                 onCreate: onCreate,
                                 showTrailingBorder: true,
                                 onSlotActive: { slotActive = $0 }
@@ -1469,7 +1521,8 @@ private struct CalendarEventDetailSheet: View {
                     highlightEvent: event,
                     collidingEvent: overlap.event,
                     allEvents: overlapBasis(event),
-                    onDismiss: { dayPreviewOverlap = nil })
+                    onDismiss: { dayPreviewOverlap = nil },
+                    colorFor: { viewModel.color(for: $0) })
             }
         }
         // Run 19.09. (Feedback): EIN Toolbar-Set - Zurück links (nur im

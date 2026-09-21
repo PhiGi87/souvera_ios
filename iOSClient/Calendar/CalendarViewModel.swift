@@ -240,6 +240,16 @@ final class CalendarViewModel: ObservableObject {
         }.sorted { $0.start < $1.start }.prefix(limit).map { $0 }
     }
 
+    /// Run 22.09. (Feedback): effektiver Teilnahme-Status fuer die
+    /// Darstellung - lokal gemerkte Antwort hat Vorrang vor dem (evtl.
+    /// veralteten) Server-PARTSTAT.
+    func effectivePartstat(for event: CalendarEventModel) -> String {
+        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid), !stored.isEmpty {
+            return stored
+        }
+        return event.ownPartstat
+    }
+
     /// Event color: the calendar's custom/server color, fallback brand.
     func color(for event: CalendarEventModel) -> Color {
         if let hex = customCalendarColors[event.calendarHref], !hex.isEmpty {
@@ -799,7 +809,11 @@ final class CalendarViewModel: ObservableObject {
             return false
         }
         // B4: Erinnerungen uebernehmen (Editor) bzw. 15-min-Default.
-        if let reminderMinutes {
+        // Run 22.09. (Feedback): Beim ABLEHNEN werden ALLE Erinnerungen
+        // entfernt (der Termin bleibt ggf. als DECLINED bestehen).
+        if status == .declined {
+            updated = Self.setValarms(ics: updated, minutes: [])
+        } else if let reminderMinutes {
             updated = Self.setValarms(ics: updated, minutes: reminderMinutes)
         } else {
             updated = Self.ensureDefaultReminder(ics: updated, status: status.rawValue)
@@ -855,6 +869,7 @@ final class CalendarViewModel: ObservableObject {
                     list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
                     events = .success(list)
                 }
+                SouveraInvitationCenter.clearReminderOverride(uid: event.uid, inviteId: event.href)
                 if !event.uid.isEmpty {
                     SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
                                                             status: status.rawValue)

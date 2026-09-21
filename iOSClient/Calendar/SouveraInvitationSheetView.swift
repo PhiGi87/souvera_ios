@@ -388,13 +388,17 @@ struct SouveraInvitationDetailView: View {
                 titleSection
                 whenSection
                 organizerSection
-                if !isResolving, hasOverlaps {
+                // Run 22.09. (Feedback): Bei Absagen keine Ueberschneidungen.
+                if !isResolving, hasOverlaps, !isCancellation {
                     overlapSection
                 }
                 if !isResolving, !displayEvent.attendees.isEmpty {
                     attendeesSection
                 }
-                reminderSection
+                // Run 22.09. (Feedback): Bei Absagen keine Erinnerungen.
+                if !isCancellation {
+                    reminderSection
+                }
                 calendarSection
                 if isCancellation {
                     cancelSection
@@ -695,15 +699,30 @@ struct SouveraInvitationDetailView: View {
                             // Run 19.09. (Feedback): Ergebnis-Popup.
                             cancelResultAlert = NSLocalizedString("_invitations_cancel_removed_", comment: "")
                         } else {
-                            // Echter Fehler: Zeile BEHALTEN, Fehler zeigen,
-                            // NICHT dauerhaft als "nicht im Kalender" merken.
-                            cancelResultAlert = NSLocalizedString("_error_occurred_", comment: "")
+                            // Run 22.09. (Feedback: Server-DELETE gestoert):
+                            // weich quittieren - lokal entfernen, Server-Retry
+                            // vormerken, keine harte Fehlermeldung.
+                            cancelRemoved = true
+                            if !displayEvent.uid.isEmpty {
+                                SouveraInvitationCenter.addPendingRemoval(displayEvent.uid)
+                            }
+                            SouveraInvitationCenter.markAnswered(
+                                messageId: displayEvent.href, eventEnd: displayEvent.end)
+                            SouveraInvitationCenter.shared.removeMailInvitation(event.href)
+                            Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: displayEvent.href) }
+                            cancelResultAlert = NSLocalizedString("_invitations_cancel_removed_", comment: "")
                         }
                     }
                 } label: {
-                    Label(NSLocalizedString("_invitations_cancel_remove_", comment: ""),
-                          systemImage: "trash")
-                        .foregroundStyle(.red)
+                    HStack(spacing: 8) {
+                        if cancelBusy {
+                            ProgressView()
+                        } else {
+                            Image(systemName: "trash")
+                        }
+                        Text(NSLocalizedString("_invitations_cancel_remove_", comment: ""))
+                    }
+                    .foregroundStyle(.red)
                 }
                 .disabled(cancelBusy)
             }
@@ -873,6 +892,7 @@ struct SouveraInvitationDetailView: View {
             busy = false
             if ok == true {
                 answeredRSVP = .declined
+                rsvpReminderMinutes = []
                 declineProposalMode = false
                 // Run 19.09. (Feedback): Ablehnung entfernt den Termin -
                 // Ergebnis-Popup, Schliessen beendet den Dialog.

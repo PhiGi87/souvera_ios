@@ -237,6 +237,9 @@ struct SouveraDayPreviewPopup: View {
     }
 
     /// Zeichnet Stundenraster + Terminbloecke exakt.
+    /// Run 22.09.: Kalenderfarbe fuer Statusdarstellung (Rahmen/Schraffur).
+    var colorFor: (CalendarEventModel) -> Color = { _ in .secondary }
+
     private func drawDay(context: GraphicsContext, size: CGSize) {
         // Raster
         for hour in 0..<24 {
@@ -266,9 +269,28 @@ struct SouveraDayPreviewPopup: View {
                     let isInvite = event.href == highlightEvent.href
                     let isCollision = event.href == collisionHref
                     let path = Path(roundedRect: rect, cornerRadius: 7)
+                    let status = event.ownPartstat.lowercased()
+                    let calendarColor = colorFor(event)
+                    let statusFill: Color? = status == "declined"
+                        ? Color(.systemBackground)
+                        : (status == "tentative" ? calendarColor.opacity(0.10) : nil)
                     let fill: Color = isInvite ? Color.blue.opacity(0.10)
-                        : (isCollision ? Color.orange.opacity(0.12) : Color(.systemGray6))
+                        : (isCollision ? Color.orange.opacity(0.12) : (statusFill ?? Color(.systemGray6)))
                     context.fill(path, with: .color(fill))
+                    // Run 22.09.: Vielleicht -> Schraffur in Kalenderfarbe.
+                    if status == "tentative", !isInvite, !isCollision {
+                        context.drawLayer { layer in
+                            layer.clip(to: path)
+                            var x0 = rect.minX - rect.height
+                            while x0 < rect.maxX {
+                                var hatch = Path()
+                                hatch.move(to: CGPoint(x: x0, y: rect.maxY))
+                                hatch.addLine(to: CGPoint(x: x0 + rect.height, y: rect.minY))
+                                layer.stroke(hatch, with: .color(calendarColor.opacity(0.7)), lineWidth: 1)
+                                x0 += 9
+                            }
+                        }
+                    }
                     // Schraffur nur fuer unbeantwortete Einladungen
                     if event.ownPartstat == "needs-action",
                        !SouveraInvitationCenter.isAnswered(uid: event.uid) {
@@ -284,8 +306,9 @@ struct SouveraDayPreviewPopup: View {
                             }
                         }
                     }
-                    let border: Color = isInvite ? .blue : (isCollision ? .orange : .clear)
-                    if isInvite || isCollision {
+                    let border: Color = isInvite ? .blue
+                        : (isCollision ? .orange : (status == "declined" ? calendarColor : .clear))
+                    if isInvite || isCollision || status == "declined" {
                         context.stroke(path, with: .color(border), lineWidth: 1.5)
                     }
                     // Texte - Run 19.09. (Feedback): auf die Blockbreite
@@ -305,6 +328,7 @@ struct SouveraDayPreviewPopup: View {
                             .foregroundStyle(Color.secondary)
                         layer.draw(timeText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 10), anchor: .topLeading)
                         let titleText = Text(event.title)
+                            .strikethrough(status == "declined")
                             .font(.caption.weight(isInvite || isCollision ? .semibold : .regular))
                             .foregroundStyle(Color.primary)
                         layer.draw(titleText, at: CGPoint(x: rect.minX + 6, y: rect.minY + 24), anchor: .topLeading)
@@ -345,17 +369,22 @@ struct SouveraDayPreviewPopup: View {
 
 /// Schraffur-Overlay (diagonale Streifen) fuer offene Termine.
 struct SouveraHatchOverlay: View {
+    /// Run 22.09.: parametrisierbar (voller Kalenderfarbe fuer Vielleicht);
+    /// Defaults halten das bisherige Popup-Verhalten unveraendert.
+    var color: Color = .secondary.opacity(0.5)
+    var lineWidth: CGFloat = 1
+    var spacing: CGFloat = 10
+
     var body: some View {
-        GeometryReader { geo in
+        GeometryReader { _ in
             Canvas { context, size in
-                let stride: CGFloat = 10
                 var x: CGFloat = -size.height
                 while x < size.width {
                     var path = Path()
                     path.move(to: CGPoint(x: x, y: size.height))
                     path.addLine(to: CGPoint(x: x + size.height, y: 0))
-                    context.stroke(path, with: .color(.secondary.opacity(0.5)), lineWidth: 1)
-                    x += stride
+                    context.stroke(path, with: .color(color), lineWidth: lineWidth)
+                    x += spacing
                 }
             }
         }
