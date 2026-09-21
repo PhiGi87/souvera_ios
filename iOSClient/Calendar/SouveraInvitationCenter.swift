@@ -914,19 +914,30 @@ final class SouveraInvitationCenter: ObservableObject {
     // versucht - die Antwort selbst gilt bereits als erteilt.
 
     private static let pendingRemovalKey = "invitations_pending_removal_uids"
+    /// Run 22.09.: Zeitstempel je vorgemerkter UID (Drossel + Verfall).
+    private static let pendingRemovalDatesKey = "invitations_pending_removal_dates"
+    private static let pendingRemovalLastAttemptKey = "invitations_pending_removal_last_attempt"
 
     nonisolated static func addPendingRemoval(_ uid: String) {
         guard !uid.isEmpty else { return }
+        let key = uid.lowercased()
         var uids = Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
-        uids.insert(uid.lowercased())
+        uids.insert(key)
         UserDefaults.standard.set(Array(uids), forKey: pendingRemovalKey)
+        var dates = UserDefaults.standard.dictionary(forKey: pendingRemovalDatesKey) as? [String: Double] ?? [:]
+        dates[key] = Date().timeIntervalSince1970
+        UserDefaults.standard.set(dates, forKey: pendingRemovalDatesKey)
     }
 
     nonisolated static func removePendingRemoval(_ uid: String) {
         guard !uid.isEmpty else { return }
+        let key = uid.lowercased()
         var uids = Set(UserDefaults.standard.stringArray(forKey: pendingRemovalKey) ?? [])
-        uids.remove(uid.lowercased())
+        uids.remove(key)
         UserDefaults.standard.set(Array(uids), forKey: pendingRemovalKey)
+        var dates = UserDefaults.standard.dictionary(forKey: pendingRemovalDatesKey) as? [String: Double] ?? [:]
+        dates.removeValue(forKey: key)
+        UserDefaults.standard.set(dates, forKey: pendingRemovalDatesKey)
     }
 
     nonisolated static func pendingRemovals() -> Set<String> {
@@ -936,8 +947,22 @@ final class SouveraInvitationCenter: ObservableObject {
     /// Wird beim Kalender-Load aufgerufen; entfernt erfolgreich die
     /// vorgemerkten Termine und raeumt die Liste.
     func retryPendingRemovals() async {
-        let pending = Self.pendingRemovals()
+        // Run 22.09.: gedrosselt (max. 1x/10 min) + Verfall nach 24 h -
+        // vorher lief alle ~30 s ein 3er-DELETE-Sturm gegen einen Termin,
+        // der serverseitig nicht loeschbar war.
+        let now = Date()
+        let lastAttempt = UserDefaults.standard.double(forKey: Self.pendingRemovalLastAttemptKey)
+        guard now.timeIntervalSince1970 - lastAttempt >= 600 else { return }
+        var pending = Self.pendingRemovals()
         guard !pending.isEmpty else { return }
+        UserDefaults.standard.set(now.timeIntervalSince1970, forKey: Self.pendingRemovalLastAttemptKey)
+        var dates = UserDefaults.standard.dictionary(forKey: Self.pendingRemovalDatesKey) as? [String: Double] ?? [:]
+        for uid in pending {
+            if let date = dates[uid], now.timeIntervalSince1970 - date > 86_400 {
+                Self.removePendingRemoval(uid)
+                pending.remove(uid)
+            }
+        }
         for uid in pending {
             if await removeEventByUID(uid) {
                 Self.removePendingRemoval(uid)

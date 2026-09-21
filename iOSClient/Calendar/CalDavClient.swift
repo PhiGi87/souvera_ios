@@ -74,6 +74,12 @@ final class CalDavClient {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 45
+        // Run 22.09. (Feedback: Termine liessen sich nie loeschen): KEIN
+        // URLCache und keine Cache-Revalidierung - CFNetwork haengte nach
+        // einem gecachten GET einen If-None-Match-Header an den DELETE, den
+        // Sabre mit 412 ablehnte ("An If-None-Match header was specified").
+        config.urlCache = nil
+        config.requestCachePolicy = .reloadIgnoringLocalCacheData
         return URLSession(configuration: config)
     }()
 
@@ -101,6 +107,10 @@ final class CalDavClient {
     private func authorizedRequest(for url: URL, method: String, contentType: String? = nil) -> URLRequest {
         var req = URLRequest(url: url)
         req.httpMethod = method
+        // Run 22.09.: niemals Cache-Revalidierung uebernehmen.
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        req.setValue(nil, forHTTPHeaderField: "If-None-Match")
+        req.setValue(nil, forHTTPHeaderField: "If-Modified-Since")
         if let contentType {
             req.setValue(contentType, forHTTPHeaderField: "Content-Type")
         }
@@ -291,6 +301,10 @@ final class CalDavClient {
     private func performDelete(url: URL, etag: String?) async -> Bool {
         var req = authorizedRequest(for: url, method: "DELETE")
         if let etag { req.setValue(etag, forHTTPHeaderField: "If-Match") }
+        // Run 22.09.: Beweis-Logging - welche bedingten Header gehen raus?
+        let ifMatch = req.value(forHTTPHeaderField: "If-Match") ?? "-"
+        let ifNoneMatch = req.value(forHTTPHeaderField: "If-None-Match") ?? "-"
+        JmapLog.write("CalDAV deleteEvent headers: If-Match=\(ifMatch) If-None-Match=\(ifNoneMatch)")
         guard let (data, response) = try? await urlSession.data(for: req) else {
             JmapLog.write("CalDAV deleteEvent \(url.absoluteString) (If-Match=\(etag ?? "-")): Transportfehler")
             return false
