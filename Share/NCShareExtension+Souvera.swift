@@ -6,6 +6,7 @@
 // per Deep-Link an die App (Mail-Anhang / Link-Raum).
 
 import UIKit
+import SwiftUI
 import UniformTypeIdentifiers
 import NextcloudKit
 
