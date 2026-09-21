@@ -2685,6 +2685,11 @@ private struct AutoGrowingTextView: UIViewRepresentable {
 /// Abruf (Kreis leert sich bis zum Abruf, dann startet er neu).
 struct AutoRefreshRingView: View {
     @ObservedObject var viewModel: MailViewModel
+    // Run 21.09.: TimelineView tickte im UIKit-gehosteten Bar-Custom-View
+    // auf iOS 17 nicht zuverlaessig - ein echter 1-s-Timer garantiert die
+    // Countdown-Animation auf allen OS-Versionen.
+    @State private var now = Date()
+    private let ticker = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
     var body: some View {
         // Antippbar: manueller Voll-Refresh - auch bei "Aus" (R3): dann
@@ -2697,22 +2702,20 @@ struct AutoRefreshRingView: View {
                     ProgressView()
                         .frame(width: 18, height: 18)
                 } else if let interval = SouveraAutoRefresh.interval, interval > 0,
-                          viewModel.nextAutoRefreshAt != nil {
-                    TimelineView(.periodic(from: .now, by: 1)) { _ in
-                        let remaining = max(0, (viewModel.nextAutoRefreshAt ?? .now).timeIntervalSinceNow)
-                        let progress = min(1, remaining / interval)
-                        ZStack {
-                            Circle()
-                                .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
-                            Circle()
-                                .trim(from: 0, to: min(1, progress))
-                                .stroke(Color.Souvera.brandPrimaryDeep, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
-                                .rotationEffect(.degrees(-90))
-                                .animation(.linear(duration: 1), value: progress)
-                        }
-                        .frame(width: 18, height: 18)
-                        .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
+                          let next = viewModel.nextAutoRefreshAt {
+                    let remaining = max(0, next.timeIntervalSince(now))
+                    let progress = min(1, remaining / interval)
+                    ZStack {
+                        Circle()
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 2.5)
+                        Circle()
+                            .trim(from: 0, to: min(1, progress))
+                            .stroke(Color.Souvera.brandPrimaryDeep, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                            .animation(.linear(duration: 1), value: progress)
                     }
+                    .frame(width: 18, height: 18)
+                    .accessibilityLabel(String(format: NSLocalizedString("_mail_auto_refresh_ring_", comment: ""), Int(remaining / 60), Int(remaining.truncatingRemainder(dividingBy: 60))))
                 } else {
                     // "Aus" (R3): manueller Refresh-Button bleibt sichtbar.
                     Image(systemName: "arrow.clockwise")
@@ -2726,6 +2729,7 @@ struct AutoRefreshRingView: View {
         }
         .buttonStyle(.plain)
         .accessibilityHint(NSLocalizedString("_mail_refresh_now_", comment: ""))
+        .onReceive(ticker) { now = $0 }
     }
 }
 

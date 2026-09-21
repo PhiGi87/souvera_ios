@@ -336,11 +336,16 @@ final class MailViewModel: ObservableObject {
     }
 
     func start() {
+        // Run 21.09. (Feedback iPadOS 17: Auto-Refresh-Ring tot): Der
+        // Auto-Refresh-Task wurde hinter dem Client-Guard gestartet - lief
+        // start() erneut (Layout-/Tab-Rebuild) waehrend Clients schon
+        // existierten, kehrte die Funktion vorher zurueck und der Timer
+        // fehlte dauerhaft. Jetzt IMMER (idempotent) starten.
+        startAutoRefresh()
         if imapClient != nil || jmapClient != nil { return }
         // Muell-Dateien aus dem frueheren Kaltstart-Race entfernen (leerer
         // Account-Teil, z. B. "_|Inbox-v3.json.gz").
         MailCache.cleanupEmptyAccountFiles()
-        startAutoRefresh()
         // ALLES asynchron (Task statt synchron im SwiftUI-Update-Zyklus):
         // Der vorherige synchrone Cache-First-Block machte einen SYNC
         // Realm-Read auf dem Haupt-Thread (Crash 0xdead10cc am 04.09.,
@@ -432,6 +437,7 @@ final class MailViewModel: ObservableObject {
                 if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
                     self.lastAutoRefresh = Date()
                     self.nextAutoRefreshAt = Date().addingTimeInterval(interval)
+                    JmapLog.write("Mail auto-refresh tick interval=\(Int(interval))s")
                     guard self.composeContext == nil else { continue }
                     if self.currentMailbox != nil {
                         await self.refreshMessagesIncremental()

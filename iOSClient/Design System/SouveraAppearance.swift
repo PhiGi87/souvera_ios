@@ -352,21 +352,34 @@ final class SouveraBarCoordinator {
         item.title = bridge.title.isEmpty ? nil : bridge.title
         let leading = Self.bars(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
         let trailing = Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
-        // Run 19.09. (Feedback iPad-Header: Buttons fehlten auf iOS 26):
-        // iPadOS 26 rendert left/rightBarButtonItems in der zentrierten
-        // Tab-Pill-Bar NICHT - die Items erscheinen nur ueber
-        // leading/trailingItemGroups. Eine Gruppe PRO Item verhindert,
-        // dass ein Text-Item die uebrigen Items verschluckt.
-        item.leftBarButtonItems = nil
-        item.rightBarButtonItems = nil
-        item.leadingItemGroups = leading.map {
-            UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+        // Run 21.09. (Feedback iPadOS 17: Buttons fehlten): iPadOS 26
+        // rendert left/rightBarButtonItems in der zentrierten Tab-Pill-Bar
+        // NICHT (nur Item-Groups); iOS 17 rendert Plain-Image-Items in
+        // UIBarButtonItemGroups nicht (Titel/Menues/Custom-Views schon).
+        // Deshalb pro OS der passende Pfad.
+        let useGroups: Bool
+        if #available(iOS 26.0, *) {
+            useGroups = true
+        } else {
+            useGroups = false
         }
-        item.trailingItemGroups = trailing.map {
-            UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+        if useGroups {
+            item.leftBarButtonItems = nil
+            item.rightBarButtonItems = nil
+            item.leadingItemGroups = leading.map {
+                UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+            }
+            item.trailingItemGroups = trailing.map {
+                UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+            }
+        } else {
+            item.leadingItemGroups = []
+            item.trailingItemGroups = []
+            item.leftBarButtonItems = leading.isEmpty ? nil : leading
+            item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
         }
         #if !EXTENSION
-        SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count)")
+        SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count) api=\(useGroups ? "groups" : "buttons")")
         #endif
     }
 
