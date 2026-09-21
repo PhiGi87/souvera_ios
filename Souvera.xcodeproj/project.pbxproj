@@ -1088,6 +1088,11 @@
 		F7FFFCA02FB300440015441E /* NCAssistantSharedTextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FFFC9D2FB300440015441E /* NCAssistantSharedTextStore.swift */; };
 		F7FFFCA22FB300600015441E /* NCAssistantSharedTextStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FFFC9D2FB300440015441E /* NCAssistantSharedTextStore.swift */; };
 		F7FFFCA42FB3088E0015441E /* NCShareExtension+Assistant.swift in Sources */ = {isa = PBXBuildFile; fileRef = F7FFFCA32FB3088D0015441E /* NCShareExtension+Assistant.swift */; };
+		AA22C3D4E5F60718293A0301 /* SouveraPendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */; };
+		AA22C3D4E5F60718293A0302 /* SouveraPendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */; };
+		AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */; };
+		AA22C3D4E5F60718293A0305 /* SouveraShareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */; };
+		AA22C3D4E5F60718293A0307 /* NCShareExtension+Souvera.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0308 /* NCShareExtension+Souvera.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -2132,6 +2137,10 @@
 		F7FF2CB02842159500EBB7A1 /* NCSectionHeader.xib */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.xib; path = NCSectionHeader.xib; sourceTree = "<group>"; };
 		F7FFFC9D2FB300440015441E /* NCAssistantSharedTextStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NCAssistantSharedTextStore.swift; sourceTree = "<group>"; };
 		F7FFFCA32FB3088D0015441E /* NCShareExtension+Assistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NCShareExtension+Assistant.swift"; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Assistant/SouveraPendingShareStore.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/SouveraShareFlow.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareView.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0308 /* NCShareExtension+Souvera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NCShareExtension+Souvera.swift"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -3346,6 +3355,8 @@
 				A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */,
 				76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */,
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
+				AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */,
+				AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */,
 				D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */,
 				30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */,
 				3125D522B8F3F9162D0F3D80 /* SouveraInviteResponseView.swift */,
@@ -3509,6 +3520,8 @@
 				AF22B215277D196700DAB0CC /* NCShareExtension+DataSource.swift */,
 				AF22B216277D196700DAB0CC /* NCShareExtension+Files.swift */,
 				F7FFFCA32FB3088D0015441E /* NCShareExtension+Assistant.swift */,
+				AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */,
+				AA22C3D4E5F60718293A0308 /* NCShareExtension+Souvera.swift */,
 				AF22B20B277C6F4D00DAB0CC /* NCShareCell.swift */,
 				F7148046262EBE4B00693E51 /* Share-Bridging-Header.h */,
 			);
@@ -4945,6 +4958,9 @@
 				F72FD3B8297ED49A00075D28 /* NCManageDatabase+E2EE.swift in Sources */,
 				F7A76DC8256A71CD00119AB3 /* UIImage+Extension.swift in Sources */,
 				F7FFFCA42FB3088E0015441E /* NCShareExtension+Assistant.swift in Sources */,
+				AA22C3D4E5F60718293A0302 /* SouveraPendingShareStore.swift in Sources */,
+				AA22C3D4E5F60718293A0305 /* SouveraShareView.swift in Sources */,
+				AA22C3D4E5F60718293A0307 /* NCShareExtension+Souvera.swift in Sources */,
 				F3E173C32C9B1067006D177A /* AwakeMode.swift in Sources */,
 				F711A4E52AF9310500095DD8 /* NCUtility+Image.swift in Sources */,
 				F73EF7AA2B0223900087E6E9 /* NCManageDatabase+Comments.swift in Sources */,
@@ -5106,6 +5122,8 @@
 				F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */,
 				A945F64BF0DF50D2E4CB9A16 /* LinkImageViewer.swift in Sources */,
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
+				AA22C3D4E5F60718293A0301 /* SouveraPendingShareStore.swift in Sources */,
+				AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */,
 				8BBF0200451A7DAB1BEE4293 /* SouveraCalendarReminderSound.swift in Sources */,
 				563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */,
 				AA01B2C3D4E5F60718293A0002 /* SouveraMailDisplaySettings.swift in Sources */,

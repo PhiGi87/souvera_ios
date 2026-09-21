@@ -567,7 +567,11 @@ actor LinkOcsApi {
     /// 2. Upload the file via WebDAV into the Draft folder (random temp name).
     /// 3. Post the attachment - the server moves the file into the shared
     ///    room subfolder and creates the chat message with the file rich object.
-    func uploadFileToChat(token: String, data: Data, fileName: String, mimeType: String) async -> Bool {
+    /// Run 22.09. (Feedback: geteilte Inhalte in EINER Nachrichten-Bubble):
+    /// `referenceId` gruppiert mehrere Dateien zu einer Nachricht, `caption`
+    /// ist der Nachrichtentext dieser Bubble (statt des Dateinamens).
+    func uploadFileToChat(token: String, data: Data, fileName: String, mimeType: String,
+                          referenceId: String? = nil, caption: String? = nil) async -> Bool {
         let headerName = fileName
             .folding(options: [.diacriticInsensitive, .caseInsensitive], locale: Locale(identifier: "en_US_POSIX"))
             .replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
@@ -586,7 +590,8 @@ actor LinkOcsApi {
         }
         // 3) Als Chat-Nachricht posten (Server verschiebt die Datei in den
         //    geteilten Raum-Ordner und erzeugt die Datei-Nachricht).
-        let ok = await postAttachment(token: token, filePath: "\(draftFolder)/\(tempName)", fileName: safeName)
+        let ok = await postAttachment(token: token, filePath: "\(draftFolder)/\(tempName)",
+                                      fileName: safeName, referenceId: referenceId, caption: caption)
         CallDebugLog.log("OcsApi", "uploadFileToChat http=\(ok ? "ok" : "failed") name=\(safeName)")
         return ok
     }
@@ -623,16 +628,19 @@ actor LinkOcsApi {
 
     /// POST chat/{token}/attachment - finalizes the upload and posts the chat
     /// message with the file rich object.
-    private func postAttachment(token: String, filePath: String, fileName: String) async -> Bool {
+    private func postAttachment(token: String, filePath: String, fileName: String,
+                                referenceId: String? = nil, caption: String? = nil) async -> Bool {
         var req = signed(url: "\(base)/api/v1/chat/\(token)/attachment", method: "POST")
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         var params: [String: String] = [
             "filePath": filePath,
-            "referenceId": UUID().uuidString,
+            "referenceId": referenceId ?? UUID().uuidString,
             "fileName": fileName,
             "allowUpdate": "false"
         ]
-        if let metaData = try? JSONSerialization.data(withJSONObject: ["caption": fileName]),
+        let effectiveCaption = (caption?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false)
+            ? caption! : fileName
+        if let metaData = try? JSONSerialization.data(withJSONObject: ["caption": effectiveCaption]),
            let metaDataString = String(data: metaData, encoding: .utf8) {
             params["talkMetaData"] = metaDataString
         }

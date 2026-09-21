@@ -343,7 +343,21 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         }
 
         /*
-         Example: nextcloud://assistant/shared-text
+         Example: souvera://share?action=mail | souvera://share?action=talk
+         */
+
+        if scheme == global.appScheme, action == "share" {
+            let requested = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                .queryItems?.first(where: { $0.name == "action" })?.value ?? ""
+            let tabIndex = requested == "talk" ? 2 : 0
+            controller.selectedIndex = tabIndex
+            NotificationCenter.default.post(name: .souveraShareHandoff,
+                                            object: requested)
+            return
+        }
+
+        /*
+         Example: souvera://assistant/shared-text
          */
 
         if scheme == global.appScheme, action == "assistant", url.path == "/shared-text" {

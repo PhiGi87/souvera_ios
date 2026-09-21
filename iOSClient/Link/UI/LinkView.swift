@@ -32,6 +32,9 @@ struct LinkView: View {
     @State private var showParticipants = false
     @State private var shareRoomLink: SouveraSharePayload?
     @State private var settingsRoom: LinkConversation?
+    /// Run 22.09.: geteilter Inhalt aus der Share-Extension - erst Raum waehlen,
+    /// dann Inhalt + optionale Nachricht senden.
+    @State private var shareRoomChosen: LinkConversation?
     @State private var searchActive = false
     @State private var searchQuery = ""
 #if DEBUG
@@ -126,6 +129,7 @@ struct LinkView: View {
                 LinkViewModel.pendingOpenRoom = nil
                 viewModel.openConversation(token: pending.token, title: pending.title)
             }
+            viewModel.consumeSharedShareIfNeeded()
             Task { @MainActor in
                 await viewModel.refreshOwnStatus()
             }
@@ -147,6 +151,10 @@ struct LinkView: View {
             @unknown default:
                 break
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
+            guard (note.object as? String) == "talk" else { return }
+            viewModel.consumeSharedShareIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
             // P68e: Banner nur, wenn KEIN App-Call-Vollscreen offen ist -
@@ -224,6 +232,26 @@ struct LinkView: View {
         }
         .sheet(item: $shareRoomLink) { payload in
             SouveraShareSheet(items: payload.items)
+        }
+        .sheet(isPresented: Binding(
+            get: { viewModel.shareHandoff != nil },
+            set: { presenting in
+                if !presenting {
+                    shareRoomChosen = nil
+                    viewModel.clearSharedHandoff()
+                }
+            }
+        )) {
+            if let room = shareRoomChosen {
+                SouveraShareSendView(viewModel: viewModel, room: room) {
+                    shareRoomChosen = nil
+                    viewModel.clearSharedHandoff()
+                }
+            } else {
+                SouveraShareRoomPicker(viewModel: viewModel) { room in
+                    shareRoomChosen = room
+                }
+            }
         }
         .sheet(isPresented: $showParticipants) {
             LinkParticipantsSheet(viewModel: viewModel)

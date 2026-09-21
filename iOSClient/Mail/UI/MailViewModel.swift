@@ -3200,6 +3200,28 @@ final class MailViewModel: ObservableObject {
 
     // MARK: - Compose (new / reply / reply-all / forward)
 
+    /// Run 22.09. (Feedback: Apple-Teilen): Geteilten Text/Dateien aus der
+    /// Share-Extension als neue Mail vorbelegen (Compose-Sheet). No-op, wenn
+    /// kein Handoff fuer Mail vorliegt.
+    func consumeSharedDraftIfNeeded() {
+        guard let share = SouveraPendingShareStore.loadAndClear(action: "mail") else { return }
+        let attachments = share.files.filter { !$0.tooLarge }.map { file in
+            OutgoingAttachment(name: file.name,
+                               mimeType: file.mimeType,
+                               fileURL: URL(fileURLWithPath: file.path))
+        }
+        composeContext = MailComposeContext(
+            mode: .new,
+            message: nil,
+            to: [],
+            cc: [],
+            subject: "",
+            quoteBody: share.text,
+            preAttachments: attachments
+        )
+        SouveraLog.write("Share", "mail handoff consumed: files=\(attachments.count) text=\(share.text.count)")
+    }
+
     func startCompose(mode: MailComposeContext.ComposeMode = .new, message: MailMessage? = nil) {
         composeContext = nil
         Task {

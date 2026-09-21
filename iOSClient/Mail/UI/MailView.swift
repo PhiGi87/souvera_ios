@@ -93,6 +93,12 @@ struct MailView: View {
             // neue Mails erscheinen sofort statt erst mit dem Auto-Refresh.
             viewModel.refreshOnEntry()
             populateHeaderBridge()
+            // Run 22.09.: Apple-Teilen-Handoff (Text/Dateien als neue Mail).
+            viewModel.consumeSharedDraftIfNeeded()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
+            guard (note.object as? String) == "mail" else { return }
+            viewModel.consumeSharedDraftIfNeeded()
         }
         .onChange(of: viewModel.route) { _, _ in
             populateHeaderBridge()

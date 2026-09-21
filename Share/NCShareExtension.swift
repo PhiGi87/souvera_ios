@@ -151,33 +151,44 @@ class NCShareExtension: UIViewController {
             return
         }
 
-        // Keep the Share extension visually hidden until we know whether this is
-        // an Assistant text handoff or a normal file upload flow. This avoids the
-        // visible open-and-close flash when the extension only needs to redirect text.
+        // Bis der Auswahlschirm steht, bleibt die Extension-UI unsichtbar -
+        // das verhindert das Aufblitzen der leeren Liste beim Datei-Kopieren.
         view.alpha = 0
 
+        // Run 22.09. (Feedback: Teilen fuer Mail/Link/Dateien): IMMER zuerst
+        // den Souvera-Auswahlschirm zeigen (Paritaet zur Android-App) -
+        // Mail-Anhang, Dateien-Upload, Link-Raum oder Assistant.
         Task { @MainActor in
-            if await handleAssistantSharedTextIfNeeded(inputItems: inputItems) {
+            let payload = await self.loadSouveraSharedPayload(from: inputItems)
+            let hasAnything = !payload.files.isEmpty
+                || !payload.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            guard hasAnything else {
+                self.cancel(with: .noFiles)
                 return
             }
-
             self.view.alpha = 1
-
-            NCFilesExtensionHandler(items: inputItems) { fileNames in
-                self.filesName = fileNames
-                DispatchQueue.main.async {
-                    self.setCommandView()
-                }
-            }
-
-            if NCPreferences().presentPasscode {
-                NCPasscode.shared.presentPasscode(viewController: self, delegate: self) {
-                    NCPasscode.shared.enableTouchFaceID()
-                }
-            }
-
-            self.collectionView.reloadData()
+            self.presentSouveraShareChooser(payload: payload, inputItems: inputItems)
         }
+    }
+
+    /// Startet den bestehenden Dateien-Upload-Flow (Auswahl "In Dateien
+    /// hochladen" im Souvera-Auswahlschirm).
+    func startFilesFlow(inputItems: [NSExtensionItem]) {
+        view.alpha = 1
+        NCFilesExtensionHandler(items: inputItems) { fileNames in
+            self.filesName = fileNames
+            DispatchQueue.main.async {
+                self.setCommandView()
+            }
+        }
+
+        if NCPreferences().presentPasscode {
+            NCPasscode.shared.presentPasscode(viewController: self, delegate: self) {
+                NCPasscode.shared.enableTouchFaceID()
+            }
+        }
+
+        self.collectionView.reloadData()
     }
 
     override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {

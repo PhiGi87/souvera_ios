@@ -75,19 +75,20 @@ extension NCShareExtension {
 
     /// Opens the main app using the Assistant shared-text deep link.
     private func openMainAppForAssistantSharedText() {
-        guard let url = URL(string: "nextcloud://assistant/shared-text") else {
+        guard let url = URL(string: "souvera://assistant/shared-text") else {
             extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
             return
         }
 
-        openAssistantSharedTextURLThroughResponderChain(url)
+        openDeepLinkThroughResponderChain(url, label: "assistant shared text")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
             self?.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
         }
     }
 
-    /// Opens the Assistant shared-text deep link from the Share extension.
+    /// Opens a deep link in the containing application from the Share
+    /// extension.
     ///
     /// Share extensions cannot use `UIApplication.shared` directly because it is not
     /// extension-safe. This method walks the responder chain until it finds the hidden
@@ -96,8 +97,10 @@ extension NCShareExtension {
     ///
     /// This is intentionally isolated because it relies on Objective-C runtime dispatch.
     ///
-    /// - Parameter url: Deep link URL to open in the containing application.
-    private func openAssistantSharedTextURLThroughResponderChain(_ url: URL) {
+    /// - Parameters:
+    ///   - url: Deep link URL to open in the containing application.
+    ///   - label: Diagnostic label for the log output.
+    func openDeepLinkThroughResponderChain(_ url: URL, label: String) {
         let selector = NSSelectorFromString("openURL:options:completionHandler:")
         let applicationClass: AnyClass? = NSClassFromString("UIApplication")
         var responder: UIResponder? = self
@@ -118,9 +121,9 @@ extension NCShareExtension {
 
             let completion: CompletionBlock = { success in
                 if success {
-                    nkLog(debug: "Assistant shared text deep link performed through modern responder chain")
+                    nkLog(debug: "Share deep link (\(label)) performed through modern responder chain")
                 } else {
-                    nkLog(error: "Assistant shared text deep link modern responder chain returned false")
+                    nkLog(error: "Share deep link (\(label)) modern responder chain returned false")
                 }
             }
 
@@ -128,6 +131,6 @@ extension NCShareExtension {
             return
         }
 
-        nkLog(error: "Assistant shared text deep link failed because no UIApplication responder can open URL")
+        nkLog(error: "Share deep link (\(label)) failed because no UIApplication responder can open URL")
     }
 }

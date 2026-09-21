@@ -1741,6 +1741,54 @@ final class LinkViewModel: ObservableObject {
 
     // MARK: - Attachments
 
+    // MARK: - Run 22.09.: Apple-Teilen-Handoff
+
+    /// Geteilter Inhalt (Text + Dateien) aus der Share-Extension.
+    @Published var shareHandoff: SouveraPendingShareStore.Share?
+
+    /// Holt einen anstehenden Teilen-Handoff fuer den Link-Bereich ab.
+    func consumeSharedShareIfNeeded() {
+        guard let share = SouveraPendingShareStore.loadAndClear(action: "talk") else { return }
+        shareHandoff = share
+        if case .loading = conversations { loadConversations() }
+        if case .error = conversations { loadConversations() }
+        SouveraLog.write("Share", "link handoff consumed: files=\(share.files.count) text=\(share.text.count)")
+    }
+
+    func clearSharedHandoff() {
+        shareHandoff = nil
+    }
+
+    /// Sendet den geteilten Inhalt in EINER Nachrichten-Bubble: Dateien teilen
+    /// eine `referenceId`, der (optionale) Nachrichtentext wird die Caption
+    /// der ersten Datei. Ohne Dateien geht der Text als normale Nachricht.
+    func sendSharedToRoom(token: String, title: String, message: String) async -> Bool {
+        guard let share = shareHandoff, let api else { return false }
+        let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        let files = share.files.filter { !$0.tooLarge }
+        var ok = true
+        if files.isEmpty {
+            if !text.isEmpty, !(await api.sendMessage(token: token, message: text)).ok { ok = false }
+        } else {
+            let referenceId = UUID().uuidString
+            for (index, file) in files.enumerated() {
+                guard let data = try? Data(contentsOf: URL(fileURLWithPath: file.path)) else { continue }
+                let uploaded = await api.uploadFileToChat(token: token, data: data,
+                                                          fileName: file.name,
+                                                          mimeType: file.mimeType,
+                                                          referenceId: referenceId,
+                                                          caption: index == 0 ? text : nil)
+                if !uploaded { ok = false }
+            }
+        }
+        if ok {
+            shareHandoff = nil
+            openConversation(token: token, title: title)
+        }
+        SouveraLog.write("Share", "link handoff send room=\(token) files=\(files.count) ok=\(ok)")
+        return ok
+    }
+
     /// Uploads a local file into the current chat (Talk 24+ attachment flow:
     /// Draft-Ordner → DAV-Upload → Attachment-Post).
     func sendAttachment(data: Data, fileName: String, mimeType: String) {
