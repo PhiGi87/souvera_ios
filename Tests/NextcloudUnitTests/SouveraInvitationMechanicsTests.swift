@@ -48,3 +48,20 @@ struct SouveraInvitationMechanicsTests {
         #expect(!SouveraInvitationCenter.pendingRemovals().contains(uid.lowercased()))
     }
 }
+
+@Suite("Souvera calendar categories")
+struct SouveraCalendarCategoryTests {
+
+    private func calendar(_ href: String) -> CalDavCalendar {
+        CalDavCalendar(href: href, displayName: "Test", color: nil, canWrite: true)
+    }
+
+    @Test("Calendars are grouped into own, shared and deck")
+    func categoryClassification() {
+        #expect(calendar("/remote.php/dav/calendars/u/personal/").category == .own)
+        #expect(calendar("/remote.php/dav/calendars/u/contact_birthdays/").category == .own)
+        #expect(calendar("/remote.php/dav/calendars/u/shared_calendar_shared_by_other/").category == .shared)
+        #expect(calendar("/remote.php/dav/calendars/u/app-generated--deck--board-5/").category == .deck)
+        #expect(calendar("/remote.php/dav/calendars/u/DECK_Board/").category == .deck)
+    }
+}

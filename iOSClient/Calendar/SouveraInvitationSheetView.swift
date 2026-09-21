@@ -82,6 +82,12 @@ struct SouveraInvitationSheetView: View {
                              respond: @escaping (CalendarViewModel.CalendarRSVP) async -> Bool)
         -> some View {
         HStack(spacing: 8) {
+            // Run 22.09. (Feedback: Reaktion erst spaet sichtbar): Waehrend
+            // der Antwort laeuft ein Apple-typischer Ladekreis.
+            if busyId == id {
+                ProgressView()
+                    .frame(width: 36, height: 36)
+            } else {
             ForEach(CalendarViewModel.CalendarRSVP.allCases, id: \.rawValue) { rsvp in
                 Button {
                     busyId = id
@@ -101,6 +107,7 @@ struct SouveraInvitationSheetView: View {
                 .buttonStyle(.borderless)
                 .disabled(busyId == id)
                 .accessibilityLabel(Text(NSLocalizedString(rsvp.titleKey, comment: "")))
+            }
             }
         }
     }
@@ -723,6 +730,15 @@ struct SouveraInvitationDetailView: View {
                     Label(status.text, systemImage: status.icon)
                         .foregroundStyle(status.color)
                         .font(.subheadline.weight(.medium))
+                } else if busy {
+                    // Run 22.09. (Feedback: Reaktion erst spaet sichtbar):
+                    // Ladekreis waehrend der Antwort (Apple-Stil).
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(NSLocalizedString("_invitations_loading_", comment: ""))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
                 } else {
                 HStack(spacing: 12) {
                     ForEach(allowedOptions, id: \.rawValue) { rsvp in

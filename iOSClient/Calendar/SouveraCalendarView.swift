@@ -1570,14 +1570,30 @@ private struct CalendarEventEditSheet: View {
                     // Neue Termine: Ziel-Kalender wählbar (nur schreibbare).
                     Section(NSLocalizedString("_calendar_select_calendar_", comment: "")) {
                         Menu {
-                            ForEach(viewModel.writableCalendars, id: \.href) { calendar in
-                                Button {
-                                    draft.calendarHref = calendar.href
-                                } label: {
-                                    if draft.calendarHref == calendar.href {
-                                        Label(calendar.displayName, systemImage: "checkmark")
-                                    } else {
-                                        Text(calendar.displayName)
+                            // Run 22.09.: Gruppierung wie in der Uebersicht
+                            // (Eigene/Freigegebene); Deck-Kalender sind in
+                            // writableCalendars bereits ausgeschlossen.
+                            let writable = viewModel.writableCalendars
+                            let groups: [(String, [CalDavCalendar])] = [
+                                (NSLocalizedString("_calendar_group_own_", comment: ""),
+                                 writable.filter { $0.category == .own }),
+                                (NSLocalizedString("_calendar_group_shared_", comment: ""),
+                                 writable.filter { $0.category == .shared })
+                            ]
+                            ForEach(groups, id: \.0) { group in
+                                if !group.1.isEmpty {
+                                    Section(group.0) {
+                                        ForEach(group.1, id: \.href) { calendar in
+                                            Button {
+                                                draft.calendarHref = calendar.href
+                                            } label: {
+                                                if draft.calendarHref == calendar.href {
+                                                    Label(calendar.displayName, systemImage: "checkmark")
+                                                } else {
+                                                    Text(calendar.displayName)
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -1930,10 +1946,24 @@ private struct CalendarPickerSheet: View {
         "#AF52DE", "#FF2D55", "#8E8E93"
     ]
 
+    /// Run 22.09.: Gruppierung wie Android - Eigene, Freigegebene, Deck.
+    private var groupedCalendars: [(String, [CalDavCalendar])] {
+        let own = viewModel.calendars.filter { $0.category == .own }
+        let shared = viewModel.calendars.filter { $0.category == .shared }
+        let deck = viewModel.calendars.filter { $0.category == .deck }
+        return [
+            (NSLocalizedString("_calendar_group_own_", comment: ""), own),
+            (NSLocalizedString("_calendar_group_shared_", comment: ""), shared),
+            (NSLocalizedString("_calendar_group_deck_", comment: ""), deck)
+        ].filter { !$0.1.isEmpty }
+    }
+
     var body: some View {
         NavigationStack {
             List {
-                ForEach(viewModel.calendars, id: \.href) { calendar in
+                ForEach(groupedCalendars, id: \.0) { group in
+                Section(group.0) {
+                ForEach(group.1, id: \.href) { calendar in
                     HStack(spacing: 12) {
                         Button {
                             viewModel.toggleCalendar(calendar)
@@ -1974,6 +2004,8 @@ private struct CalendarPickerSheet: View {
                                 .frame(width: 28, height: 28)
                         }
                     }
+                }
+                }
                 }
             }
             .navigationTitle(NSLocalizedString("_calendar_", comment: ""))

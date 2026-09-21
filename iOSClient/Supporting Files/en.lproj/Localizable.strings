@@ -1277,3 +1277,6 @@ _mail_sort_flagged_ = "Flagged first";
 "_calendar_reminder_saved_" = "Reminders saved";
 "_calendar_reminder_save_failed_" = "Reminders could not be saved";
 "_invitations_declined_removed_" = "Declined and removed from the calendar";
+"_calendar_group_own_" = "My calendars";
+"_calendar_group_shared_" = "Shared calendars";
+"_calendar_group_deck_" = "Deck calendars";

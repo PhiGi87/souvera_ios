@@ -59,14 +59,17 @@ enum SouveraLanguage {
 enum SouveraAutoRefresh {
     static let defaultsKey = "souvera_auto_refresh_seconds"
     static let legacyMinutesKey = "souvera_auto_refresh_minutes"
-    /// Aus, 15 Sekunden, 30 Sekunden, 1 Minute, 5 Minuten.
-    static let presets: [Int] = [0, 15, 30, 60, 300]
+    /// Run 22.09. (Feedback): Aus, 30 Sekunden, 1 Minute, 5 Minuten,
+    /// 15 Minuten (letztes) - 15 Sekunden entfallen.
+    static let presets: [Int] = [0, 30, 60, 300, 900]
 
-    /// Bildet gespeicherte Werte alter Presets (120/300/900) auf das neue
-    /// Set ab (alles > 60 s -> 5 Minuten).
+    /// Bildet gespeicherte Werte alter Presets auf das neue Set ab:
+    /// 15 s -> 30 s (entferntes Preset), alles > 60 s -> 5 Minuten,
+    /// solange es kein gueltiges Preset (z. B. 900) ist.
     private static func normalized(_ seconds: Int) -> Int {
-        guard presets.contains(seconds) else { return seconds > 60 ? 300 : 60 }
-        return seconds
+        if presets.contains(seconds) { return seconds }
+        if seconds == 15 { return 30 }
+        return seconds > 60 ? 300 : 60
     }
 
     static var intervalSeconds: Int {
