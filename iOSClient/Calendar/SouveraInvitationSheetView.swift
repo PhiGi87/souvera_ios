@@ -892,7 +892,9 @@ struct SouveraInvitationDetailView: View {
             busy = false
             if ok == true {
                 answeredRSVP = .declined
-                rsvpReminderMinutes = []
+                // Run 22.09.: Ablehnen entfernt alle Erinnerungen - auch im
+                // lokalen Editor-State (Server/Overrides raeumt der Center).
+                reminderMinutes = []
                 declineProposalMode = false
                 // Run 19.09. (Feedback): Ablehnung entfernt den Termin -
                 // Ergebnis-Popup, Schliessen beendet den Dialog.
