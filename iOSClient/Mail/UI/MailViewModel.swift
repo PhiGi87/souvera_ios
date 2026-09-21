@@ -1300,7 +1300,7 @@ final class MailViewModel: ObservableObject {
             guard generation == listGeneration else { return }
             // P62f: Cache-first-Publish filtern (optimistisch entfernte Mails
             // dürfen nicht wieder auftauchen).
-            let filteredSnapshot = snapshot.emails.filter { !pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+            let filteredSnapshot = snapshot.emails.filter { !suppressedIds(in: mailbox.id).contains($0.optString("id") ?? "") }
             messages = .success(filteredSnapshot.map {
                 JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
             })
@@ -1323,6 +1323,8 @@ final class MailViewModel: ObservableObject {
     }
 
     private var draftsSelfHealRunning = false
+    /// Run 22.09.: Drossel fuer den Einladungs-Scan (30 s).
+    private var lastInvitationScan: Date = .distantPast
 
     /// Run 21.09.: Raeumt den Entwuerfe-Ordner auf, ohne echte Entwuerfe
     /// anzutasten:
@@ -1472,47 +1474,29 @@ final class MailViewModel: ObservableObject {
 
     /// Liest die neuesten Posteingangs-Mails und meldet iMIP-Einladungen
     /// (text/calendar-Part oder Einladungs-Betreff) ans InvitationCenter.
-    func scanInvitations(mailbox: Mailbox) async {
+    /// Run 22.09. (Feedback: Einladung erschien erst spaet): Der Scan laeuft
+    /// jetzt auch beim Auto-Refresh (nicht nur beim Modul-Eintritt), ist
+    /// aber auf 30 s gedrosselt und nutzt bereits aufgeloeste Einladungen
+    /// wieder (kein erneuter ICS-Download).
+    func scanInvitations(mailbox: Mailbox, force: Bool = false) async {
         guard let api = jmapApi, let client = jmapClient else { return }
         guard let jmapMailboxId = mailbox.jmapId, !jmapMailboxId.isEmpty else { return }
         guard let session = try? await client.refreshSession() else { return }
         let accId = session.primaryAccountId
         guard !accId.isEmpty else { return }
-        do {
-            let resp = try await api.queryEmails(
-                accountId: accId,
-                inMailboxId: jmapMailboxId,
-                limit: 40,
-                position: 0
-            )
-            let ids = (resp["ids"] as? [String]) ?? []
-            guard !ids.isEmpty else {
-                await SouveraInvitationCenter.shared.setMailInvites([], accountKey: cacheAccountKey)
-                return
-            }
-            let detailed = try await api.getEmails(
-                accountId: accId,
-                ids: ids,
-                // Run 19.09. (Feedback: Zeiten erst nach Klick): dieselben
-                // Part-Felder wie fetchInvitationDetails anfordern - die
-                // blosse "attachments"-Property lieferte den text/calendar-
-                // Part nicht immer (inline/typisiert), wodurch die
-                // Einladung ohne Termindaten (und ohne Zeit) in der
-                // Uebersicht landete.
-                bodyProperties: ["subject", "from", "keywords", "attachments", "partId", "blobId", "size", "type", "name", "disposition", "cid"],
-                fetchAllBodyValues: true
-            )
-            await SouveraInvitationCenter.shared.scanMailInvites(
-                accountId: accId,
-                accountKey: cacheAccountKey,
-                ownEmail: fromAddress,
-                candidates: detailed,
-                client: client,
-                api: api
-            )
-        } catch {
-            SouveraLog.write("Invitations", "scan failed: \(error)")
+        if !force {
+            let now = Date()
+            if now.timeIntervalSince(lastInvitationScan) < 30 { return }
+            lastInvitationScan = now
         }
+        await SouveraInvitationCenter.shared.scanInbox(
+            accountId: accId,
+            accountKey: cacheAccountKey,
+            ownEmail: fromAddress,
+            inboxJmapId: jmapMailboxId,
+            client: client,
+            api: api
+        )
     }
 
     private func syncMessagesImap(_ mailbox: Mailbox) async {
@@ -1613,9 +1597,9 @@ final class MailViewModel: ObservableObject {
                     // Defensive: Base ohne Fremd-Mailbox-Einträge (Run 15.09.
                     // final — verschobene Mails kehren nicht zurück) und ohne
                     // kuerzlich geloeschte IDs (Run 16.09., Race-Fix).
-                    let recentlyRemoved = activeRecentlyRemovedIds
+                    let suppressed = self.suppressedIds(in: cacheKey)
                     baseRaw = baseRaw.filter { entry in
-                        if let id = entry.value.optString("id"), recentlyRemoved.contains(id) { return false }
+                        if let id = entry.value.optString("id"), suppressed.contains(id) { return false }
                         guard let ids = entry.value["mailboxIds"] as? [String: Any] else { return true }
                         return ids[jmapMailboxId] != nil
                     }
@@ -1729,10 +1713,10 @@ final class MailViewModel: ObservableObject {
                     // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
                     // inkrementelle Sync (Snapshot von VOR der Löschung) die
                     // gelöschten Mails in den Cache (Reappear-Muster).
-                    let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+                    let keptEmails = emails.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
                     await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                     let mapped = await mapMessagesOffMain(emails, account: accountName, accountId: accId, mailboxId: cacheKey)
-                    messages = .success(filterPendingRemoved(protectingLiveMessages(mapped)))
+                    messages = .success(filterPendingRemoved(protectingLiveMessages(mapped), mailboxId: cacheKey))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) new=\(newCount) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
@@ -1780,7 +1764,7 @@ final class MailViewModel: ObservableObject {
             } else {
                 let cachedList = byId.values.sorted { ($0["receivedAt"] as? String ?? "") > ($1["receivedAt"] as? String ?? "") }
                 let cachedMapped = await mapMessagesOffMain(cachedList, account: accountName, accountId: accId, mailboxId: cacheKey)
-                messages = .success(filterPendingRemoved(protectingLiveMessages(cachedMapped)))
+                messages = .success(filterPendingRemoved(protectingLiveMessages(cachedMapped), mailboxId: cacheKey))
             }
             var lastId: String?
             var hasMore = false
@@ -1796,6 +1780,15 @@ final class MailViewModel: ObservableObject {
             // müssen aus Liste + Cache verschwinden, nicht nur hinzugefügt
             // werden).
             var serverIds = Set<String>()
+            // Run 22.09. (Feedback: Liste flackerte beim Loeschen): Ist die
+            // Liste bereits gefuellt, werden Zwischenseiten NICHT mehr
+            // publiziert - sonst waechst/springt die Uebersicht pro Seite
+            // (mehrere Publishes in Sekunden). Erst-Load publiziert weiter
+            // progressiv.
+            let wasPopulated: Bool = {
+                if case .success = messages { return true }
+                return false
+            }()
             for _ in 0..<maxPages {
                 // Pro-Seite-Fehlerisolation: Schlägt eine Folgeseite fehl,
                 // bricht der Loop ab und die bereits geladenen Mails werden
@@ -1876,12 +1869,14 @@ final class MailViewModel: ObservableObject {
                 rawMailboxEmails[cacheKey] = byId
                 pageState = (lastId: lastId, hasMore: pageHasMore)
                 hasMoreMessages = pageHasMore
-                let collectedFiltered = collected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+                let collectedFiltered = collected.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: collectedFiltered, queryState: state)
                 JmapLog.write("sync \(mailbox.name): cache saved (\(collectedFiltered.count) mails, page hasMore=\(pageHasMore))")
-                JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
-                let collectedMapped = await mapMessagesOffMain(collected, account: accountName, accountId: accId, mailboxId: cacheKey)
-                messages = .success(filterPendingRemoved(protectingLiveMessages(collectedMapped)))
+                if !pageHasMore || !wasPopulated {
+                    JmapLog.write("publish \(mailbox.name): \(collectedFiltered.count) mails (page, hasMore=\(pageHasMore))")
+                    let collectedMapped = await mapMessagesOffMain(collected, account: accountName, accountId: accId, mailboxId: cacheKey)
+                    messages = .success(filterPendingRemoved(protectingLiveMessages(collectedMapped), mailboxId: cacheKey))
+                }
                 if !pageHasMore {
                     break
                 }
@@ -1970,10 +1965,10 @@ final class MailViewModel: ObservableObject {
             pageState = (lastId: lastId, hasMore: hasMore)
             hasMoreMessages = hasMore
             dirtyFlagIds[cacheKey] = nil
-            let savedCollected = finalCollected.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+            let savedCollected = finalCollected.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
             await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: savedCollected, queryState: state)
             let savedMapped = await mapMessagesOffMain(savedCollected, account: accountName, accountId: accId, mailboxId: cacheKey)
-            messages = .success(filterPendingRemoved(protectingLiveMessages(savedMapped)))
+            messages = .success(filterPendingRemoved(protectingLiveMessages(savedMapped), mailboxId: cacheKey))
             // P62f-Fix: Erst NACH dem vollständigen Publish des Server-
             // Stands (Voll-Refresh) sind die optimistisch entfernten IDs
             // freigegeben - nur hier, nicht nach gequeueten Refreshes.
@@ -2006,7 +2001,7 @@ final class MailViewModel: ObservableObject {
                 let removedSet = Set(missing)
                 JmapLog.write("P64 stale verification removed \(removedSet.count) of \(cachedIds.count) cached mails")
                 var kept = finalSnapshot.filter { !removedSet.contains($0.optString("id") ?? "") }
-                kept = kept.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+                kept = kept.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: kept, queryState: finalState)
                 // Live-Liste ebenfalls bereinigen: auf einem anderen Gerät /
                 // im Web gelöschte Mails entfernen. NUR Entfernen auf Basis des
@@ -2090,10 +2085,10 @@ final class MailViewModel: ObservableObject {
                 guard generation == listGeneration else { return }
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
-                let keptEmails = emails.filter { !self.pendingRemovedIds.union(activeRecentlyRemovedIds).contains($0.optString("id") ?? "") }
+                let keptEmails = emails.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
                 let keptMapped = await mapMessagesOffMain(keptEmails, account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id)
-                messages = .success(filterPendingRemoved(protectingLiveMessages(keptMapped)))
+                messages = .success(filterPendingRemoved(protectingLiveMessages(keptMapped), mailboxId: mailbox.id))
                 prefetchBodies(mailbox: mailbox)
                 JmapLog.write("loadMore \(mailbox.name): page=\(ids.count) added=\(added) hasMore=\(hasMore)")
                 isFetchingMail = false
@@ -2148,6 +2143,28 @@ final class MailViewModel: ObservableObject {
     /// Verhindert das Wiederauftauchen gelöschter Mails durch parallel
     /// laufende Syncs (log-belegter Reappear).
     private var pendingRemovedIds: Set<String> = []
+    /// Run 22.09.: IDs, die aus EINEM bestimmten Ordner verschoben wurden -
+    /// nur dieser Ordner filtert sie (kurz), alle anderen zeigen sie.
+    private var movedOutIds: [String: Set<String>] = [:]
+
+    private func markMovedOut(_ ids: [String], from mailboxId: String) {
+        guard !ids.isEmpty, !mailboxId.isEmpty else { return }
+        var set = movedOutIds[mailboxId] ?? []
+        set.formUnion(ids)
+        movedOutIds[mailboxId] = set
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 120_000_000_000)
+            guard let self else { return }
+            self.movedOutIds[mailboxId]?.subtract(ids)
+        }
+    }
+
+    /// Globale Entfernungs-Marker + ordnergebundene Verschiebungen.
+    private func suppressedIds(in mailboxId: String) -> Set<String> {
+        var set = pendingRemovedIds.union(activeRecentlyRemovedIds)
+        if let moved = movedOutIds[mailboxId], !moved.isEmpty { set.formUnion(moved) }
+        return set
+    }
 
     /// Run 16.09.: Persistente "kuerzlich entfernt"-IDs (Grace 10 min).
     /// Grund: der parallele Auto-Sync refetchet den kompletten Snapshot
@@ -2225,8 +2242,8 @@ final class MailViewModel: ObservableObject {
     }
 
     /// P62f: Filtert optimistisch entfernte IDs aus einer Publish-Liste.
-    private func filterPendingRemoved(_ published: [MailMessage]) -> [MailMessage] {
-        let removed = pendingRemovedIds.union(activeRecentlyRemovedIds)
+    private func filterPendingRemoved(_ published: [MailMessage], mailboxId: String = "") -> [MailMessage] {
+        let removed = suppressedIds(in: mailboxId)
         guard !removed.isEmpty else { return published }
         return published.filter { !removed.contains($0.emailId) }
     }
@@ -2413,6 +2430,10 @@ final class MailViewModel: ObservableObject {
             await syncMessagesImap(mailbox)
         }
         await refreshUnreadBadge()
+        // Run 22.09.: Einladungs-Scan auch beim Auto-Refresh (gedrosselt).
+        if mailbox.kind == .inbox, useJmap {
+            await scanInvitations(mailbox: mailbox)
+        }
     }
 
     /// Autoritative Ungelesen-Zählung für den persönlichen Posteingang
@@ -2927,11 +2948,15 @@ final class MailViewModel: ObservableObject {
     /// P62d: Entfernt Mails SYNCHRON aus Live-Liste, Cache und Badge
     /// (optimistisch, vor dem Server-Call) - der Swipe "flappt" damit nicht
     /// mehr, weil die Zeile sofort verschwindet.
-    private func optimisticRemove(_ ids: [String]) {
+    private func optimisticRemove(_ ids: [String], markRemoved: Bool = true) {
         let removed = Set(ids)
         guard !removed.isEmpty else { return }
         // P62f: bis zum bestätigenden Refresh filtern Syncs die IDs aus.
-        pendingRemovedIds.formUnion(removed)
+        // Run 22.09.: Beim VERSCHIEBEN nicht global markieren - sonst ist
+        // die Mail auch im ZIELordner unsichtbar ("ganz weg").
+        if markRemoved {
+            pendingRemovedIds.formUnion(removed)
+        }
         // Run 19.09. (Feedback: Freeze beim Loeschen): Roh-Spiegel ZUERST
         // synchron saeubern (billig), dann die Persistenz OFF-MAIN
         // schreiben - das fruehere loadMessages+saveMessages (JSON+gzip)
@@ -3064,9 +3089,13 @@ final class MailViewModel: ObservableObject {
     /// (mirrors the Android move action).
     func move(_ messagesToMove: [MailMessage], to target: Mailbox) {
         // P62d: auch Verschieben optimistisch (kein Flappen beim Move).
-        optimisticRemove(messagesToMove.map(\.emailId))
+        // Run 22.09. (Feedback: nach dem Zurueckverschieben in den
+        // Posteingang war die Mail "ganz weg"): Verschieben wird NUR im
+        // Quellordner kurz unterdrueckt, nicht global gefiltert.
+        let moveIds = messagesToMove.map(\.emailId)
+        optimisticRemove(moveIds, markRemoved: false)
         listGeneration += 1
-        markRecentlyRemoved(messagesToMove.map(\.emailId))
+        markMovedOut(moveIds, from: currentMailbox?.id ?? "")
         Task {
             guard let first = messagesToMove.first else { return }
             if useJmap {

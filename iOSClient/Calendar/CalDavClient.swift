@@ -15,6 +15,16 @@ struct CalDavCalendar {
     /// Schreibrecht laut current-user-privilege-set (write/all).
     let canWrite: Bool
 
+    /// Run 22.09.: Gruppierung der Kalender-Uebersicht (wie Android):
+    /// eigene, freigegebene, Deck-Kalender.
+    enum Category { case own, shared, deck }
+
+    var category: Category {
+        if href.range(of: "deck", options: .caseInsensitive) != nil { return .deck }
+        if href.range(of: "_shared_by_", options: .caseInsensitive) != nil { return .shared }
+        return .own
+    }
+
     /// Eigener Kalender des Nutzers (kein geteilter, Deck- oder
     /// Geburtstags-Kalender).
     var isPersonal: Bool {
@@ -254,19 +264,105 @@ final class CalDavClient {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Run 22.09. (Feedback: Termin-Loeschung schlug IMMER fehl): DELETE mit
+    /// vollstaendiger Retry-Leiter + Diagnose:
+    ///   1. gecachter ETag (If-Match), 2. ohne If-Match,
+    ///   3. frischer ETag per PROPFIND, 4. If-Match: *,
+    ///   5. danach Verify per GET (404/410 = geloescht).
+    /// Jeder Versuch loggt URL + Status + Body.
     func deleteEvent(_ entry: CalDavEventEntry) async -> Bool {
         guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,
-              let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return false }
-        var req = authorizedRequest(for: url, method: "DELETE")
-        if let etag = entry.etag {
-            req.setValue(etag, forHTTPHeaderField: "If-Match")
+              let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else {
+            JmapLog.write("CalDAV deleteEvent: URL-Aufbau fehlgeschlagen (\(entry.href))")
+            return false
         }
+        if await performDelete(url: url, etag: entry.etag) { return true }
+        if entry.etag != nil, await performDelete(url: url, etag: nil) { return true }
+        if let fresh = await fetchETag(url: url), await performDelete(url: url, etag: fresh) { return true }
+        if await performDelete(url: url, etag: "*") { return true }
+        if await resourceGone(url: url) {
+            JmapLog.write("CalDAV deleteEvent \(url.absoluteString): Verify 404/410 -> Erfolg")
+            return true
+        }
+        return false
+    }
+
+    private func performDelete(url: URL, etag: String?) async -> Bool {
+        var req = authorizedRequest(for: url, method: "DELETE")
+        if let etag { req.setValue(etag, forHTTPHeaderField: "If-Match") }
+        guard let (data, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("CalDAV deleteEvent \(url.absoluteString) (If-Match=\(etag ?? "-")): Transportfehler")
+            return false
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let ok = (200..<300).contains(status) || status == 404 || status == 410
+        if !ok {
+            let body = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            JmapLog.write("CalDAV deleteEvent \(url.absoluteString) (If-Match=\(etag ?? "-")) -> \(status) \(body)")
+        } else {
+            JmapLog.write("CalDAV deleteEvent \(url.absoluteString) (If-Match=\(etag ?? "-")) -> \(status)")
+        }
+        return ok
+    }
+
+    private func fetchETag(url: URL) async -> String? {
+        var req = authorizedRequest(for: url, method: "PROPFIND")
+        req.setValue("0", forHTTPHeaderField: "Depth")
+        req.httpBody = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <d:propfind xmlns:d="DAV:"><d:prop><d:getetag/></d:prop></d:propfind>
+        """.data(using: .utf8)
+        guard let (data, response) = try? await urlSession.data(for: req),
+              (response as? HTTPURLResponse)?.statusCode == 207,
+              let xml = String(data: data, encoding: .utf8) else { return nil }
+        return DavMultistatusParser().parse(xml).first?["getetag"]
+    }
+
+    private func resourceGone(url: URL) async -> Bool {
+        let req = authorizedRequest(for: url, method: "GET")
         guard let (_, response) = try? await urlSession.data(for: req) else { return false }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-        // Run 19.09.: 404/410 = bereits entfernt -> Erfolg (sonst blieb der
-        // Termin als "nicht loeschbar" haengen).
-        return (200..<300).contains(status) || status == 404 || status == 410
+        return status == 404 || status == 410
+    }
+
+    /// Run 22.09. (Feedback: Kalenderfarben mit dem Server synchronisieren):
+    /// Setzt die Farbe per PROPPATCH (Apple `calendar-color`); hex == nil
+    /// entfernt die Property ("Standard"). Nur bei Schreibrecht aufrufen.
+    func setCalendarColor(href: String, hex: String?) async -> Bool {
+        guard let home = calendarHomeURLs().first,
+              let url = URL(string: href, relativeTo: home)?.absoluteURL else { return false }
+        let body: String
+        if let hex, !hex.isEmpty {
+            body = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <d:propertyupdate xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/">
+              <d:set><d:prop><a:calendar-color>\(hex)</a:calendar-color></d:prop></d:set>
+            </d:propertyupdate>
+            """
+        } else {
+            body = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <d:propertyupdate xmlns:d="DAV:" xmlns:a="http://apple.com/ns/ical/">
+              <d:remove><d:prop><a:calendar-color/></d:prop></d:remove>
+            </d:propertyupdate>
+            """
+        }
+        var req = authorizedRequest(for: url, method: "PROPPATCH", contentType: "application/xml; charset=utf-8")
+        req.httpBody = body.data(using: .utf8)
+        guard let (data, response) = try? await urlSession.data(for: req) else {
+            JmapLog.write("CalDAV setCalendarColor \(url.absoluteString): Transportfehler")
+            return false
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let ok = status == 207 || (200..<300).contains(status)
+        if !ok {
+            let text = String(data: data.prefix(300), encoding: .utf8) ?? ""
+            JmapLog.write("CalDAV setCalendarColor \(url.absoluteString) hex=\(hex ?? "-") -> \(status) \(text)")
+        } else {
+            JmapLog.write("CalDAV setCalendarColor \(url.absoluteString) hex=\(hex ?? "-") -> \(status)")
+        }
+        return ok
     }
 
     // MARK: - XML bodies
@@ -274,11 +370,11 @@ final class CalDavClient {
     private static var propfindBody: String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
-        <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+        <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
           <d:prop>
             <d:displayname/>
             <d:resourcetype/>
-            <c:calendar-color/>
+            <a:calendar-color/>
             <d:current-user-privilege-set/>
           </d:prop>
         </d:propfind>

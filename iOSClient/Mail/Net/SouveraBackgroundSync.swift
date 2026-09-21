@@ -176,6 +176,22 @@ final class SouveraBackgroundSync {
               let inboxId = inbox.optString("id") else { return }
 
         let accountName = credential.account
+        // Run 22.09. (Feedback: Einladung erschien erst spaet): Einladungs-
+        // Scan auch im Hintergrund (gedrosselt 60 s) - so erscheint der
+        // Einladungs-Button, ohne dass das Mail-Modul geoeffnet werden muss.
+        let scanKey = "souvera_invitation_scan_last"
+        let lastScan = UserDefaults.standard.double(forKey: scanKey)
+        if Date().timeIntervalSince1970 - lastScan >= 60 {
+            UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: scanKey)
+            await SouveraInvitationCenter.shared.scanInbox(
+                accountId: accId,
+                accountKey: accountName,
+                ownEmail: credential.saslUser,
+                inboxJmapId: inboxId,
+                client: client,
+                api: api
+            )
+        }
         let cacheKey = Mailbox.makeId(account: accountName, path: inbox.optString("name") ?? "Inbox")
         var knownEmails: [[String: Any]] = []
         var knownIds = Set<String>()

@@ -280,6 +280,42 @@ final class SouveraInvitationCenter: ObservableObject {
     /// Fuer Kandidaten (Einladungs-Betreff oder text/calendar-Anhang) wird
     /// der ICS-Part (auch ohne sichtbaren .ics-Anhang, siehe Feedback
     /// 16.09. 17:23) per Blob-Download geladen und geparst.
+    /// Run 22.09.: Einheitlicher Inbox-Scan fuer Foreground, Auto-Refresh
+    /// und BGAppRefresh - loest bei Bedarf die Inbox-ID auf und ruft den
+    /// eigentlichen Scan auf.
+    func scanInbox(accountId: String, accountKey: String, ownEmail: String,
+                   inboxJmapId: String?, limit: Int = 40,
+                   client: JmapClient, api: JmapApi) async {
+        var mailboxId = inboxJmapId ?? ""
+        if mailboxId.isEmpty {
+            guard let boxes = try? await api.getMailboxes(accountId: accountId),
+                  let inbox = boxes.first(where: { ($0["role"] as? String) == "inbox" }),
+                  let id = inbox["id"] as? String, !id.isEmpty else { return }
+            mailboxId = id
+        }
+        do {
+            let resp = try await api.queryEmails(accountId: accountId,
+                                                 inMailboxId: mailboxId,
+                                                 limit: limit, position: 0)
+            let ids = (resp["ids"] as? [String]) ?? []
+            guard !ids.isEmpty else {
+                await setMailInvites([], accountKey: accountKey)
+                return
+            }
+            let detailed = try await api.getEmails(
+                accountId: accountId,
+                ids: ids,
+                bodyProperties: ["subject", "from", "keywords", "attachments", "partId", "blobId", "size", "type", "name", "disposition", "cid"],
+                fetchAllBodyValues: true
+            )
+            await scanMailInvites(accountId: accountId, accountKey: accountKey,
+                                  ownEmail: ownEmail, candidates: detailed,
+                                  client: client, api: api)
+        } catch {
+            SouveraLog.write("Invitations", "scanInbox failed: \(error)")
+        }
+    }
+
     func scanMailInvites(accountId: String,
                          accountKey: String,
                          ownEmail: String,
@@ -333,7 +369,15 @@ final class SouveraInvitationCenter: ObservableObject {
 
             var parsedEvent: CalendarEventModel?
             var invitationICS: String?
-            if let att = icsAttachment, let blobId = att["blobId"] as? String {
+            // Run 22.09. (Feedback: Erkennung dauerte lange): Bereits
+            // aufgeloeste Einladungen wiederverwenden - kein erneuter
+            // ICS-Blob-Download bei jedem Scan (Throttle-freundlich).
+            if let existing = mailInvites.first(where: { $0.messageId == messageId }) {
+                parsedEvent = existing.event
+                invitationICS = existing.rawICS
+            }
+            if invitationICS == nil, parsedEvent == nil,
+               let att = icsAttachment, let blobId = att["blobId"] as? String {
                 let data = try? await client.downloadBlob(
                     accountId: accountId, blobId: blobId, mimeType: "text/calendar")
                 if let ics = String(data: data ?? Data(), encoding: .utf8) {
@@ -350,12 +394,22 @@ final class SouveraInvitationCenter: ObservableObject {
             // beantwortet (PARTSTAT != needs-action), die Mail-Einladung
             // hier ausblenden UND die Mail in den Papierkorb verschieben -
             // damit ist der Stand geraeteuebergreifend konsistent.
+            // Run 22.09. (Feedback: Absage-Mail verschwand wiederholt): Das
+            // gilt NUR fuer echte Einladungen - eine Absage-Mail
+            // ("Abgesagt: …") ist eine Information des Organisators und darf
+            // NICHT automatisch getrasht werden. Ausserdem wird die Mail als
+            // beantwortet markiert, damit sie nach einem manuellen
+            // Zurueckverschieben nicht erneut verarbeitet wird.
+            let isCancelMail = cancelHint || (invitationICS.map {
+                (Self.quickExtract($0, key: "METHOD") ?? "").uppercased() == "CANCEL"
+            } ?? false)
             let candidateUID = parsedEvent?.uid
                 ?? invitationICS.flatMap { Self.quickExtract($0, key: "UID") }
                 ?? ""
-            if !candidateUID.isEmpty,
+            if !isCancelMail, !candidateUID.isEmpty,
                serverAnsweredUids.contains(candidateUID.lowercased()) {
                 SouveraLog.write("Invitations", "skip server-answered invite uid=\(candidateUID) mail=\(messageId)")
+                Self.markAnswered(messageId: messageId, eventEnd: parsedEvent?.end)
                 Task { await SouveraInviteMailSender.shared.moveToTrash(messageId: messageId) }
                 continue
             }

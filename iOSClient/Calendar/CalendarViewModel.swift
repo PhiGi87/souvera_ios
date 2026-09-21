@@ -151,6 +151,24 @@ final class CalendarViewModel: ObservableObject {
             customCalendarColors[calendar.href] = hex
         }
         UserDefaults.standard.set(customCalendarColors, forKey: colorDefaultsKey)
+        // Run 22.09. (Feedback: Farben mit dem Server synchronisieren):
+        // Bei Schreibrecht zusaetzlich per PROPPATCH (Apple calendar-color);
+        // "Standard" entfernt die Property. Schlaegt der Server-Write fehl,
+        // bleibt der lokale Override bestehen (Android-Paritaet). Read-only
+        // Kalender bleiben rein lokal gefaerbt.
+        guard calendar.canWrite else {
+            JmapLog.write("Calendar color: local only (read-only) \(calendar.displayName) hex=\(hex.isEmpty ? "-" : hex)")
+            return
+        }
+        let href = calendar.href
+        let name = calendar.displayName
+        let value: String? = hex.isEmpty ? nil : hex
+        Task { [weak self] in
+            let client = CalDavClient(account: nil)
+            let ok = await client.setCalendarColor(href: href, hex: value)
+            JmapLog.write("Calendar color PROPPATCH \(ok ? "ok" : "failed") \(name) hex=\(value ?? "-")")
+            if ok { await self?.load() }
+        }
     }
 
     private func persistSelection() {
@@ -810,28 +828,41 @@ final class CalendarViewModel: ObservableObject {
             // entfernt, wenn der Server wirklich geloescht hat - sonst
             // waere der Termin nur scheinbar weg und beim naechsten Laden
             // wieder da.
-            if status == .declined, Self.isForeignOrganizer(event) {
+            // Run 22.09. (Feedback: nachtraegliches Ablehnen muss den Termin
+            // loeschen UND eine "Abgelehnt"-Mail an den Organisator senden):
+            // Reihenfolge neu - die Antwortmail geht IMMER raus, unabhaengig
+            // vom Loeschergebnis; lokal wird immer aufgeraeumt, ein
+            // fehlgeschlagenes DELETE wird nur vorgemerkt (kein harter
+            // Fehler, die Antwort ist serverseitig bereits erteilt).
+            let unknownOrganizer = event.organizerEmail
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if status == .declined, Self.isForeignOrganizer(event) || unknownOrganizer {
+                // 1) "Abgelehnt"-Antwortmail - nur bei EXTERNER Domain
+                // (interne Organisatoren bekommen die Server-iTIP-Absage).
+                if Self.organizerIsExternal(event.organizerEmail) {
+                    let sent = await SouveraInvitationCenter.sendReply(
+                        event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
+                        altProposal: nil)
+                    JmapLog.write("Invitation RSVP DECLINED reply mail sent=\(sent)")
+                }
+                // 2) Termin entfernen (Retry-Leiter + Verify im Client).
                 let removed = await Self.deleteEventEntry(entry, client: client)
                 JmapLog.write("Invitation RSVP DECLINED -> removed from calendar: \(removed)")
-                guard removed else {
-                    if !event.uid.isEmpty {
-                        SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
-                                                                status: status.rawValue)
-                        SouveraInvitationCenter.addPendingRemoval(event.uid)
-                    }
-                    actionFeedback = CalendarActionFeedback(
-                        success: false,
-                        message: NSLocalizedString("_error_occurred_", comment: ""))
-                    return false
-                }
+                // 3) Lokal immer aufraeumen (Antwort ist erteilt); bei
+                // Fehlschlag Entfernung vormerken (Retry beim naechsten Load).
                 cachedEntries.removeAll { $0.href == entry.href }
                 if case var .success(list) = events {
                     list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
                     events = .success(list)
                 }
                 if !event.uid.isEmpty {
-                    SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end)
-                    SouveraInvitationCenter.removePendingRemoval(event.uid)
+                    SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                            status: status.rawValue)
+                    if removed {
+                        SouveraInvitationCenter.removePendingRemoval(event.uid)
+                    } else {
+                        SouveraInvitationCenter.addPendingRemoval(event.uid)
+                    }
                 }
                 let remaining: [CalendarEventModel] = {
                     if case let .success(list) = events {
@@ -844,11 +875,6 @@ final class CalendarViewModel: ObservableObject {
                 actionFeedback = CalendarActionFeedback(
                     success: true,
                     message: NSLocalizedString("_invitations_declined_removed_", comment: ""))
-                if Self.organizerIsExternal(event.organizerEmail) {
-                    _ = await SouveraInvitationCenter.sendReply(
-                        event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
-                        altProposal: nil)
-                }
                 Task { [weak self] in
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     await self?.load()
@@ -967,10 +993,9 @@ final class CalendarViewModel: ObservableObject {
     /// wiederholen, 404/410 gilt als bereits entfernt.
     static func deleteEventEntry(_ entry: CalDavEventEntry,
                                  client: CalDavClient) async -> Bool {
-        if await client.deleteEvent(entry) { return true }
-        let withoutEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
-                                           href: entry.href, etag: nil, ics: entry.ics)
-        return await client.deleteEvent(withoutEtag)
+        // Run 22.09.: Die Retry-Leiter (ETag/Variants + Verify) steckt jetzt
+        // in CalDavClient.deleteEvent.
+        await client.deleteEvent(entry)
     }
 
     /// Schreibt PARTSTAT im eigenen ATTENDEE um (Case-insensitiver
