@@ -21,7 +21,16 @@ enum JmapMapper {
         let name = json.optString("name") ?? path ?? "?"
         let resolvedPath = path ?? name
         let role = json.optString("role")
-        let kind = resolveMailboxKind(role: role, name: name, path: resolvedPath)
+        // Run 21.09. (Feedback: doppelte/falsch benannte Ordner): Der
+        // Namens-Fallback der Kind-Erkennung darf NUR auf Root-Ebene
+        // greifen. Legacy-Unterordner im Posteingang heissen z. B. "Drafts"
+        // oder "Deleted Items" und wurden sonst als Spezialordner
+        // (lokalisiert, Spezial-Icon, kindOrder-Sortierung) dargestellt -
+        // Webmail/Thunderbird zeigen sie mit Originalnamen als normale
+        // Ordner. Ausserdem trafen Versand/Selbstheilung dadurch das
+        // falsche Postfach.
+        let isRoot = (json.optString("parentId") ?? "").isEmpty
+        let kind = resolveMailboxKind(role: role, name: name, path: resolvedPath, isRoot: isRoot)
         let jmapId = json.optString("id")
         let rights = json["myRights"] as? [String: Any]
 
@@ -150,7 +159,8 @@ enum JmapMapper {
         return MessageBody(plainText: plainText, html: html, attachments: attachments, inlineParts: inlineParts)
     }
 
-    static func resolveMailboxKind(role: String?, name: String, path: String) -> MailboxKind {
+    static func resolveMailboxKind(role: String?, name: String, path: String,
+                                   isRoot: Bool = true) -> MailboxKind {
         switch role {
         case "inbox": return .inbox
         case "sent": return .sent
@@ -160,9 +170,10 @@ enum JmapMapper {
         case "archive": return .regular
         default: break
         }
-        // Only exact, standard English names identify system mailboxes.
-        // Stalwart's sent special-use mailbox is "Sent Items"; a plain
-        // "Sent" folder is user data and stays a regular folder.
+        // Only exact, standard English names identify system mailboxes, and
+        // only on root level - IMAP-style subfolders inside the inbox may
+        // legitimately carry such names (run 21.09.).
+        guard isRoot else { return .regular }
         switch name {
         case "Inbox": return .inbox
         case "Sent Items", "Sent Messages": return .sent

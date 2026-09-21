@@ -412,16 +412,14 @@ final class SouveraBarCoordinator {
         for item in items where !item.icon.isEmpty || !(item.text ?? "").isEmpty {
             let bar: UIBarButtonItem
             if let text = item.text, !text.isEmpty {
-                bar = UIBarButtonItem(title: text, style: .plain, target: nil, action: nil)
-                bar.primaryAction = UIAction(title: text) { _ in item.handler() }
+                bar = UIBarButtonItem(title: text, primaryAction: UIAction(title: text) { _ in item.handler() })
             } else {
-                bar = UIBarButtonItem(
-                    image: UIImage(systemName: item.icon),
-                    style: .plain,
-                    target: nil,
-                    action: nil
-                )
-                bar.primaryAction = UIAction { _ in item.handler() }
+                // Run 21.09. (Feedback iPadOS 17: Button sichtbar, Icon nicht):
+                // iOS 17 rendert den Inhalt der primaryAction - eine leere
+                // UIAction lieferte weder Titel noch Bild. Das Bild muss in
+                // die Aktion (und zusaetzlich ins Item fuer iOS 26).
+                let img = UIImage(systemName: item.icon)
+                bar = UIBarButtonItem(image: img, primaryAction: UIAction(image: img) { _ in item.handler() })
             }
             bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : itemTint)
             bar.accessibilityLabel = item.accessibilityLabel
