@@ -1713,7 +1713,7 @@ final class MailViewModel: ObservableObject {
                     // P62f: Auch den CACHE-Save filtern - sonst re-seedet der
                     // inkrementelle Sync (Snapshot von VOR der Löschung) die
                     // gelöschten Mails in den Cache (Reappear-Muster).
-                    let keptEmails = emails.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
+                    let keptEmails = emails.filter { !self.suppressedIds(in: mailbox.id).contains($0.optString("id") ?? "") }
                     await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: cacheKey, emails: keptEmails, queryState: newState)
                     let mapped = await mapMessagesOffMain(emails, account: accountName, accountId: accId, mailboxId: cacheKey)
                     messages = .success(filterPendingRemoved(protectingLiveMessages(mapped), mailboxId: cacheKey))
@@ -2085,7 +2085,7 @@ final class MailViewModel: ObservableObject {
                 guard generation == listGeneration else { return }
                 pageState = (lastId: ids.last, hasMore: hasMore)
                 hasMoreMessages = hasMore
-                let keptEmails = emails.filter { !self.suppressedIds(in: cacheKey).contains($0.optString("id") ?? "") }
+                let keptEmails = emails.filter { !self.suppressedIds(in: mailbox.id).contains($0.optString("id") ?? "") }
                 await MailCache.saveMessagesOffMain(account: cacheAccountKey, mailboxId: mailbox.id, emails: keptEmails, queryState: snapshot?.queryState ?? "")
                 let keptMapped = await mapMessagesOffMain(keptEmails, account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id)
                 messages = .success(filterPendingRemoved(protectingLiveMessages(keptMapped), mailboxId: mailbox.id))
