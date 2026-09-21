@@ -681,11 +681,23 @@ private struct CalendarEventRow: View {
     private var isDeclined: Bool { partstat.lowercased() == "declined" }
     private var isTentative: Bool { partstat.lowercased() == "tentative" }
 
+    /// Run 22.09.: "Vielleicht" - linker Strich in Kalenderfarbe SCHRAFFIERT
+    /// (nicht vollfarbig), kein Hintergrund/Rahmen.
+    private var leadingBar: some View {
+        RoundedRectangle(cornerRadius: 3)
+            .fill(isTentative ? color.opacity(0.22) : color)
+            .overlay {
+                if isTentative {
+                    SouveraHatchOverlay(color: color, lineWidth: 1, spacing: 4)
+                        .clipShape(RoundedRectangle(cornerRadius: 3))
+                }
+            }
+            .frame(width: 4)
+    }
+
     var body: some View {
         HStack(spacing: 10) {
-            RoundedRectangle(cornerRadius: 3)
-                .fill(color)
-                .frame(width: 4)
+            leadingBar
             if event.isTask {
                 Image(systemName: "checklist")
                     .font(.caption)
@@ -717,21 +729,6 @@ private struct CalendarEventRow: View {
         .contentShape(Rectangle())
         .padding(.vertical, 4)
         .padding(.horizontal, 6)
-        .background {
-            let shape = RoundedRectangle(cornerRadius: 6)
-            if isDeclined {
-                shape.fill(Color(.systemBackground))
-                    .overlay(shape.stroke(color, lineWidth: 1.5))
-            } else if isTentative {
-                shape.fill(color.opacity(0.10))
-                    .overlay(
-                        SouveraHatchOverlay(color: color.opacity(0.7), lineWidth: 1, spacing: 9)
-                            .clipShape(shape)
-                    )
-            } else {
-                Color.clear
-            }
-        }
     }
 
     private var timeLabel: String {
@@ -1056,12 +1053,13 @@ private struct TimelineColumn: View {
         .background {
             let shape = RoundedRectangle(cornerRadius: 6)
             if isDeclined {
+                // Run 22.09.: kein Rahmen, nur durchgestrichener Titel.
                 shape.fill(Color(.systemBackground))
-                    .overlay(shape.stroke(colorFor(event), lineWidth: 1.5))
             } else if isTentative {
-                shape.fill(colorFor(event).opacity(0.10))
+                // Run 22.09.: deutlich dezenter (heller Grund, feine Schraffur).
+                shape.fill(colorFor(event).opacity(0.06))
                     .overlay(
-                        SouveraHatchOverlay(color: colorFor(event).opacity(0.7), lineWidth: 1, spacing: 9)
+                        SouveraHatchOverlay(color: colorFor(event).opacity(0.35), lineWidth: 0.75, spacing: 8)
                             .clipShape(shape)
                     )
             } else {

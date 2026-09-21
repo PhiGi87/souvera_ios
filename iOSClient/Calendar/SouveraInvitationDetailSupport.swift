@@ -273,7 +273,7 @@ struct SouveraDayPreviewPopup: View {
                     let calendarColor = colorFor(event)
                     let statusFill: Color? = status == "declined"
                         ? Color(.systemBackground)
-                        : (status == "tentative" ? calendarColor.opacity(0.10) : nil)
+                        : (status == "tentative" ? calendarColor.opacity(0.06) : nil)
                     let fill: Color = isInvite ? Color.blue.opacity(0.10)
                         : (isCollision ? Color.orange.opacity(0.12) : (statusFill ?? Color(.systemGray6)))
                     context.fill(path, with: .color(fill))
@@ -286,8 +286,8 @@ struct SouveraDayPreviewPopup: View {
                                 var hatch = Path()
                                 hatch.move(to: CGPoint(x: x0, y: rect.maxY))
                                 hatch.addLine(to: CGPoint(x: x0 + rect.height, y: rect.minY))
-                                layer.stroke(hatch, with: .color(calendarColor.opacity(0.7)), lineWidth: 1)
-                                x0 += 9
+                                layer.stroke(hatch, with: .color(calendarColor.opacity(0.35)), lineWidth: 0.75)
+                                x0 += 8
                             }
                         }
                     }
@@ -306,9 +306,9 @@ struct SouveraDayPreviewPopup: View {
                             }
                         }
                     }
-                    let border: Color = isInvite ? .blue
-                        : (isCollision ? .orange : (status == "declined" ? calendarColor : .clear))
-                    if isInvite || isCollision || status == "declined" {
+                    // Run 22.09.: abgelehnt ohne Rahmen (nur durchgestrichen).
+                    let border: Color = isInvite ? .blue : (isCollision ? .orange : .clear)
+                    if isInvite || isCollision {
                         context.stroke(path, with: .color(border), lineWidth: 1.5)
                     }
                     // Texte - Run 19.09. (Feedback): auf die Blockbreite
