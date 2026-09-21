@@ -851,15 +851,10 @@ final class CalendarViewModel: ObservableObject {
             let unknownOrganizer = event.organizerEmail
                 .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             if status == .declined, Self.isForeignOrganizer(event) || unknownOrganizer {
-                // 1) "Abgelehnt"-Antwortmail - nur bei EXTERNER Domain
-                // (interne Organisatoren bekommen die Server-iTIP-Absage).
-                if Self.organizerIsExternal(event.organizerEmail) {
-                    let sent = await SouveraInvitationCenter.sendReply(
-                        event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
-                        altProposal: nil)
-                    JmapLog.write("Invitation RSVP DECLINED reply mail sent=\(sent)")
-                }
-                // 2) Termin entfernen (Retry-Leiter + Verify im Client).
+                // Run 22.09. (Feedback: Server-iTIP): KEINE App-Mail mehr -
+                // der PARTSTAT-PUT laesst Nextcloud die "Abgelehnt"-Antwort
+                // selbst an den Organisator senden (auch extern).
+                // Termin entfernen (Retry-Leiter + Verify im Client).
                 let removed = await Self.deleteEventEntry(entry, client: client)
                 JmapLog.write("Invitation RSVP DECLINED -> removed from calendar: \(removed)")
                 // 3) Lokal immer aufraeumen (Antwort ist erteilt); bei
@@ -932,13 +927,8 @@ final class CalendarViewModel: ObservableObject {
                 SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
                                                         status: status.rawValue)
             }
-            // B6: Externer Organisator - Server-iTIP erreicht ihn nicht,
-            // deshalb zusaetzlich die normale Antwort-Mail.
-            if Self.organizerIsExternal(event.organizerEmail) {
-                _ = await SouveraInvitationCenter.sendReply(
-                    event: event, statusWord: NSLocalizedString(status.titleKey, comment: ""),
-                    altProposal: nil)
-            }
+            // Run 22.09. (Feedback: Server-iTIP): Antwortmails versendet
+            // Nextcloud selbst (PARTSTAT in CalDAV) - keine App-Mail mehr.
             // Stiller Hintergrund-Reload (Badges, weitere Foldes).
             Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)

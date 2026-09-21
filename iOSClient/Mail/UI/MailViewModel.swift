@@ -1422,6 +1422,7 @@ final class MailViewModel: ObservableObject {
                 }
             }
         }
+        var created = false
         if status != .declined, !resolved.isCancellation, !handledExisting {
             var createICS = resolved.rawICS
             if createICS == nil, let event = resolved.event {
@@ -1430,7 +1431,7 @@ final class MailViewModel: ObservableObject {
                     organizerEmail: resolved.organizerEmail)
             }
             if let ics = createICS {
-                await SouveraInvitationCenter.shared.createCalendarEvent(
+                created = await SouveraInvitationCenter.shared.createCalendarEvent(
                     from: resolved, ics: ics, status: status.rawValue,
                     calendarHref: calendarHref, reminderMinutes: reminderMinutes)
             }
@@ -1439,16 +1440,23 @@ final class MailViewModel: ObservableObject {
             SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end,
                                                     status: status.rawValue)
         }
-        // B1: Moderne Antwort-Mail - Run 19.09. EIN Pfad ueber den Center
-        // (korrekter Betreff in Vergangenheitsform, Submission-
-        // Finalisierung, Sent-Kopie, Logging).
-        let event = resolved.event
-        if event != nil || resolved.organizerEmail.contains("@") {
-            _ = await SouveraInvitationCenter.sendReply(
-                invitation: resolved,
-                statusWord: NSLocalizedString(status.titleKey, comment: ""),
-                altProposal: altProposal)
+        // Run 22.09. (Feedback: Server-iTIP): Die Antwortmail der App ist
+        // nur noch FALLBACK - bei Alternativvorschlag (die Server-REPLY
+        // traegt keinen Freitext) oder wenn kein Kalender-Write gelungen
+        // ist. Sonst versendet Nextcloud die Antwort selbst (PARTSTAT in
+        // CalDAV).
+        let calendarWrite = handledExisting || created
+        let needsAppMail = (altProposal?.isEmpty == false) || !calendarWrite
+        if needsAppMail {
+            let event = resolved.event
+            if event != nil || resolved.organizerEmail.contains("@") {
+                _ = await SouveraInvitationCenter.sendReply(
+                    invitation: resolved,
+                    statusWord: NSLocalizedString(status.titleKey, comment: ""),
+                    altProposal: altProposal)
+            }
         }
+        SouveraLog.write("Invitations", "mail RSVP \(status.rawValue) uid=\(resolved.eventUID) calendarWrite=\(calendarWrite) appMail=\(needsAppMail)")
         // Einladungsmail gelesen markieren + als beantwortet merken.
         if useJmap, let api = jmapApi,
            let session = try? await jmapClient?.refreshSession() {

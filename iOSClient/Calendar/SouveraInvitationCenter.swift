@@ -505,6 +505,7 @@ final class SouveraInvitationCenter: ObservableObject {
                 }
             }
         }
+        var created = false
         if status != .declined, !resolved.isCancellation, !handledExisting {
             var createICS = resolved.rawICS
             if createICS == nil, let event = resolved.event {
@@ -512,7 +513,7 @@ final class SouveraInvitationCenter: ObservableObject {
                                           organizerEmail: resolved.organizerEmail)
             }
             if let ics = createICS {
-                _ = await SouveraInvitationCenter.shared.createCalendarEvent(
+                created = await SouveraInvitationCenter.shared.createCalendarEvent(
                     from: resolved, ics: ics, status: status.rawValue,
                     calendarHref: calendarHref, reminderMinutes: reminderMinutes)
             }
@@ -521,11 +522,18 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraInvitationCenter.markAnsweredUid(resolved.eventUID, end: resolved.event?.end,
                                                     status: status.rawValue)
         }
-        let statusWord = NSLocalizedString(status.titleKey, comment: "")
-        // Run 18.09.: Antwort-Mail IMMER (auch ohne geparstes Event).
-        let sent = await sendReply(invitation: resolved, statusWord: statusWord,
-                                   altProposal: altProposal)
-        if !sent { return false }
+        // Run 22.09. (Feedback: Server-iTIP): App-Antwortmail nur noch als
+        // FALLBACK - bei Alternativvorschlag (Server-REPLY hat keinen
+        // Freitext) oder wenn kein Kalender-Write gelungen ist. Sonst
+        // versendet Nextcloud die Antwort selbst (PARTSTAT in CalDAV).
+        let calendarWrite = handledExisting || created
+        let needsAppMail = (altProposal?.isEmpty == false) || !calendarWrite
+        if needsAppMail {
+            let statusWord = NSLocalizedString(status.titleKey, comment: "")
+            _ = await sendReply(invitation: resolved, statusWord: statusWord,
+                                altProposal: altProposal)
+        }
+        SouveraLog.write("Invitations", "mail RSVP \(status.rawValue) uid=\(resolved.eventUID) calendarWrite=\(calendarWrite) appMail=\(needsAppMail)")
         markAnswered(messageId: resolved.messageId, eventEnd: resolved.event?.end)
         await MainActor.run {
             SouveraInvitationCenter.shared.removeMailInvitation(resolved.id)
@@ -706,8 +714,15 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraLog.write("Invitations", "calendar create: no writable calendar")
             return false
         }
-        var created = await client.createEvent(calendarHref: target.href, ics: updated, uid: uid)
-        if created == nil, updated != normalized {
+        // Run 22.09. (Feedback: Server-iTIP): Zweistufig anlegen - erst mit
+        // NEEDS-ACTION, danach den finalen PARTSTAT per PUT. Nur dieser
+        // Wechsel triggert den iTIP-REPLY des Servers an den Organisator.
+        let needsTwoStep = status.lowercased() != "needs-action"
+        let createICS = needsTwoStep
+            ? (CalendarViewModel.updatePartstat(ics: updated, attendeeEmail: me, status: "NEEDS-ACTION") ?? updated)
+            : updated
+        var created = await client.createEvent(calendarHref: target.href, ics: createICS, uid: uid)
+        if created == nil, createICS != normalized {
             // Fallback 1: normalisierte Original-ICS ohne PARTSTAT-Umschrieb.
             created = await client.createEvent(calendarHref: target.href, ics: normalized, uid: uid)
         }
@@ -732,12 +747,22 @@ final class SouveraInvitationCenter: ObservableObject {
             created = await client.createEvent(calendarHref: target.href, ics: rebuilt, uid: uid)
             SouveraLog.write("Invitations", "create fallback via buildICS: \(created != nil)")
         }
-        if created != nil {
-            SouveraLog.write("Invitations", "calendar create ok in \(target.displayName) uid=\(uid)")
-        } else {
+        guard let created else {
             SouveraLog.write("Invitations", "calendar create FAILED uid=\(uid)")
+            return false
         }
-        return created != nil
+        SouveraLog.write("Invitations", "calendar create ok in \(target.displayName) uid=\(uid)")
+        guard needsTwoStep else { return true }
+        // Finalen PARTSTAT nachziehen (ETag-Retry) - erst dadurch sendet der
+        // Server den iTIP-REPLY an den Organisator.
+        var finalOK = await client.updateEvent(created, ics: updated)
+        if !finalOK {
+            let noEtag = CalDavEventEntry(calendarHref: created.calendarHref,
+                                          href: created.href, etag: nil, ics: updated)
+            finalOK = await client.updateEvent(noEtag, ics: updated)
+        }
+        SouveraLog.write("Invitations", "calendar create two-step PARTSTAT \(status) ok=\(finalOK) uid=\(uid)")
+        return finalOK
     }
 
     /// Run 18.09.: Externe ICS in die buildICS-kompatible Form bringen:
@@ -753,7 +778,19 @@ final class SouveraInvitationCenter: ObservableObject {
         }
         return lines
             .filter { !$0.isEmpty && !$0.uppercased().hasPrefix("METHOD:") }
+            .map { Self.stripScheduleAgentParameter($0) }
             .joined(separator: "\r\n")
+    }
+
+    /// Run 22.09. (Feedback: Server-iTIP): `SCHEDULE-AGENT=CLIENT` in
+    /// ATTENDEE-Zeilen unterdrueckt das Server-Scheduling - Parameter
+    /// entfernen, damit Nextcloud den iTIP-REPLY selbst sendet.
+    nonisolated static func stripScheduleAgentParameter(_ line: String) -> String {
+        guard line.uppercased().hasPrefix("ATTENDEE"), let colon = line.firstIndex(of: ":") else { return line }
+        var head = String(line[..<colon])
+        head = head.replacingOccurrences(of: ";schedule-agent=client", with: "", options: .caseInsensitive)
+        head = head.replacingOccurrences(of: ";schedule-agent=server", with: "", options: .caseInsensitive)
+        return head + String(line[colon...])
     }
 
     /// Erster Wert des Keys in der ICS (zeilenbasiert, Folding-tolerant).
