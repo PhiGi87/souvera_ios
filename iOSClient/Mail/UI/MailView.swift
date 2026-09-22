@@ -2183,7 +2183,15 @@ private struct MailHtmlView: UIViewRepresentable {
         webView.isOpaque = true
         webView.backgroundColor = .white
         webView.scrollView.backgroundColor = .white
-        webView.scrollView.isScrollEnabled = false
+        // Run 22.09. (Feedback: breite Mails abschneiden): Vertikal laeuft
+        // der äußere SwiftUI-ScrollView (die View ist selbst-dimensioniert,
+        // vertikal gibt es nichts zu scrollen) - HORIZONTAL bleibt das
+        // eigene Scrollen aktiv, damit feste Tabellen-/Bildbreiten
+        // seitlich erreichbar sind.
+        webView.scrollView.isScrollEnabled = true
+        webView.scrollView.alwaysBounceVertical = false
+        webView.scrollView.alwaysBounceHorizontal = true
+        webView.scrollView.showsVerticalScrollIndicator = false
         webView.navigationDelegate = context.coordinator
         return webView
     }
