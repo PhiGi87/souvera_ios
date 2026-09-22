@@ -627,11 +627,25 @@ struct LinkView: View {
         }
     }
 
+    /// Run 22.09. (Feedback: Tastatur brach beim Emoji-Button weg): Die
+    /// Orientierung kommt aus den FENSTER-Bounds, nicht aus dem
+    /// GeometryReader des Inhalts - oeffnet sich die Tastatur, schrumpft
+    /// die Content-Hoehe (z.B. 440x439) und Breite > Hoehe liess den
+    /// Landscape-Flag kippen. Dadurch wurde die ganze Chat-View (inkl.
+    /// Composer-Fokus) neu erzeugt und die Tastatur schloss sich.
     private func updateLandscapeLayout(_ size: CGSize) {
-        let isLandscape = size.width > size.height
+        let bounds: CGRect = viewWindowBounds ?? CGRect(origin: .zero, size: size)
+        let isLandscape = bounds.width > bounds.height
         guard isLandscape != landscapeLayout else { return }
         landscapeLayout = isLandscape
-        SouveraLog.write("LinkUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height))")
+        SouveraLog.write("LinkUI", "layout landscape=\(isLandscape) window=\(Int(bounds.width))x\(Int(bounds.height)) content=\(Int(size.width))x\(Int(size.height))")
+    }
+
+    /// Fenster-Bounds des aktiven Scenes (tastaturunabhaengig).
+    private var viewWindowBounds: CGRect? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let keyScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        return keyScene?.screen.bounds
     }
 
     /// Landscape-Split: Raum-Übersicht links (~1/3, max. 320 pt auf dem
