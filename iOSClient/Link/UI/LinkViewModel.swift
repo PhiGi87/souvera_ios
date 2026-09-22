@@ -10,6 +10,7 @@
 import Foundation
 import Combine
 import Network
+import NextcloudKit
 
 extension Notification.Name {
     /// Posted whenever the active call state changes (started/ended).
@@ -1753,6 +1754,49 @@ final class LinkViewModel: ObservableObject {
         let folderPath = (raw as NSString).deletingLastPathComponent
         CallDebugLog.log("LinkViewModel", "openFileInFiles path=\(raw) folder=\(folderPath)")
         NotificationCenter.default.post(name: .openFileInFiles, object: folderPath)
+    }
+
+    // MARK: - Run 22.09.: Chat-Datei in Souvera Dateien speichern
+
+    /// Kopiert einen Chat-Anhang SERVERSEITIG in den gewaehlten Zielordner
+    /// (Souvera Dateien) - kein Re-Download, konfliktfreier Dateiname.
+    func saveChatFileToFiles(_ message: LinkChatMessage, toFolder destinationServerUrl: String) async -> Bool {
+        guard !destinationServerUrl.isEmpty,
+              let info = message.fileInfo(), let path = info.path, !path.isEmpty,
+              let tblAccount = NCManageDatabase.shared.getActiveTableAccount() else {
+            SouveraLog.write("LinkChat", "saveToFiles: kein Ziel/Pfad/Konto")
+            return false
+        }
+        let session = NCSession.shared.getSession(account: tblAccount.account)
+        let fileSystem = NCUtilityFileSystem()
+        let home = fileSystem.getHomeServer(session: session)
+        let source = Self.serverUrlFileName(home: home, relativePath: path)
+        let baseName = (path as NSString).lastPathComponent
+        let unique = await NCNetworking.shared.createFileName(fileNameBase: baseName,
+                                                              account: tblAccount.account,
+                                                              serverUrl: destinationServerUrl)
+        let destination = fileSystem.createServerUrl(serverUrl: destinationServerUrl, fileName: unique)
+        let results = await NextcloudKit.shared.copyFileOrFolderAsync(
+            serverUrlFileNameSource: source,
+            serverUrlFileNameDestination: destination,
+            overwrite: false,
+            account: tblAccount.account) { _ in }
+        SouveraLog.write("LinkChat", "saveToFiles copy name=\(unique) error=\(results.error.errorCode)")
+        if results.error == .success,
+           let read = await NCNetworking.shared.readFileAsync(serverUrlFileName: destination, account: tblAccount.account),
+           let metadata = read.metadata {
+            await NCManageDatabase.shared.addMetadataAsync(metadata)
+        }
+        return results.error == .success
+    }
+
+    /// Baut den serverUrlFileName aus Home-Server + relativem Talk-Pfad
+    /// (Segmente einzeln URL-kodiert, wie beim Download).
+    static func serverUrlFileName(home: String, relativePath: String) -> String {
+        let encoded = relativePath.split(separator: "/").map {
+            String($0).addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? String($0)
+        }.joined(separator: "/")
+        return home.hasSuffix("/") ? home + encoded : home + "/" + encoded
     }
 
     // MARK: - Attachments

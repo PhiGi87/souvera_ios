@@ -1199,6 +1199,13 @@ struct LinkChatView: View {
     @State private var fullscreenImageMessage: LinkChatMessage?
     /// P68o: PDF-Datei für den QuickLook-Vollbild-Viewer.
     @State private var pdfPreviewURL: URL?
+    /// Run 22.09. (Feedback: kein Download fuer Nicht-Vorschau-Dateien):
+    /// Auswahl-Dialog am Datei-Chip + Zielordner-Auswahl "Souvera Dateien".
+    @State private var fileActionMessage: LinkChatMessage?
+    @State private var showFileActions = false
+    @State private var saveToFilesMessage: LinkChatMessage?
+    @State private var showSaveFolderPicker = false
+    @State private var saveFolderServerUrl = ""
     /// P68n: Nach dem Senden ans Listenende springen.
     @State private var scrollToNewestPending = false
     /// Run 15.09.: Fokus-Anker für den Composer — das „+"-Menü/Emoji-
@@ -1252,6 +1259,35 @@ struct LinkChatView: View {
                     )
                 }
                 .quickLookPreview($pdfPreviewURL)
+                .confirmationDialog(NSLocalizedString("_link_file_actions_", comment: ""),
+                                    isPresented: $showFileActions,
+                                    titleVisibility: .visible) {
+                    if let message = fileActionMessage {
+                        Button(NSLocalizedString("_link_save_to_files_", comment: "")) {
+                            saveToFilesMessage = message
+                            saveFolderServerUrl = ""
+                            showSaveFolderPicker = true
+                        }
+                        Button(NSLocalizedString("_link_share_message_", comment: "")) {
+                            prepareShare(for: message)
+                        }
+                        if let info = message.fileInfo() {
+                            Button(NSLocalizedString("_link_open_in_files_", comment: "")) {
+                                viewModel.openFileInFiles(info)
+                            }
+                        }
+                    }
+                    Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
+                }
+                // Run 22.09.: Zielordner in den Souvera-Dateien waehlen
+                // (bewaehrte SelectView); onDisappear uebernimmt die Auswahl.
+                .sheet(isPresented: $showSaveFolderPicker) {
+                    SelectView(serverUrl: $saveFolderServerUrl,
+                               includeDirectoryE2EEncryption: false,
+                               session: NCSession.shared.getSession(account: NCManageDatabase.shared.getActiveTableAccount()?.account),
+                               controller: nil)
+                        .onDisappear { performSaveToFiles() }
+                }
             Divider()
             composer
         }
@@ -1610,6 +1646,25 @@ struct LinkChatView: View {
         }
     }
 
+    /// Run 22.09.: Kopiert die gewaehlte Chat-Datei in den Zielordner
+    /// (Souvera Dateien) und meldet das Ergebnis.
+    private func performSaveToFiles() {
+        guard let message = saveToFilesMessage, !saveFolderServerUrl.isEmpty else {
+            saveToFilesMessage = nil
+            saveFolderServerUrl = ""
+            return
+        }
+        saveToFilesMessage = nil
+        let folder = saveFolderServerUrl
+        saveFolderServerUrl = ""
+        Task {
+            let ok = await viewModel.saveChatFileToFiles(message, toFolder: folder)
+            viewModel.actionFeedback = LinkActionFeedback(
+                success: ok,
+                message: NSLocalizedString(ok ? "_link_saved_" : "_link_save_failed_", comment: ""))
+        }
+    }
+
     /// Baut die Teile-Liste für das iOS-Teilen-Sheet (Text, Links, Anhang).
     private func prepareShare(for message: LinkChatMessage) {
         Task {
@@ -1690,10 +1745,16 @@ struct LinkChatView: View {
                                 showTime: showsTime(index: index, message: message, items: items),
                                 showsAvatar: showsAvatar(index: index, message: message, items: items),
                                 onStartEdit: { editingMessage = message; draft = message.message },
-                                onFileTap: { info in
-                                    // Datei im Dateien-Modul anzeigen (Ordner
-                                    // des Talk-Uploads statt lokaler Vorschau).
-                                    viewModel.openFileInFiles(info)
+                                onFileTap: { _ in
+                                    // Run 22.09.: Auswahl-Dialog statt starrer
+                                    // Ordner-Navigation - Speichern/Teilen/Oeffnen.
+                                    fileActionMessage = message
+                                    showFileActions = true
+                                },
+                                onSaveToFiles: { target in
+                                    saveToFilesMessage = target
+                                    saveFolderServerUrl = ""
+                                    showSaveFolderPicker = true
                                 },
                                 onImageTap: { target in
                                     fullscreenImageMessage = target
@@ -2009,6 +2070,8 @@ private struct LinkMessageRow: View {
     var onImageTap: (LinkChatMessage) -> Void = { _ in }
     /// P68o: Tap auf ein PDF-Thumbnail -> QuickLook-Viewer.
     var onPdfTap: (LinkChatMessage) -> Void = { _ in }
+    /// Run 22.09.: Datei in Souvera Dateien speichern (Kontextmenue).
+    var onSaveToFiles: (LinkChatMessage) -> Void = { _ in }
     let onStartReply: () -> Void
     let onStartForward: () -> Void
     var onLongPress: (LinkChatMessage) -> Void = { _ in }
@@ -2194,6 +2257,16 @@ private struct LinkMessageRow: View {
                         onShare(message)
                     } label: {
                         Label(NSLocalizedString("_link_share_message_", comment: ""), systemImage: "square.and.arrow.up")
+                    }
+                    if message.fileName() != nil {
+                        // Run 22.09.: JEDE Datei in Souvera Dateien speichern
+                        // (auch Bild/PDF, die eine Vorschau haben).
+                        Button {
+                            onSaveToFiles(message)
+                        } label: {
+                            Label(NSLocalizedString("_link_save_to_files_", comment: ""),
+                                  systemImage: "folder.badge.plus")
+                        }
                     }
                     Button {
                         onLongPress(message)
