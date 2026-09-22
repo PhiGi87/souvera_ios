@@ -929,7 +929,15 @@ final class LinkViewModel: ObservableObject {
                     self.windowLoadDone = true
                     self.hasMoreHistory = true
                 }
-                self.updateUnreadBoundary(roomLastRead: roomLastRead, roomUnread: roomUnread)
+                // Run 22.09. (Feedback: Eintritt sprang erst zum Ende,
+                // dann zur Trennlinie): War das Room-Objekt beim Oeffnen
+                // noch nicht geladen (roomUnread/roomLastRead = 0), mit den
+                // AKTUELLEN Werten ableiten - sobald das Room-Objekt da
+                // ist, steht die Boundary korrekt beim ersten Publish.
+                let effectiveLastRead = self.currentRoom?.lastReadMessage ?? roomLastRead
+                let effectiveUnread = self.currentRoom?.unreadMessages ?? roomUnread
+                self.updateUnreadBoundary(roomLastRead: effectiveLastRead,
+                                          roomUnread: effectiveUnread)
             }
 
             /// Abdeckungs-Check: Die Trennlinie (erste Meldung > lastRead)
@@ -1036,6 +1044,14 @@ final class LinkViewModel: ObservableObject {
             // die "Neue Nachrichten"-Trennlinie (lastReadMessage = 0).
             if self.currentRoom == nil, case let .success(rooms) = self.conversations {
                 self.currentRoom = rooms.first(where: { $0.token == token })
+                // Run 22.09.: Room-Objekt nachgezogen -> Boundary sofort aus
+                // den frischen Werten ableiten (die Trennlinie wird via
+                // onChange/applyBoundary waehrend der Stabilisierung ange-
+                // fahren - kein Sprung ans Listenende mehr).
+                if let fresh = self.currentRoom {
+                    self.updateUnreadBoundary(roomLastRead: fresh.lastReadMessage,
+                                              roomUnread: fresh.unreadMessages)
+                }
             }
             if !covered {
                 // Sicherheitsnetz (Cap erreicht): zeigen, was da ist.

@@ -447,6 +447,11 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// Content-Hoehe 3 Messungen stabil bleibt (~1,2 s max) alle 100 ms
     /// aufs Ende pinnen; Self-Sizing-Hoehen realisieren sich dabei.
     func pinToBottomUntilStable() {
+        // Run 22.09. (Feedback: Raum-Eintritt sprang zwischen neuester
+        // Nachricht und Trennlinie): Waehrend der Eintritts-Stabilisierung
+        // darf kein Auto-Pin dazwischenfunken - das Eintrittsziel (Trenn-
+        // linie) hat Vorrang, applyBoundary faehrt es selbst an.
+        guard !isEntryStabilizing else { return }
         pinToBottomTask?.cancel()
         pinToBottomTask = Task { [weak self] in
             var lastHeight: CGFloat = -1
