@@ -244,10 +244,24 @@ final class CalendarViewModel: ObservableObject {
     /// Darstellung - lokal gemerkte Antwort hat Vorrang vor dem (evtl.
     /// veralteten) Server-PARTSTAT.
     func effectivePartstat(for event: CalendarEventModel) -> String {
-        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid), !stored.isEmpty {
+        // Run 22.09. (Feedback: iPad zeigte nach einer Aenderung auf einem
+        // anderen Geraet weiter den alten Status): Der SERVER-Stand hat
+        // Vorrang, sobald er eine konkrete Antwort kennt. Der lokal
+        // gemerkte Marker ist nur noch Bruecke, solange der Server (noch)
+        // NEEDS-ACTION/leer liefert.
+        let server = event.ownPartstat.lowercased()
+        if Self.isConcretePartstat(server) { return server }
+        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid),
+           !stored.isEmpty, Self.isConcretePartstat(stored) {
             return stored
         }
         return event.ownPartstat
+    }
+
+    /// Konkrete iTIP-Antwort (alles ausser "unbeantwortet"/leer).
+    static func isConcretePartstat(_ value: String) -> Bool {
+        let v = value.lowercased()
+        return v == "accepted" || v == "tentative" || v == "declined"
     }
 
     /// Event color: the calendar's custom/server color, fallback brand.
@@ -412,6 +426,18 @@ final class CalendarViewModel: ObservableObject {
                 .map { $0.uid.lowercased() }
         )
         SouveraInvitationCenter.shared.setServerAnsweredUids(serverAnswered)
+        // Run 22.09. (Feedback: veralteter lokaler Antwort-Marker): Meldet
+        // der Server eine konkrete, ABWEICHENDE Antwort, den lokalen Marker
+        // damit ueberschreiben (Selbstheilung) - sonst zeigt diese Ansicht
+        // weiter den auf DIESEM Geraet zuletzt gespeicherten Status.
+        for event in sortedAll where Self.isConcretePartstat(event.ownPartstat) && !event.uid.isEmpty {
+            if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid),
+               !stored.isEmpty, stored.lowercased() != event.ownPartstat.lowercased() {
+                SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                        status: event.ownPartstat)
+                JmapLog.write("Calendar partstat heal uid=\(event.uid): \(stored) -> \(event.ownPartstat)")
+            }
+        }
         await SouveraInvitationCenter.shared.setCalendarInvites(pending, accountKey: Self.stableAccountKey())
         // Run 19.09.: zuvor fehlgeschlagene Termin-Entfernungen (nach
         // Ablehnung) erneut versuchen.
@@ -728,6 +754,9 @@ final class CalendarViewModel: ObservableObject {
             let retryEntry = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
                                               href: entryUnwrapped.href, etag: nil, ics: entryUnwrapped.ics)
             ok = await client.updateEvent(retryEntry, ics: updated)
+            // Run 22.09.: Ergebnis des Retrys loggen (vorher unsichtbar -
+            // der Nutzer sah nur "gespeichert nicht").
+            JmapLog.write("updateReminders: Retry-Ergebnis uid=\(event.uid) ok=\(ok) minutes=\(minutes)")
         }
         let entryFinal = ok
             ? CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref, href: entryUnwrapped.href,
@@ -898,20 +927,27 @@ final class CalendarViewModel: ObservableObject {
     /// Run 16.09. (B4): Ersetzt alle VALARM-Blöcke durch die gegebenen
     /// Erinnerungen (Minuten vor Beginn). Leere Liste = keine Erinnerung.
     static func setValarms(ics: String, minutes: [Int]) -> String {
+        // Run 22.09. (Feedback: Erinnerungen liessen sich nicht speichern):
+        // Die frueher zeilenweise GETRIMMTE Fassung zerstoerte RFC-5545-
+        // Folding - Fortsetzungszeilen (fuehrendes Leerzeichen/Tab) wurden
+        // zu eigenstaendigen Zeilen und der Server lehnte den PUT mit 415
+        // ab ("Invalid Mimedir file. Line ... did not follow ..."). Jetzt:
+        // erst entfalten, dann VALARM-Bloecke entfernen/einfuegen, am Ende
+        // wieder RFC-konform bei 75 Oktetten falten.
         var cleaned: [String] = []
         var inAlarm = false
-        for raw in ics
-            .replacingOccurrences(of: "\r\n", with: "\n")
-            .components(separatedBy: "\n") {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if line == "BEGIN:VALARM" { inAlarm = true; continue }
-            if line == "END:VALARM" { inAlarm = false; continue }
+        for raw in ICSParser.unfold(ics).components(separatedBy: "\n") {
+            let upper = raw.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if upper == "BEGIN:VALARM" { inAlarm = true; continue }
+            if upper == "END:VALARM" { inAlarm = false; continue }
             if inAlarm { continue }
-            cleaned.append(line)
+            cleaned.append(raw)
         }
         guard !minutes.isEmpty,
-              let endIdx = cleaned.firstIndex(where: { $0 == "END:VEVENT" }) else {
-            return cleaned.joined(separator: "\r\n")
+              let endIdx = cleaned.firstIndex(where: {
+                  $0.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() == "END:VEVENT"
+              }) else {
+            return Self.foldICS(cleaned)
         }
         var alarms: [String] = []
         for m in minutes.sorted() {
@@ -919,7 +955,39 @@ final class CalendarViewModel: ObservableObject {
                        "DESCRIPTION:Erinnerung", "END:VALARM"]
         }
         cleaned.insert(contentsOf: alarms, at: endIdx)
-        return cleaned.joined(separator: "\r\n")
+        return Self.foldICS(cleaned)
+    }
+
+    /// RFC-5545-Folding: physische Zeilen bei max. 75 Oktetten umbrechen
+    /// (Fortsetzung mit CRLF + Leerzeichen), UTF-8-sicher - kein Multi-
+    /// Byte-Zeichen wird zerschnitten. Leere Zeilen werden verworfen.
+    static func foldICS(_ lines: [String]) -> String {
+        var physical: [String] = []
+        for line in lines where !line.isEmpty {
+            let bytes = Array(line.utf8)
+            if bytes.count <= 75 {
+                physical.append(line)
+                continue
+            }
+            var start = 0
+            var firstPiece = true
+            while start < bytes.count {
+                // Erste Zeile 75 Oktette, Fortsetzungen 74 (1 Oktett fuer das
+                // fuehrende Leerzeichen).
+                let budget = (firstPiece ? 75 : 74)
+                var end = min(start + budget, bytes.count)
+                // Auf eine UTF-8-Zeichengrenze zurueckgehen.
+                while end > start, String(bytes: bytes[start..<end], encoding: .utf8) == nil {
+                    end -= 1
+                }
+                if end == start { end = min(start + budget, bytes.count) }
+                let piece = String(decoding: bytes[start..<end], as: UTF8.self)
+                physical.append(firstPiece ? piece : " " + piece)
+                start = end
+                firstPiece = false
+            }
+        }
+        return physical.joined(separator: "\r\n")
     }
 
     /// Run 16.09. (B4): Standard-Erinnerung 15 min - nur wenn die ICS

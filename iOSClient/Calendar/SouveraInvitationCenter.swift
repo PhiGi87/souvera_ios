@@ -1059,7 +1059,12 @@ final class SouveraInvitationCenter: ObservableObject {
             byUid[eventUID.lowercased()] = minutes
             UserDefaults.standard.set(byUid, forKey: Self.reminderOverridesUIDKey)
         }
-        guard !eventUID.isEmpty else { return true }
+        guard !eventUID.isEmpty else {
+            // Noch kein Kalender-Termin: die Erinnerung wird beim Anlegen
+            // angewandt (gueltiger Pfad, kein Fehler).
+            SouveraLog.write("Invitations", "reminders deferred (keine UID fuer \(invitation.id))")
+            return true
+        }
         let client = CalDavClient(account: nil)
         let calendars = await client.fetchCalendars()
         let calendar = Calendar.current
@@ -1083,7 +1088,10 @@ final class SouveraInvitationCenter: ObservableObject {
                 return ok
             }
         }
-        return true
+        // Run 22.09.: UID-Match fehlgeschlagen - das war bisher ein STILLES
+        // "return true" und liess Erinnerungen verschwinden. Jetzt sichtbar.
+        SouveraLog.write("Invitations", "reminders update uid=\(eventUID): kein Termin im Kalender gefunden")
+        return false
     }
 
     // MARK: - Antwort auf einen bereits im Kalender liegenden Termin

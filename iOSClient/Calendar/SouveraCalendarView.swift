@@ -1272,12 +1272,24 @@ private struct CalendarEventDetailSheet: View {
 
     private var effectivePartstat: String {
         if let answeredRSVP { return answeredRSVP.rawValue.lowercased() }
-        // Run 19.09. (Feedback): gegebene Antwort aus dem lokalen Marker,
-        // falls der Server (noch) NEEDS-ACTION liefert.
-        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid) {
+        // Run 22.09. (Feedback: iPad zeigte alten Status): Zuerst den
+        // FRISCHEN Server-Stand aus der geladenen Liste nehmen - die
+        // hereingereichte Event-Kopie friert ownPartstat ein. Der lokale
+        // Marker ist nur Fallback, solange der Server nichts Konkretes hat.
+        var fresh = event
+        if case let .success(list) = viewModel.events,
+           let match = list.first(where: {
+               $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid)
+           }) {
+            fresh = match
+        }
+        let server = fresh.ownPartstat.lowercased()
+        if CalendarViewModel.isConcretePartstat(server) { return server }
+        if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid),
+           !stored.isEmpty, CalendarViewModel.isConcretePartstat(stored) {
             return stored
         }
-        return event.ownPartstat
+        return fresh.ownPartstat
     }
 
     private var currentRsvpStatusKey: String? {
