@@ -1751,11 +1751,6 @@ struct LinkChatView: View {
                                     fileActionMessage = message
                                     showFileActions = true
                                 },
-                                onSaveToFiles: { target in
-                                    saveToFilesMessage = target
-                                    saveFolderServerUrl = ""
-                                    showSaveFolderPicker = true
-                                },
                                 onImageTap: { target in
                                     fullscreenImageMessage = target
                                 },
@@ -1763,6 +1758,11 @@ struct LinkChatView: View {
                                     if let url = viewModel.chatPdfCache[target.id] {
                                         pdfPreviewURL = url
                                     }
+                                },
+                                onSaveToFiles: { target in
+                                    saveToFilesMessage = target
+                                    saveFolderServerUrl = ""
+                                    showSaveFolderPicker = true
                                 },
                                 onStartReply: { replyingTo = message },
                                 onStartForward: { forwardTarget = message },

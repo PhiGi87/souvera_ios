@@ -1782,10 +1782,14 @@ final class LinkViewModel: ObservableObject {
             overwrite: false,
             account: tblAccount.account) { _ in }
         SouveraLog.write("LinkChat", "saveToFiles copy name=\(unique) error=\(results.error.errorCode)")
-        if results.error == .success,
-           let read = await NCNetworking.shared.readFileAsync(serverUrlFileName: destination, account: tblAccount.account),
-           let metadata = read.metadata {
-            await NCManageDatabase.shared.addMetadataAsync(metadata)
+        if results.error == .success {
+            // Zielordner-Cache nachziehen, damit die Datei in den Dateien
+            // sofort sichtbar ist.
+            let read = await NCNetworking.shared.readFileAsync(serverUrlFileName: destination,
+                                                               account: tblAccount.account)
+            if let metadata = read.metadata {
+                await NCManageDatabase.shared.addMetadataAsync(metadata)
+            }
         }
         return results.error == .success
     }
