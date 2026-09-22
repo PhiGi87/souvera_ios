@@ -323,13 +323,13 @@ final class LinkChatListController: NSObject, ObservableObject {
         // Abdeckung bzw. zum Timeout ausgeblendet, statt kurz am Listen-
         // ende zu erscheinen und hochzuspringen. onEntrySettled wird nur
         // EINMAL gemeldet (revealt + startet den Hintergrund-Load).
-        revealIfTargetReached()
+        updateEntryTarget()
         [0.15, 0.35, 0.7].forEach { delay in
             entryRescrollTasks.append(Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { return }
                 guard let self, self.isEntryStabilizing else { return }
-                self.revealIfTargetReached()
+                self.updateEntryTarget()
                 self.evaluateEntrySettle()
             })
         }
@@ -367,15 +367,23 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
     }
 
-    /// Run 22.09.: Einblenden + Hintergrund-Load erst, wenn das Eintritts-
-    /// ziel WIRKLICH angefahren ist (Trennlinie im Fenster) - vorher
-    /// erschien kurz das Listenende und sprang dann hoch.
-    private func revealIfTargetReached() {
-        guard !didReportPositioned, isEntryStabilizing else { return }
-        if scrollToEntryTarget() {
+    /// Run 22.09. (Feedback: Eintritt landete irgendwo im Verlauf):
+    /// Positionieren und Freigeben getrennt. Bis das Layout stabil ist, wird
+    /// das Ziel in JEDEM Korrektur-Pass erneut angefahren (vorher machte der
+    /// didReportPositioned-Guard alle weiteren Paesse zu No-Ops, sodass nur
+    /// der erste - vor der Hoehen-Realisierung berechnete - Scroll blieb).
+    /// Freigegeben (onEntrySettled) wird genau einmal, sobald das Ziel
+    /// erreichbar ist; eine fehlende Boundary scrollt weiterhin nicht.
+    private func updateEntryTarget() {
+        guard isEntryStabilizing else { return }
+        let reached = scrollToEntryTarget()
+        if reached, !didReportPositioned {
             didReportPositioned = true
             onEntrySettled?()
             SouveraLog.write("LinkChat", "entry target reached - revealed")
+        }
+        if reached {
+            SouveraLog.write("LinkChat", "entry reposition pass (height \(Int(collectionView?.contentSize.height ?? 0)))")
         }
     }
 
@@ -422,6 +430,9 @@ final class LinkChatListController: NSObject, ObservableObject {
         cancelEntryRescrollPasses()
         entryTimeoutTask?.cancel()
         entryTimeoutTask = nil
+        // Run 22.09.: Schlusskorrektur - nach der letzten Hoehenaenderung
+        // die Position exakt setzen (sonst bleibt ein Rest-Versatz).
+        scrollToEntryTarget()
         SouveraLog.write("LinkChat", "entry settled (UIKit, \(reason))")
         // onEntrySettled bereits beim ersten Ziel-Scroll gemeldet
         // (didReportPositioned) - hier nur noch Log/State.
@@ -442,7 +453,7 @@ final class LinkChatListController: NSObject, ObservableObject {
 
         // Ziel erneut anfahren (Index je Pass aus der ID abgeleitet);
         // bei Erfolg die Liste freigeben (Run 22.09.).
-        revealIfTargetReached()
+        updateEntryTarget()
         evaluateEntrySettle()
     }
 
@@ -567,7 +578,7 @@ final class LinkChatListController: NSObject, ObservableObject {
         if isEntryStabilizing {
             entryTarget = .separator(id: boundary)
             // Run 22.09.: Freigabe an den Ziel-Treffer koppeln.
-            revealIfTargetReached()
+            updateEntryTarget()
             evaluateEntrySettle()
         } else if !didInitialEntry {
             pendingEntryBoundary = boundary
