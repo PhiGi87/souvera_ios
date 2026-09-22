@@ -104,6 +104,12 @@ struct SouveraShareSendView: View {
         viewModel.shareHandoff?.files ?? []
     }
 
+    /// Run 22.09. (Feedback): Geteilter Text/URL als sichtbarer Inhalt -
+    /// die optionale Nachricht ist ein SEPARATES Feld (vorbelegt).
+    private var sharedText: String {
+        (viewModel.shareHandoff?.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -112,6 +118,14 @@ struct SouveraShareSendView: View {
                         ForEach(Array(files.enumerated()), id: \.offset) { _, file in
                             SouveraShareContentRow(file: file)
                         }
+                    }
+                }
+                if !sharedText.isEmpty {
+                    Section(NSLocalizedString("_share_", comment: "")) {
+                        Text(sharedText)
+                            .font(.subheadline)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 Section {

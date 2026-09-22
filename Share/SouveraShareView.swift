@@ -11,34 +11,16 @@ import UIKit
 struct SouveraShareView: View {
 
     let files: [SouveraPendingShareStore.SharedFile]
-    let onMail: (String) -> Void
+    let sharedText: String
+    let onMail: () -> Void
     let onUpload: () -> Void
-    let onTalk: (String) -> Void
-    let onAssistant: (String) -> Void
+    let onTalk: () -> Void
     let onCancel: () -> Void
-
-    @State private var text: String
 
     private static var brandPrimary: Color { SouveraAppearance.accentColor }
 
-    init(files: [SouveraPendingShareStore.SharedFile],
-         initialText: String,
-         onMail: @escaping (String) -> Void,
-         onUpload: @escaping () -> Void,
-         onTalk: @escaping (String) -> Void,
-         onAssistant: @escaping (String) -> Void,
-         onCancel: @escaping () -> Void) {
-        self.files = files
-        self.onMail = onMail
-        self.onUpload = onUpload
-        self.onTalk = onTalk
-        self.onAssistant = onAssistant
-        self.onCancel = onCancel
-        _text = State(initialValue: initialText)
-    }
-
     private var usableFiles: [SouveraPendingShareStore.SharedFile] { files.filter { !$0.tooLarge } }
-    private var trimmedText: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedText: String { sharedText.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var canAct: Bool { !trimmedText.isEmpty || !usableFiles.isEmpty }
 
     var body: some View {
@@ -47,7 +29,7 @@ struct SouveraShareView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 12) {
                     if !files.isEmpty { fileList }
-                    textEditor
+                    if !trimmedText.isEmpty { textRow }
                     if !canAct {
                         Text(NSLocalizedString("_share_empty_", comment: ""))
                             .font(.subheadline)
@@ -139,27 +121,24 @@ struct SouveraShareView: View {
         return "doc"
     }
 
-    private var textEditor: some View {
-        ZStack(alignment: .topLeading) {
-            if text.isEmpty {
-                Text(NSLocalizedString("_share_text_hint_", comment: ""))
-                    .foregroundStyle(.secondary)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 18)
-            }
-            TextEditor(text: $text)
-                .scrollContentBackground(.hidden)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 10)
-                .frame(minHeight: 96, maxHeight: 160)
+    /// Run 22.09. (Feedback): Geteilter Text/URL als reine Inhaltszeile -
+    /// das Nachrichtenfeld gibt es nur noch nach der Raumwahl im Link-Weg.
+    private var textRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(trimmedText)
+                .font(.subheadline)
+                .lineLimit(6)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .padding(14)
         .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 12))
     }
 
     private var actions: some View {
         VStack(spacing: 10) {
             Button {
-                onMail(text)
+                onMail()
             } label: {
                 Text(NSLocalizedString("_share_mail_", comment: ""))
                     .font(.body.weight(.semibold))
@@ -174,11 +153,8 @@ struct SouveraShareView: View {
             if !usableFiles.isEmpty {
                 outlinedButton(NSLocalizedString("_share_upload_", comment: "")) { onUpload() }
             }
-            outlinedButton(NSLocalizedString("_share_talk_", comment: "")) { onTalk(text) }
+            outlinedButton(NSLocalizedString("_share_talk_", comment: "")) { onTalk() }
                 .disabled(!canAct)
-            if !trimmedText.isEmpty {
-                outlinedButton(NSLocalizedString("_share_assistant_", comment: "")) { onAssistant(text) }
-            }
         }
     }
 

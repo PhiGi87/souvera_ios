@@ -64,14 +64,15 @@ extension NCShareExtension {
     }
 
     /// Zeigt den Souvera-Auswahlschirm ueber der bestehenden Extension-UI.
+    /// Run 22.09. (Feedback): Ohne Assistant-Weg und ohne Nachrichtenfeld -
+    /// der geteilte Text/URL wird 1:1 uebergeben, die optionale Nachricht
+    /// gibt es nur nach der Raumwahl in der App.
     func presentSouveraShareChooser(payload: SouveraSharedPayload, inputItems: [NSExtensionItem]) {
         let chooser = SouveraShareView(
             files: payload.files,
-            initialText: payload.text,
-            onMail: { [weak self] text in
-                var updated = payload
-                updated.text = text
-                self?.handOffSouveraShare(action: "mail", payload: updated)
+            sharedText: payload.text,
+            onMail: { [weak self] in
+                self?.handOffSouveraShare(action: "mail", payload: payload)
             },
             onUpload: { [weak self] in
                 guard let self else { return }
@@ -79,13 +80,8 @@ extension NCShareExtension {
                     self.startFilesFlow(inputItems: inputItems)
                 }
             },
-            onTalk: { [weak self] text in
-                var updated = payload
-                updated.text = text
-                self?.handOffSouveraShare(action: "talk", payload: updated)
-            },
-            onAssistant: { [weak self] text in
-                self?.handOffToAssistant(text: text)
+            onTalk: { [weak self] in
+                self?.handOffSouveraShare(action: "talk", payload: payload)
             },
             onCancel: { [weak self] in
                 self?.cancel()
@@ -95,19 +91,6 @@ extension NCShareExtension {
         host.modalPresentationStyle = .fullScreen
         host.view.backgroundColor = .systemGroupedBackground
         present(host, animated: true)
-    }
-
-    /// Uebergibt Text an den Assistant (bestehender App-Group-Weg).
-    func handOffToAssistant(text: String) {
-        NCAssistantSharedTextStore.save(text)
-        guard let url = URL(string: "souvera://assistant/shared-text") else {
-            extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
-            return
-        }
-        openDeepLinkThroughResponderChain(url, label: "assistant shared text")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.extensionContext?.completeRequest(returningItems: nil, completionHandler: nil)
-        }
     }
 
     /// Uebergibt den geteilten Inhalt an die App und schliesst die Extension.
