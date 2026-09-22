@@ -468,7 +468,7 @@ struct NCSettingsView: View {
         isSendingLogs = true
         logsResult = nil
         Task {
-            // 10s-Timeout: bei langsamen Verbindungen wartete der Nutzer
+            // 15s-Timeout: bei langsamen Verbindungen wartete der Nutzer
             // minutenlang auf den JMAP-Versand (Run-Feedback 12.09.).
             // Nach dem Timeout oeffnet sich das NATIVE Apple-Teilen mit dem
             // fertigen Log-File - mit Vorab-Info im Overlay.
@@ -484,7 +484,7 @@ struct NCSettingsView: View {
                 logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
             case .failure(let error):
                 if case SouveraLogSender.MailSendError.timeout = error {
-                    SouveraLog.write("Settings", "logs send timed out (10s) - offering native share")
+                    SouveraLog.write("Settings", "logs send timed out (15s) - offering native share")
                     // Vorab-Info: Ergebnis-Overlay informieren, bevor das
                     // Apple-Teilen erscheint.
                     logsResult = (true, NSLocalizedString("_settings_logs_timeout_share_", comment: ""))

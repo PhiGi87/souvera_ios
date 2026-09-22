@@ -59,12 +59,18 @@ struct SouveraMailCredentialManager {
     private var keychain: Keychain { Keychain(service: Self.service) }
 
     func ensureCombinedCredential(account explicitAccount: String? = nil) async -> MailAccount? {
-        guard let info = Self.accountInfo(explicitAccount) else { return nil }
+        guard let info = Self.accountInfo(explicitAccount) else {
+            SouveraLog.write("MailCredential", "ensure: no account info available")
+            return nil
+        }
         let account = info.account
         let baseUrl = info.baseUrl
         let username = info.username
         let davPassword = info.davPassword
-        guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
+        guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else {
+            SouveraLog.write("MailCredential", "ensure: incomplete account fields")
+            return nil
+        }
 
         if let stored = storedAccount(account: account, baseUrl: baseUrl, username: username) {
             return stored
@@ -98,12 +104,18 @@ struct SouveraMailCredentialManager {
     /// neu gemintzt (jeder Mint entwertet serverseitig das vorherige
     /// Passwort derselben Beschreibung).
     func renewCredential(account explicitAccount: String? = nil) async -> MailAccount? {
-        guard let info = Self.accountInfo(explicitAccount) else { return nil }
+        guard let info = Self.accountInfo(explicitAccount) else {
+            SouveraLog.write("MailCredential", "ensure: no account info available")
+            return nil
+        }
         let account = info.account
         let baseUrl = info.baseUrl
         let username = info.username
         let davPassword = info.davPassword
-        guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else { return nil }
+        guard !baseUrl.isEmpty, !username.isEmpty, !davPassword.isEmpty else {
+            SouveraLog.write("MailCredential", "ensure: incomplete account fields")
+            return nil
+        }
 
         let stored = storedAccount(account: account, baseUrl: baseUrl, username: username)
         if let last = lastMintDate(account: account),

@@ -85,7 +85,7 @@ enum SouveraLogSender {
     /// Settings bieten dann das native Teilen an. Der Versand-Task laeuft
     /// dahinter weiter - faellt er spter doch noch erfolgreich an, wird
     /// das Ergebnis via onLateSuccess gemeldet (dedupliziert).
-    static func sendLogsWithTimeout(timeoutSeconds: UInt64 = 10,
+    static func sendLogsWithTimeout(timeoutSeconds: UInt64 = 15,
                                     onLateSuccess: @escaping @Sendable () -> Void) async -> Result<String, Error> {
         let logs = await Task.detached { combinedLog() }.value
         let once = OnceBox()
@@ -134,9 +134,11 @@ enum SouveraLogSender {
             }
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {
+                SouveraLog.write("LogSender", "send step: no credential (attempt \(attempt + 1))")
                 lastError = MailSendError.noClient
                 continue
             }
+            SouveraLog.write("LogSender", "send step: credential ok")
             do {
                 let recipient = try await send(logs: logs, account: account)
                 return .success(recipient)
@@ -157,12 +159,15 @@ enum SouveraLogSender {
             let session = try await client.refreshSession()
             let accId = session.primaryAccountId
             guard !accId.isEmpty else {
+                SouveraLog.write("LogSender", "send step: no primary account id")
                 throw MailSendError.noClient
             }
+            SouveraLog.write("LogSender", "send step: session ok (\(logs.utf8.count) bytes)")
 
             let data = Data(logs.utf8)
             let uploaded = try await client.uploadBlob(accountId: accId, data: data, contentType: "text/plain")
             let blobId = uploaded.blobId
+            SouveraLog.write("LogSender", "send step: blob uploaded (\(data.count) bytes)")
 
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -202,8 +207,10 @@ enum SouveraLogSender {
             let created = draftResp["created"] as? [String: Any]
             let createdId = (created?["new"] as? [String: Any])?.optString("id") ?? ""
             guard !createdId.isEmpty else {
+                SouveraLog.write("LogSender", "send step: draft creation failed")
                 throw MailSendError.smtp("Draft-Erstellung fehlgeschlagen")
             }
+            SouveraLog.write("LogSender", "send step: draft created")
             let identities = try await api.getIdentities(accountId: accId)
             let identityId = identities.first?.optString("id") ?? ""
             let sentId = boxes.first(where: { ($0["role"] as? String) == "sent" })?.optString("id") ?? ""
@@ -217,6 +224,7 @@ enum SouveraLogSender {
             if !sentId.isEmpty {
                 _ = try? await api.moveEmails(accountId: accId, emailIds: [createdId], targetMailboxId: sentId, markRead: true)
             }
+            SouveraLog.write("LogSender", "send step: submitted")
             SouveraLog.write("LogSender", "logs sent to \(recipient)")
             return recipient
         } catch {
