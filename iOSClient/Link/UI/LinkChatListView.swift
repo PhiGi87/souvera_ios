@@ -318,20 +318,18 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         scrollToEntryTarget()
         pendingEntryBoundary = nil
-        // Liste SOFORT nach dem ersten Ziel-Scroll einblenden (Run 13.09.:
-        // bis zu 2,5s leere Fläche bis zum Settle). Die Korrektur-Pässe und
-        // die KVO-Stabilisierung laufen unsichtbar weiter; onEntrySettled
-        // wird nur EINMAL gemeldet (revealt + startet den Hintergrund-Load).
-        if !didReportPositioned {
-            didReportPositioned = true
-            onEntrySettled?()
-        }
+        // Run 22.09.: Einblenden erst am ERREICHTEN Ziel (revealIfTarget-
+        // Reached) - bei fehlender Boundary bleibt die Liste bis zur
+        // Abdeckung bzw. zum Timeout ausgeblendet, statt kurz am Listen-
+        // ende zu erscheinen und hochzuspringen. onEntrySettled wird nur
+        // EINMAL gemeldet (revealt + startet den Hintergrund-Load).
+        revealIfTargetReached()
         [0.15, 0.35, 0.7].forEach { delay in
             entryRescrollTasks.append(Task { [weak self] in
                 try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                 guard !Task.isCancelled else { return }
                 guard let self, self.isEntryStabilizing else { return }
-                self.scrollToEntryTarget()
+                self.revealIfTargetReached()
                 self.evaluateEntrySettle()
             })
         }
@@ -339,21 +337,45 @@ final class LinkChatListController: NSObject, ObservableObject {
     }
 
     /// Faehrt das Eintrittsziel an: Trennlinie (Index je Pass neu aus der
-    /// Boundary-ID abgeleitet) oder Listenende.
-    private func scrollToEntryTarget() {
-        guard let collectionView, !items.isEmpty else { return }
+    /// Boundary-ID abgeleitet) oder Listenende. Liefert true, wenn das
+    /// Ziel angefahren wurde.
+    @discardableResult
+    private func scrollToEntryTarget() -> Bool {
+        guard let collectionView, !items.isEmpty else { return false }
         switch entryTarget {
         case .bottom:
             scrollToBottom(animated: false)
+            return true
         case .separator(let id):
             if let index = items.firstIndex(where: { $0.message.id == id }) {
                 collectionView.layoutIfNeeded()
                 collectionView.scrollToItem(at: messageIndexPath(item: index),
                                             at: .centeredVertically, animated: false)
-            } else {
-                // Boundary (noch) nicht im Fenster: zunaechst ans Ende.
-                scrollToBottom(animated: false)
+                return true
             }
+            // Run 22.09. (Feedback: "Raum 2" sprang erst zum Neuesten, dann
+            // zur Trennlinie): Boundary (noch) nicht im Fenster - VOR der
+            // Freigabe NICHT ans Ende springen. Die Rescroll-Paesse/KVO
+            // fahren das Ziel an, sobald die Abdeckungs-Kette die Boundary
+            // publiziert; der 1,5s-Timeout faengt den Worst Case ab.
+            if didReportPositioned {
+                scrollToBottom(animated: false)
+            } else {
+                SouveraLog.write("LinkChat", "entry target pending (boundary \(id) not in window)")
+            }
+            return false
+        }
+    }
+
+    /// Run 22.09.: Einblenden + Hintergrund-Load erst, wenn das Eintritts-
+    /// ziel WIRKLICH angefahren ist (Trennlinie im Fenster) - vorher
+    /// erschien kurz das Listenende und sprang dann hoch.
+    private func revealIfTargetReached() {
+        guard !didReportPositioned, isEntryStabilizing else { return }
+        if scrollToEntryTarget() {
+            didReportPositioned = true
+            onEntrySettled?()
+            SouveraLog.write("LinkChat", "entry target reached - revealed")
         }
     }
 
@@ -361,6 +383,10 @@ final class LinkChatListController: NSObject, ObservableObject {
     /// Sofort-Settle desselben Millisekunden-Timestamps, Log 11.09.).
     private func evaluateEntrySettle() {
         guard isEntryStabilizing else { return }
+        // Run 22.09.: Settle erst nach der Freigabe - sonst endet die
+        // Stabilisierung, waehrend die Boundary noch nicht im Fenster ist
+        // (Raeume mit vielen Ungelesenen) und es wuerde nie mehr gefreigibt.
+        guard didReportPositioned else { return }
         if stableSizeCount >= 2,
            CACurrentMediaTime() - entryStartTime >= 0.4 {
             finishEntryStabilization(reason: "stable")
@@ -377,6 +403,15 @@ final class LinkChatListController: NSObject, ObservableObject {
         entryTimeoutTask = Task { [weak self] in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
             guard !Task.isCancelled else { return }
+            // Run 22.09.: Sicherheitsnetz - war die Boundary bis hierher
+            // nicht im Fenster, ans Ende fallen und JETZT freigeben.
+            if let self, !self.didReportPositioned {
+                self.entryTarget = .bottom
+                self.scrollToEntryTarget()
+                self.didReportPositioned = true
+                self.onEntrySettled?()
+                SouveraLog.write("LinkChat", "entry fallback to bottom after timeout")
+            }
             self?.finishEntryStabilization(reason: "timeout")
         }
     }
@@ -405,8 +440,9 @@ final class LinkChatListController: NSObject, ObservableObject {
         }
         lastStableContentHeight = height
 
-        // Ziel erneut anfahren (Index je Pass aus der ID abgeleitet).
-        scrollToEntryTarget()
+        // Ziel erneut anfahren (Index je Pass aus der ID abgeleitet);
+        // bei Erfolg die Liste freigeben (Run 22.09.).
+        revealIfTargetReached()
         evaluateEntrySettle()
     }
 
@@ -530,7 +566,8 @@ final class LinkChatListController: NSObject, ObservableObject {
         guard let boundary else { return }
         if isEntryStabilizing {
             entryTarget = .separator(id: boundary)
-            scrollToEntryTarget()
+            // Run 22.09.: Freigabe an den Ziel-Treffer koppeln.
+            revealIfTargetReached()
             evaluateEntrySettle()
         } else if !didInitialEntry {
             pendingEntryBoundary = boundary
