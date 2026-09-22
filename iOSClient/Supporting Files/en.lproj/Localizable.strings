@@ -1292,3 +1292,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_share_send_failed_" = "The content could not be sent.";
 "_no_rooms_" = "No rooms found";
 "_send_" = "Send";
+"_invitations_declined_kept_" = "Declined - the appointment remains in the calendar without reminders";

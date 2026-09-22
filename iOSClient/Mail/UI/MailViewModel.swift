@@ -1413,14 +1413,9 @@ final class MailViewModel: ObservableObject {
             handledExisting = await SouveraInvitationCenter.shared.respondToExistingCalendarEvent(
                 uid: resolved.eventUID, status: status.rawValue,
                 reminderMinutes: reminderMinutes)
-            // Run 19.09. (Feedback): Ablehnung entfernt den Termin
-            // komplett aus dem Kalender.
-            if status == .declined {
-                let removed = await SouveraInvitationCenter.shared.removeEventByUID(resolved.eventUID)
-                if !removed, !resolved.eventUID.isEmpty {
-                    SouveraInvitationCenter.addPendingRemoval(resolved.eventUID)
-                }
-            }
+            // Run 22.09. (Feedback: einheitliche Ablehnung, Std-CalDAV-
+            // Logik): Der Termin bleibt beim Ablehnen im Kalender stehen
+            // (durchgestrichen, ohne Erinnerungen) - kein DELETE mehr.
         }
         var created = false
         if status != .declined, !resolved.isCancellation, !handledExisting {

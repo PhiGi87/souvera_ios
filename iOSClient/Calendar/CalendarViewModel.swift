@@ -836,61 +836,12 @@ final class CalendarViewModel: ObservableObject {
             } else {
                 JmapLog.write("Invitation RSVP verify \(event.uid): ICS nicht lesbar")
             }
-            // Run 19.09. (Feedback): Eine ABLEHNUNG entfernt den Termin
-            // komplett aus dem Kalender (nach dem PARTSTAT-PUT, damit der
-            // Organisator die iTIP-Absage erhaelt). Lokal wird aber NUR
-            // entfernt, wenn der Server wirklich geloescht hat - sonst
-            // waere der Termin nur scheinbar weg und beim naechsten Laden
-            // wieder da.
-            // Run 22.09. (Feedback: nachtraegliches Ablehnen muss den Termin
-            // loeschen UND eine "Abgelehnt"-Mail an den Organisator senden):
-            // Reihenfolge neu - die Antwortmail geht IMMER raus, unabhaengig
-            // vom Loeschergebnis; lokal wird immer aufgeraeumt, ein
-            // fehlgeschlagenes DELETE wird nur vorgemerkt (kein harter
-            // Fehler, die Antwort ist serverseitig bereits erteilt).
-            let unknownOrganizer = event.organizerEmail
-                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            if status == .declined, Self.isForeignOrganizer(event) || unknownOrganizer {
-                // Run 22.09. (Feedback: Server-iTIP): KEINE App-Mail mehr -
-                // der PARTSTAT-PUT laesst Nextcloud die "Abgelehnt"-Antwort
-                // selbst an den Organisator senden (auch extern).
-                // Termin entfernen (Retry-Leiter + Verify im Client).
-                let removed = await Self.deleteEventEntry(entry, client: client)
-                JmapLog.write("Invitation RSVP DECLINED -> removed from calendar: \(removed)")
-                // 3) Lokal immer aufraeumen (Antwort ist erteilt); bei
-                // Fehlschlag Entfernung vormerken (Retry beim naechsten Load).
-                cachedEntries.removeAll { $0.href == entry.href }
-                if case var .success(list) = events {
-                    list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
-                    events = .success(list)
-                }
-                SouveraInvitationCenter.clearReminderOverride(uid: event.uid, inviteId: event.href)
-                if !event.uid.isEmpty {
-                    SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
-                                                            status: status.rawValue)
-                    if removed {
-                        SouveraInvitationCenter.removePendingRemoval(event.uid)
-                    } else {
-                        SouveraInvitationCenter.addPendingRemoval(event.uid)
-                    }
-                }
-                let remaining: [CalendarEventModel] = {
-                    if case let .success(list) = events {
-                        return list.filter { $0.ownPartstat == "needs-action" }
-                    }
-                    return []
-                }()
-                await SouveraInvitationCenter.shared.setCalendarInvites(
-                    remaining, accountKey: Self.stableAccountKey())
-                actionFeedback = CalendarActionFeedback(
-                    success: true,
-                    message: NSLocalizedString("_invitations_declined_removed_", comment: ""))
-                Task { [weak self] in
-                    try? await Task.sleep(nanoseconds: 2_000_000_000)
-                    await self?.load()
-                }
-                return true
-            }
+            // Run 22.09. (Feedback: einheitliche Ablehnung, Std-CalDAV-
+            // Logik): Ablehnen LOESCHT den Termin NICHT mehr - er bleibt
+            // mit durchgestrichenem Namen und ohne Erinnerungen im
+            // Kalender (PARTSTAT-PUT oben, Antwortmail serverseitig).
+            // Der generische Pfad unten aktualisiert den Eintrag sofort
+            // lokal (durchgestrichen) ohne Listen-Sprung.
             // B2: SOFORT-Feedback - betroffenen Eintrag lokal ersetzen und
             // neu parsen statt vollen Reload abzuwarten.
             if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
@@ -926,6 +877,12 @@ final class CalendarViewModel: ObservableObject {
             if !event.uid.isEmpty {
                 SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
                                                         status: status.rawValue)
+                if status == .declined {
+                    // Run 22.09.: Erinnerungs-Override mitgeben - der
+                    // Termin bleibt ohne Erinnerungen.
+                    SouveraInvitationCenter.clearReminderOverride(uid: event.uid,
+                                                                  inviteId: event.href)
+                }
             }
             // Run 22.09. (Feedback: Server-iTIP): Antwortmails versendet
             // Nextcloud selbst (PARTSTAT in CalDAV) - keine App-Mail mehr.

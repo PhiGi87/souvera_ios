@@ -896,9 +896,9 @@ struct SouveraInvitationDetailView: View {
                 // lokalen Editor-State (Server/Overrides raeumt der Center).
                 reminderMinutes = []
                 declineProposalMode = false
-                // Run 19.09. (Feedback): Ablehnung entfernt den Termin -
-                // Ergebnis-Popup, Schliessen beendet den Dialog.
-                cancelResultAlert = NSLocalizedString("_invitations_declined_removed_", comment: "")
+                // Run 22.09.: Ablehnung laesst den Termin im Kalender
+                // stehen (durchgestrichen, ohne Erinnerungen) - Popup.
+                cancelResultAlert = NSLocalizedString("_invitations_declined_kept_", comment: "")
             }
         }
     }
