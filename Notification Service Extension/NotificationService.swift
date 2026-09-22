@@ -28,12 +28,41 @@ class NotificationService: UNNotificationServiceExtension {
     var bestAttemptContent: UNMutableNotificationContent?
     var request: UNNotificationRequest?
 
+    /// Run 22.09. (Push-Diagnose): Zeitstempel + verstrichene Millisekunden
+    /// in die App-Group-Logs schreiben, damit der App-Log die NSE-Eingangs-
+    /// und Auslieferungszeit zeigt (bisher wurde nur der Kopierzeitpunkt
+    /// geloggt, nicht die Push-Ankunft).
+    static let nseStart = Date()
+
+    static func nseStamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f.string(from: Date())
+    }
+
+    static func nseMs(since: Date) -> Int {
+        Int(Date().timeIntervalSince(since) * 1000)
+    }
+
+    static func nseAppend(_ text: String, key: String, limit: Int = 12000) {
+        guard let d = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) else { return }
+        var logText = d.string(forKey: key) ?? ""
+        logText += text + "|"
+        if logText.count > limit { logText = String(logText.suffix(limit)) }
+        d.set(logText, forKey: key)
+    }
+
     override func didReceive(_ request: UNNotificationRequest, withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
         self.contentHandler = contentHandler
         self.request = request
         bestAttemptContent = (request.content.mutableCopy() as? UNMutableNotificationContent)
 
         NextcloudKit.configureLogger(logLevel: .verbose)
+
+        let nseStart = Self.nseStart
+        let arrivalKeys = (bestAttemptContent?.userInfo ?? [:]).keys.map { String(describing: $0) }.sorted().joined(separator: ",")
+        Self.nseAppend("t=\(Self.nseStamp()) phase=arrival keys=[\(arrivalKeys)]",
+                       key: "souvera_mail_push_timing_log")
 
         // P66d: Roh-Payload JEDES Pushs loggen (Keys + Werte, gekürzt) -
         // die Mail-Push-Feldstruktur ist serverseitig unbekannt; dieser
@@ -170,16 +199,16 @@ class NotificationService: UNNotificationServiceExtension {
                                         }
                                         semaphore.signal()
                                     }
-                                    _ = semaphore.wait(timeout: .now() + 8)
-                                    if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
-                                        let key = "souvera_mail_push_enrich_log"
-                                        var logText = (groupDefaults.string(forKey: key)) ?? ""
-                                        logText += "objectId=\(objectId.prefix(12)) result=\(enrichResult)|"
-                                        if logText.count > 10000 {
-                                            logText = String(logText.suffix(10000))
-                                        }
-                                        groupDefaults.set(logText, forKey: key)
-                                    }
+                                    // Run 22.09. (Push-Verzoegerung): Kurzes
+                                    // Budget statt 8 s - der Banner soll
+                                    // sofort erscheinen; laeuft die Anreicherung
+                                    // nicht in 1,5 s durch, wird der vorhandene
+                                    // (generische) Text sofort ausgeliefert.
+                                    let enrichStart = Date()
+                                    let waited = semaphore.wait(timeout: .now() + 1.5)
+                                    let enrichMs = Self.nseMs(since: enrichStart)
+                                    Self.nseAppend("t=\(Self.nseStamp()) phase=enrich objectId=\(objectId.prefix(12)) result=\(enrichResult) completed=\(waited == .success) wait_ms=\(enrichMs)",
+                                                   key: "souvera_mail_push_timing_log")
                                 }
                                 bestAttemptContent.title = title
                                 bestAttemptContent.body = body
@@ -246,28 +275,27 @@ class NotificationService: UNNotificationServiceExtension {
                     }
                     semaphore.signal()
                 }
-                _ = semaphore.wait(timeout: .now() + 8)
-                if let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
-                    let key = "souvera_mail_push_enrich_log"
-                    var logText = (groupDefaults.string(forKey: key)) ?? ""
-                    logText += "legacy emailId=\(legacyEmailId.prefix(12)) result=\(enrichResult)|"
-                    if logText.count > 10000 {
-                        logText = String(logText.suffix(10000))
-                    }
-                    groupDefaults.set(logText, forKey: key)
-                }
+                let enrichStart = Date()
+                let waited = semaphore.wait(timeout: .now() + 1.5)
+                let enrichMs = Self.nseMs(since: enrichStart)
+                Self.nseAppend("t=\(Self.nseStamp()) phase=enrich-legacy emailId=\(legacyEmailId.prefix(12)) result=\(enrichResult) completed=\(waited == .success) wait_ms=\(enrichMs)",
+                               key: "souvera_mail_push_timing_log")
             }
 
+            Self.nseAppend("t=\(Self.nseStamp()) phase=deliver total_ms=\(Self.nseMs(since: nseStart))",
+                           key: "souvera_mail_push_timing_log")
             contentHandler(bestAttemptContent)
         }
     }
 
     override func serviceExtensionTimeWillExpire() {
-        // Called just before the extension will be terminated by the system.
-        // Use this as an opportunity to deliver your "best attempt" at modified content, otherwise the original push payload will be used.
+        // iOS beendet die Extension (~30 s). Statt einer englischen
+        // Fehlermeldung den BESTEN vorhandenen Inhalt ausliefern (Run 22.09.
+        // - der Banner ist wichtiger als ein Technik-Text; mit dem neuen
+        // 1,5-s-Budget wird dieser Pfad praktisch nie erreicht).
         if let contentHandler = contentHandler, let bestAttemptContent = bestAttemptContent {
-            bestAttemptContent.title = ""
-            bestAttemptContent.body = "Souvera Notification Time Will Expire"
+            Self.nseAppend("t=\(Self.nseStamp()) phase=expire total_ms=\(Self.nseMs(since: Self.nseStart))",
+                           key: "souvera_mail_push_timing_log")
             contentHandler(bestAttemptContent)
         }
     }

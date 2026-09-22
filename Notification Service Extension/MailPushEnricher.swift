@@ -28,16 +28,65 @@ final class MailPushEnricher {
         defaults ?? .standard
     }
 
+    /// Run 22.09. (Push-Verzoegerung): Session (apiUrl/accountId) im
+    /// App-Group cachen und wiederverwenden - die Discovery
+    /// (`/.well-known/jmap` + `/jmap/session`) kostete pro Push einen
+    /// eigenen Netz-Roundtrip und damit Zeit bis zum Banner.
+    private let sessionApiUrlKey = "souvera_mail_push_ext_apiurl"
+    private let sessionAccountIdKey = "souvera_mail_push_ext_accountid"
+    private let sessionAtKey = "souvera_mail_push_ext_session_at"
+    private let sessionLifetimeSeconds: TimeInterval = 43_200 // 12 h
+
     /// Liefert (title, body) für einen Mail-Push oder nil (Fallback).
     func enrich(root: String, ncUser: String, ncPassword: String, objectId: String) async -> (title: String, body: String)? {
         guard !objectId.isEmpty else { return nil }
         let rootTrimmed = root.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let credential = await credential(root: rootTrimmed, ncUser: ncUser, ncPassword: ncPassword),
-              let session = await jmapSession(root: rootTrimmed, user: credential.loginName, password: credential.appPassword),
-              let accId = session.primaryAccountId,
-              let apiUrl = session.apiUrl,
-              let mail = await fetchMail(apiUrl: apiUrl, accountId: accId, user: credential.loginName, password: credential.appPassword, objectId: objectId) else { return nil }
+        guard let credential = await credential(root: rootTrimmed, ncUser: ncUser, ncPassword: ncPassword) else { return nil }
+
+        // 1) Session aus dem Cache, sonst frisch ermitteln und ablegen.
+        var apiUrl = cachedSessionApiUrl()
+        var accId = cachedSessionAccountId()
+        if apiUrl == nil || accId == nil {
+            guard let session = await jmapSession(root: rootTrimmed, user: credential.loginName, password: credential.appPassword),
+                  let freshApiUrl = session.apiUrl,
+                  let freshAccId = session.primaryAccountId else { return nil }
+            apiUrl = freshApiUrl
+            accId = freshAccId
+            storeSession(apiUrl: freshApiUrl, accountId: freshAccId)
+        }
+        guard let apiUrl, let accId else { return nil }
+
+        // 2) Nur noch EIN Request (Email/get). Bei Auth-Fehler Cache
+        //    verwerfen, damit der naechste Push neu aufloest.
+        guard let mail = await fetchMail(apiUrl: apiUrl, accountId: accId, user: credential.loginName, password: credential.appPassword, objectId: objectId) else {
+            clearSession()
+            return nil
+        }
         return mail
+    }
+
+    private func cachedSessionApiUrl() -> String? {
+        guard let last = groupDefaults.object(forKey: sessionAtKey) as? Date,
+              Date().timeIntervalSince(last) < sessionLifetimeSeconds else { return nil }
+        let url = groupDefaults.string(forKey: sessionApiUrlKey)
+        return (url?.isEmpty == false) ? url : nil
+    }
+
+    private func cachedSessionAccountId() -> String? {
+        let id = groupDefaults.string(forKey: sessionAccountIdKey)
+        return (id?.isEmpty == false) ? id : nil
+    }
+
+    private func storeSession(apiUrl: String, accountId: String) {
+        groupDefaults.set(apiUrl, forKey: sessionApiUrlKey)
+        groupDefaults.set(accountId, forKey: sessionAccountIdKey)
+        groupDefaults.set(Date(), forKey: sessionAtKey)
+    }
+
+    private func clearSession() {
+        groupDefaults.removeObject(forKey: sessionApiUrlKey)
+        groupDefaults.removeObject(forKey: sessionAccountIdKey)
+        groupDefaults.removeObject(forKey: sessionAtKey)
     }
 
     // MARK: - Credential (Login-Flow, max. 1x pro Tag)

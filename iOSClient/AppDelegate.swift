@@ -451,6 +451,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             }
             groupDefaults.removeObject(forKey: "souvera_mail_push_enrich_log")
         }
+        // Run 22.09. (Push-Verzoegerung): NSE-Zeitstempel (Ankunft/
+        // Anreicherung/Auslieferung) ins App-Log heben - damit ist die
+        // Strecke Push-Server -> iPhone messbar.
+        if let timingLog = groupDefaults.string(forKey: "souvera_mail_push_timing_log"),
+           !timingLog.isEmpty {
+            for entry in timingLog.split(separator: "|") where !entry.isEmpty {
+                SouveraLog.write("PushTiming", String(entry))
+            }
+            groupDefaults.removeObject(forKey: "souvera_mail_push_timing_log")
+        }
     }
 
     /// P66d: Mail-Metadaten für den Vordergrund-Banner laden (Absender/Betreff).
