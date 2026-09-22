@@ -67,6 +67,16 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
             window?.makeKeyAndVisible()
         } else {
             self.startNextcloud(scene: scene, withActivateSceneForAccount: false)
+            // Run 22.09. (Feedback: Teilen aus Fotos startete die App kalt
+            // und landete ohne Raum-Auswahl): Deep-Links beim KALTSTART
+            // kommen über connectionOptions.urlContexts - NICHT über
+            // scene(_:openURLContexts:). Nach der synchronen Registrierung
+            // des Controllers verarbeiten (asynchroner Hop).
+            if !connectionOptions.urlContexts.isEmpty {
+                DispatchQueue.main.async { [weak self] in
+                    self?.scene(scene, openURLContexts: connectionOptions.urlContexts)
+                }
+            }
         }
     }
 
@@ -349,6 +359,7 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         if scheme == global.appScheme, action == "share" {
             let requested = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                 .queryItems?.first(where: { $0.name == "action" })?.value ?? ""
+            SouveraLog.write("Share", "deep link action=\(requested) (scene, urlContexts=\(URLContexts.count))")
             let tabIndex = requested == "talk" ? 2 : 0
             controller.selectedIndex = tabIndex
             NotificationCenter.default.post(name: .souveraShareHandoff,
