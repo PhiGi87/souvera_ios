@@ -251,6 +251,20 @@ struct LinkChatMessage: Codable, Identifiable {
         messageParameters?.values.first(where: { $0.type == "file" })?.name
     }
 
+    /// Run 22.09. (Feedback: optionale Nachricht beim Teilen): Talk
+    /// parst die Caption einer Datei-Nachricht als NACHRICHTENTEXT
+    /// (SystemMessage.php: `$parsedMessage = $metaData['caption']`) -
+    /// nur bei reiner '{file}'-Nachricht liegt sie (falls ueberhaupt) im
+    /// `metaData`-Parameter. nil = reine Datei-Nachricht ohne Caption.
+    var captionText: String? {
+        if let text = fileCaption(), !text.isEmpty { return text }
+        if let caption = messageParameters?["metaData"]?.caption?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !caption.isEmpty {
+            return caption
+        }
+        return nil
+    }
+
     /// File metadata if this message carries a shared/uploaded file.
     func fileInfo() -> LinkFileInfo? {
         guard let file = messageParameters?.values.first(where: { $0.type == "file" }),
@@ -486,7 +500,11 @@ struct LinkRichObject: Codable {
     let id: String?
     let path: String?
     let size: String?
-    enum CodingKeys: String, CodingKey { case type, name, id, path, size }
+    /// Run 22.09. (Feedback: optionale Nachricht beim Teilen): Talk legt
+    /// die Caption einer Datei-Nachricht ggf. als `metaData`-Parameter
+    /// mit ab - tolerant mitdekodieren.
+    let caption: String?
+    enum CodingKeys: String, CodingKey { case type, name, id, path, size, caption }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -495,6 +513,7 @@ struct LinkRichObject: Codable {
         id = try? c.decode(String.self, forKey: .id)
         path = try? c.decode(String.self, forKey: .path)
         size = try? c.decode(String.self, forKey: .size)
+        caption = try? c.decode(String.self, forKey: .caption)
     }
 }
 

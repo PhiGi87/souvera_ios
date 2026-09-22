@@ -2299,13 +2299,22 @@ private struct LinkMessageBubble: View {
                 Text(message.actorDisplayName).font(.caption2).foregroundStyle(.secondary)
             }
             if isPdfMessage {
-                // Kein Dateiname/Caption unter dem Thumbnail - der Name ist
-                // nur im Vollbild-Viewer sichtbar (Run-Feedback 13.09.).
                 pdfContent
+                captionText
             } else if isImageMessage {
                 imageContent
+                captionText
             } else if message.fileName() != nil {
-                Text(displayText)
+                // Run 22.09. (Feedback: optionale Nachricht beim Teilen):
+                // Mit Caption den Nachrichtentext zeigen (Talk liefert die
+                // Caption als Nachrichtentext) - sonst "📎 Name".
+                if message.captionText != nil {
+                    Text(message.attributedDisplayText())
+                        .fixedSize(horizontal: false, vertical: true)
+                        .souveraOpenURLAction()
+                } else {
+                    Text(displayText)
+                }
             } else {
                 Text(message.attributedDisplayText())
                     .fixedSize(horizontal: false, vertical: true)
@@ -2446,6 +2455,18 @@ private struct LinkMessageBubble: View {
     private var displayText: String {
         if let file = message.fileName() { return "📎 \(file)" }
         return message.displayText()
+    }
+
+    /// Run 22.09.: Caption (optionale Nachricht beim Teilen) UNTER Bild
+    /// bzw. PDF - Talk liefert sie als Nachrichtentext der Datei-Nachricht.
+    @ViewBuilder
+    private var captionText: some View {
+        if message.captionText != nil {
+            Text(message.attributedDisplayText())
+                .fixedSize(horizontal: false, vertical: true)
+                .souveraOpenURLAction()
+                .padding(.top, 4)
+        }
     }
 }
 
