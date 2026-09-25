@@ -87,6 +87,18 @@ final class MailViewModel: ObservableObject {
     @Published var isSending = false
     @Published var sendError: String?
     @Published var searchResults: MailUiState<[MailMessage]> = .success([])
+
+    /// Run 25.09.: Aktuelle Suchtreffer fuer das Overlay (leer bei
+    /// loading/error).
+    var searchResultItems: [MailMessage] {
+        if case let .success(items) = searchResults { return items }
+        return []
+    }
+
+    var isSearching: Bool {
+        if case .loading = searchResults { return true }
+        return false
+    }
     @Published var offlineNotice: String?
     /// Transienter Trigger für den "Server-Error: Cache aktiv"-Banner
     /// (fade-in beim Öffnen, fade-out nach 3 s).
@@ -3304,6 +3316,13 @@ final class MailViewModel: ObservableObject {
             return
         }
         lastSearchQuery = trimmed
+        // Run 25.09.: Ergebnisse werden im Such-Overlay gecacht und bleiben
+        // beim Schliessen/Wiederoeffnen erhalten - hier NICHT mehr auf
+        // .loading zuruecksetzen, wenn dieselbe Query erneut laeuft.
+        if case let .success(existing) = searchResults, !existing.isEmpty,
+           lastSearchQuery == trimmed {
+            return
+        }
         searchResults = .loading
         guard useJmap, let api = jmapApi,
               let client = jmapClient,
@@ -3312,19 +3331,44 @@ final class MailViewModel: ObservableObject {
             return
         }
         let accId = session.primaryAccountId
+
+        func fetch(_ filter: [String: Any]) async throws -> [String] {
+            let resp = try await api.queryEmailsRaw(accountId: accId, filter: filter, limit: 100)
+            return (resp["ids"] as? [String]) ?? []
+        }
+
         do {
-            let resp = try await api.queryEmails(accountId: accId, inMailboxId: "", limit: 100, filterText: trimmed)
-            let ids = (resp["ids"] as? [String]) ?? []
+            // Run 25.09. (Feedback: Suche nach E-Mail-Adresse lieferte
+            // nichts): Stalwarts `text`-Filter matcht KEINE Adressen in
+            // From/To. Adress-artige Queries laufen deshalb als OR ueber
+            // text/from/to/cc/bcc; scheitert der OR-Operator, Fallback auf
+            // Einzelsuchen mit ID-Merge.
+            var ids: [String] = []
+            let filter = SouveraJmapMailSearch.buildFilter(query: trimmed)
+            do {
+                ids = try await fetch(filter)
+            } catch {
+                guard SouveraJmapMailSearch.isAddressLike(trimmed) else { throw error }
+                var merged: Set<String> = []
+                for fallback in SouveraJmapMailSearch.fallbackFilters(query: trimmed) {
+                    for id in (try? await fetch(fallback)) ?? [] {
+                        merged.insert(id)
+                    }
+                }
+                ids = Array(merged)
+            }
             guard !ids.isEmpty else {
                 searchResults = .success([])
                 return
             }
-            let list = try await api.getEmails(accountId: accId, ids: ids, properties: JmapApi.listSyncProperties)
+            let list = try await api.getEmails(accountId: accId, ids: Array(ids.prefix(100)), properties: JmapApi.listSyncProperties)
             let mapped = list.map {
                 JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: "search", json: $0)
-            }
+            }.sorted { $0.dateSent > $1.dateSent }
             searchResults = .success(mapped)
+            SouveraLog.write("MailSearch", "query=\(trimmed.prefix(40)) ids=\(ids.count) mapped=\(mapped.count)")
         } catch {
+            SouveraLog.write("MailSearch", "query=\(trimmed.prefix(40)) failed: \(error.localizedDescription)")
             searchResults = .error(errorText(error.localizedDescription))
         }
     }

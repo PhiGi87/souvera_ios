@@ -129,6 +129,24 @@ final class JmapApi {
         return try await client.singleCall("Email/query", args: args)
     }
 
+    /// Run 25.09.: Roher Filter (z. B. JMAP-FilterOperator OR fuer die
+    /// Mail-Suche ueber text/from/to/cc/bcc).
+    func queryEmailsRaw(
+        accountId: String,
+        filter: [String: Any],
+        limit: Int = 50,
+        position: Int = 0
+    ) async throws -> [String: Any] {
+        var args: [String: Any] = [:]
+        args["accountId"] = try resolveAccountArg(accountId)
+        args["filter"] = filter
+        args["collapseThreads"] = false
+        args["sort"] = [["property": "receivedAt", "isAscending": false]]
+        args["position"] = position
+        args["limit"] = limit
+        return try await client.singleCall("Email/query", args: args)
+    }
+
     func queryEmailChanges(
         accountId: String,
         sinceState: String?,
