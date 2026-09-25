@@ -42,6 +42,34 @@ struct LinkView: View {
     /// Overlay-Ergebnisse: gefilterte Raeume + Personen-Vorschlaege.
     @State private var searchPeopleResults: [LinkSuggestion] = []
 
+    /// Run 25.09.: Spotlight-artige Suche (eigenes Member, damit die
+    /// Root-Modifier-Kette nicht zum Type-Checker-Timeout fuehrt).
+    private var searchOverlay: some View {
+        Group {
+            if searchActive {
+                SouveraSearchOverlay(
+                    title: NSLocalizedString("_link_search_people_", comment: ""),
+                    isPresented: $searchActive,
+                    query: $searchQuery,
+                    items: searchOverlayItems,
+                    isLoading: false,
+                    display: { $0.display },
+                    onSelect: { handleSearchSelection($0) }
+                )
+                .transition(.opacity)
+            }
+        }
+    }
+
+    private func handleSearchSelection(_ item: SouveraLinkSearchItem) {
+        switch item.kind {
+        case .room(let room):
+            viewModel.openConversation(token: room.token, title: room.displayName)
+        case .person(let suggestion):
+            viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
+        }
+    }
+
     enum SouveraLinkSearchItem: Identifiable {
         case room(LinkConversation)
         case person(LinkSuggestion)
@@ -214,27 +242,7 @@ struct LinkView: View {
             }
         }
         // Run 25.09.: Spotlight-artige Suche (Raeume + Personen) als Overlay.
-        .overlay {
-            if searchActive {
-                SouveraSearchOverlay(
-                    title: NSLocalizedString("_link_search_people_", comment: ""),
-                    isPresented: $searchActive,
-                    query: $searchQuery,
-                    items: searchOverlayItems,
-                    isLoading: false,
-                    display: { $0.display },
-                    onSelect: { item in
-                        switch item.kind {
-                        case .room(let room):
-                            viewModel.openConversation(token: room.token, title: room.displayName)
-                        case .person(let suggestion):
-                            viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
-                        }
-                    }
-                )
-                .transition(.opacity)
-            }
-        }
+        .overlay { searchOverlay }
         .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
             guard (note.object as? String) == "talk" else { return }
             viewModel.consumeSharedShareIfNeeded()
