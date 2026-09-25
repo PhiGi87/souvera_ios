@@ -369,6 +369,27 @@ final class JmapApi {
         return resp
     }
 
+    /// Run 25.09. (Feedback: Shared-Versand landete nicht im Shared-Sent):
+    /// Kopiert eine Mail zwischen JMAP-Accounts (Cross-Account, z. B.
+    /// Primaer -> Shared-Postfach) und entfernt optional das Original
+    /// (RFC 8621 Email/copy; `accountId` = Ziel-Account).
+    func copyEmail(fromAccountId: String,
+                   toAccountId: String,
+                   emailId: String,
+                   mailboxId: String,
+                   destroyOriginal: Bool) async throws -> String {
+        let creationId = "copy\(UUID().uuidString.prefix(8))"
+        var args: [String: Any] = [:]
+        args["fromAccountId"] = try resolveAccountArg(fromAccountId)
+        args["accountId"] = try resolveAccountArg(toAccountId)
+        args["create"] = [creationId: ["id": emailId, "mailboxIds": [mailboxId: true]]]
+        if destroyOriginal {
+            args["onSuccessDestroyOriginal"] = true
+        }
+        let resp = try await client.singleCall("Email/copy", args: args)
+        return resp.optString("newState")
+    }
+
     /// Run 19.09. (Feedback: Antwort-Mail kam nicht an): Die Einreichung
     /// nach dem Submit auf "final" setzen (Undo-Fenster beenden) und den
     /// Zustand pruefen - Stalwart akzeptierte sie sonst nur als "pending".
