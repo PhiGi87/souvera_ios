@@ -68,6 +68,7 @@ struct MailView: View {
                 if searchActive {
                     SouveraSearchOverlay(
                         title: NSLocalizedString("_mail_search_", comment: ""),
+                        emptyHint: NSLocalizedString("_mail_search_hint_", comment: ""),
                         isPresented: $searchActive,
                         query: $searchQuery,
                         items: viewModel.searchResultItems,
@@ -77,7 +78,8 @@ struct MailView: View {
                                 title: message.displayFrom.isEmpty ? NSLocalizedString("_mail_", comment: "") : message.displayFrom,
                                 subtitle: message.subject,
                                 icon: "envelope",
-                                tintColor: SouveraAppearance.accentColor
+                                tintColor: SouveraAppearance.accentColor,
+                                trailing: MailDateFormatter.searchLabel(for: message.dateSent)
                             )
                         },
                         onSelect: { message in

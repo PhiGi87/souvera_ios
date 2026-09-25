@@ -17,6 +17,8 @@ struct SouveraSearchDisplay: Equatable {
     let subtitle: String
     let icon: String
     let tintColor: Color
+    /// Rechte Nebenspalte (z. B. Datum/Zeit bei Mail-Treffern).
+    var trailing: String = ""
 
     static func == (lhs: SouveraSearchDisplay, rhs: SouveraSearchDisplay) -> Bool {
         lhs.title == rhs.title && lhs.subtitle == rhs.subtitle && lhs.icon == rhs.icon
@@ -27,6 +29,9 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
     let title: String
     /// Hinweistext, wenn die Suche laeuft (z. B. "weite Kalendersuche").
     var loadingHint: String = ""
+    /// Hinweistext im LEEREN Ergebnisbereich (pro Modul: "E-Mails suchen",
+    /// "Termine suchen", "Person oder Raum suchen").
+    var emptyHint: String = ""
     @Binding var isPresented: Bool
     @Binding var query: String
     let items: [Item]
@@ -109,8 +114,8 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
                     Text(NSLocalizedString("_mail_search_no_results_", comment: ""))
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
-                } else {
-                    Text(NSLocalizedString("_mail_search_hint_", comment: ""))
+                } else if !emptyHint.isEmpty {
+                    Text(emptyHint)
                         .foregroundStyle(.secondary)
                         .font(.subheadline)
                 }
@@ -181,6 +186,15 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
                     }
                 }
                 Spacer()
+                if !d.trailing.isEmpty {
+                    // Run 25.09. (Mail): Datum+Uhrzeit rechts - bleibt immer
+                    // voll lesbar, Titel/Subjekt kuerzen stattdessen.
+                    Text(d.trailing)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

@@ -132,6 +132,7 @@ struct SouveraCalendarView: View {
                 SouveraSearchOverlay(
                     title: NSLocalizedString("_calendar_search_hint_", comment: ""),
                     loadingHint: NSLocalizedString("_calendar_search_wide_", comment: ""),
+                    emptyHint: NSLocalizedString("_calendar_search_hint_", comment: ""),
                     isPresented: $searchActive,
                     query: $searchQuery,
                     items: viewModel.eventSearchResults ?? [],
@@ -144,15 +145,7 @@ struct SouveraCalendarView: View {
                             tintColor: viewModel.color(for: event)
                         )
                     },
-                    onSelect: { event in
-                        // In die normale Ansicht: Monat/Tag des Termins + Detail.
-                        selectedDay = event.start
-                        viewModel.visibleMonth = event.start
-                        viewMode = .day
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-                            detailEvent = event
-                        }
-                    }
+                    onSelect: { openEventFromSearch($0) }
                 )
                 .transition(.opacity)
             }
@@ -222,7 +215,9 @@ struct SouveraCalendarView: View {
             )
         }
         .sheet(isPresented: $showCalendarPicker) {
-            CalendarPickerSheet(viewModel: viewModel)
+            CalendarPickerSheet(viewModel: viewModel, searchQuery: $searchQuery) { event in
+                openEventFromSearch(event)
+            }
         }
         .sheet(isPresented: $showMonthYearPicker) {
             MonthYearPickerSheet(initial: viewModel.visibleMonth) { date in
@@ -1991,6 +1986,11 @@ private struct CalendarEventEditSheet: View {
 /// custom color per calendar via its "..." menu.
 private struct CalendarPickerSheet: View {
     @ObservedObject var viewModel: CalendarViewModel
+    /// Run 25.09.: Such-Overlay in der Uebersicht - Query wird GEBUNDEN an
+    /// die Hauptansicht uebergeben (Zustandserhalt beim Wieder-Oeffnen).
+    @Binding var searchQuery: String
+    var onOpenEvent: (CalendarEventModel) -> Void = { _ in }
+    @State private var searchActive = false
     @Environment(\.dismiss) private var dismiss
 
     private let palette: [String] = [
@@ -2064,18 +2064,73 @@ private struct CalendarPickerSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Task { await viewModel.load() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
+                    HStack(spacing: 12) {
+                        // Run 25.09. (Feedback): Die Termin-Suche lebt hier
+                        // in der Kalender-Übersicht (neben Aktualisieren).
+                        Button {
+                            searchActive = true
+                        } label: {
+                            Image(systemName: "magnifyingglass")
+                        }
+                        .accessibilityLabel(NSLocalizedString("_calendar_search_hint_", comment: ""))
+                        Button {
+                            Task { await viewModel.load() }
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                        }
+                        .accessibilityLabel(NSLocalizedString("_calendar_refresh_", comment: ""))
                     }
-                    .accessibilityLabel(NSLocalizedString("_calendar_refresh_", comment: ""))
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
                 }
             }
+            // Run 25.09.: Dasselbe Such-Overlay wie in der Hauptansicht.
+            .overlay {
+                if searchActive {
+                    CalendarSearchOverlay(
+                        viewModel: viewModel,
+                        searchQuery: $searchQuery,
+                        isPresented: $searchActive,
+                        onSelect: { event in
+                            dismiss()
+                            onOpenEvent(event)
+                        }
+                    )
+                    .transition(.opacity)
+                }
+            }
         }
+    }
+}
+
+/// Schlanke Huelle (Type-Checker): Such-Overlay mit den Ergebnisdaten des
+/// Kalender-ViewModels.
+private struct CalendarSearchOverlay: View {
+    @ObservedObject var viewModel: CalendarViewModel
+    @Binding var searchQuery: String
+    @Binding var isPresented: Bool
+    let onSelect: (CalendarEventModel) -> Void
+
+    var body: some View {
+        SouveraSearchOverlay(
+            title: NSLocalizedString("_calendar_search_hint_", comment: ""),
+            loadingHint: NSLocalizedString("_calendar_search_wide_", comment: ""),
+            emptyHint: NSLocalizedString("_calendar_search_hint_", comment: ""),
+            isPresented: $isPresented,
+            query: $searchQuery,
+            items: viewModel.eventSearchResults ?? [],
+            isLoading: viewModel.isSearchingEvents,
+            display: { event in
+                SouveraSearchDisplay(
+                    title: event.title.isEmpty ? NSLocalizedString("_calendar_", comment: "") : event.title,
+                    subtitle: event.start.formatted(date: .abbreviated, time: event.allDay ? .omitted : .shortened),
+                    icon: "calendar",
+                    tintColor: viewModel.color(for: event)
+                )
+            },
+            onSelect: onSelect
+        )
     }
 }
 
@@ -2238,10 +2293,9 @@ extension SouveraCalendarView {
                     }
                     .buttonStyle(.plain)
                     .accessibilityLabel(NSLocalizedString("_calendar_today_", comment: ""))
-                    SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
-                        searchActive = true
-                    }
-                    .accessibilityLabel(NSLocalizedString("_calendar_search_hint_", comment: ""))
+                    // Run 25.09. (Feedback): Der Suchbutton lebt in der
+                    // Kalender-UEBERSICHT (neben Aktualisieren), nicht mehr
+                    // im Modul-Header.
                     SouveraHeaderButton(icon: "calendar.badge.checkmark", glass: false) {
                         showCalendarPicker = true
                     }
@@ -2282,6 +2336,17 @@ extension SouveraCalendarView {
         )
     }
 
+    /// Run 25.09.: Suchtreffer aus dem Overlay (Hauptansicht UND
+    /// Kalender-Übersicht) in die normale Ansicht überführen.
+    func openEventFromSearch(_ event: CalendarEventModel) {
+        selectedDay = event.start
+        viewModel.visibleMonth = event.start
+        viewMode = .day
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            detailEvent = event
+        }
+    }
+
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         bridge.title = ""
@@ -2294,10 +2359,6 @@ extension SouveraCalendarView {
                 selectedDay = Date()
                 viewModel.visibleMonth = Date()
                 scrollToNowTrigger += 1
-            },
-            .init(id: "search", icon: "magnifyingglass",
-                  accessibilityLabel: NSLocalizedString("_calendar_search_hint_", comment: "")) {
-                searchActive = true
             },
             .init(id: "picker", icon: "calendar.badge.checkmark",
                   accessibilityLabel: NSLocalizedString("_calendar_", comment: "")) {

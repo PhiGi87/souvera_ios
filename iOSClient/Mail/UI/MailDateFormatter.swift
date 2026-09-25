@@ -25,6 +25,15 @@ enum MailDateFormatter {
         Self.full.string(from: date)
     }
 
+    /// Run 25.09. (Such-Overlay): Datum+Uhrzeit IMMER beides (kurz) -
+    /// anders als die Liste, die bei heutigen Mails nur die Zeit zeigt.
+    static func searchLabel(for date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .short
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
     private static let time: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short

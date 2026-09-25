@@ -591,21 +591,16 @@ struct LinkView: View {
             bridge.leadingCustoms = []
             bridge.trailingCustoms = [SouveraHeaderBridge.Custom(
                 id: "status-plus", view: {
+                    // Run 25.09. (Feedback iPad: Status-Pill eingefroren):
+                    // Der SwiftUI-Inhalt muss das ViewModel BEOBACHTEN -
+                    // der frühere Snapshot zeigte den Status vom Zeitpunkt
+                    // der Bridge-Erzeugung und aktualisierte nie.
                     let host = UIHostingController(rootView:
-                        HStack(spacing: 2) {
-                            LinkOnlineStatusButton(status: viewModel.ownStatus) {
-                                showUserStatus = true
-                            }
-                            Button {
-                                channelName = ""
-                                showCreateChannel = true
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                                    .frame(width: 36, height: 36)
-                            }
-                            .buttonStyle(.plain)
+                        LinkBridgeStatusView(viewModel: viewModel) {
+                            showUserStatus = true
+                        } onCreateChannel: {
+                            channelName = ""
+                            showCreateChannel = true
                         }
                         .padding(.trailing, 4)
                     )
@@ -3469,7 +3464,8 @@ private struct LinkSearchOverlayView: View {
 
     var body: some View {
         SouveraSearchOverlay(
-            title: NSLocalizedString("_link_search_people_", comment: ""),
+            title: NSLocalizedString("_link_search_person_or_room_", comment: ""),
+            emptyHint: NSLocalizedString("_link_search_person_or_room_", comment: ""),
             isPresented: $isPresented,
             query: $query,
             items: items,
@@ -3504,6 +3500,33 @@ enum SouveraLinkSearchItem: Identifiable {
                                         subtitle: NSLocalizedString("_link_start_conversation_", comment: ""),
                                         icon: "person.badge.plus",
                                         tintColor: .green)
+        }
+    }
+}
+
+
+/// Run 25.09.: Status + "+" im iPad-Bridge-Header - mit @ObservedObject,
+/// damit die Status-Pill auf ownStatus-Aenderungen live reagiert (der
+/// Custom-View wird nur EINMAL erzeugt und vom Bar-Coordinator gecacht).
+private struct LinkBridgeStatusView: View {
+    @ObservedObject var viewModel: LinkViewModel
+    var onStatusTap: () -> Void
+    var onCreateChannel: () -> Void
+
+    var body: some View {
+        HStack(spacing: 2) {
+            LinkOnlineStatusButton(status: viewModel.ownStatus) {
+                onStatusTap()
+            }
+            Button {
+                onCreateChannel()
+            } label: {
+                Image(systemName: "plus")
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
+                    .frame(width: 36, height: 36)
+            }
+            .buttonStyle(.plain)
         }
     }
 }
