@@ -182,7 +182,7 @@ final class SouveraInvitationCenter: ObservableObject {
 
     /// Run 25.09.: Lokalen Antwort-Marker einer UID entfernen (z. B. fuer
     /// selbst organisierte Termine, die nie eine Einladung waren).
-    nonisolated static func clearAnsweredUid(_ uid: String) {
+    static func clearAnsweredUid(_ uid: String) {
         guard !uid.isEmpty else { return }
         let key = uid.lowercased()
         var uids = answeredUids()

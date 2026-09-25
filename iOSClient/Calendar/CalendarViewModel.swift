@@ -487,7 +487,7 @@ final class CalendarViewModel: ObservableObject {
         // den zentralen InvitationCenter melden (FAB-Badge + Sheet).
         // Run 25.09.: eigene Adressen pro Load auffrischen (Mail-Modul kann
         // Identitaeten nachgeladen haben).
-        cachedOwnAddresses = computeOwnAddresses()
+        Self.cachedOwnAddresses = Self.computeOwnAddresses()
         // Run 25.09.: eigene Termine sind keine offenen Einladungen.
         let pending = sortedAll.filter {
             $0.ownPartstat == "needs-action" && Self.isForeignOrganizer($0)
