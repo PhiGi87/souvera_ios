@@ -614,6 +614,25 @@ final class MailViewModel: ObservableObject {
             let accId = session?.primaryAccountId ?? ""
             let identities = try await api.getIdentities(accountId: accId)
             allIdentities = identities
+            // Run 25.09. (Feedback: Absender-Auswahl bei mehreren
+            // Postfaechern, auch shared): Identity-E-Mails und die
+            // Eigentuemer der Shared-Ordner in die From-Liste mergen.
+            let identityEmails = identities.compactMap { $0.optString("email") }
+            let sharedOwners = allMailboxes.compactMap { box -> String? in
+                box.ownerIdentity ?? SouveraMailFromAddresses.sharedOwnerEmail(ofPath: box.path)
+            }
+            let merged = SouveraMailFromAddresses.merge(
+                existing: fromAddresses,
+                identities: identityEmails,
+                sharedOwners: sharedOwners)
+            if merged != fromAddresses {
+                fromAddresses = merged
+                if !fromAddresses.contains(where: { $0.caseInsensitiveCompare(fromAddress) == .orderedSame }),
+                   let first = fromAddresses.first {
+                    fromAddress = first
+                }
+            }
+            SouveraLog.write("MailFrom", "options: \(fromAddresses.joined(separator: ", "))")
             identityId = identity(for: fromAddress) ?? identities.first?.optString("id")
         } catch {
             identityId = nil
@@ -623,6 +642,25 @@ final class MailViewModel: ObservableObject {
     /// The JMAP Identity matching the given from-address, if any.
     private func identity(for address: String) -> String? {
         allIdentities.first(where: { ($0.optString("email") ?? "") == address })?.optString("id")
+    }
+
+    /// Run 25.09.: Mailbox einer Nachricht finden (fuer die Shared-Ordner-
+    /// Erkennung beim Antworten/Weiterleiten).
+    private func mailbox(forMessage message: MailMessage) -> Mailbox? {
+        allMailboxes.first(where: { box in
+            box.id == message.mailboxId
+                || box.jmapId == message.mailboxId
+                || box.path == message.mailboxId
+        })
+    }
+
+    /// Run 25.09.: From-Wechsel im Picker zieht die passende JMAP-Identity
+    /// nach (der Submit resolved sie ebenfalls, dies haelt den State konsistent).
+    func selectFromAddress(_ address: String) {
+        guard fromAddresses.contains(where: { $0.caseInsensitiveCompare(address) == .orderedSame }) else { return }
+        fromAddress = address
+        identityId = identity(for: address)
+        SouveraLog.write("MailFrom", "selected \(address)")
     }
 
     // MARK: - Folders
@@ -3265,6 +3303,23 @@ final class MailViewModel: ObservableObject {
                 }
                 if mode == .reply || mode == .replyAll {
                     subject = message.subject.hasPrefix("Re:") ? message.subject : "Re: \(message.subject)"
+                }
+                // Run 25.09. (Paritaet Webmail v0.14.8): Reply/Forward aus
+                // einem Shared-Ordner ("Shared Folders/<email>/...") waehlt
+                // automatisch die Shared-Adresse als Absender.
+                if mode == .reply || mode == .replyAll || mode == .forward {
+                    if let mailbox = mailbox(forMessage: message),
+                       let sharedEmail = mailbox.ownerIdentity ?? SouveraMailFromAddresses.sharedOwnerEmail(ofPath: mailbox.path),
+                       !sharedEmail.isEmpty {
+                        if !fromAddresses.contains(where: { $0.caseInsensitiveCompare(sharedEmail) == .orderedSame }) {
+                            fromAddresses.append(sharedEmail)
+                        }
+                        if let match = fromAddresses.first(where: { $0.caseInsensitiveCompare(sharedEmail) == .orderedSame }) {
+                            fromAddress = match
+                            identityId = identity(for: match)
+                        }
+                        SouveraLog.write("MailFrom", "reply from shared mailbox -> \(sharedEmail)")
+                    }
                 }
             }
 

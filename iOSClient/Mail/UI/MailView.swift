@@ -1817,6 +1817,13 @@ private struct MailRowContent: View {
                     Text(showsRecipient ? message.displayTo : message.displayFrom)
                         .fontWeight(message.isRead ? .regular : .semibold).lineLimit(1)
                     Spacer()
+                    // Run 25.09. (Feedback): Anhang-Hinweis rechts in der
+                    // Mail-Zeile - vor Flag/Datum, nur bei Anhaengen.
+                    if message.hasAttachments {
+                        Image(systemName: "paperclip")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                     if message.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption2) }
                     Text(MailDateFormatter.listLabel(for: message.dateSent)).font(.caption2).foregroundStyle(.secondary)
                 }
@@ -2300,6 +2307,12 @@ struct MailComposeView: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        // Run 25.09.: Auswahl SOFORT anwenden (inkl. passender
+                        // Identity), nicht erst beim Senden.
+                        .onChange(of: selectedFromIndex) { _, newIndex in
+                            guard viewModel.fromAddresses.indices.contains(newIndex) else { return }
+                            viewModel.selectFromAddress(viewModel.fromAddresses[newIndex])
+                        }
                         Spacer()
                     }
                     .padding(.horizontal, 12)
@@ -2411,7 +2424,7 @@ struct MailComposeView: View {
                             outgoing.body = bodyText
                             outgoing.attachments = attachments
                             outgoing.inReplyTo = context.message?.messageId
-                            viewModel.fromAddress = viewModel.fromAddresses[selectedFromIndex]
+                            viewModel.selectFromAddress(viewModel.fromAddresses[selectedFromIndex])
                             viewModel.send(outgoing)
                             dismiss()
                         }
