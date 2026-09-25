@@ -391,6 +391,10 @@ struct LinkView: View {
 
     /// Green banner shown while a call is running without its own UI.
     private func activeCallBanner(title: String) -> some View {
+        // Run 25.09. (Feedback): Schwebt UNTER dem Glas-Header (56 pt =
+        // 44-pt-Buttons + Padding), verdeckt keine Header-Buttons; der
+        // GANZE Banner tappbar -> zurueck in den Call (die beiden Buttons
+        // bleiben eigenstaendig).
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
                 .foregroundStyle(.white)
@@ -417,8 +421,13 @@ struct LinkView: View {
         .padding(.vertical, 8)
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .shadow(radius: 4)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            returnToCall = true
+        }
         .padding(.horizontal, 10)
         .padding(.top, 4)
+        .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 48)
     }
 
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
