@@ -214,6 +214,34 @@ extension NCUtility {
         return page.thumbnail(of: screenSize, for: .mediaBox)
     }
 
+    /// Run 25.09. (Call-UI): Deterministische Nextcloud-Avatar-Farbe eines
+    /// Namens (md5 -> 18er-Brand-Palette) - dieselbe Logik wie in
+    /// `createAvatar`, damit Call-Kacheln und Raum-Avatare fuer dieselbe
+    /// Person dieselbe Farbe zeigen.
+    func avatarColor(for displayName: String) -> UIColor {
+        let lowerUsername = displayName.lowercased()
+        var hash: String
+        // swiftlint:disable force_try
+        let regex = try! NSRegularExpression(pattern: "^([0-9a-f]{4}-?){8}$")
+        // swiftlint:enable force_try
+        let matches = regex.matches(
+            in: lowerUsername,
+            range: NSRange(lowerUsername.startIndex..., in: lowerUsername))
+
+        if !matches.isEmpty {
+            hash = lowerUsername
+        } else {
+            hash = lowerUsername.md5()
+        }
+
+        hash = hash.replacingOccurrences(of: "[^0-9a-f]", with: "", options: .regularExpression)
+
+        // userColors has 18 colors by default
+        let result = hash.compactMap(\.hexDigitValue)
+        let userColorIx = result.reduce(0, { $0 + $1 }) % 18
+        return UIColor(cgColor: NCBrandColor.shared.userColors[userColorIx])
+    }
+
     func createAvatar(displayName: String, size: CGFloat) -> UIImage? {
         func usernameToColor(_ username: String) -> CGColor {
             // Normalize hash

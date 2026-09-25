@@ -77,10 +77,17 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             ])
         }
 
+        /// Run 25.09.: Zuletzt bekannter Name der Kachel - ein Re-Offer
+        /// (Video an/aus) durfte die Identitaet nicht mit "?" leeren,
+        /// nur weil der Teilnehmer-Poll die Session noch nicht kennt.
+        private(set) var currentName: String = ""
+
         func setOverlayIdentity(initials: String, name: String, color: UIColor) {
+            guard !name.isEmpty else { return }
+            currentName = name
             overlayAvatar.text = initials.uppercased()
             overlayAvatar.backgroundColor = color
-            overlayAvatar.textColor = UIColor(red: 0.0, green: 0.4, blue: 0.62, alpha: 1)
+            overlayAvatar.textColor = .white
             overlayAvatar.layer.cornerRadius = 55
             overlayAvatar.clipsToBounds = true
             overlayName.text = name
@@ -359,7 +366,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         avatar.textColor = .white
         avatar.font = .systemFont(ofSize: 18, weight: .semibold)
         avatar.textAlignment = .center
-        avatar.backgroundColor = UIColor(red: 0.2, green: 0.55, blue: 0.9, alpha: 1)
+        // Run 25.09.: 1:1 wie die Raum-Avatare - deterministische
+        // Nextcloud-Palette (Namens-Hash, Beige/Braun-Töne möglich).
+        avatar.backgroundColor = NCUtility().avatarColor(for: name)
         avatar.layer.cornerRadius = 26
         avatar.clipsToBounds = true
         avatar.translatesAutoresizingMaskIntoConstraints = false
@@ -395,8 +404,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Name-Label an EINER Kachel (tag 4711 = austauschbar).
     private func attachNameLabel(to container: UIView, name: String) {
-        container.viewWithTag(4711)?.removeFromSuperview()
+        // Run 25.09.: Leer (Poll kennt die Session noch nicht) -> das
+        // bestehende Label BEHALTEN statt es zu entfernen.
         guard !name.isEmpty else { return }
+        container.viewWithTag(4711)?.removeFromSuperview()
         let label = UILabel()
         label.tag = 4711
         label.text = name
@@ -900,13 +911,18 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             for (session2, nick) in self.sessionNames {
                 names[session2] = nick
             }
-            let name = names[session] ?? ""
+            // Run 25.09.: Unbekannter Name -> den zuletzt bekannten der
+            // Kachel behalten (kein "?"-Rueckschritt beim Re-Offer).
+            let name = names[session] ?? tile.currentName
+            if name.isEmpty {
+                CallDebugLog.log("CallVC", "remote tile \(key.prefix(14)) name unknown - identity kept")
+            }
             let initials = name.split(separator: " ").prefix(2)
                 .compactMap { $0.first.map(String.init) }
                 .joined()
             tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
                                     name: name,
-                                    color: UIColor(red: 0.78, green: 0.85, blue: 0.95, alpha: 1))
+                                    color: NCUtility().avatarColor(for: name))
             tile.showOverlay()
             CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
             self.attachNameLabel(to: tile.container, name: name)
@@ -964,7 +980,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                     .joined()
                 tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
                                         name: name,
-                                        color: UIColor(red: 0.78, green: 0.85, blue: 0.95, alpha: 1))
+                                        color: NCUtility().avatarColor(for: name))
                 if let label = tile.container.viewWithTag(4711) as? UILabel {
                     label.text = name
                 }
