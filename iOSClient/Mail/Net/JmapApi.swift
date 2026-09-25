@@ -387,7 +387,7 @@ final class JmapApi {
             args["onSuccessDestroyOriginal"] = true
         }
         let resp = try await client.singleCall("Email/copy", args: args)
-        return resp.optString("newState")
+        return resp.optString("newState") ?? ""
     }
 
     /// Run 19.09. (Feedback: Antwort-Mail kam nicht an): Die Einreichung
