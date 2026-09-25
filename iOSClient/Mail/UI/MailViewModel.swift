@@ -647,6 +647,28 @@ final class MailViewModel: ObservableObject {
         allIdentities.first(where: { ($0.optString("email") ?? "") == address })?.optString("id")
     }
 
+    /// Run 25.09.: E-Mail-Adresse des `from`-Feldes einer JMAP-Mail.
+    private static func firstFromAddress(_ json: [String: Any]) -> String {
+        guard let from = json["from"] as? [[String: Any]], let first = from.first else { return "" }
+        return (first["email"] as? String) ?? ""
+    }
+
+    /// Run 25.09.: Gesendet-Ordner des Shared-Postfachs zu einer Adresse
+    /// (Cross-Account-Ziel fuer Email/copy).
+    private func sharedSentTarget(for address: String) -> (accountId: String, mailboxId: String)? {
+        guard !address.isEmpty else { return nil }
+        let candidates = allMailboxes.filter { box in
+            let owner = SouveraMailFromAddresses.sharedOwnerEmail(ofPath: box.path)
+                ?? SouveraMailFromAddresses.normalizedOwnerEmail(box.ownerIdentity)
+            guard owner?.caseInsensitiveCompare(address) == .orderedSame else { return false }
+            let haystack = (box.name + "/" + box.path).lowercased()
+            return box.kind == .sent || haystack.contains("sent") || haystack.contains("gesendet")
+        }
+        guard let target = candidates.first(where: { !($0.jmapId ?? "").isEmpty }),
+              let mailboxId = target.jmapId else { return nil }
+        return (target.accountId, mailboxId)
+    }
+
     /// Run 25.09.: Ist die Absenderadresse der Owner eines Shared-Postfachs?
     private func isSharedFromAddress(_ address: String) -> Bool {
         guard !address.isEmpty else { return false }
@@ -1407,7 +1429,7 @@ final class MailViewModel: ObservableObject {
         guard let draftQuery = try? await api.queryEmails(accountId: accId, inMailboxId: draftsId, limit: 0),
               let draftIds = draftQuery["ids"] as? [String], !draftIds.isEmpty else { return }
         let drafts = (try? await api.getEmails(accountId: accId, ids: Array(draftIds.prefix(500)),
-                                               bodyProperties: ["messageId", "keywords"],
+                                               bodyProperties: ["messageId", "keywords", "from"],
                                                fetchAllBodyValues: false)) ?? []
         guard !drafts.isEmpty else { return }
         // Message-IDs des Gesendet-Ordners sammeln (begrenzt, in Bloecken).
@@ -1445,11 +1467,34 @@ final class MailViewModel: ObservableObject {
             _ = try? await api.deleteEmails(accountId: accId, emailIds: toDestroy)
         }
         if !toSent.isEmpty {
-            _ = try? await api.moveEmails(accountId: accId, emailIds: toSent, targetMailboxId: sentId, markRead: true)
+            // Run 25.09.: Shared-Absender NICHT in den primaeren Gesendet-
+            // Ordner schieben - Cross-Account-Kopie in den Shared-Sent.
+            var primaryMove: [String] = []
+            for id in toSent {
+                let from = drafts.first(where: { $0.optString("id") == id })
+                    .map { Self.firstFromAddress($0) } ?? ""
+                if isSharedFromAddress(from), let target = sharedSentTarget(for: from) {
+                    do {
+                        _ = try await api.copyEmail(fromAccountId: accId,
+                                                    toAccountId: target.accountId,
+                                                    emailId: id,
+                                                    mailboxId: target.mailboxId,
+                                                    destroyOriginal: true)
+                        SouveraLog.write("MailFrom", "drafts heal -> shared sent \(target.mailboxId)")
+                    } catch {
+                        primaryMove.append(id)
+                    }
+                } else {
+                    primaryMove.append(id)
+                }
+            }
+            if !primaryMove.isEmpty {
+                _ = try? await api.moveEmails(accountId: accId, emailIds: primaryMove, targetMailboxId: sentId, markRead: true)
+            }
             invalidateCache(for: mailbox)
         }
         if !toDestroy.isEmpty || !toSent.isEmpty {
-            JmapLog.write("drafts self-heal: \(toSent.count) moved to sent, \(toDestroy.count) duplicates destroyed")
+            JmapLog.write("drafts self-heal: \(toSent.count) moved/copied to sent, \(toDestroy.count) duplicates destroyed")
         }
     }
 
@@ -1581,34 +1626,43 @@ final class MailViewModel: ObservableObject {
     }
 
     private func syncMessagesJmap(_ mailbox: Mailbox, forceFullRefresh: Bool = false) async {
-        guard let api = jmapApi else { return }
+        guard let api = jmapApi else {
+            isFetchingMail = false
+            return
+        }
         let accountGen = self.generation
         // Run-Diagnose "Mail-Cache nach Neustart": Sync-Start loggen, um
         // Wiederhol-Trigger im Log exakt zählen zu können. Queued-Syncs
         // kenntlich machen (die laufen ja NICHT parallel).
-        if mailboxSyncInFlight {
+        if mailboxSyncInFlightId != nil {
             JmapLog.write("sync \(mailbox.name) QUEUED (forceFullRefresh=\(forceFullRefresh))")
         } else {
             JmapLog.write("sync \(mailbox.name) started (forceFullRefresh=\(forceFullRefresh))")
         }
-        // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync dieser
-        // Mailbox, wird der neue Wunsch nur vorgemerkt und danach EINMAL
-        // nachgezogen (keine parallelen Publishes, die sich überschreiben).
+        // P62c: Sync-In-Flight-Guard - läuft bereits ein Sync, wird der neue
+        // Wunsch nur vorgemerkt und danach EINMAL nachgezogen (keine
+        // parallelen Publishes, die sich überschreiben).
         let generation = listGeneration
-        guard !mailboxSyncInFlight else {
-            mailboxSyncQueued = true
+        guard mailboxSyncInFlightId == nil else {
+            mailboxSyncQueuedMailboxId = mailbox.id
             return
         }
-        mailboxSyncInFlight = true
+        mailboxSyncInFlightId = mailbox.id
         defer {
-            mailboxSyncInFlight = false
-            if mailboxSyncQueued {
-                mailboxSyncQueued = false
+            mailboxSyncInFlightId = nil
+            // Run 25.09. (HUD-Fix): IsFetchingMail fuer diese Mailbox IMMER
+            // beenden - der fruehere inkrementelle Erfolgspfad kehrte ohne
+            // Reset zurueck und das Overlay "Mail-Abruf laeuft..." blieb
+            // dauerhaft stehen. Nur wenn der Ordner noch offen ist, sonst
+            // wuerde ein laufender Ladezustand des NEUEN Ordners verdeckt.
+            if self.currentMailbox?.id == mailbox.id {
+                isFetchingMail = false
+            }
+            if let queued = mailboxSyncQueuedMailboxId {
+                mailboxSyncQueuedMailboxId = nil
                 // Unbedingt nachziehen - AUCH wenn sich die Generation
                 // geändert hat (Ordnerwechsel während des laufenden Syncs).
-                // Der alte Vergleich listGeneration == generation hat die
-                // vorgemerkte Sync-Auslösung verworfen -> die Liste blieb
-                // leer (kein Abruf, kein Overlay) bis zum Modulwechsel.
+                JmapLog.write("sync queued after in-flight: \(queued.prefix(20))")
                 Task { [weak self] in await self?.refreshMessages() }
             }
         }
@@ -1785,6 +1839,9 @@ final class MailViewModel: ObservableObject {
                     messages = .success(filterPendingRemoved(protectingLiveMessages(mapped), mailboxId: cacheKey))
                     pageState = (lastId: emails.last?.optString("id"), hasMore: emails.count >= 100)
                     hasMoreMessages = pageState.hasMore
+                    // Run 25.09. (HUD-Fix): auch der inkrementelle Erfolg
+                    // beendet das Abruf-Overlay.
+                    isFetchingMail = false
                     JmapLog.write("sync \(mailbox.name) incremental: added=\(added.count) new=\(newCount) removed=\(removed.count) dirty=\(dirty.count) refetched=\(refetch.count)")
                 JmapLog.write("publish \(mailbox.name): \(emails.count) mails (incremental)")
                     return
@@ -2184,8 +2241,11 @@ final class MailViewModel: ObservableObject {
     /// P62c: Sync-In-Flight-Guard - kein zweiter voller Sync derselben
     /// Mailbox parallel (die parallelen Syncs überschrieben sich sonst
     /// gegenseitig und warfen die Deep-Link-Mail wieder raus).
-    private var mailboxSyncInFlight = false
-    private var mailboxSyncQueued = false
+    /// Run 25.09. (Feedback: "Mail-Abruf laeuft..." blieb stehen): Guard
+    /// fuehrt die MAILBOX-ID - ein waehrend eines fremden Syncs geoeffneter
+    /// Ordner wird nachgezogen und sein HUD danach beendet.
+    private var mailboxSyncInFlightId: String?
+    private var mailboxSyncQueuedMailboxId: String?
     /// P62d: Debounce-Task für den Refresh nach Mutationen (Löschen/
     /// Verschieben) - ein Refresh nach der LETZTEN Mutation statt pro Swipe.
     private var mutationRefreshTask: Task<Void, Never>?
@@ -3592,13 +3652,16 @@ final class MailViewModel: ObservableObject {
                 // - dann entscheidet der Server (souvera_mail v0.14.7) und
                 // legt die Kopie in die Shared-Sent-Items.
                 let isSharedSender = isSharedFromAddress(fromAddress)
-                let sentBox: Mailbox? = isSharedSender ? nil :
-                    (allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
-                     ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }))
-                let sentJmapId = sentBox?.jmapId ?? ""
-                SouveraLog.write("MailFrom", "send from=\(fromAddress) identity=\(identId) sent=\(isSharedSender ? "server" : sentJmapId)")
+                let primarySentBox: Mailbox? =
+                    allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
+                     ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId })
+                let primarySentId = primarySentBox?.jmapId ?? ""
+                // Run 25.09.: Shared-Absender -> KEIN Submission-Patch
+                // (fremder JMAP-Account), sondern Cross-Account-Copy in den
+                // Shared-Sent; Fallback: primaerer Gesendet-Ordner.
+                SouveraLog.write("MailFrom", "send from=\(fromAddress) identity=\(identId) shared=\(isSharedSender) primarySent=\(primarySentId)")
                 _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId,
-                                              sentMailboxId: isSharedSender ? nil : sentJmapId)
+                                              sentMailboxId: isSharedSender ? nil : primarySentId)
 
                 // Fallback (falls der Server den Atomar-Patch nicht
                 // unterstuetzt): $draft entfernen und manuell nach Gesendet
@@ -3612,10 +3675,31 @@ final class MailViewModel: ObservableObject {
                 } catch {
                     JmapLog.write("send: $draft entfernen fehlgeschlagen: \(error.localizedDescription)")
                 }
-                if let sentBox, !sentJmapId.isEmpty {
+                if isSharedSender, let target = sharedSentTarget(for: fromAddress) {
+                    // Run 25.09.: Cross-Account-Kopie in den Shared-Sent,
+                    // Original (Entwurf) wird dabei entfernt.
+                    do {
+                        _ = try await api.copyEmail(fromAccountId: accId,
+                                                    toAccountId: target.accountId,
+                                                    emailId: emailId,
+                                                    mailboxId: target.mailboxId,
+                                                    destroyOriginal: true)
+                        SouveraLog.write("MailFrom", "send copy -> shared sent mailbox=\(target.mailboxId) account=\(target.accountId)")
+                        if let box = allMailboxes.first(where: { $0.accountId == target.accountId && $0.jmapId == target.mailboxId }) {
+                            invalidateCache(for: box)
+                        }
+                    } catch {
+                        SouveraLog.write("MailFrom", "send copy to shared sent FAILED: \(error.localizedDescription) - fallback primary")
+                        if let sentBox = primarySentBox, !primarySentId.isEmpty {
+                            _ = try? await api.moveEmails(accountId: accId, emailIds: [emailId],
+                                                          targetMailboxId: primarySentId, markRead: true)
+                            invalidateCache(for: sentBox)
+                        }
+                    }
+                } else if let sentBox = primarySentBox, !primarySentId.isEmpty {
                     do {
                         _ = try await api.moveEmails(accountId: accId, emailIds: [emailId],
-                                                     targetMailboxId: sentJmapId, markRead: true)
+                                                     targetMailboxId: primarySentId, markRead: true)
                         invalidateCache(for: sentBox)
                     } catch {
                         JmapLog.write("send: Sent-Verschiebung fehlgeschlagen: \(error.localizedDescription)")
