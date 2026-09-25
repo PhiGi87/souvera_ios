@@ -37,9 +37,7 @@ struct LinkView: View {
     @State private var shareRoomChosen: LinkConversation?
     @State private var searchActive = false
     @State private var searchQuery = ""
-    /// Run 25.09.: Debounce fuer die Overlay-Suche (Personen-Autocomplete).
-    @State private var searchDebounceTask: Task<Void, Never>?
-    /// Overlay-Ergebnisse: gefilterte Raeume + Personen-Vorschlaege.
+    /// Overlay-Ergebnisse: Personen-Vorschlaege (Autocomplete, Modifier).
     @State private var searchPeopleResults: [LinkSuggestion] = []
 
     private func handleSearchSelection(_ item: SouveraLinkSearchItem) {
@@ -165,37 +163,16 @@ struct LinkView: View {
                 break
             }
         }
-        .onChange(of: searchQuery) { _, newValue in
-            // Run 25.09.: Raeume filtert das Overlay selbst; Personen-
-            // Autocomplete debounced anstossen.
-            searchDebounceTask?.cancel()
-            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
-            guard !trimmed.isEmpty else {
-                searchPeopleResults = []
-                return
-            }
-            searchDebounceTask = Task {
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                guard !Task.isCancelled else { return }
-                viewModel.searchUsers(query: trimmed)
-                await MainActor.run {
-                    searchPeopleResults = viewModel.userResults
-                }
-            }
-        }
-        // Run 25.09.: Spotlight-artige Suche (Raeume + Personen) als Overlay.
-        .overlay {
-            if searchActive {
-                LinkSearchOverlayView(
-                    isPresented: $searchActive,
-                    query: $searchQuery,
-                    viewModel: viewModel,
-                    people: searchPeopleResults,
-                    onSelect: handleSearchSelection
-                )
-                .transition(.opacity)
-            }
-        }
+        // Run 25.09.: Spotlight-artige Suche (Raeume + Personen) als
+        // Overlay - in einem eigenen Modifier, damit die Root-Kette nicht
+        // zum Type-Checker-Timeout fuehrt.
+        .modifier(LinkSearchOverlayModifier(
+            isPresented: $searchActive,
+            query: $searchQuery,
+            viewModel: viewModel,
+            people: $searchPeopleResults,
+            onSelect: handleSearchSelection
+        ))
         .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
             guard (note.object as? String) == "talk" else { return }
             viewModel.consumeSharedShareIfNeeded()
@@ -3417,6 +3394,51 @@ private struct LinkLobbyManagementView: View {
                 workingAttendee = nil
             }
         }
+    }
+}
+
+/// Run 25.09.: Haengt die Spotlight-Suche an den Link-Root (Debounce +
+/// Overlay) - als eigener Modifier fuer eine schlanke Root-Kette.
+private struct LinkSearchOverlayModifier: ViewModifier {
+    @Binding var isPresented: Bool
+    @Binding var query: String
+    @ObservedObject var viewModel: LinkViewModel
+    @Binding var people: [LinkSuggestion]
+    let onSelect: (SouveraLinkSearchItem) -> Void
+    @State private var debounceTask: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: query) { _, newValue in
+                // Raeume filtert das Overlay selbst; Personen-Autocomplete
+                // debounced anstossen.
+                debounceTask?.cancel()
+                let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+                guard !trimmed.isEmpty else {
+                    people = []
+                    return
+                }
+                debounceTask = Task {
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    guard !Task.isCancelled else { return }
+                    viewModel.searchUsers(query: trimmed)
+                    await MainActor.run {
+                        people = viewModel.userResults
+                    }
+                }
+            }
+            .overlay {
+                if isPresented {
+                    LinkSearchOverlayView(
+                        isPresented: $isPresented,
+                        query: $query,
+                        viewModel: viewModel,
+                        people: people,
+                        onSelect: onSelect
+                    )
+                    .transition(.opacity)
+                }
+            }
     }
 }
 
