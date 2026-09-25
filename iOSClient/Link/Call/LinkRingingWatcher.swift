@@ -10,7 +10,6 @@
 
 import Foundation
 
-@MainActor
 final class LinkRingingWatcher {
 
     struct Decision: Equatable {
@@ -23,7 +22,7 @@ final class LinkRingingWatcher {
 
     /// Reine Entscheidungsfunktion (unit-testbar): true, wenn der eigene
     /// User von einem ANDEREN Geraet aus im Call ist.
-    nonisolated static func evaluate(participants: [LinkParticipant], ownUserId: String) -> Decision {
+    static func evaluate(participants: [LinkParticipant], ownUserId: String) -> Decision {
         guard !ownUserId.isEmpty else { return Decision(answeredElsewhere: false) }
         let own = participants.filter {
             $0.actorType == "users" && $0.actorId == ownUserId
@@ -31,8 +30,8 @@ final class LinkRingingWatcher {
         return Decision(answeredElsewhere: own.contains { $0.inCall != 0 })
     }
 
-    /// Startet das Polling. `onAnsweredElsewhere` wird HOECHSTENS einmal
-    /// gefeuert; der Watcher stoppt danach selbst.
+    /// Startet das Polling. `onAnsweredElsewhere` wird auf dem MAIN thread
+    /// HOECHSTENS einmal gefeuert; der Watcher stoppt danach selbst.
     func start(account: LinkAccount, token: String,
                onAnsweredElsewhere: @escaping () -> Void) {
         stop()
@@ -45,12 +44,19 @@ final class LinkRingingWatcher {
                 let participants = await api.listParticipants(token: token)
                 guard !Task.isCancelled, let self else { return }
                 let decision = Self.evaluate(participants: participants, ownUserId: ownUserId)
-                if decision.answeredElsewhere, !self.hasFired {
-                    self.hasFired = true
-                    SouveraLog.write("RingingObs", "answered elsewhere detected room=\(token)")
-                    onAnsweredElsewhere()
-                    self.stop()
-                    return
+                if decision.answeredElsewhere {
+                    var fired = false
+                    await MainActor.run {
+                        guard !self.hasFired else { return }
+                        self.hasFired = true
+                        fired = true
+                        SouveraLog.write("RingingObs", "answered elsewhere detected room=\(token)")
+                        onAnsweredElsewhere()
+                    }
+                    if fired {
+                        self.stop()
+                        return
+                    }
                 }
                 try? await Task.sleep(nanoseconds: self.pollIntervalSeconds * 1_000_000_000)
             }
