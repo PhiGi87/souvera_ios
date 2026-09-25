@@ -32,6 +32,7 @@ struct SouveraCalendarView: View {
     ) ?? .day
     @State private var searchQuery = ""
     @State private var searchActive = false
+    @State private var searchDebounceTask: Task<Void, Never>?
     @State private var scrollToNowTrigger = 0
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
@@ -86,13 +87,9 @@ struct SouveraCalendarView: View {
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 // (Offline-Banner haengt am Root-NavigationStack, siehe unten.)
                 VStack(spacing: 0) {
-                    if searchActive {
-                        calendarSearchField
-                    } else if searchQuery.trimmingCharacters(in: .whitespaces).isEmpty {
-                        content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
-                    } else {
-                        searchResults
-                    }
+                    // Run 25.09.: Overlay-Suche - die normale Ansicht bleibt
+                    // immer stehen, Ergebnisse zeigt das Overlay.
+                    content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                 }
                 .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 8)
             }
@@ -118,6 +115,47 @@ struct SouveraCalendarView: View {
         }
         .onChange(of: searchActive) { _, _ in
             populateHeaderBridge()
+        }
+        .onChange(of: searchQuery) { _, newValue in
+            // Run 25.09.: Weitsuche (Overlay-Ergebnisse) debounced hier -
+            // die View zeigt viewModel.eventSearchResults im Overlay.
+            searchDebounceTask?.cancel()
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
+                viewModel.searchEvents(query: newValue)
+            }
+        }
+        // Run 25.09.: Spotlight-artige Suche als Overlay.
+        .overlay {
+            if searchActive {
+                SouveraSearchOverlay(
+                    title: NSLocalizedString("_calendar_search_hint_", comment: ""),
+                    loadingHint: NSLocalizedString("_calendar_search_wide_", comment: ""),
+                    isPresented: $searchActive,
+                    query: $searchQuery,
+                    items: viewModel.eventSearchResults ?? [],
+                    isLoading: viewModel.isSearchingEvents,
+                    display: { event in
+                        SouveraSearchDisplay(
+                            title: event.title.isEmpty ? NSLocalizedString("_calendar_", comment: "") : event.title,
+                            subtitle: event.start.formatted(date: .abbreviated, time: event.allDay ? .omitted : .shortened),
+                            icon: "calendar",
+                            tintColor: viewModel.color(for: event)
+                        )
+                    },
+                    onSelect: { event in
+                        // In die normale Ansicht: Monat/Tag des Termins + Detail.
+                        selectedDay = event.start
+                        viewModel.visibleMonth = event.start
+                        viewMode = .day
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            detailEvent = event
+                        }
+                    }
+                )
+                .transition(.opacity)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: SouveraPushDeepLink.opened)) { notification in
             guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
@@ -620,55 +658,6 @@ struct SouveraCalendarView: View {
         .refreshable { await viewModel.load() }
     }
 
-    // MARK: - Search
-
-    /// Suchfeld + Inline-Suchergebnisse (ausgelöst per Such-Button im Header).
-    private var calendarSearchField: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(NSLocalizedString("_calendar_search_hint_", comment: ""), text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                Button(NSLocalizedString("_cancel_", comment: "")) {
-                    searchActive = false
-                    searchQuery = ""
-                }
-            }
-            .padding(12)
-            Divider()
-            searchResults
-        }
-    }
-
-    @ViewBuilder
-    private var searchResults: some View {
-        let query = searchQuery.trimmingCharacters(in: .whitespaces)
-        let results = matchingEvents(query)
-        VStack(spacing: 0) {
-            if results.isEmpty {
-                Spacer()
-                Text(NSLocalizedString("_mail_search_no_results_", comment: "")).foregroundStyle(.secondary)
-                Spacer()
-            } else {
-                List(results) { event in
-                    eventRow(event)
-                }
-                .listStyle(.plain)
-            }
-        }
-    }
-
-    private func matchingEvents(_ query: String) -> [CalendarEventModel] {
-        guard case let .success(all) = viewModel.events else { return [] }
-        guard !query.isEmpty else { return [] }
-        return all.filter {
-            $0.title.localizedCaseInsensitiveContains(query)
-                || ($0.location ?? "").localizedCaseInsensitiveContains(query)
-                || ($0.description ?? "").localizedCaseInsensitiveContains(query)
-        }.sorted { $0.start < $1.start }
-    }
 }
 
 private struct CalendarEventRow: View {

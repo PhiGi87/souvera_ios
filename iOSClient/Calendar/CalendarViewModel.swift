@@ -286,6 +286,71 @@ final class CalendarViewModel: ObservableObject {
         Task { await load() }
     }
 
+    // MARK: - Run 25.09.: Suche ueber den geladenen Monat hinaus
+
+    /// Weite Suchergebnisse (nil = keine Suche aktiv); sofortige Treffer
+    /// aus dem geladenen Fenster stehen drin, bevor die Weitsuche liefert.
+    @Published var eventSearchResults: [CalendarEventModel]?
+    @Published var isSearchingEvents = false
+    private var eventSearchTask: Task<Void, Never>?
+
+    /// Generation der laufenden Suche (Abbruch-Kriterium bei WeiterTippen).
+    private var eventSearchGeneration = 0
+
+    /// Suchtext ändern: sofortige lokale Treffer (geladenes Fenster) + weite
+    /// CalDAV-Suche (−12 / +24 Monate) ueber die gewaehlten Kalender; die
+    /// weiten Ergebnisse ersetzen die lokalen, wenn die Query noch aktuell ist.
+    func searchEvents(query: String) {
+        eventSearchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            eventSearchResults = nil
+            isSearchingEvents = false
+            return
+        }
+        eventSearchGeneration += 1
+        let generation = eventSearchGeneration
+        eventSearchResults = Self.filterEvents(loadedEvents(), query: trimmed)
+        eventSearchTask = Task { [weak self] in
+            guard let self else { return }
+            let wide = await self.searchEventsWide(trimmed)
+            guard !Task.isCancelled, generation == self.eventSearchGeneration else { return }
+            self.eventSearchResults = wide
+        }
+    }
+
+    private func loadedEvents() -> [CalendarEventModel] {
+        if case let .success(list) = events { return list }
+        return []
+    }
+
+    static func filterEvents(_ events: [CalendarEventModel], query: String) -> [CalendarEventModel] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return events }
+        return events.filter {
+            $0.title.localizedCaseInsensitiveContains(trimmed)
+                || ($0.location ?? "").localizedCaseInsensitiveContains(trimmed)
+                || ($0.description ?? "").localizedCaseInsensitiveContains(trimmed)
+        }.sorted { $0.start < $1.start }
+    }
+
+    private func searchEventsWide(_ query: String) async -> [CalendarEventModel] {
+        isSearchingEvents = true
+        defer { isSearchingEvents = false }
+        let client = CalDavClient(account: nil)
+        let calendar = Calendar.current
+        let now = Date()
+        let start = calendar.date(byAdding: .month, value: -12, to: now) ?? now
+        let end = calendar.date(byAdding: .month, value: 24, to: now) ?? now
+        var all: [CalendarEventModel] = []
+        for href in selectedCalendarHrefs.sorted() {
+            if Task.isCancelled { return [] }
+            let fetched = await client.fetchEvents(calendarHref: href, start: start, end: end)
+            all += Self.parseEntries(fetched, ownEmail: Self.ownAttendeeEmail())
+        }
+        return Self.filterEvents(all, query: query)
+    }
+
     func shiftMonth(by value: Int) {
         let calendar = Calendar.current
         if let shifted = calendar.date(byAdding: .month, value: value, to: visibleMonth) {

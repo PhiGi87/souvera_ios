@@ -37,6 +37,49 @@ struct LinkView: View {
     @State private var shareRoomChosen: LinkConversation?
     @State private var searchActive = false
     @State private var searchQuery = ""
+    /// Run 25.09.: Debounce fuer die Overlay-Suche (Personen-Autocomplete).
+    @State private var searchDebounceTask: Task<Void, Never>?
+    /// Overlay-Ergebnisse: gefilterte Raeume + Personen-Vorschlaege.
+    @State private var searchPeopleResults: [LinkSuggestion] = []
+
+    enum SouveraLinkSearchItem: Identifiable {
+        case room(LinkConversation)
+        case person(LinkSuggestion)
+        var id: String {
+            switch self {
+            case .room(let room): return "room:\(room.token)"
+            case .person(let s): return "person:\(s.id)"
+            }
+        }
+        var display: SouveraSearchDisplay {
+            switch self {
+            case .room(let room):
+                return SouveraSearchDisplay(title: room.displayName,
+                                            subtitle: "",
+                                            icon: room.isOneToOne ? "person.crop.circle" : "person.3.fill",
+                                            tintColor: SouveraAppearance.accentColor)
+            case .person(let s):
+                return SouveraSearchDisplay(title: s.label,
+                                            subtitle: NSLocalizedString("_link_start_conversation_", comment: ""),
+                                            icon: "person.badge.plus",
+                                            tintColor: .green)
+            }
+        }
+    }
+
+    private var searchOverlayItems: [SouveraLinkSearchItem] {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
+        var items: [SouveraLinkSearchItem] = []
+        if case let .success(rooms) = viewModel.conversations, !trimmed.isEmpty {
+            for room in rooms where room.displayName.localizedCaseInsensitiveContains(trimmed) {
+                items.append(.room(room))
+            }
+        }
+        for suggestion in searchPeopleResults {
+            items.append(.person(suggestion))
+        }
+        return items
+    }
 #if DEBUG
     @State private var simulatedIncoming: SimulatedCall?
 #endif
@@ -150,6 +193,46 @@ struct LinkView: View {
                 viewModel.startRoomPolling()
             @unknown default:
                 break
+            }
+        }
+        .onChange(of: searchQuery) { _, newValue in
+            // Run 25.09.: Raeume filtert das Overlay selbst; Personen-
+            // Autocomplete debounced anstossen.
+            searchDebounceTask?.cancel()
+            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                searchPeopleResults = []
+                return
+            }
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
+                viewModel.searchUsers(query: trimmed)
+                await MainActor.run {
+                    searchPeopleResults = viewModel.userResults
+                }
+            }
+        }
+        // Run 25.09.: Spotlight-artige Suche (Raeume + Personen) als Overlay.
+        .overlay {
+            if searchActive {
+                SouveraSearchOverlay(
+                    title: NSLocalizedString("_link_search_people_", comment: ""),
+                    isPresented: $searchActive,
+                    query: $searchQuery,
+                    items: searchOverlayItems,
+                    isLoading: false,
+                    display: { $0.display },
+                    onSelect: { item in
+                        switch item.kind {
+                        case .room(let room):
+                            viewModel.openConversation(token: room.token, title: room.displayName)
+                        case .person(let suggestion):
+                            viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
+                        }
+                    }
+                )
+                .transition(.opacity)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
@@ -932,22 +1015,8 @@ struct LinkConversationListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if searchActive {
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField(NSLocalizedString("_link_search_people_", comment: ""), text: $searchQuery)
-                        .textFieldStyle(.plain)
-                        .autocorrectionDisabled()
-                        .submitLabel(.search)
-                    Button(NSLocalizedString("_cancel_", comment: "")) {
-                        searchActive = false
-                        searchQuery = ""
-                        viewModel.searchUsers(query: "")
-                    }
-                }
-                .padding(12)
-                Divider()
-            }
+            // Run 25.09.: Suche laeuft im Spotlight-Overlay (LinkView) -
+            // hier nur noch die Raumliste.
             List {
 #if DEBUG
             Section(NSLocalizedString("_link_debug_", comment: "")) {
@@ -963,19 +1032,6 @@ struct LinkConversationListView: View {
                 }
             }
 #endif
-            if !viewModel.userResults.isEmpty {
-                Section(NSLocalizedString("_link_start_conversation_", comment: "")) {
-                    ForEach(viewModel.userResults) { suggestion in
-                        Button {
-                            viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
-                            searchQuery = ""
-                        } label: {
-                            Label(suggestion.label, systemImage: suggestionIcon(suggestion.source))
-                        }
-                    }
-                }
-            }
-
             switch viewModel.conversations {
             case .loading:
                 HStack { Spacer(); ProgressView(); Spacer() }
@@ -1024,9 +1080,6 @@ struct LinkConversationListView: View {
         }
         .listStyle(.plain)
         .refreshable { viewModel.loadConversations() }
-        .onChange(of: searchQuery) { _, newValue in
-            viewModel.searchUsers(query: newValue)
-        }
         .confirmationDialog(
             NSLocalizedString("_link_delete_room_", comment: ""),
             isPresented: Binding(

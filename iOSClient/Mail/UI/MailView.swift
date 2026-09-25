@@ -59,8 +59,34 @@ struct MailView: View {
             }
             .onChange(of: viewModel.route) { _, newRoute in
                 // Zurück aus einer Detailansicht, die aus der Suche
-                // geöffnet wurde: Suchfeld + Ergebnisliste wieder zeigen.
+                // geöffnet wurde: Overlay wieder zeigen (alter Zustand).
                 searchActive = (newRoute == .search)
+            }
+            // Run 25.09.: Spotlight-artige Suche als Overlay - die normale
+            // Ansicht bleibt dahinter stehen, Ergebnis-Tap navigiert.
+            .overlay {
+                if searchActive {
+                    SouveraSearchOverlay(
+                        title: NSLocalizedString("_mail_search_", comment: ""),
+                        isPresented: $searchActive,
+                        query: $searchQuery,
+                        items: viewModel.searchResultItems,
+                        isLoading: viewModel.isSearching,
+                        display: { message in
+                            SouveraSearchDisplay(
+                                title: message.displayFrom.isEmpty ? NSLocalizedString("_mail_", comment: "") : message.displayFrom,
+                                subtitle: message.subject,
+                                icon: "envelope",
+                                tintColor: SouveraAppearance.accentColor
+                            )
+                        },
+                        onSelect: { message in
+                            searchActive = false
+                            viewModel.openMessage(message, fromSearch: true)
+                        }
+                    )
+                    .transition(.opacity)
+                }
             }
 
         }
@@ -585,9 +611,7 @@ struct MailView: View {
 
     @ViewBuilder
     private var content: some View {
-        if searchActive {
-            mailSearchField
-        } else if landscapeLayout {
+        if landscapeLayout {
             landscapeSplitContent
         } else {
             switch viewModel.route {
@@ -613,8 +637,16 @@ struct MailView: View {
                 }
             case .compose:
                 MailComposeView(viewModel: viewModel, context: MailComposeContext(mode: .new, message: nil, to: [], cc: [], subject: "", quoteBody: "", preAttachments: []))
-            case .search:
-                mailSearchResults
+            case .search, .messages, .detail:
+                ZStack {
+                    MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail,
+                                        editing: $listEditing, selected: $listSelected,
+                                        moveTarget: $listMoveTarget, blacklistTarget: $listBlacklistTarget,
+                                        showEmptyTrashConfirm: $listShowEmptyTrashConfirm)
+                    if let message = viewModel.route.detailMessage {
+                        MailDetailView(viewModel: viewModel, message: message)
+                    }
+                }
             }
         }
     }
@@ -691,88 +723,6 @@ struct MailView: View {
                 .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 8)
                 .padding(.horizontal, 24)
                 .padding(.vertical, 32)
-        }
-    }
-
-    /// Suchfeld + Inline-Suchergebnisse (ausgelöst per Such-Button im Header).
-    private var mailSearchField: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                TextField(NSLocalizedString("_mail_search_hint_", comment: ""), text: $searchQuery)
-                    .textFieldStyle(.plain)
-                    .autocorrectionDisabled()
-                    .submitLabel(.search)
-                Button(NSLocalizedString("_cancel_", comment: "")) {
-                    searchActive = false
-                    searchQuery = ""
-                    viewModel.searchResults = .success([])
-                }
-            }
-            .padding(12)
-            Divider()
-            mailSearchResults
-        }
-    }
-
-    /// Inline-Suchergebnisse.
-    @ViewBuilder
-    private var mailSearchResults: some View {
-        switch viewModel.searchResults {
-        case .loading:
-            Spacer()
-            ProgressView()
-            Spacer()
-        case let .error(message):
-            Spacer()
-            Text(message).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
-            Spacer()
-        case let .success(items):
-            if items.isEmpty {
-                Spacer()
-                Text(NSLocalizedString("_mail_search_no_results_", comment: ""))
-                    .foregroundStyle(.secondary)
-                Spacer()
-            } else {
-                List {
-                    Section {
-                        ForEach(items) { message in
-                            Button {
-                                // Suchliste ausblenden, damit die Detailansicht
-                                // sichtbar wird (Route .detail liegt sonst dahinter).
-                                searchActive = false
-                                viewModel.openMessage(message, fromSearch: true)
-                            } label: {
-                                MailRow(message: message)
-                            }
-                            .buttonStyle(.plain)
-                            .contextMenu {
-                                Button(role: .destructive) { viewModel.delete([message]) } label: {
-                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                                }
-                            }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) { viewModel.delete([message]) } label: {
-                                    Label(NSLocalizedString("_delete_", comment: ""), systemImage: "trash")
-                                }
-                                Button { viewModel.toggleFlagged(message) } label: {
-                                    Label(NSLocalizedString("_mail_flag_", comment: ""), systemImage: "flag")
-                                }.tint(.orange)
-                            }
-                            .swipeActions(edge: .leading) {
-                                Button { viewModel.startCompose(mode: .reply, message: message) } label: {
-                                    Label(NSLocalizedString("_mail_reply_", comment: ""), systemImage: "arrowshape.turn.up.left")
-                                }
-                                .tint(.green)
-                            }
-                        }
-                    } footer: {
-                        Text(NSLocalizedString("_mail_search_includes_attachments_", comment: ""))
-                            .font(.caption)
-                    }
-                }
-                .listStyle(.plain)
-            }
         }
     }
 
