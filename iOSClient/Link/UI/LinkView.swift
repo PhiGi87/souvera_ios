@@ -42,71 +42,13 @@ struct LinkView: View {
     /// Overlay-Ergebnisse: gefilterte Raeume + Personen-Vorschlaege.
     @State private var searchPeopleResults: [LinkSuggestion] = []
 
-    /// Run 25.09.: Spotlight-artige Suche (eigenes Member, damit die
-    /// Root-Modifier-Kette nicht zum Type-Checker-Timeout fuehrt).
-    private var searchOverlay: some View {
-        Group {
-            if searchActive {
-                SouveraSearchOverlay(
-                    title: NSLocalizedString("_link_search_people_", comment: ""),
-                    isPresented: $searchActive,
-                    query: $searchQuery,
-                    items: searchOverlayItems,
-                    isLoading: false,
-                    display: { $0.display },
-                    onSelect: { handleSearchSelection($0) }
-                )
-                .transition(.opacity)
-            }
-        }
-    }
-
     private func handleSearchSelection(_ item: SouveraLinkSearchItem) {
-        switch item.kind {
+        switch item {
         case .room(let room):
             viewModel.openConversation(token: room.token, title: room.displayName)
         case .person(let suggestion):
             viewModel.startConversation(id: suggestion.id, source: suggestion.source, title: suggestion.label)
         }
-    }
-
-    enum SouveraLinkSearchItem: Identifiable {
-        case room(LinkConversation)
-        case person(LinkSuggestion)
-        var id: String {
-            switch self {
-            case .room(let room): return "room:\(room.token)"
-            case .person(let s): return "person:\(s.id)"
-            }
-        }
-        var display: SouveraSearchDisplay {
-            switch self {
-            case .room(let room):
-                return SouveraSearchDisplay(title: room.displayName,
-                                            subtitle: "",
-                                            icon: room.isOneToOne ? "person.crop.circle" : "person.3.fill",
-                                            tintColor: SouveraAppearance.accentColor)
-            case .person(let s):
-                return SouveraSearchDisplay(title: s.label,
-                                            subtitle: NSLocalizedString("_link_start_conversation_", comment: ""),
-                                            icon: "person.badge.plus",
-                                            tintColor: .green)
-            }
-        }
-    }
-
-    private var searchOverlayItems: [SouveraLinkSearchItem] {
-        let trimmed = searchQuery.trimmingCharacters(in: .whitespaces)
-        var items: [SouveraLinkSearchItem] = []
-        if case let .success(rooms) = viewModel.conversations, !trimmed.isEmpty {
-            for room in rooms where room.displayName.localizedCaseInsensitiveContains(trimmed) {
-                items.append(.room(room))
-            }
-        }
-        for suggestion in searchPeopleResults {
-            items.append(.person(suggestion))
-        }
-        return items
     }
 #if DEBUG
     @State private var simulatedIncoming: SimulatedCall?
@@ -242,7 +184,18 @@ struct LinkView: View {
             }
         }
         // Run 25.09.: Spotlight-artige Suche (Raeume + Personen) als Overlay.
-        .overlay { searchOverlay }
+        .overlay {
+            if searchActive {
+                LinkSearchOverlayView(
+                    isPresented: $searchActive,
+                    query: $searchQuery,
+                    viewModel: viewModel,
+                    people: searchPeopleResults,
+                    onSelect: handleSearchSelection
+                )
+                .transition(.opacity)
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .souveraShareHandoff)) { note in
             guard (note.object as? String) == "talk" else { return }
             viewModel.consumeSharedShareIfNeeded()
@@ -3463,6 +3416,72 @@ private struct LinkLobbyManagementView: View {
             await MainActor.run {
                 workingAttendee = nil
             }
+        }
+    }
+}
+
+/// Run 25.09.: Spotlight-artige Suche im Link-Modul - Raeume (Namensfilter
+/// ueber die geladene Liste) + Personen-Autocomplete in einem Panel.
+/// Eigener View-Typ, damit die LinkView-Root-Kette nicht zum Type-Checker-
+/// Timeout fuehrt.
+private struct LinkSearchOverlayView: View {
+    @Binding var isPresented: Bool
+    @Binding var query: String
+    @ObservedObject var viewModel: LinkViewModel
+    let people: [LinkSuggestion]
+    let onSelect: (SouveraLinkSearchItem) -> Void
+
+    private var items: [SouveraLinkSearchItem] {
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        var items: [SouveraLinkSearchItem] = []
+        if case let .success(rooms) = viewModel.conversations, !trimmed.isEmpty {
+            for room in rooms where room.displayName.localizedCaseInsensitiveContains(trimmed) {
+                items.append(.room(room))
+            }
+        }
+        for suggestion in people {
+            items.append(.person(suggestion))
+        }
+        return items
+    }
+
+    var body: some View {
+        SouveraSearchOverlay(
+            title: NSLocalizedString("_link_search_people_", comment: ""),
+            isPresented: $isPresented,
+            query: $query,
+            items: items,
+            isLoading: false,
+            display: { $0.display },
+            onSelect: onSelect
+        )
+    }
+}
+
+/// Ergebnis-Item der Link-Suche (Raum oder Person).
+enum SouveraLinkSearchItem: Identifiable {
+    case room(LinkConversation)
+    case person(LinkSuggestion)
+
+    var id: String {
+        switch self {
+        case .room(let room): return "room:\(room.token)"
+        case .person(let s): return "person:\(s.id)"
+        }
+    }
+
+    var display: SouveraSearchDisplay {
+        switch self {
+        case .room(let room):
+            return SouveraSearchDisplay(title: room.displayName,
+                                        subtitle: "",
+                                        icon: room.isOneToOne ? "person.crop.circle" : "person.3.fill",
+                                        tintColor: SouveraAppearance.accentColor)
+        case .person(let s):
+            return SouveraSearchDisplay(title: s.label,
+                                        subtitle: NSLocalizedString("_link_start_conversation_", comment: ""),
+                                        icon: "person.badge.plus",
+                                        tintColor: .green)
         }
     }
 }
