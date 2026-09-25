@@ -29,8 +29,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let roomType: String
         var track: RTCVideoTrack?
         private var hasRenderedFrame = false
+        /// Run 25.09.: Video stumm/aus -> das Avatar-Overlay darf NICHT
+        /// durch den 10-s-Fallback verschwinden (es kommt nie ein Frame).
+        var isVideoMuted = false
         private let overlay = UIView()
         private let overlayAvatar = UILabel()
+        private let overlayAvatarImage = UIImageView()
         private let overlayName = UILabel()
 
         init(session: String, roomType: String) {
@@ -58,12 +62,20 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             overlayAvatar.textAlignment = .center
             overlayAvatar.textColor = .white
             overlayAvatar.font = .systemFont(ofSize: 30, weight: .medium)
+            // Run 25.09.: neutraler Kreis als Fallback bis das Server-
+            // Avatar-Bild geladen ist (keine geratene Farbe).
+            overlayAvatar.backgroundColor = UIColor(white: 0.25, alpha: 1)
             overlayAvatar.translatesAutoresizingMaskIntoConstraints = false
+            overlayAvatarImage.contentMode = .scaleAspectFill
+            overlayAvatarImage.clipsToBounds = true
+            overlayAvatarImage.isHidden = true
+            overlayAvatarImage.translatesAutoresizingMaskIntoConstraints = false
             overlayName.textColor = .white
             overlayName.font = .preferredFont(forTextStyle: .footnote)
             overlayName.lineBreakMode = .byTruncatingTail
             overlayName.translatesAutoresizingMaskIntoConstraints = false
             overlay.addSubview(overlayAvatar)
+            overlay.addSubview(overlayAvatarImage)
             overlay.addSubview(overlayName)
             container.addSubview(overlay)
             NSLayoutConstraint.activate([
@@ -71,6 +83,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 overlayAvatar.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
                 overlayAvatar.widthAnchor.constraint(equalToConstant: 110),
                 overlayAvatar.heightAnchor.constraint(equalToConstant: 110),
+                overlayAvatarImage.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
+                overlayAvatarImage.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+                overlayAvatarImage.widthAnchor.constraint(equalToConstant: 110),
+                overlayAvatarImage.heightAnchor.constraint(equalToConstant: 110),
                 overlayName.leadingAnchor.constraint(equalTo: overlay.leadingAnchor, constant: 12),
                 overlayName.trailingAnchor.constraint(lessThanOrEqualTo: overlay.trailingAnchor, constant: -12),
                 overlayName.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -10)
@@ -82,15 +98,24 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         /// nur weil der Teilnehmer-Poll die Session noch nicht kennt.
         private(set) var currentName: String = ""
 
-        func setOverlayIdentity(initials: String, name: String, color: UIColor) {
+        func setOverlayIdentity(initials: String, name: String) {
             guard !name.isEmpty else { return }
             currentName = name
             overlayAvatar.text = initials.uppercased()
-            overlayAvatar.backgroundColor = color
             overlayAvatar.textColor = .white
             overlayAvatar.layer.cornerRadius = 55
             overlayAvatar.clipsToBounds = true
+            overlayAvatarImage.layer.cornerRadius = 55
+            overlayAvatarImage.clipsToBounds = true
             overlayName.text = name
+        }
+
+        /// Run 25.09.: Server-Avatar (wie die Raumliste) - ersetzt die
+        /// Initialen, sobald geladen; nil laesst den neutralen Kreis.
+        func setAvatarImage(_ image: UIImage?) {
+            overlayAvatarImage.image = image
+            overlayAvatarImage.isHidden = (image == nil)
+            overlayAvatar.isHidden = (image != nil)
         }
 
         private var overlayFallbackTask: Task<Void, Never>?
@@ -107,6 +132,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 guard !Task.isCancelled else { return }
                 await MainActor.run { [weak self] in
                     guard let self, !self.hasRenderedFrame else { return }
+                    // Run 25.09.: bei stummem/ausgeschaltetem Video bleibt
+                    // das Avatar-Overlay stehen (es kommt nie ein Frame).
+                    guard !self.isVideoMuted else {
+                        CallDebugLog.log("CallVC", "overlay fallback kept (video muted)")
+                        return
+                    }
                     self.overlay.isHidden = true
                     CallDebugLog.log("CallVC", "overlay fallback hidden (no frame within 10s)")
                 }
@@ -143,6 +174,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var sessionNames: [String: String] = [:]
     /// Aktuell platzierte Platzhalter-Kacheln (wird je Layout neu aufgebaut).
     private var placeholderTiles: [UIView] = []
+    /// Run 25.09.: Platzhalter-Avatarbilder je Session (fuer das
+    /// nachtraegliche Einsetzen des Server-Avatars).
+    private var placeholderAvatarImages: [String: UIImageView] = [:]
     /// Manuell fokussierte Kachel (Tap auf eine kleine Kachel).
     private var manualFocusKey: String?
     /// Vom aktiven Sprecher fokussierte Kachel.
@@ -332,6 +366,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                     callParticipants = participants
                     updateTileNameLabels()
                     layoutTiles()
+                    // Run 25.09.: Server-Avatare nachziehen (Kacheln + Platzhalter).
+                    refreshAvatars()
                 }
             }
         }
@@ -347,6 +383,55 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var audioOnlyParticipants: [LinkOcsApi.LinkCallParticipant] {
         let tiled = tiledSessions
         return callParticipants.filter { !tiled.contains($0.sessionId) }
+    }
+
+    // MARK: - Run 25.09.: Server-Avatare (1:1 wie die Raumliste)
+
+    private static var avatarCache: [String: UIImage] = [:]
+    private var avatarTasks: Set<String> = []
+
+    private func participantUserId(forSession session: String) -> String {
+        callParticipants.first(where: { $0.sessionId == session })?.userId ?? ""
+    }
+
+    /// Laedt (einmalig) das Server-Avatar-Bild eines Users und ruft `apply`
+    /// auf dem Main-Thread auf. Cache + In-Flight-Dedupe.
+    private func ensureAvatar(forUserId userId: String, apply: @escaping (UIImage?) -> Void) {
+        guard !userId.isEmpty else { apply(nil); return }
+        if let cached = Self.avatarCache[userId] { apply(cached); return }
+        guard !avatarTasks.contains(userId) else { return }
+        avatarTasks.insert(userId)
+        Task { @MainActor in
+            let api = LinkOcsApi(account: account)
+            let url = api.userAvatarURL(actorId: userId, size: 128)
+            let image = await api.fetchImage(url: url).flatMap { UIImage(data: $0) }
+            self.avatarTasks.remove(userId)
+            if let image { Self.avatarCache[userId] = image }
+            apply(image)
+            if image == nil {
+                CallDebugLog.log("CallVC", "avatar fetch failed user=\(userId.prefix(12))")
+            }
+        }
+    }
+
+    /// Avatare fuer alle Kacheln + Platzhalter nachziehen.
+    private func refreshAvatars() {
+        for (key, tile) in tiles {
+            guard let session = key.components(separatedBy: "|").first else { continue }
+            let userId = participantUserId(forSession: session)
+            ensureAvatar(forUserId: userId) { [weak tile] image in
+                guard let tile else { return }
+                tile.setAvatarImage(image)
+            }
+        }
+        for (session, imageView) in placeholderAvatarImages {
+            let userId = participantUserId(forSession: session)
+            ensureAvatar(forUserId: userId) { [weak imageView] image in
+                guard let imageView, let image else { return }
+                imageView.image = image
+                imageView.isHidden = false
+            }
+        }
     }
 
     private func makePlaceholderTile(participant: LinkOcsApi.LinkCallParticipant) -> UIView {
@@ -366,12 +451,18 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         avatar.textColor = .white
         avatar.font = .systemFont(ofSize: 18, weight: .semibold)
         avatar.textAlignment = .center
-        // Run 25.09.: 1:1 wie die Raum-Avatare - deterministische
-        // Nextcloud-Palette (Namens-Hash, Beige/Braun-Töne möglich).
-        avatar.backgroundColor = NCUtility().avatarColor(for: name)
+        // Run 25.09.: neutraler Kreis als Fallback; das ECHTE Server-Avatar
+        // (wie die Raumliste) wird nachgeladen und darueber gelegt.
+        avatar.backgroundColor = UIColor(white: 0.25, alpha: 1)
         avatar.layer.cornerRadius = 26
         avatar.clipsToBounds = true
         avatar.translatesAutoresizingMaskIntoConstraints = false
+        let avatarImage = UIImageView()
+        avatarImage.contentMode = .scaleAspectFill
+        avatarImage.isHidden = true
+        avatarImage.layer.cornerRadius = 26
+        avatarImage.clipsToBounds = true
+        avatarImage.translatesAutoresizingMaskIntoConstraints = false
         let label = UILabel()
         label.text = name
         label.textColor = .white
@@ -384,13 +475,19 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         mic.contentMode = .scaleAspectFit
         mic.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(avatar)
+        container.addSubview(avatarImage)
         container.addSubview(label)
         container.addSubview(mic)
+        placeholderAvatarImages[participant.sessionId] = avatarImage
         NSLayoutConstraint.activate([
             avatar.centerXAnchor.constraint(equalTo: container.centerXAnchor),
             avatar.centerYAnchor.constraint(equalTo: container.centerYAnchor, constant: -14),
             avatar.widthAnchor.constraint(equalToConstant: 52),
             avatar.heightAnchor.constraint(equalToConstant: 52),
+            avatarImage.centerXAnchor.constraint(equalTo: avatar.centerXAnchor),
+            avatarImage.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
+            avatarImage.widthAnchor.constraint(equalToConstant: 52),
+            avatarImage.heightAnchor.constraint(equalToConstant: 52),
             label.topAnchor.constraint(equalTo: avatar.bottomAnchor, constant: 6),
             label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
             label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -4),
@@ -443,6 +540,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private func clearPlaceholderTiles() {
         placeholderTiles.forEach { $0.removeFromSuperview() }
         placeholderTiles.removeAll()
+        placeholderAvatarImages.removeAll()
     }
 
     private func setupVideoViews() {
@@ -921,8 +1019,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 .compactMap { $0.first.map(String.init) }
                 .joined()
             tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
-                                    name: name,
-                                    color: NCUtility().avatarColor(for: name))
+                                    name: name)
+            // Run 25.09.: Video aus/stumm -> Overlay bleibt stehen; Server-
+            // Avatar nachladen (1:1 wie die Raumliste).
+            tile.isVideoMuted = !track.isEnabled
+            let userId = self.participantUserId(forSession: session)
+            self.ensureAvatar(forUserId: userId) { [weak tile] image in
+                tile?.setAvatarImage(image)
+            }
             tile.showOverlay()
             CallDebugLog.log("CallVC", "remote tile added \(key.prefix(14))")
             self.attachNameLabel(to: tile.container, name: name)
@@ -934,6 +1038,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         DispatchQueue.main.async {
             let key = Self.key(session: session, roomType: roomType)
             guard let tile = self.tiles[key] else { return }
+            // Run 25.09.: Mute-Zustand merken - bei stumm/aus darf der
+            // 10-s-Fallback das Avatar-Overlay nicht ausblenden.
+            tile.isVideoMuted = muted
             if muted {
                 tile.showOverlay()
             } else {
@@ -979,8 +1086,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                     .compactMap { $0.first.map(String.init) }
                     .joined()
                 tile.setOverlayIdentity(initials: initials.isEmpty ? "?" : initials,
-                                        name: name,
-                                        color: NCUtility().avatarColor(for: name))
+                                        name: name)
                 if let label = tile.container.viewWithTag(4711) as? UILabel {
                     label.text = name
                 }
