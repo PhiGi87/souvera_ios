@@ -581,10 +581,16 @@ class NCMainTabBarController: UITabBarController {
         // Nur auf dem iPad (bridge mode); auf dem iPhone bleibt die
         // aeussere Bar hidden - dort zeichnet der Glas-Header.
         navigationController.setNavigationBarHidden(!SouveraAppearance.useBridgeHeader, animated: false)
-        // Run 19.09.: gemeinsamer Appearance-Helper (alle vier Slots,
-        // deckend, dunkle Icons) - 1:1 Mehr/Dateien.
-        SouveraAppearance.applyBlueNavigationBar(to: navigationController.navigationBar)
-        navigationController.setNavigationBarHidden(false, animated: false)
+        if SouveraAppearance.useBridgeHeader {
+            // Run 19.09.: gemeinsamer Appearance-Helper (alle vier Slots,
+            // deckend, dunkle Icons) - 1:1 Mehr/Dateien.
+            SouveraAppearance.applyBlueNavigationBar(to: navigationController.navigationBar)
+            navigationController.setNavigationBarHidden(false, animated: false)
+            // Run 25.09. (Feedback: doppelter Header auf iOS 17/18-iPhones):
+            // Beides nur im Bridge-Modus - auf dem iPhone verliess der
+            // unbedingte Un-Hide die aeussere Bar sichtbar, neben dem
+            // Glas-Header (doppelter Header).
+        }
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),
             image: UIImage(systemName: imageName),

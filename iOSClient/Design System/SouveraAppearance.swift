@@ -345,6 +345,11 @@ final class SouveraBarCoordinator {
     }
 
     func rebuild() {
+        // Run 25.09. (Feedback: doppelter Header auf iOS 17/18-iPhones):
+        // Die Bridge gehoert NUR zur iPad-Bridge-Bar - auf dem iPhone
+        // bleibt die aeussere Bar versteckt (Glas-Header), hier keine
+        // Items setzen und nicht loggen.
+        guard SouveraAppearance.useBridgeHeader else { return }
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
         // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
         // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
