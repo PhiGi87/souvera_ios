@@ -343,6 +343,20 @@ final class SouveraInvitationCenter: ObservableObject {
         Self.resetLocalStateOnce()
         // Run 19.09.: abgelaufene Einladungsdaten aufraeumen.
         Self.cleanupExpired()
+        // Run 25.09. (Feedback "Fake-Einladungen"): Reste frueherer Scans
+        // (leerer Titel / 01.01.1 / unbrauchbares ICS) sofort entfernen.
+        let beforePurge = mailInvites.count
+        mailInvites = mailInvites.filter { invite in
+            if let method = invite.rawICS.flatMap({ Self.quickExtract($0, key: "METHOD") }),
+               !Self.isAcceptableInvitationMethod(method) {
+                return false
+            }
+            guard let event = invite.event else { return true } // reine Text-Einladung
+            return Self.isUsableInvitationEvent(uid: event.uid, start: event.start, title: event.title)
+        }
+        if mailInvites.count != beforePurge {
+            SouveraLog.write("Invitations", "purged \(beforePurge - mailInvites.count) fake/unusable invites")
+        }
 
         let answered = Self.answeredMessageIds
         var invites: [SouveraMailInvitation] = []
@@ -396,11 +410,32 @@ final class SouveraInvitationCenter: ObservableObject {
                 let data = try? await client.downloadBlob(
                     accountId: accountId, blobId: blobId, mimeType: "text/calendar")
                 if let ics = String(data: data ?? Data(), encoding: .utf8) {
+                    // Run 25.09. (Feedback "Fake-Einladungen"): iTIP-REPLY-
+                    // Mails (vom Client selbst gesendet) sind KEINE
+                    // Einladungen - METHOD pruefen, bevor geparst wird.
+                    let method = (Self.quickExtract(ics, key: "METHOD") ?? "").uppercased()
+                    guard Self.isAcceptableInvitationMethod(method) else {
+                        SouveraLog.write("Invitations", "skip non-invitation ics mail=\(messageId) method=\(method)")
+                        Self.markAnswered(messageId: messageId, eventEnd: nil)
+                        continue
+                    }
                     invitationICS = ics
-                    parsedEvent = ICSParser.parseEvents(
+                    let candidate = ICSParser.parseEvents(
                         ics, calendarHref: "", href: messageId, etag: nil,
                         ownEmail: ownEmail.lowercased()
                     ).first
+                    // Run 25.09.: nur brauchbare Termine (UID + echter Start
+                    // + Titel) uebernehmen; sonst kein Platzhalter-Eintrag.
+                    if let candidate,
+                       Self.isUsableInvitationEvent(uid: candidate.uid,
+                                                    start: candidate.start,
+                                                    title: candidate.title) {
+                        parsedEvent = candidate
+                    } else {
+                        SouveraLog.write("Invitations", "skip unusable ics mail=\(messageId) method=\(method) uid=\(candidate?.uid ?? "-")")
+                        Self.markAnswered(messageId: messageId, eventEnd: nil)
+                        continue
+                    }
                 }
             }
 
@@ -800,6 +835,31 @@ final class SouveraInvitationCenter: ObservableObject {
             }
         }
         return nil
+    }
+
+    // MARK: - Run 25.09.: Einladungs-Validierung
+    //
+    // Feedback: "Fake-Einladungen" mit leerem Titel und Datum 01.01.1.
+    // Ursache: Der Scanner behandelte JEDE Mail mit text/calendar als
+    // Einladung - auch die vom Client selbst gesendeten iTIP-REPLY-Mails
+    // (METHOD:REPLY). Deren VEVENT hat kein SUMMARY/DTSTART -> Titel leer,
+    // Start = Date.distantPast.
+
+    /// Nur echte Einladungen (REQUEST) bzw. Absagen (CANCEL) akzeptieren;
+    /// REPLY/COUNTER/REFRESH/DECLINECOUNTER sind keine Einladungen.
+    nonisolated static func isAcceptableInvitationMethod(_ method: String) -> Bool {
+        let m = method.trimmingCharacters(in: .whitespaces).uppercased()
+        return m.isEmpty || m == "REQUEST" || m == "CANCEL"
+    }
+
+    /// Geparster Termin ist nur brauchbar mit UID, echtem Start (> 2000)
+    /// und nicht-leerem Titel (verhindert Platzhalter-Eintraege).
+    nonisolated static func isUsableInvitationEvent(uid: String, start: Date?, title: String) -> Bool {
+        guard !uid.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
+        guard let start else { return false }
+        let minStart = Date(timeIntervalSince1970: 946_684_800) // 2000-01-01
+        guard start > minStart else { return false }
+        return !title.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// Ergebnis einer Absage-Entfernung (Run 19.09.): unterscheidet echtes
