@@ -244,6 +244,10 @@ final class CalendarViewModel: ObservableObject {
     /// Darstellung - lokal gemerkte Antwort hat Vorrang vor dem (evtl.
     /// veralteten) Server-PARTSTAT.
     func effectivePartstat(for event: CalendarEventModel) -> String {
+        // Run 25.09. (Feedback: eigener "Testtermin" durchgestrichen):
+        // Selbst organisierte Termine zeigen KEINEN Status - das
+        // Durchstreichen/Status-Rendering gilt nur fuer echte Einladungen.
+        if Self.isOwnOrganizer(event) { return "" }
         // Run 22.09. (Feedback: iPad zeigte nach einer Aenderung auf einem
         // anderen Geraet weiter den alten Status): Der SERVER-Stand hat
         // Vorrang, sobald er eine konkrete Antwort kennt. Der lokal
@@ -481,7 +485,13 @@ final class CalendarViewModel: ObservableObject {
         let sortedAll = all.sorted { $0.start < $1.start }
         // Run 16.09.: offene Einladungen (ownPartstat = needs-action) an
         // den zentralen InvitationCenter melden (FAB-Badge + Sheet).
-        let pending = sortedAll.filter { $0.ownPartstat == "needs-action" }
+        // Run 25.09.: eigene Adressen pro Load auffrischen (Mail-Modul kann
+        // Identitaeten nachgeladen haben).
+        cachedOwnAddresses = computeOwnAddresses()
+        // Run 25.09.: eigene Termine sind keine offenen Einladungen.
+        let pending = sortedAll.filter {
+            $0.ownPartstat == "needs-action" && Self.isForeignOrganizer($0)
+        }
         // Run 19.09. (Feedback Cross-Device): Server-beantwortete UIDs
         // melden - damit werden auf anderen Geraeten beantwortete
         // Mail-Einladungen ebenfalls ausgeblendet.
@@ -502,6 +512,18 @@ final class CalendarViewModel: ObservableObject {
                                                         status: event.ownPartstat)
                 JmapLog.write("Calendar partstat heal uid=\(event.uid): \(stored) -> \(event.ownPartstat)")
             }
+        }
+        // Run 25.09.: Selbst organisierte Termine duerfen KEINEN lokalen
+        // Antwort-Marker behalten (sonst erscheinen sie andernorts als
+        // abgelehnt/durchgestrichen).
+        for event in sortedAll where Self.isOwnOrganizer(event) && !event.uid.isEmpty {
+            if SouveraInvitationCenter.isAnswered(uid: event.uid) {
+                SouveraInvitationCenter.clearAnsweredUid(event.uid)
+                JmapLog.write("Calendar own organizer: cleared answer marker uid=\(event.uid)")
+            }
+        }
+        if let test = sortedAll.first(where: { $0.title.caseInsensitiveCompare("Testtermin") == .orderedSame }) {
+            JmapLog.write("Calendar ownEvent uid=\(test.uid) organizer=\(test.organizerEmail) own=\(Self.isOwnOrganizer(test))")
         }
         await SouveraInvitationCenter.shared.setCalendarInvites(pending, accountKey: Self.stableAccountKey())
         // Run 19.09.: zuvor fehlgeschlagene Termin-Entfernungen (nach
@@ -1066,6 +1088,9 @@ final class CalendarViewModel: ObservableObject {
     /// B6: Termin eines FREMD-Organisators (interne oder externe
     /// Einladung) - RSVP-Sektion im Detail anzeigen.
     static func isForeignOrganizer(_ event: CalendarEventModel) -> Bool {
+        // Run 25.09.: selbst organisierte Termine sind NIE "fremd" - auch
+        // wenn der Organisator ein Alias/eine andere eigene Identitaet ist.
+        guard !isOwnOrganizer(event) else { return false }
         let me = ownAttendeeEmail()
         guard !me.isEmpty else { return false }
         let orga = event.organizerEmail.lowercased()
@@ -1182,6 +1207,41 @@ final class CalendarViewModel: ObservableObject {
     }
 
     /// Eigene Adresse (Account-User) - Match fuer den eigenen ATTENDEE.
+    /// Cache der eigenen Adressen (pro Load aktualisiert) - verhindert
+    /// UserDefaults-Zugriffe pro Listenzeile.
+    private static var cachedOwnAddresses: Set<String> = []
+
+    /// Run 25.09.: Alle eigenen Adressen (Konto + Alias/Shared-Identitaeten
+    /// aus dem Mail-Modul) - fuer die Organisator-Erkennung.
+    static func ownAddresses() -> Set<String> {
+        if !cachedOwnAddresses.isEmpty { return cachedOwnAddresses }
+        return computeOwnAddresses()
+    }
+
+    private static func computeOwnAddresses() -> Set<String> {
+        var set = Set<String>()
+        let me = ownAttendeeEmail()
+        if !me.isEmpty { set.insert(me.lowercased()) }
+        for address in SouveraMailFromAddresses.ownAddresses(account: stableAccountKey()) where !address.isEmpty {
+            set.insert(address.lowercased())
+        }
+        cachedOwnAddresses = set
+        return set
+    }
+
+    /// Reine Erkennung (testbar): leerer Organisator = lokal erstellt = eigen.
+    static func isOwnOrganizer(organizerEmail: String, ownAddresses: Set<String>) -> Bool {
+        let orga = organizerEmail.trimmingCharacters(in: .whitespaces).lowercased()
+        if orga.isEmpty { return true }
+        return ownAddresses.contains(orga)
+    }
+
+    /// Selbst organisierter Termin? Dann KEINE Status-/Einladungs-Darstellung
+    /// (Durchstreichen bei "declined" gilt nur fuer echte Einladungen).
+    static func isOwnOrganizer(_ event: CalendarEventModel) -> Bool {
+        isOwnOrganizer(organizerEmail: event.organizerEmail, ownAddresses: ownAddresses())
+    }
+
     static func ownAttendeeEmail() -> String {
         NCManageDatabase.shared.getActiveTableAccount()?.user.lowercased() ?? ""
     }

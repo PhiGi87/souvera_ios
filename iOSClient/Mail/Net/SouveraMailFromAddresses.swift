@@ -39,6 +39,25 @@ enum SouveraMailFromAddresses {
         return nil
     }
 
+    // MARK: - Run 25.09.: Eigene Adressen fuer den Kalender
+    //
+    // Der Kalender muss "selbst organisierte" Termine erkennen. Organisiert
+    // der Nutzer unter einem Alias/Shared/anderen eigenen Konto, reicht die
+    // Konto-Adresse nicht - das Mail-Modul kennt alle eigenen Adressen und
+    // legt sie hier ab.
+
+    private static let ownAddressesKeyPrefix = "souvera_mail_own_addresses_"
+
+    static func storeOwnAddresses(_ addresses: [String], account: String) {
+        guard !account.isEmpty else { return }
+        UserDefaults.standard.set(addresses, forKey: ownAddressesKeyPrefix + account)
+    }
+
+    static func ownAddresses(account: String) -> [String] {
+        guard !account.isEmpty else { return [] }
+        return UserDefaults.standard.stringArray(forKey: ownAddressesKeyPrefix + account) ?? []
+    }
+
     /// Mergt die From-Liste: bestehende Eintraege bleiben, Identities und
     /// Shared-Eigentuemer kommen dazu (dedupe case-insensitive, Reihenfolge
     /// stabil: Primary zuerst).

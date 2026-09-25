@@ -33,6 +33,9 @@ struct SouveraInvitationSheetView: View {
                 let openCalendarInvites = center.calendarInvites.filter {
                     $0.ownPartstat == "needs-action"
                         && !SouveraInvitationCenter.isAnswered(uid: $0.uid)
+                        // Run 25.09.: selbst organisierte Termine sind
+                        // keine offenen Einladungen.
+                        && CalendarViewModel.isForeignOrganizer($0)
                 }
                 if !openCalendarInvites.isEmpty {
                     Section(NSLocalizedString("_invitations_section_calendar_", comment: "")) {

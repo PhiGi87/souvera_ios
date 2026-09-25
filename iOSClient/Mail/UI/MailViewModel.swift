@@ -636,6 +636,9 @@ final class MailViewModel: ObservableObject {
                 }
             }
             SouveraLog.write("MailFrom", "options: \(fromAddresses.joined(separator: ", "))")
+            // Run 25.09.: eigene Adressen fuer den Kalender persistieren
+            // (Organisator-Erkennung bei Alias/Shared/Mehrfach-Identitaet).
+            SouveraMailFromAddresses.storeOwnAddresses(fromAddresses, account: cacheAccountKey)
             identityId = identity(for: fromAddress) ?? identities.first?.optString("id")
         } catch {
             identityId = nil

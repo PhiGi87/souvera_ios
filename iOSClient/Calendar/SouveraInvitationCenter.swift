@@ -180,6 +180,22 @@ final class SouveraInvitationCenter: ObservableObject {
         }
     }
 
+    /// Run 25.09.: Lokalen Antwort-Marker einer UID entfernen (z. B. fuer
+    /// selbst organisierte Termine, die nie eine Einladung waren).
+    nonisolated static func clearAnsweredUid(_ uid: String) {
+        guard !uid.isEmpty else { return }
+        let key = uid.lowercased()
+        var uids = answeredUids()
+        uids.remove(key)
+        UserDefaults.standard.set(Array(uids), forKey: answeredUidsKey)
+        var ends = UserDefaults.standard.dictionary(forKey: "invitations_uid_enddates") as? [String: Double] ?? [:]
+        ends.removeValue(forKey: key)
+        UserDefaults.standard.set(ends, forKey: "invitations_uid_enddates")
+        var statuses = UserDefaults.standard.dictionary(forKey: "invitations_answered_status_uid") as? [String: String] ?? [:]
+        statuses.removeValue(forKey: key)
+        UserDefaults.standard.set(statuses, forKey: "invitations_answered_status_uid")
+    }
+
     /// Run 22.09.: Erinnerungs-Overrides zu einer Antwort entfernen
     /// (UID- und Message-Key).
     nonisolated static func clearReminderOverride(uid: String, inviteId: String?) {
