@@ -427,7 +427,9 @@ struct LinkView: View {
         }
         .padding(.horizontal, 10)
         .padding(.top, 4)
-        .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 48)
+        // Run 25.09. (Feedback: ueberlappte den Header noch): 60 pt =
+        // 44-pt-Buttons + 12 pt Header-Padding + 4 pt Abstand.
+        .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 60)
     }
 
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
