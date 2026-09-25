@@ -619,7 +619,10 @@ final class MailViewModel: ObservableObject {
             // Eigentuemer der Shared-Ordner in die From-Liste mergen.
             let identityEmails = identities.compactMap { $0.optString("email") }
             let sharedOwners = allMailboxes.compactMap { box -> String? in
-                box.ownerIdentity ?? SouveraMailFromAddresses.sharedOwnerEmail(ofPath: box.path)
+                // Run 25.09.: ownerIdentity kann den ganzen "Shared
+                // Folders/<email>"-Praefix tragen - auf die E-Mail reduzieren.
+                SouveraMailFromAddresses.sharedOwnerEmail(ofPath: box.path)
+                    ?? SouveraMailFromAddresses.normalizedOwnerEmail(box.ownerIdentity)
             }
             let merged = SouveraMailFromAddresses.merge(
                 existing: fromAddresses,
@@ -642,6 +645,16 @@ final class MailViewModel: ObservableObject {
     /// The JMAP Identity matching the given from-address, if any.
     private func identity(for address: String) -> String? {
         allIdentities.first(where: { ($0.optString("email") ?? "") == address })?.optString("id")
+    }
+
+    /// Run 25.09.: Ist die Absenderadresse der Owner eines Shared-Postfachs?
+    private func isSharedFromAddress(_ address: String) -> Bool {
+        guard !address.isEmpty else { return false }
+        return allMailboxes.contains { box in
+            let owner = SouveraMailFromAddresses.sharedOwnerEmail(ofPath: box.path)
+                ?? SouveraMailFromAddresses.normalizedOwnerEmail(box.ownerIdentity)
+            return owner?.caseInsensitiveCompare(address) == .orderedSame
+        }
     }
 
     /// Run 25.09.: Mailbox einer Nachricht finden (fuer die Shared-Ordner-
@@ -3573,11 +3586,19 @@ final class MailViewModel: ObservableObject {
             if !emailId.isEmpty, let identId = resolvedIdentity, !identId.isEmpty {
                 // Run 21.09.: Sent-Mailbox vorab ermitteln - der Submit
                 // verschiebt die Mail atomar dorthin und entfernt $draft.
-                let sentBox = allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
-                    ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId })
+                // Run 25.09. (Feedback: Mail landete im Haupt-Gesendet):
+                // Bei einer SHARED-Absenderadresse darf der Patch NICHT auf
+                // den primaeren Gesendet-Ordner zeigen (fremder JMAP-Account)
+                // - dann entscheidet der Server (souvera_mail v0.14.7) und
+                // legt die Kopie in die Shared-Sent-Items.
+                let isSharedSender = isSharedFromAddress(fromAddress)
+                let sentBox: Mailbox? = isSharedSender ? nil :
+                    (allMailboxes.first(where: { $0.role == "sent" && $0.accountId == accId })
+                     ?? allMailboxes.first(where: { $0.kind == .sent && $0.accountId == accId }))
                 let sentJmapId = sentBox?.jmapId ?? ""
+                SouveraLog.write("MailFrom", "send from=\(fromAddress) identity=\(identId) sent=\(isSharedSender ? "server" : sentJmapId)")
                 _ = try await api.submitEmail(accountId: accId, emailId: emailId, identityId: identId,
-                                              sentMailboxId: sentJmapId)
+                                              sentMailboxId: isSharedSender ? nil : sentJmapId)
 
                 // Fallback (falls der Server den Atomar-Patch nicht
                 // unterstuetzt): $draft entfernen und manuell nach Gesendet

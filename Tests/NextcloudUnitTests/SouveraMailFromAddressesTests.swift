@@ -16,6 +16,17 @@ struct SouveraMailFromAddressesTests {
         #expect(SouveraMailFromAddresses.sharedOwnerEmail(ofPath: "Shared Folders/no-email-here/INBOX") == nil)
     }
 
+    @Test("Owner identity values are normalized to the plain email")
+    func normalizedOwner() {
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("admins@host-on.de") == "admins@host-on.de")
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("Shared Folders/admins@host-on.de") == "admins@host-on.de")
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("Shared Folders/admins@host-on.de/INBOX") == "admins@host-on.de")
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("Admins@Host-On.DE") == "Admins@Host-On.DE")
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("no-email") == nil)
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail(nil) == nil)
+        #expect(SouveraMailFromAddresses.normalizedOwnerEmail("") == nil)
+    }
+
     @Test("Merge dedupes case-insensitively and keeps the primary first")
     func merge() {
         let merged = SouveraMailFromAddresses.merge(

@@ -24,6 +24,21 @@ enum SouveraMailFromAddresses {
         return email.contains("@") ? email : nil
     }
 
+    /// Normalisiert einen `ownerIdentity`-Wert: enthaelt er einen
+    /// "Shared Folders/<email>"-Praefix (oder einen Pfad), wird nur die
+    /// E-Mail zurueckgegeben.
+    static func normalizedOwnerEmail(_ raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        if let fromPath = sharedOwnerEmail(ofPath: raw) { return fromPath }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.contains("@"), !trimmed.contains("/") { return trimmed }
+        // Letztes Pfadsegment versuchen.
+        if let last = trimmed.split(separator: "/").last, last.contains("@") {
+            return String(last)
+        }
+        return nil
+    }
+
     /// Mergt die From-Liste: bestehende Eintraege bleiben, Identities und
     /// Shared-Eigentuemer kommen dazu (dedupe case-insensitive, Reihenfolge
     /// stabil: Primary zuerst).
