@@ -178,11 +178,12 @@ struct LinkView: View {
             viewModel.consumeSharedShareIfNeeded()
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
-            // P68e: Banner nur, wenn KEIN App-Call-Vollscreen offen ist -
-            // der Nutzer landet nach "In Souvera öffnen" direkt im
-            // Vollscreen statt im "Zum Anruf wechseln"-Zwischenzustand.
-            showCallBanner = LinkVoIPManager.shared.activeCallInfo != nil
-                && !LinkVoIPManager.shared.isCallUIPresented
+            updateCallBannerVisibility()
+        }
+        .onChange(of: viewModel.route) { _, _ in
+            // Run 25.09. (Feedback): Der Banner gehoert nur in den Raum, in
+            // dem der Call laeuft - beim Raumwechsel neu bewerten.
+            updateCallBannerVisibility()
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallUIClose)) { _ in
             // Wichtig: die Cover-Items leeren, sonst bleibt nach dem Auflegen
@@ -387,6 +388,20 @@ struct LinkView: View {
             }
             .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
         }
+    }
+
+    /// Run 25.09. (Feedback: Banner erschien in allen Raeumen): Der
+    /// "Zurueck zum Anruf"-Banner ist nur sichtbar, wenn der Call laeuft,
+    /// kein Vollscreen offen ist und der GERADE offene Raum der Call-Raum ist.
+    private func updateCallBannerVisibility() {
+        var visible = false
+        if let info = LinkVoIPManager.shared.activeCallInfo,
+           !LinkVoIPManager.shared.isCallUIPresented,
+           case let .chat(token, _) = viewModel.route {
+            visible = (token == info.token)
+        }
+        showCallBanner = visible
+        SouveraLog.write("CallBanner", "visible=\(visible) room=\((viewModel.route.chatToken ?? "-")) call=\(LinkVoIPManager.shared.activeCallInfo?.token ?? "-")")
     }
 
     /// Green banner shown while a call is running without its own UI.
@@ -661,6 +676,15 @@ struct LinkView: View {
     /// Landscape-Flag kippen. Dadurch wurde die ganze Chat-View (inkl.
     /// Composer-Fokus) neu erzeugt und die Tastatur schloss sich.
     private func updateLandscapeLayout(_ size: CGSize) {
+        // Run 25.09. (Feedback iPad): Auf dem iPad IMMER die 2-Spalten-
+        // Darstellung (Raeume links, Chat rechts) - auch im Hochformat;
+        // die Einschspalte verschwendet dort nur Platz.
+        if SouveraAppearance.useBridgeHeader {
+            guard landscapeLayout != true else { return }
+            landscapeLayout = true
+            SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split)")
+            return
+        }
         let bounds: CGRect = viewWindowBounds ?? CGRect(origin: .zero, size: size)
         let isLandscape = bounds.width > bounds.height
         guard isLandscape != landscapeLayout else { return }
@@ -668,11 +692,21 @@ struct LinkView: View {
         SouveraLog.write("LinkUI", "layout landscape=\(isLandscape) window=\(Int(bounds.width))x\(Int(bounds.height)) content=\(Int(size.width))x\(Int(size.height))")
     }
 
-    /// Fenster-Bounds des aktiven Scenes (tastaturunabhaengig).
+    /// Run 25.09. (Feedback: iPad zeigte keine 2 Spalten mehr): Die
+    /// Orientierung kommt aus den FENSTER-Bounds - `screen.bounds` fuehrt
+    /// bei Split View/Stage Manager in die Irre (Bildschirm-Aspekt !=
+    /// Fenster-Aspekt). Die Fenster-Groesse ist zudem tastaturunabhaengig
+    /// (der urspruengliche iPhone-Fix bleibt gueltig).
     private var viewWindowBounds: CGRect? {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let keyScene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        return keyScene?.screen.bounds
+        if let appWindow = UIApplication.shared.mainAppWindow {
+            return appWindow.bounds
+        }
+        if let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+            .first(where: { $0.activationState == .foregroundActive }),
+           let window = scene.windows.first(where: { $0.isKeyWindow }) {
+            return window.bounds
+        }
+        return view.window?.bounds
     }
 
     /// Landscape-Split: Raum-Übersicht links (~1/3, max. 320 pt auf dem
