@@ -678,6 +678,10 @@ final class LinkVoIPManager: NSObject {
     /// CallKit-UUID des aktuell laufenden (angenommenen) Calls - beim
     /// App-seitigen Auflegen wird der System-Call damit beendet.
     private var activeCallUUID: UUID?
+    /// Run 25.09.: Beobachtet waehrend des Klingelns die Teilnehmer - wird
+    /// der Call auf einem ANDEREN Geraet angenommen, endet die Klingel-UI
+    /// hier automatisch ("answered elsewhere").
+    private let ringingWatcher = LinkRingingWatcher()
 
     private func reportIncomingCall(roomToken: String, displayName: String, hasVideo: Bool, completion: @escaping () -> Void) {
         let uuid = UUID()
@@ -697,6 +701,14 @@ final class LinkVoIPManager: NSObject {
             } else {
                 CallDebugLog.log("LinkVoIPManager", "reportNewIncomingCall OK (\(uuid.uuidString.prefix(8)))")
                 self?.startRingingTimeout(for: uuid)
+                // Run 25.09.: Klingeln auf "anderswo angenommen" beobachten.
+                if !roomToken.isEmpty, let account = LinkAccount.active() {
+                    DispatchQueue.main.async {
+                        self?.ringingWatcher.start(account: account, token: roomToken) { [weak self] in
+                            self?.endRingingAnsweredElsewhere()
+                        }
+                    }
+                }
             }
             completion()
         }
@@ -716,6 +728,7 @@ final class LinkVoIPManager: NSObject {
                     return
                 }
                 CallDebugLog.log("LinkVoIPManager", "ringing timeout - ending unanswered call")
+                self.ringingWatcher.stop()
                 self.pendingIncomingCall = nil
                 self.activeCalls[uuid] = nil
                 self.provider.reportCall(with: uuid, endedAt: Date(), reason: .unanswered)
@@ -727,6 +740,35 @@ final class LinkVoIPManager: NSObject {
     private func cancelRingingTimeout() {
         ringingTimeoutTimer?.invalidate()
         ringingTimeoutTimer = nil
+        ringingWatcher.stop()
+    }
+
+    /// Run 25.09.: Der Call wurde auf einem ANDEREN Geraet angenommen -
+    /// CallKit-Call hier sauber beenden (System-Grund "answeredElsewhere",
+    /// iOS zeigt das passend an) und die In-App-Klingel-UI schliessen.
+    private func endRingingAnsweredElsewhere() {
+        guard (activeSession?.hasEnded ?? true) else {
+            // Eigene Session laeuft bereits (hier angenommen) - nichts tun.
+            CallDebugLog.log("LinkVoIPManager", "answered-elsewhere ignored (session active)")
+            return
+        }
+        DispatchQueue.main.async {
+            guard self.pendingIncomingCall != nil else { return }
+            CallDebugLog.log("LinkVoIPManager", "ringing dismissed: answered on another device")
+            self.cancelRingingTimeout()
+            if let uuid = self.activeCallUUID {
+                self.provider.reportCall(with: uuid, endedAt: Date(), reason: .answeredElsewhere)
+                self.activeCalls[uuid] = nil
+            }
+            if let fallback = self.fallbackCallUUID {
+                self.provider.reportCall(with: fallback, endedAt: Date(), reason: .answeredElsewhere)
+                self.activeCalls[fallback] = nil
+                self.fallbackCallUUID = nil
+            }
+            self.pendingIncomingCall = nil
+            self.activeCallUUID = nil
+            NotificationCenter.default.post(name: .linkEndCall, object: nil)
+        }
     }
 
     /// Decrypts a VoIP payload with the account device private key and pulls out the call info.
