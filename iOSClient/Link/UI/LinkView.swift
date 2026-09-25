@@ -401,7 +401,9 @@ struct LinkView: View {
             visible = (token == info.token)
         }
         showCallBanner = visible
-        SouveraLog.write("CallBanner", "visible=\(visible) room=\((viewModel.route.chatToken ?? "-")) call=\(LinkVoIPManager.shared.activeCallInfo?.token ?? "-")")
+        var roomToken = "-"
+        if case let .chat(token, _) = viewModel.route { roomToken = token }
+        SouveraLog.write("CallBanner", "visible=\(visible) room=\(roomToken) call=\(LinkVoIPManager.shared.activeCallInfo?.token ?? "-")")
     }
 
     /// Green banner shown while a call is running without its own UI.
@@ -706,7 +708,7 @@ struct LinkView: View {
            let window = scene.windows.first(where: { $0.isKeyWindow }) {
             return window.bounds
         }
-        return view.window?.bounds
+        return nil
     }
 
     /// Landscape-Split: Raum-Übersicht links (~1/3, max. 320 pt auf dem

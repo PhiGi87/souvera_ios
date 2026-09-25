@@ -1947,7 +1947,7 @@ private struct CalendarEventEditSheet: View {
         guard trimmed.contains("@"), !draft.attendees.contains(trimmed) else { return }
         // Run 25.09. (Feedback): Bei selbst organisierten Terminen ist der
         // Organisator kein Teilnehmer - eigene Adresse nicht aufnehmen.
-        if CalendarViewModel.isOwnAddress(trimmed, ownAddresses: viewModel.ownAddresses(),
+        if CalendarViewModel.isOwnAddress(trimmed, ownAddresses: CalendarViewModel.ownAddresses(),
                                           accountUser: CalendarViewModel.ownAttendeeEmail()) {
             return
         }

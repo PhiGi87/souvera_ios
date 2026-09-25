@@ -1259,7 +1259,7 @@ final class CalendarViewModel: ObservableObject {
     }
 
     func isOwnAddress(_ address: String) -> Bool {
-        Self.isOwnAddress(address, ownAddresses: ownAddresses(), accountUser: ownAttendeeEmail())
+        Self.isOwnAddress(address, ownAddresses: Self.ownAddresses(), accountUser: Self.ownAttendeeEmail())
     }
 
     /// Run 25.09. (Feedback: eigener Termin durchgestrichen): Darstellungs-
