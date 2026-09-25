@@ -463,7 +463,7 @@ struct SouveraCalendarView: View {
                 hourHeight: isWide ? 44 : 56,
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
-                partstatFor: { viewModel.effectivePartstat(for: $0) },
+                partstatFor: { viewModel.displayPartstat(for: $0) },
                 onCreate: createEventInSlot,
                 bottomPadding: isWide ? 12 : 40,
                 scrollTrigger: scrollTrigger
@@ -576,7 +576,7 @@ struct SouveraCalendarView: View {
                 eventsProvider: { viewModel.events(on: $0) },
                 onSelect: { detailEvent = $0 },
                 colorFor: { viewModel.color(for: $0) },
-                partstatFor: { viewModel.effectivePartstat(for: $0) },
+                partstatFor: { viewModel.displayPartstat(for: $0) },
                 onCreate: createEventInSlot,
                 compact: isWide,
                 onPrev: { shiftSelectedDay(by: -3) },
@@ -614,7 +614,7 @@ struct SouveraCalendarView: View {
             detailEvent = event
         } label: {
             CalendarEventRow(event: event, color: viewModel.color(for: event),
-                             partstat: viewModel.effectivePartstat(for: event))
+                             partstat: viewModel.displayPartstat(for: event))
         }
         .buttonStyle(.plain)
     }
@@ -1462,9 +1462,11 @@ private struct CalendarEventDetailSheet: View {
                         Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
                     }
                 }
-                if !event.attendees.isEmpty {
+                // Run 25.09.: Bei eigenen Terminen den Organisator nicht
+                // als Teilnehmer auffuehren.
+                if !viewModel.ownEventAttendees(event).isEmpty {
                     Section(NSLocalizedString("_calendar_attendees_", comment: "")) {
-                        ForEach(event.attendees, id: \.self) { attendee in
+                        ForEach(viewModel.ownEventAttendees(event), id: \.self) { attendee in
                             Text(attendee)
                         }
                     }
@@ -1943,6 +1945,12 @@ private struct CalendarEventEditSheet: View {
     private func addAttendee(_ email: String) {
         let trimmed = email.trimmingCharacters(in: .whitespaces).lowercased()
         guard trimmed.contains("@"), !draft.attendees.contains(trimmed) else { return }
+        // Run 25.09. (Feedback): Bei selbst organisierten Terminen ist der
+        // Organisator kein Teilnehmer - eigene Adresse nicht aufnehmen.
+        if CalendarViewModel.isOwnAddress(trimmed, ownAddresses: viewModel.ownAddresses(),
+                                          accountUser: CalendarViewModel.ownAttendeeEmail()) {
+            return
+        }
         draft.attendees.append(trimmed)
         attendeeInput = ""
         attendeeSuggestions = []

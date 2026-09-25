@@ -31,4 +31,26 @@ struct SouveraOwnOrganizerTests {
         #expect(!CalendarViewModel.isOwnOrganizer(organizerEmail: "p.grassegger@host-on.de", ownAddresses: own))
         #expect(!CalendarViewModel.isOwnOrganizer(organizerEmail: "someone@example.com", ownAddresses: own))
     }
+
+    @Test("Own address matching tolerates a bare account user id")
+    func ownAddressMatching() {
+        // Account-User ist eine bare User-ID: die volle Adresse matcht
+        // trotzdem (Local-Part-Abgleich).
+        #expect(CalendarViewModel.isOwnAddress("a.raatz@host-on.de",
+                                               ownAddresses: own,
+                                               accountUser: "a.raatz"))
+        #expect(CalendarViewModel.isOwnAddress("mailto:a.raatz@host-on.de",
+                                               ownAddresses: own,
+                                               accountUser: "a.raatz"))
+        #expect(CalendarViewModel.isOwnAddress("admins@host-on.de",
+                                               ownAddresses: own,
+                                               accountUser: "a.raatz"))
+        // Fremde Adresse matcht nicht - auch nicht per Local-Part.
+        #expect(!CalendarViewModel.isOwnAddress("jan@host-on.de",
+                                                ownAddresses: own,
+                                                accountUser: "a.raatz"))
+        #expect(!CalendarViewModel.isOwnAddress("not-an-email",
+                                                ownAddresses: own,
+                                                accountUser: "a.raatz"))
+    }
 }

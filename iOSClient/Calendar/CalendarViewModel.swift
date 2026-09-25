@@ -762,7 +762,9 @@ final class CalendarViewModel: ObservableObject {
         draft.allDay = event.allDay
         draft.location = event.location ?? ""
         draft.notes = event.description ?? ""
-        draft.attendees = event.attendees
+        // Run 25.09. (Feedback): Selbst organisierte Termine fuehren den
+        // Organisator nicht als Teilnehmer (Display + gespeicherte ICS).
+        draft.attendees = ownEventAttendees(event)
         draft.sequence = event.sequence + 1
         draft.talkRoomToken = event.talkRoomToken
         draft.talkRoomName = event.talkRoomName
@@ -1240,6 +1242,39 @@ final class CalendarViewModel: ObservableObject {
     /// (Durchstreichen bei "declined" gilt nur fuer echte Einladungen).
     static func isOwnOrganizer(_ event: CalendarEventModel) -> Bool {
         isOwnOrganizer(organizerEmail: event.organizerEmail, ownAddresses: ownAddresses())
+    }
+
+    /// Ist die Adresse eine eigene (Konto-User, Alias, Identitaet)?
+    /// Tolerant: der Account-User darf eine bare User-ID sein ("a.raatz"),
+    /// dann matcht auch die volle Adresse "a.raatz@host-on.de".
+    static func isOwnAddress(_ address: String, ownAddresses: Set<String>, accountUser: String) -> Bool {
+        let a = address.trimmingCharacters(in: .whitespaces)
+            .lowercased()
+            .replacingOccurrences(of: "mailto:", with: "")
+        guard a.contains("@") else { return false }
+        if ownAddresses.contains(a) { return true }
+        let bareUser = accountUser.lowercased()
+        if !bareUser.isEmpty, !bareUser.contains("@"), a.hasPrefix(bareUser + "@") { return true }
+        return false
+    }
+
+    func isOwnAddress(_ address: String) -> Bool {
+        Self.isOwnAddress(address, ownAddresses: ownAddresses(), accountUser: ownAttendeeEmail())
+    }
+
+    /// Run 25.09. (Feedback: eigener Termin durchgestrichen): Darstellungs-
+    /// Status NUR fuer echte (fremde) Einladungen - eigene Termine und
+    /// lokal erstellte Termine ohne Status (kein Durchstreichen/Pill).
+    func displayPartstat(for event: CalendarEventModel) -> String {
+        guard Self.isForeignOrganizer(event) else { return "" }
+        return effectivePartstat(for: event)
+    }
+
+    /// Run 25.09.: Teilnehmerliste OHNE eigene Adressen - selbst
+    /// organisierte Termine fuehren den Organisator nicht als Teilnehmer.
+    func ownEventAttendees(_ event: CalendarEventModel) -> [String] {
+        guard Self.isOwnOrganizer(event) else { return event.attendees }
+        return event.attendees.filter { !isOwnAddress($0) }
     }
 
     static func ownAttendeeEmail() -> String {
