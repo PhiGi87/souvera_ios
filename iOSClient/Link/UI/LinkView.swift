@@ -200,8 +200,8 @@ struct LinkView: View {
         }
 #endif
         .overlay(alignment: .top) {
-            if showCallBanner, let info = LinkVoIPManager.shared.activeCallInfo {
-                activeCallBanner(title: info.title)
+            if showCallBanner, LinkVoIPManager.shared.activeCallInfo != nil {
+                activeCallBanner()
             }
         }
         .overlay(alignment: .bottom) {
@@ -407,21 +407,22 @@ struct LinkView: View {
     }
 
     /// Green banner shown while a call is running without its own UI.
-    private func activeCallBanner(title: String) -> some View {
-        // Run 25.09. (Feedback): Schwebt UNTER dem Glas-Header (56 pt =
-        // 44-pt-Buttons + Padding), verdeckt keine Header-Buttons; der
-        // GANZE Banner tappbar -> zurueck in den Call (die beiden Buttons
-        // bleiben eigenstaendig).
+    /// Run 26.09. (Feedback): OHNE Call-Namen/Gruppentext - nur Icon,
+    /// "Zurueck zum Anruf" und Auflegen.
+    private func activeCallBanner() -> some View {
+        // Run 25.09. (Feedback): Schwebt UNTER dem Glas-Header, verdeckt
+        // keine Header-Buttons; der GANZE Banner tappbar -> zurueck in den
+        // Call (die beiden Buttons bleiben eigenstaendig).
         HStack(spacing: 10) {
             Image(systemName: "phone.fill")
                 .foregroundStyle(.white)
                 .padding(6)
                 .background(Circle().fill(Color.green))
-            Text(title)
+            Text(NSLocalizedString("_link_call_return_", comment: ""))
                 .font(.subheadline)
                 .lineLimit(1)
             Spacer()
-            Button(NSLocalizedString("_link_call_return_", comment: "")) {
+            Button {
                 returnToCall = true
             }
             .buttonStyle(.borderedProminent)
