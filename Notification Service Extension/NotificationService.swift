@@ -217,6 +217,16 @@ class NotificationService: UNNotificationServiceExtension {
                                 // Wert bleibt die Benachrichtigung stumm
                                 // (Feedback 05.09.). Nur bei echtem Inhalt.
                                 bestAttemptContent.sound = UNNotificationSound.default
+                                // Run 26.09. (Feedback: Mail-Aktionen + keine
+                                // Doppel-Meldungen): Kategorie fuer die
+                                // Long-Press-Aktionen + E-Mail-Id/Konto in die
+                                // userInfo (Tap-Route, Dedupe gegen lokale
+                                // Hintergrund-Meldungen).
+                                if isMailPush {
+                                    bestAttemptContent.categoryIdentifier = "souvera_mail_actions"
+                                    bestAttemptContent.userInfo["emailId"] = objectId
+                                    bestAttemptContent.userInfo["account"] = tableAccount.account
+                                }
                                 // Run 19.09.: Mail-/Kalender-Pushes NICHT von
                                 // Fokus/Mitteilungszusammenfassung verzögern
                                 // lassen (Talk/Admin/Deck unverändert).

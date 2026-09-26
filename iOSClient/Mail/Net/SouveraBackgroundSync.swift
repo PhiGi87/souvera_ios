@@ -208,11 +208,24 @@ final class SouveraBackgroundSync {
         guard !newIds.isEmpty,
               let newEmails = try? await api.getEmails(accountId: accId, ids: Array(newIds.prefix(10))) else { return }
 
+        // Run 26.09. (Feedback: doppelte Mail-Push-Meldungen): Mails, fuer
+        // die die Server-Push-Kette (souvera_mail) bereits eine Meldung
+        // geliefert hat, NICHT lokal erneut melden. Die NSE traegt die
+        // E-Mail-Id in die userInfo der zugestellten Meldungen ein.
+        let delivered = await notificationCenter.deliveredNotifications()
+        let notifiedEmailIds = Set(delivered.compactMap {
+            $0.request.content.userInfo["emailId"] as? String
+        })
+
         for email in newEmails {
             let fromName = ((email["from"] as? [[String: Any]])?.first?.optString("name"))
                 ?? ((email["from"] as? [[String: Any]])?.first?.optString("email"))
                 ?? ""
             let subject = email.optString("subject") ?? ""
+            let emailId = email.optString("id") ?? ""
+            // Run 26.09. (Feedback: doppelte Meldungen): Server-Kette hat
+            // diese Mail bereits gemeldet -> lokal NICHT erneut melden.
+            if notifiedEmailIds.contains(emailId) { continue }
             let content = UNMutableNotificationContent()
             // Apple-Mail-Stil: Absender FETT (Titelzeile), Betreff darunter
             // in normaler Schrift.
@@ -223,6 +236,7 @@ final class SouveraBackgroundSync {
             // Run 19.09.: Neue Mails NICHT in Fokus/Mitteilungs-
             // zusammenfassung verzögern lassen.
             content.interruptionLevel = .timeSensitive
+            content.categoryIdentifier = "souvera_mail_actions"
             // Gruppierung pro E-Mail-Thread im Sperrbildschirm (wie Talk
             // pro Raum) - fehlt die threadId, bleibt das Feld leer.
             if let threadId = email.optString("threadId"), !threadId.isEmpty {
@@ -231,7 +245,7 @@ final class SouveraBackgroundSync {
             // Deep-Link-Payload: Tap öffnet direkt die jeweilige Mail.
             content.userInfo = [
                 "account": accountName,
-                "emailId": email.optString("id") ?? "",
+                "emailId": emailId,
                 "baseUrl": credential.baseUrl
             ]
             if mailNotificationsEnabled {

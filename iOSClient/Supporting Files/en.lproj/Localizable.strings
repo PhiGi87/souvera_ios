@@ -1300,3 +1300,4 @@ _mail_sort_flagged_ = "Flagged first";
 "_link_save_failed_" = "File could not be saved";
 "_calendar_search_wide_" = "Searching the whole calendar…";
 "_link_search_person_or_room_" = "Search person or room";
+"_mail_mark_flagged_" = "Flag";

@@ -179,6 +179,11 @@ final class MailViewModel: ObservableObject {
     /// vorherigen Accounts).
     private var generation = 0
     private var pendingDeepLink: SouveraPushDeepLink.Target?
+    /// Run 26.09.: Zuletzt geoeffnete Deep-Link-Mail (Delivery-Retrys der-
+    /// selben Push ignorieren). Fehlgeschlagene Versuche setzen den Marker
+    /// NICHT - die Retry-Zustellung verarbeitet sie dann erneut.
+    private var lastOpenedMailEmailId: String?
+    private var lastOpenedMailAt = Date.distantPast
 
     init() {
         deepLinkObserver = NotificationCenter.default.addObserver(
@@ -229,6 +234,13 @@ final class MailViewModel: ObservableObject {
     private func handleDeepLink(_ target: SouveraPushDeepLink.Target) {
         switch target.kind {
         case .mail:
+            // Run 26.09.: Delivery-Retrys derselben Mail innerhalb kurzer
+            // Zeit ueberspringen, wenn sie bereits erfolgreich geoeffnet war.
+            if lastOpenedMailEmailId == target.emailId,
+               Date().timeIntervalSince(lastOpenedMailAt) < 15 {
+                SouveraLog.write("Mail", "deep link retry skipped (already open) emailId=\(target.emailId)")
+                return
+            }
             if case .success = mailboxes {
                 Task { await openMailByJmapId(account: target.account, emailId: target.emailId, mailboxPath: target.mailboxPath) }
             } else {
@@ -272,7 +284,18 @@ final class MailViewModel: ObservableObject {
         do {
             let session = try await client.refreshSession()
             let accId = currentMailbox?.accountId ?? session.primaryAccountId
-            let emails = try await api.getEmails(accountId: accId, ids: [emailId])
+            // Run 26.09. (Feedback: Push-Tap oeffnete die Mail nicht): Der
+            // Tap landet oft in einer JMAP-Stress-Phase (POST-Timeouts des
+            // Hintergrund-Refreshs) - deshalb EIN Retry nach 2 s + Log.
+            var emails: [[String: Any]]
+            do {
+                emails = try await api.getEmails(accountId: accId, ids: [emailId])
+            } catch {
+                SouveraLog.write("Mail", "deep link fetch failed (\(error.localizedDescription)) - retrying once")
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                emails = try await api.getEmails(accountId: accId, ids: [emailId])
+            }
+            SouveraLog.write("Mail", "deep link: fetched emailId=\(emailId) count=\(emails.count)")
             guard let json = emails.first else {
                 actionFeedback = MailSendFeedback(
                     success: false,
@@ -317,6 +340,8 @@ final class MailViewModel: ObservableObject {
             // sonst bliebe der Body der VORHERIGEN Mail sichtbar und die
             // Mail ungelesen.
             openMessage(message)
+            lastOpenedMailEmailId = message.emailId
+            lastOpenedMailAt = Date()
         } catch {
             SouveraLog.write("Mail", "deep link mail failed: \(error.localizedDescription)")
             actionFeedback = MailSendFeedback(
@@ -893,6 +918,14 @@ final class MailViewModel: ObservableObject {
             logMailboxTreeDiagnostics(all)
             let sorted = sortMailboxGroups(filterNonStandardSentFolders(all))
             applyMailboxes(sorted)
+            // Run 26.09. (Feedback: Push-Tap oeffnete die Mail nicht): Ein
+            // waehrend des Ladens getappter Deep-Link wurde nur im Start-
+            // Pfad konsumiert - jetzt auch nach JEDEM erfolgreichen
+            // Mailbox-Load (dann ist die Mailbox-Liste .success).
+            if let pending = self.pendingDeepLink, case .success = self.mailboxes {
+                self.pendingDeepLink = nil
+                self.handleDeepLink(pending)
+            }
             // Verbindung steht wieder: Recovery-Sperre zurücksetzen.
             hasRecoveredCredential = false
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
@@ -1352,11 +1385,18 @@ final class MailViewModel: ObservableObject {
         Task { await syncMessages() }
     }
 
-    private static func clearDeliveredMailNotifications() {
+    /// Run 26.09. (Feedback: veraltete Mail-Meldungen): Entfernt lokale
+    /// Hintergrund-Meldungen ("mail_…") UND Server-Ketten-Meldungen
+    /// (souvera_mail, an der userInfo-E-Mail-Id erkennbar).
+    static func clearDeliveredMailNotifications() {
         let center = UNUserNotificationCenter.current()
         center.getDeliveredNotifications { delivered in
             let ids = delivered
-                .filter { $0.request.identifier.hasPrefix("mail_") }
+                .filter { request in
+                    request.request.identifier.hasPrefix("mail_")
+                        || request.request.content.categoryIdentifier == "souvera_mail_actions"
+                        || request.request.content.userInfo["emailId"] != nil
+                }
                 .map { $0.request.identifier }
             if !ids.isEmpty {
                 center.removeDeliveredNotifications(withIdentifiers: ids)
@@ -1365,6 +1405,12 @@ final class MailViewModel: ObservableObject {
     }
 
     /// Öffnet beim App-Start den ZULETZT benutzten Ordner (Fallback INBOX).
+    /// Run 26.09.: Beim Mail-Eintritt veraltete lokale/Server-Mail-Meldungen
+    /// raeumen (die Liste zeigt den aktuellen Stand).
+    func clearStaleMailNotificationsOnEntry() {
+        Self.clearDeliveredMailNotifications()
+    }
+
     private func openPreferredMailbox(_ boxes: [Mailbox]) {
         if let lastId = Self.lastMailboxId(account: cacheAccountKey),
            let last = boxes.first(where: { $0.id == lastId }) {
@@ -2523,6 +2569,8 @@ final class MailViewModel: ObservableObject {
     private var lastEntryRefresh: Date = .distantPast
 
     func refreshOnEntry(force: Bool = false) {
+        // Run 26.09.: veraltete Mail-Meldungen beim Modul-Eintritt raeumen.
+        Self.clearDeliveredMailNotifications()
         guard let mailbox = currentMailbox else { return }
         let groupDefaults = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup)
         let flagSet = (groupDefaults?.bool(forKey: Self.refreshNeededFlagKey)) ?? false

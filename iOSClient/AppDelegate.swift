@@ -112,6 +112,19 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         }
         application.registerForRemoteNotifications()
         UNUserNotificationCenter.current().delegate = self
+        // Run 26.09. (Feedback): Long-Press auf Mail-Pushes -> zwei
+        // getrennte Aktionen (gelesen / markiert = geflaggt).
+        let markRead = UNNotificationAction(identifier: Self.mailMarkReadAction,
+                                            title: NSLocalizedString("_mail_mark_read_", comment: ""),
+                                            options: [])
+        let markFlagged = UNNotificationAction(identifier: Self.mailMarkFlaggedAction,
+                                               title: NSLocalizedString("_mail_mark_flagged_", comment: ""),
+                                               options: [])
+        let mailCategory = UNNotificationCategory(identifier: Self.mailCategoryIdentifier,
+                                                  actions: [markRead, markFlagged],
+                                                  intentIdentifiers: [],
+                                                  options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([mailCategory])
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
             // P68z: NACH der Berechtigungs-Entscheidung erneut registrieren.
             // Auf iOS 26 wird das APNs-Token teils erst dann ausgeliefert -
@@ -213,6 +226,48 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     // MARK: - Push Notifications
 
+    static let mailCategoryIdentifier = "souvera_mail_actions"
+    static let mailMarkReadAction = "souvera_mail_mark_read"
+    static let mailMarkFlaggedAction = "souvera_mail_mark_flagged"
+
+    /// Run 26.09.: Long-Press-Aktionen auf Mail-Pushes - "gelesen" bzw.
+    /// "markiert (flagged)" direkt aus der Meldung heraus setzen.
+    private func handleMailNotificationAction(_ actionIdentifier: String,
+                                               account: String, emailId: String,
+                                               notificationIdentifier: String) {
+        guard !account.isEmpty, !emailId.isEmpty else {
+            SouveraLog.write("MailAction", "action \(actionIdentifier): account/emailId fehlen")
+            return
+        }
+        var keywords: [String: Bool] = ["$seen": true]
+        if actionIdentifier == Self.mailMarkFlaggedAction {
+            keywords["$flagged"] = true
+        }
+        UNUserNotificationCenter.current()
+            .removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])
+        Task { @MainActor in
+            // Credential sicherstellen (Kaltstart aus der Meldung heraus).
+            guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else {
+                SouveraLog.write("MailAction", "action \(actionIdentifier): kein Credential")
+                return
+            }
+            let client = JmapClient(baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
+                                    username: credential.saslUser,
+                                    password: credential.mailPassword)
+            let api = JmapApi(client: client)
+            do {
+                let session = try await client.refreshSession()
+                let accId = session.primaryAccountId
+                _ = try await api.setEmailFlags(accountId: accId, emailIds: [emailId],
+                                                keywordsToAdd: keywords)
+                SouveraLog.write("MailAction", "action \(actionIdentifier) ok emailId=\(emailId) keywords=\(keywords.keys.joined(separator: ","))")
+                await SouveraBackgroundSync.shared.refreshMailBadge()
+            } catch {
+                SouveraLog.write("MailAction", "action \(actionIdentifier) FAILED: \(error.localizedDescription)")
+            }
+        }
+    }
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         // Link-Nachricht für den AKTUELL geöffneten Raum: kein Banner, nur
         // Ton (Run-Feedback 12.09.). Token kommt für lokale talk_-Meldungen
@@ -236,6 +291,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         let request = response.notification.request
         let info = request.content.userInfo
         let identifier = request.identifier
+        // Run 26.09. (Feedback): Long-Press-Aktionen auf Mail-Pushes -
+        // "gelesen" bzw. "markiert (flagged)" - VOR der Tap-Route behandeln.
+        if response.actionIdentifier != UNNotificationDefaultActionIdentifier,
+           response.actionIdentifier != UNNotificationDismissActionIdentifier,
+           request.content.categoryIdentifier == Self.mailCategoryIdentifier {
+            let account = info["account"] as? String
+                ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            var emailId = info["emailId"] as? String ?? ""
+            if emailId.isEmpty, let rawSubject = info["subject"] as? String,
+               let matched = decryptPushForAccounts(rawSubject),
+               (matched.data["app"] as? String) == "souvera_mail" {
+                emailId = (matched.data["objectId"] as? String)
+                    ?? (matched.data["id"] as? String) ?? ""
+            }
+            SouveraLog.write("MailAction", "action \(response.actionIdentifier) emailId=\(emailId) account=\(account)")
+            handleMailNotificationAction(response.actionIdentifier, account: account,
+                                          emailId: emailId,
+                                          notificationIdentifier: identifier)
+            completionHandler()
+            return
+        }
         // souvera_mail-Standard-Push (direkte APNs, unverschlüsselt):
         // emailId + mailboxPath direkt in die Mail-Detailansicht führen.
         if let emailId = info["emailId"] as? String, !emailId.isEmpty {
@@ -405,6 +481,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     /// Zwischenzustand mit "Zum Anruf wechseln").
     func applicationDidBecomeActive(_ application: UIApplication) {
         LinkVoIPManager.shared.presentCallUIIfNeeded()
+        // Run 26.09.: veraltete lokale/Server-Mail-Meldungen raeumen.
+        MailViewModel.clearDeliveredMailNotifications()
         // P68x: APNs-Token-Retry - nach einem Reinstall kam der erste
         // registerForRemoteNotifications()-Callback teils nicht an (kein
         // "APNs registration OK" im Log). Ohne Token registriert sich das
