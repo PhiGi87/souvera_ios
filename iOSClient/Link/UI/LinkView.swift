@@ -422,8 +422,8 @@ struct LinkView: View {
                 .font(.subheadline)
                 .lineLimit(1)
             Spacer()
-            Button {
-                returnToCall = true
+            Button(action: { returnToCall = true }) {
+                Text(NSLocalizedString("_link_call_return_", comment: ""))
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.small)
