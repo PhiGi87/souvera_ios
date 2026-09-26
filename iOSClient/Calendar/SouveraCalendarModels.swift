@@ -267,8 +267,11 @@ enum ICSParser {
                 continue
             }
             var resolvedStart = start ?? startDay ?? Date.distantPast
+            // Run 26.09. (Feedback: Deck-Termine dauerten 1 h): Aufgaben aus
+            // Deck ohne explizites Ende laufen 15 MINUTEN.
+            let fallbackDuration: TimeInterval = isTask ? 900 : 3600
             var resolvedEnd = end ?? endDay
-                ?? (duration.map { resolvedStart.addingTimeInterval($0) } ?? resolvedStart.addingTimeInterval(3600))
+                ?? (duration.map { resolvedStart.addingTimeInterval($0) } ?? resolvedStart.addingTimeInterval(fallbackDuration))
             if isTask && start == nil && startDay == nil {
                 // Nur Fälligkeitsdatum vorhanden: Aufgabe zum Fälligkeitszeitpunkt zeigen
                 resolvedStart = resolvedEnd
@@ -277,7 +280,7 @@ enum ICSParser {
                 resolvedEnd = resolvedStart.addingTimeInterval(86400)
             }
             if resolvedEnd <= resolvedStart {
-                resolvedEnd = resolvedStart.addingTimeInterval(allDay ? 86400 : 3600)
+                resolvedEnd = resolvedStart.addingTimeInterval(allDay ? 86400 : fallbackDuration)
             }
 
             events.append(CalendarEventModel(
