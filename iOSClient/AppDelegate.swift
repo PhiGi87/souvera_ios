@@ -255,12 +255,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
     /// Run 26.09.: Long-Press-Aktionen auf Mail-Pushes - "gelesen" bzw.
     /// "markiert (flagged)" direkt aus der Meldung heraus setzen.
+    /// Run 27.09. (Crash 0xdead10cc): Die Arbeit läuft in einem
+    /// UIApplication-Background-Task - sonst kann iOS die App mitten in
+    /// der Realm-Operation suspendieren (File-Lock) und killen.
     private func handleMailNotificationAction(_ actionIdentifier: String,
                                                account: String, emailId: String,
                                                notificationIdentifier: String) {
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])
+        let bgTask = UIApplication.shared.beginBackgroundTask(withName: "SouveraMailPushAction")
         Task { @MainActor in
+            defer {
+                if bgTask != .invalid {
+                    UIApplication.shared.endBackgroundTask(bgTask)
+                }
+            }
             let ok = await SouveraMailPushActionRunner.run(actionIdentifier: actionIdentifier,
                                                             account: account,
                                                             emailId: emailId)
@@ -333,7 +342,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             let userText = (response as? UNTextInputNotificationResponse)?.userText ?? ""
             let isReply = response.actionIdentifier == Self.talkReplyAction
             SouveraLog.write("TalkAction", "action \(response.actionIdentifier) token=\(token) account=\(account) replyLen=\(userText.count)")
+            // Run 27.09. (Crash 0xdead10cc): Auch die Talk-Aktionen in
+            // einem Background-Task ausführen (kein Suspend mitten in der
+            // Realm-/Netz-Arbeit).
+            let bgTask = UIApplication.shared.beginBackgroundTask(withName: "SouveraTalkPushAction")
             Task { @MainActor in
+                defer {
+                    if bgTask != .invalid {
+                        UIApplication.shared.endBackgroundTask(bgTask)
+                    }
+                }
                 if isReply {
                     await SouveraTalkPushActionRunner.runReply(account: account,
                                                                 token: token,

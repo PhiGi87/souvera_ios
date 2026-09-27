@@ -9,6 +9,7 @@
 // verschwinden aus der Mitteilungszentrale.
 
 import Foundation
+import UIKit
 import UserNotifications
 
 enum SouveraTalkPushActionRunner {
@@ -47,6 +48,7 @@ enum SouveraTalkPushActionRunner {
     }
 
     /// Read-Marker raumweit auf die neueste Nachricht setzen.
+    @MainActor
     static func markRoomRead(account: String, token: String) async {
         guard let link = resolveAccount(account) else {
             SouveraLog.write("TalkAction", "markRoomRead: kein Account \(account)")
@@ -63,11 +65,16 @@ enum SouveraTalkPushActionRunner {
         await api.markRoomRead(token: token, lastReadMessage: latest)
         SouveraLog.write("TalkAction", "markRoomRead \(token) -> \(latest)")
         // Raum-Liste und Badge nachziehen (gleicher Mechanismus wie beim
-        // Push-Empfang, entprellt).
-        NotificationCenter.default.post(name: .linkConversationsReloadRequested, object: nil)
+        // Push-Empfang, entprellt). Run 27.09. (Crash 0xdead10cc): nur im
+        // Vordergrund - die Observer machen Main-Thread-Realm-Reads, im
+        // Hintergrund holt der nächste Foreground-Wechsel nach.
+        if UIApplication.shared.applicationState == .active {
+            NotificationCenter.default.post(name: .linkConversationsReloadRequested, object: nil)
+        }
     }
 
     /// "Antworten": Text senden und bei Erfolg raumweit aufräumen.
+    @MainActor
     @discardableResult
     static func runReply(account: String, token: String, userText: String) async -> Bool {
         let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -93,6 +100,7 @@ enum SouveraTalkPushActionRunner {
     }
 
     /// "Als gelesen markieren": raumweit lesen + aufräumen.
+    @MainActor
     @discardableResult
     static func runMarkRead(account: String, token: String) async -> Bool {
         guard !account.isEmpty, !token.isEmpty else {

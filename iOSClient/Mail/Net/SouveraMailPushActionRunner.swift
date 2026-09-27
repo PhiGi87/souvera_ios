@@ -8,6 +8,7 @@
 // Aktion die kanonische (volle) Id per blobId ermittelt.
 
 import Foundation
+import UIKit
 
 enum SouveraMailPushActionRunner {
 
@@ -105,7 +106,14 @@ enum SouveraMailPushActionRunner {
                 return false
             }
             SouveraLog.write("MailAction", "action \(actionIdentifier) ok emailId=\(canonical)")
-            await SouveraBackgroundSync.shared.refreshMailBadge()
+            // Run 27.09. (Crash 0xdead10cc): Der Badge-Refresh postet
+            // synchron Notifications, deren Observer Main-Thread-Realm-
+            // Reads ausführen - im Hintergrund kann iOS die App genau
+            // dabei suspendieren (Realm-File-Lock) und killen. Der Badge
+            // wird beim nächsten Foreground-Wechsel ohnehin nachgezogen.
+            if UIApplication.shared.applicationState == .active {
+                await SouveraBackgroundSync.shared.refreshMailBadge()
+            }
             return true
         } catch {
             SouveraLog.write("MailAction", "action \(actionIdentifier) FAILED: \(error.localizedDescription)")
