@@ -1301,3 +1301,14 @@ _mail_sort_flagged_ = "Flagged first";
 "_calendar_search_wide_" = "Searching the whole calendar…";
 "_link_search_person_or_room_" = "Search person or room";
 "_mail_mark_flagged_" = "Flag";
+
+/* Run 27.09.: Push-Aktionen (Mail + Talk) */
+"_mail_push_action_delete_" = "Delete";
+"_talk_push_action_reply_" = "Reply";
+"_talk_push_action_read_" = "Mark as read";
+"_talk_push_reply_placeholder_" = "Message…";
+"_talk_push_reply_send_" = "Send";
+"_link_select_room_" = "Select room";
+"account_does_not_exist" = "Account does not exist";
+"favorite" = "Favorite";
+"OK" = "OK";
