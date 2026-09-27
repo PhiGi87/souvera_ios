@@ -237,9 +237,13 @@ class NotificationService: UNNotificationServiceExtension {
                                 // token) + Konto in die userInfo - die App
                                 // unterdrückt damit Banner für den AKTUELL
                                 // geöffneten Raum (Run-Feedback 12.09.).
+                                // Run 27.09.: Kategorie für die Touch-
+                                // Aktionen ("Antworten" / "Als gelesen
+                                // markieren", raumweites Aufräumen).
                                 if appName == "spreed" || appName == "talk", !objectId.isEmpty {
                                     bestAttemptContent.userInfo["token"] = objectId
                                     bestAttemptContent.userInfo["account"] = tableAccount.account
+                                    bestAttemptContent.categoryIdentifier = "souvera_talk_actions"
                                 }
                                 if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                     json["account"] = tableAccount.account as AnyObject

@@ -113,18 +113,34 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
         application.registerForRemoteNotifications()
         UNUserNotificationCenter.current().delegate = self
         // Run 26.09. (Feedback): Long-Press auf Mail-Pushes -> zwei
-        // getrennte Aktionen (gelesen / markiert = geflaggt).
+        // getrennte Aktionen (gelesen / markiert = geflaggt). Run 27.09.:
+        // dritte Aktion "löschen" (destruktiv, rot) + Talk-Kategorie mit
+        // TextInput-Aktion "Antworten" (WhatsApp/Signal-Stil).
         let markRead = UNNotificationAction(identifier: Self.mailMarkReadAction,
                                             title: NSLocalizedString("_mail_mark_read_", comment: ""),
                                             options: [])
         let markFlagged = UNNotificationAction(identifier: Self.mailMarkFlaggedAction,
                                                title: NSLocalizedString("_mail_mark_flagged_", comment: ""),
                                                options: [])
+        let deleteMail = UNNotificationAction(identifier: Self.mailDeleteAction,
+                                              title: NSLocalizedString("_mail_push_action_delete_", comment: ""),
+                                              options: [.destructive])
         let mailCategory = UNNotificationCategory(identifier: Self.mailCategoryIdentifier,
-                                                  actions: [markRead, markFlagged],
+                                                  actions: [markRead, markFlagged, deleteMail],
                                                   intentIdentifiers: [],
                                                   options: [])
-        UNUserNotificationCenter.current().setNotificationCategories([mailCategory])
+        let talkReply = UNTextInputNotificationAction(identifier: Self.talkReplyAction,
+                                                      title: NSLocalizedString("_talk_push_action_reply_", comment: ""),
+                                                      textInputButtonTitle: NSLocalizedString("_talk_push_reply_send_", comment: ""),
+                                                      textInputPlaceholder: NSLocalizedString("_talk_push_reply_placeholder_", comment: ""))
+        let talkMarkRead = UNNotificationAction(identifier: Self.talkMarkReadAction,
+                                                title: NSLocalizedString("_talk_push_action_read_", comment: ""),
+                                                options: [])
+        let talkCategory = UNNotificationCategory(identifier: Self.talkCategoryIdentifier,
+                                                  actions: [talkReply, talkMarkRead],
+                                                  intentIdentifiers: [],
+                                                  options: [])
+        UNUserNotificationCenter.current().setNotificationCategories([mailCategory, talkCategory])
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .badge, .sound]) { granted, _ in
             // P68z: NACH der Berechtigungs-Entscheidung erneut registrieren.
             // Auf iOS 26 wird das APNs-Token teils erst dann ausgeliefert -
@@ -229,41 +245,27 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     static let mailCategoryIdentifier = "souvera_mail_actions"
     static let mailMarkReadAction = "souvera_mail_mark_read"
     static let mailMarkFlaggedAction = "souvera_mail_mark_flagged"
+    // Run 27.09. (Feedback): Dritte Mail-Aktion "löschen" (Papierkorb).
+    static let mailDeleteAction = "souvera_mail_delete_action"
+    // Run 27.09. (Feedback): Talk-Aktionen - "Antworten" (TextInput) und
+    // "Als gelesen markieren" (raumweit).
+    static let talkCategoryIdentifier = "souvera_talk_actions"
+    static let talkReplyAction = "souvera_talk_reply"
+    static let talkMarkReadAction = "souvera_talk_mark_read"
 
     /// Run 26.09.: Long-Press-Aktionen auf Mail-Pushes - "gelesen" bzw.
     /// "markiert (flagged)" direkt aus der Meldung heraus setzen.
     private func handleMailNotificationAction(_ actionIdentifier: String,
                                                account: String, emailId: String,
                                                notificationIdentifier: String) {
-        guard !account.isEmpty, !emailId.isEmpty else {
-            SouveraLog.write("MailAction", "action \(actionIdentifier): account/emailId fehlen")
-            return
-        }
-        var keywords: [String: Bool] = ["$seen": true]
-        if actionIdentifier == Self.mailMarkFlaggedAction {
-            keywords["$flagged"] = true
-        }
         UNUserNotificationCenter.current()
             .removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])
         Task { @MainActor in
-            // Credential sicherstellen (Kaltstart aus der Meldung heraus).
-            guard let credential = await SouveraMailCredentialManager().ensureCombinedCredential(account: account) else {
-                SouveraLog.write("MailAction", "action \(actionIdentifier): kein Credential")
-                return
-            }
-            let client = JmapClient(baseUrl: credential.baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/")),
-                                    username: credential.saslUser,
-                                    password: credential.mailPassword)
-            let api = JmapApi(client: client)
-            do {
-                let session = try await client.refreshSession()
-                let accId = session.primaryAccountId
-                _ = try await api.setEmailFlags(accountId: accId, emailIds: [emailId],
-                                                keywordsToAdd: keywords)
-                SouveraLog.write("MailAction", "action \(actionIdentifier) ok emailId=\(emailId) keywords=\(keywords.keys.joined(separator: ","))")
-                await SouveraBackgroundSync.shared.refreshMailBadge()
-            } catch {
-                SouveraLog.write("MailAction", "action \(actionIdentifier) FAILED: \(error.localizedDescription)")
+            let ok = await SouveraMailPushActionRunner.run(actionIdentifier: actionIdentifier,
+                                                            account: account,
+                                                            emailId: emailId)
+            if !ok {
+                SouveraLog.write("MailAction", "action \(actionIdentifier) nicht ausgeführt")
             }
         }
     }
@@ -309,6 +311,38 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
             handleMailNotificationAction(response.actionIdentifier, account: account,
                                           emailId: emailId,
                                           notificationIdentifier: identifier)
+            completionHandler()
+            return
+        }
+        // Run 27.09. (Feedback): Long-Press-Aktionen auf Talk-Pushes -
+        // "Antworten" (TextInput) und "Als gelesen markieren" - VOR der
+        // Tap-Route behandeln, raumweites Aufräumen im Runner.
+        if response.actionIdentifier != UNNotificationDefaultActionIdentifier,
+           response.actionIdentifier != UNNotificationDismissActionIdentifier,
+           request.content.categoryIdentifier == Self.talkCategoryIdentifier {
+            let account = info["account"] as? String
+                ?? NCManageDatabase.shared.getActiveTableAccount()?.account ?? ""
+            var token = info["token"] as? String ?? ""
+            if token.isEmpty, let rawSubject = info["subject"] as? String,
+               let matched = decryptPushForAccounts(rawSubject),
+               (matched.data["app"] as? String) == "spreed"
+                || (matched.data["app"] as? String) == "talk" {
+                token = (matched.data["id"] as? String)
+                    ?? (matched.data["objectId"] as? String) ?? ""
+            }
+            let userText = (response as? UNTextInputNotificationResponse)?.userText ?? ""
+            let isReply = response.actionIdentifier == Self.talkReplyAction
+            SouveraLog.write("TalkAction", "action \(response.actionIdentifier) token=\(token) account=\(account) replyLen=\(userText.count)")
+            Task { @MainActor in
+                if isReply {
+                    await SouveraTalkPushActionRunner.runReply(account: account,
+                                                                token: token,
+                                                                userText: userText)
+                } else if response.actionIdentifier == Self.talkMarkReadAction {
+                    await SouveraTalkPushActionRunner.runMarkRead(account: account,
+                                                                   token: token)
+                }
+            }
             completionHandler()
             return
         }

@@ -1098,6 +1098,10 @@
 		AA22C3D4E5F60718293A0321 /* SouveraOwnOrganizerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0320 /* SouveraOwnOrganizerTests.swift */; };
 		AA22C3D4E5F60718293A0319 /* LinkRingingWatcherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0318 /* LinkRingingWatcherTests.swift */; };
 		AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */; };
+		AA22C3D4E5F60718293A0401 /* SouveraMailPushActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0400 /* SouveraMailPushActionRunner.swift */; };
+		AA22C3D4E5F60718293A0403 /* SouveraTalkPushActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0402 /* SouveraTalkPushActionRunner.swift */; };
+		AA22C3D4E5F60718293A0405 /* SouveraMailPushActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */; };
+		AA22C3D4E5F60718293A0407 /* SouveraTalkPushActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */; };
 		AA22C3D4E5F60718293A0315 /* SouveraJmapMailSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */; };
 		AA22C3D4E5F60718293A0302 /* SouveraPendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */; };
 		AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */; };
@@ -2157,6 +2161,10 @@
 		AA22C3D4E5F60718293A0320 /* SouveraOwnOrganizerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraOwnOrganizerTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0318 /* LinkRingingWatcherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LinkRingingWatcherTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/SouveraJmapMailSearch.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0400 /* SouveraMailPushActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/Net/SouveraMailPushActionRunner.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0402 /* SouveraTalkPushActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/SouveraTalkPushActionRunner.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraMailPushActionTests.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraTalkPushActionTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraJmapMailSearchTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/SouveraShareFlow.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareView.swift; sourceTree = "<group>"; };
@@ -2386,6 +2394,7 @@
 				FEA0DA7E1DB00123456789AB /* MailDateFormatter.swift */,
 				37269F52158C446D846629D3 /* ContactSuggestionSource.swift */,
 				026B76E49864477F8AF907B8 /* SouveraBackgroundSync.swift */,
+				AA22C3D4E5F60718293A0400 /* SouveraMailPushActionRunner.swift */,
 				8095B76DDF2A416C90389BF3 /* NextcloudDirectorySource.swift */,
 				DA665EE4070B481D94841B80 /* NextcloudFilePickerView.swift */,
 				6851B1C149014F6997A7B0BE /* ContactPickerSheet.swift */,
@@ -2492,6 +2501,8 @@
 				AA22C3D4E5F60718293A031E /* SouveraInvitationValidationTests.swift */,
 				AA22C3D4E5F60718293A0322 /* SouveraCalendarCategoryTests.swift */,
 				AA22C3D4E5F60718293A0320 /* SouveraOwnOrganizerTests.swift */,
+				AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */,
+				AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
 			);
 			path = NextcloudUnitTests;
@@ -3386,6 +3397,7 @@
 				AA22C3D4E5F60718293A0316 /* LinkRingingWatcher.swift */,
 				AA22C3D4E5F60718293A031A /* SouveraMailFromAddresses.swift */,
 				AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */,
+				AA22C3D4E5F60718293A0402 /* SouveraTalkPushActionRunner.swift */,
 				AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */,
 				D9F5B7E3C2A64917A8C1B5D3 /* SouveraLinkOpener.swift */,
 				30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */,
@@ -4806,6 +4818,8 @@
 				AA22C3D4E5F60718293A031F /* SouveraInvitationValidationTests.swift in Sources */,
 				AA22C3D4E5F60718293A0323 /* SouveraCalendarCategoryTests.swift in Sources */,
 				AA22C3D4E5F60718293A0321 /* SouveraOwnOrganizerTests.swift in Sources */,
+				AA22C3D4E5F60718293A0405 /* SouveraMailPushActionTests.swift in Sources */,
+				AA22C3D4E5F60718293A0407 /* SouveraTalkPushActionTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
 				F78E2D6C29AF02DB0024D4F3 /* Database.swift in Sources */,
 			);
@@ -5163,6 +5177,8 @@
 				AA22C3D4E5F60718293A0317 /* LinkRingingWatcher.swift in Sources */,
 				AA22C3D4E5F60718293A031B /* SouveraMailFromAddresses.swift in Sources */,
 				AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */,
+				AA22C3D4E5F60718293A0401 /* SouveraMailPushActionRunner.swift in Sources */,
+				AA22C3D4E5F60718293A0403 /* SouveraTalkPushActionRunner.swift in Sources */,
 				AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */,
 				8BBF0200451A7DAB1BEE4293 /* SouveraCalendarReminderSound.swift in Sources */,
 				563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */,
