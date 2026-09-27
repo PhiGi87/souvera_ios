@@ -84,6 +84,26 @@ opportunistischen iOS-Background-Task angewiesen zu sein.
   `SouveraReminderScheduler.schedule` (Erinnerungen sofort geplant).
 - Tap -> Termin-Detail (`SouveraPushDeepLink.event` -> `findEvent(uid:)`).
 
+## APNs-Auth-Key (team-weit, `92897N97QD`)
+
+- Der APNs-Auth-Key `92897N97QD` (Team `S76D7JCS9V`) ist **team-scoped**
+  und wird vom Push-Proxy (push.souvera.eu) für **alle Apps von
+  Host-On/Souvera** genutzt - jede Bundle-ID des Teams (u. a.
+  `eu.souvera.app`) wird über diesen einen Key zugestellt.
+- **Beim Revoken/Neuerstellen beachten:** Ein Widerrufen des Keys bricht
+  die Push-Zustellung für **alle Apps des Teams gleichzeitig** (nicht nur
+  für eine App), bis die neue `.p8` samt neuer Key-ID im Push-Proxy
+  hinterlegt ist (`nc-push-proxy.env`: `NC_PUSH_PROXY_APNS_KEY_ID` +
+  Credentials-Datei) und der Dienst neu gestartet wurde. Geräte müssen
+  nicht neu registriert werden (die Zustellung läuft JWT-basiert über
+  den Key, nicht überGeräte-Credentials).
+- Ablauf bei Rotation: neuen Key im Portal anlegen -> `.p8` + Key-ID im
+  Proxy hinterlegen -> Dienst neu starten -> Test-Push verifizieren ->
+  erst danach den alten Key widerrufen.
+- Der App-Store-Connect-API-Key (`ZW3SHJCS48`, CI/TestFlight) ist davon
+  unabhängig; der Legacy-Direct-Mode-Key (`VMZTTW625A`) wird im
+  Zielzustand (`push_mode=nc`) nicht mehr genutzt.
+
 ## Hinweise
 
 - Beide Erweiterungen sind isolierte Server-Patches (Notification über die
