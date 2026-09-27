@@ -343,8 +343,17 @@ enum SouveraPushDeepLink {
 
     static let opened = Notification.Name("souveraPushDeepLinkOpened")
 
+    /// Run 26.09. (Feedback: Push-Tap oeffnete die Mail nicht mehr): Der
+    /// Tap landet oft in einer JMAP-Stress-Phase, in der das Mail-Modul
+    /// die Zustellung noch nicht verarbeiten kann - deshalb 3 Zustell-
+    /// Versuche (0,5 s / 2,5 s / 6 s). Das Modul parkt oder verarbeitet
+    /// den Link jeweils idempotent.
     static func deliver(_ target: Target) {
-        NotificationCenter.default.post(name: opened, object: target)
+        for delay in [0.5, 2.5, 6.0] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                NotificationCenter.default.post(name: opened, object: target)
+            }
+        }
     }
 }
 
