@@ -85,9 +85,21 @@ enum SouveraLogSender {
     /// Settings bieten dann das native Teilen an. Der Versand-Task laeuft
     /// dahinter weiter - faellt er spter doch noch erfolgreich an, wird
     /// das Ergebnis via onLateSuccess gemeldet (dedupliziert).
-    static func sendLogsWithTimeout(timeoutSeconds: UInt64 = 15,
+    /// Run 29.09. (Feedback: Log-Versand schlug bei langsamer Verbindung
+    /// immer fehl): Der feste 15s-Timeout war bei 4-MB-Logs unerreichbar.
+    /// Der Timeout ist jetzt größenabhängig (15 s + ~128 kB/s, Deckel
+    /// 90 s) - der Versand-Task läuft bei Timeout weiterhin im Hintergrund
+    /// und meldet späten Erfolg via onLateSuccess (dedupliziert).
+    static func adaptiveTimeout(bytes: Int) -> UInt64 {
+        let seconds = 15 + (bytes / 128_000)
+        return UInt64(min(90, max(15, seconds)))
+    }
+
+    static func sendLogsWithTimeout(timeoutSeconds: UInt64? = nil,
                                     onLateSuccess: @escaping @Sendable () -> Void) async -> Result<String, Error> {
         let logs = await Task.detached { combinedLog() }.value
+        let effective = timeoutSeconds ?? adaptiveTimeout(bytes: logs.utf8.count)
+        SouveraLog.write("LogSender", "send with adaptive timeout \(effective)s (\(logs.utf8.count) bytes)")
         let once = OnceBox()
         return await withCheckedContinuation { continuation in
             // Versand-Task: LAEUFT BEIM TIMEOUT WEITER (kein cancelAll -
@@ -101,10 +113,10 @@ enum SouveraLogSender {
                     await MainActor.run { onLateSuccess() }
                 }
             }
-            // Timeout-Task: meldet nach 10s .timeout, wenn der Versand noch
-            // luft - die Settings zeigen dann das native Teilen.
+            // Timeout-Task: meldet nach Ablauf .timeout, wenn der Versand
+            // noch luft - die Settings zeigen dann das native Teilen.
             Task {
-                try? await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+                try? await Task.sleep(nanoseconds: effective * 1_000_000_000)
                 if await once.claim() {
                     continuation.resume(returning: .failure(MailSendError.timeout))
                 }
@@ -128,9 +140,12 @@ enum SouveraLogSender {
         // Versands der Account gewechselt wurde), wird die Credential
         // frisch aufgelöst und EINMAL wiederholt.
         var lastError: Error = MailSendError.noClient
-        for attempt in 0..<2 {
+        // Run 29.09.: 3 Versuche mit wachsendem Abstand - bei langsamer
+        // Verbindung scheitert der Session-Aufbau öfter transient
+        // ("JMAP session not available" im Log).
+        for attempt in 0..<3 {
             if attempt > 0 {
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(2 * attempt))
             }
             let manager = SouveraMailCredentialManager()
             guard let account = await manager.ensureCombinedCredential() else {

@@ -484,7 +484,7 @@ struct NCSettingsView: View {
                 logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
             case .failure(let error):
                 if case SouveraLogSender.MailSendError.timeout = error {
-                    SouveraLog.write("Settings", "logs send timed out (15s) - offering native share")
+                    SouveraLog.write("Settings", "logs send timed out - offering native share")
                     // Vorab-Info: Ergebnis-Overlay informieren, bevor das
                     // Apple-Teilen erscheint.
                     logsResult = (true, NSLocalizedString("_settings_logs_timeout_share_", comment: ""))
