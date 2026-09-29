@@ -102,11 +102,11 @@ final class SouveraBackgroundSync {
         var inboxId = UserDefaults.standard.string(forKey: inboxCacheKey) ?? ""
         if inboxId.isEmpty {
             guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
-                  !inbox.optString("id").isEmpty else {
+                  let resolved = inbox.optString("id"), !resolved.isEmpty else {
                 SouveraLog.write("BackgroundSync", "badge: no inbox for \(account) (accId \(accId))")
                 return nil
             }
-            inboxId = inbox.optString("id")
+            inboxId = resolved
             UserDefaults.standard.set(inboxId, forKey: inboxCacheKey)
         }
         guard let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
