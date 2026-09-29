@@ -155,14 +155,18 @@ actor JmapClient {
         var response: [String: Any]
         do {
             response = try await httpPost(apiUrl, body: requestObj)
-        } catch let error as JmapException {
-            if case .authNeedsBearer = error {
+        } catch {
+            if let jmapError = error as? JmapException, case .authNeedsBearer = jmapError {
                 throw error
             }
-            // Transienter Fehler (Server-Zucken/Verbindung): gecachte
-            // Session verwerfen, Session neu laden und EINMAL retryen -
-            // sonst hält eine zwischenzeitliche Störung die App offline.
-            JmapLog.write("JMAP call failed (\(error)) - invalidating session and retrying once")
+            // Run 29.09. (Feedback: Mail zäh/flappend bei schlechter
+            // Verbindung): transienter Fehler - Session verwerfen, 1 s
+            // Backoff (immediate Retry traf auf dieselbe Stausituation)
+            // und EINMAL retryen. Der Catch ist generisch, weil der
+            // NWConnection-Transport rohe POSIX-/URLErrors wirft
+            // (Log: POSIXErrorCode 53/57), die vorher nie retryt wurden.
+            JmapLog.write("JMAP call failed (\(error)) - backoff 1s, invalidating session and retrying once")
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
             jmapSession = nil
             resolvedApiUrl = nil
             resolvedJson = nil

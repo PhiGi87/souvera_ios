@@ -95,13 +95,25 @@ final class SouveraBackgroundSync {
             return nil
         }
         let accId = session.primaryAccountId
-        guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
-              let inboxId = inbox.optString("id") else {
-            SouveraLog.write("BackgroundSync", "badge: no inbox for \(account) (accId \(accId))")
-            return nil
+        // Run 29.09. (Feedback: Mail zäh): Inbox-JMAP-Id cachen - das
+        // getMailboxes()-Roundtrip entfällt im Normalfall (ein POST
+        // weniger je Badge-Zählung auf langsamen Verbindungen).
+        let inboxCacheKey = "souvera_badge_inboxid_\(account)"
+        var inboxId = UserDefaults.standard.string(forKey: inboxCacheKey) ?? ""
+        if inboxId.isEmpty {
+            guard let inbox = (try? await api.getMailboxes(accountId: accId))?.first(where: { $0.optString("role") == "inbox" }),
+                  !inbox.optString("id").isEmpty else {
+                SouveraLog.write("BackgroundSync", "badge: no inbox for \(account) (accId \(accId))")
+                return nil
+            }
+            inboxId = inbox.optString("id")
+            UserDefaults.standard.set(inboxId, forKey: inboxCacheKey)
         }
         guard let resp = try? await api.queryEmails(accountId: accId, inMailboxId: inboxId, limit: 0, calculateTotal: true, notKeyword: "$seen"),
               let total = resp["total"] as? Int else {
+            // Gecachte Inbox-Id könnte veraltet sein (Ordner gelöscht):
+            // einmalig ohne Cache wiederholen.
+            UserDefaults.standard.removeObject(forKey: inboxCacheKey)
             SouveraLog.write("BackgroundSync", "badge: query failed for \(account) inbox \(inboxId)")
             return nil
         }

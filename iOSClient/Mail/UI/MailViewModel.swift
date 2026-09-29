@@ -2199,6 +2199,17 @@ final class MailViewModel: ObservableObject {
                     return
                 }
             }
+            // Run 29.09. (Sticky States, Feedback "Zustaende flappen"):
+            // Gibt es bereits eine sichtbare Liste, bleibt sie bei einem
+            // Sync-Fehler STEHEN - der Rueckfall auf den (aelteren)
+            // Persistierten Cache lies Zeilen/Stati zurueckspringen. Der
+            // naechste erfolgreiche Sync korrigiert, offlineNotice
+            // erklaert den Zustand.
+            if case .success = messages {
+                offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
+                cacheBannerActive = cacheBannerGate.shouldTrigger()
+                return
+            }
             // Cache-Fallback bei JEDEM Fehler (auch Server-Antworten wie
             // 404/HTML/nicht-JSON): letzten Nachrichten-Stand anzeigen.
             guard generation == listGeneration else { return }
@@ -2616,7 +2627,23 @@ final class MailViewModel: ObservableObject {
     /// Autoritative Ungelesen-Zählung für den persönlichen Posteingang
     /// (JMAP Email/query mit notKeyword $seen) - aktualisiert Badge und
     /// Ordnerzähler. Fallback: komplette Postfachliste (unreadEmails).
-    func refreshUnreadBadge() async {
+    /// Run 29.09. (Feedback: Mail zäh): TTL-Guard (60 s) - der Voll- und
+    /// der inkrementelle Sync liefen vorher beide direkt hintereinander
+    /// in die Session+Postfachliste+Query-Kette, auf langsamen
+    /// Verbindungen doppelter Ballast.
+    private var lastAuthoritativeBadgeRefresh: Date = .distantPast
+    private var badgeRefreshInFlight = false
+
+    func refreshUnreadBadge(force: Bool = false) async {
+        if !force {
+            guard !badgeRefreshInFlight,
+                  Date().timeIntervalSince(lastAuthoritativeBadgeRefresh) >= 60 else { return }
+        }
+        badgeRefreshInFlight = true
+        defer {
+            badgeRefreshInFlight = false
+            lastAuthoritativeBadgeRefresh = Date()
+        }
         if useJmap {
             if let api = jmapApi, let client = jmapClient,
                let session = try? await client.refreshSession() {
@@ -2657,30 +2684,44 @@ final class MailViewModel: ObservableObject {
     /// primären Accounts; die Pill einer geteilten Inbox (z. B. "Eingang"
     /// für mail@arrt-it.de) blieb dadurch dauerhaft stehen.
     /// Run 19.09.: verhindert gestapelte 138-Ordner-Zaehlungen.
+    /// Run 29.09. (Feedback: Mail zäh bei langsamer Verbindung): die
+    /// seriellen Einzel-Queries laufen jetzt als JMAP-BATCH (ein POST je
+    /// 40 Ordner) und nur noch mit 5-min-TTL - vorher blockierte die
+    /// Ordner-Zaehlung auf langsamen Verbindungen den ganzen Sync.
     private var perInboxUnreadRefreshInFlight = false
+    private var lastPerInboxUnreadRefresh: Date = .distantPast
 
-    func refreshPerInboxUnreadCounts() async {
-        guard let api = jmapApi else { return }
+    func refreshPerInboxUnreadCounts(force: Bool = false) async {
+        guard let api = jmapApi, let client = jmapClient else { return }
         // Run 15.09. (2. Runde): ALLE Ordner - Unterordner-Pills (z. B.
         // INBOX/Inkasso) wurden vorher nie autoritativ aktualisiert.
         let targets = allMailboxes.filter { $0.jmapId != nil }
         guard !targets.isEmpty else { return }
-        // Run 19.09. (Feedback Freeze): nicht mehrfach parallel/gestapelt
-        // laufen lassen - der Badge-Sync und Mutationen riefen die
-        // 138-Ordner-Zaehlung sonst mehrfach gleichzeitig auf.
         guard !perInboxUnreadRefreshInFlight else { return }
+        if !force, Date().timeIntervalSince(lastPerInboxUnreadRefresh) < 300 { return }
+        _ = try? await client.refreshSession()
         perInboxUnreadRefreshInFlight = true
-        defer { perInboxUnreadRefreshInFlight = false }
+        defer {
+            perInboxUnreadRefreshInFlight = false
+            lastPerInboxUnreadRefresh = Date()
+        }
         var counts: [String: Int] = [:]
-        for box in targets {
-            guard let jmapId = box.jmapId else { continue }
-            if let resp = try? await api.queryEmails(accountId: box.accountId,
-                                                     inMailboxId: jmapId,
-                                                     limit: 0,
-                                                     calculateTotal: true,
-                                                     notKeyword: "$seen"),
-               let total = resp["total"] as? Int {
-                counts[box.id] = total
+        // Nach JMAP-Account gruppieren (geteilte Ordner leben in einem
+        // eigenen Account) und je Account als Batch abfragen.
+        let byAccount = Dictionary(grouping: targets, by: { $0.accountId })
+        for (accountId, boxes) in byAccount {
+            let mailboxIds = boxes.compactMap { $0.jmapId }
+            var cursor = 0
+            while cursor < mailboxIds.count {
+                let chunk = Array(mailboxIds[cursor..<min(cursor + 40, mailboxIds.count)])
+                cursor += chunk.count
+                guard let totals = try? await api.queryUnreadTotals(accountId: accountId,
+                                                                    mailboxIds: chunk) else { continue }
+                for (jmapId, total) in totals {
+                    if let box = boxes.first(where: { $0.jmapId == jmapId }) {
+                        counts[box.id] = total
+                    }
+                }
             }
         }
         guard !counts.isEmpty else { return }
@@ -3374,11 +3415,15 @@ final class MailViewModel: ObservableObject {
     /// kein Handoff fuer Mail vorliegt.
     func consumeSharedDraftIfNeeded() {
         guard let share = SouveraPendingShareStore.loadAndClear(action: "mail") else { return }
-        let attachments = share.files.filter { !$0.tooLarge }.map { file in
-            OutgoingAttachment(name: file.name,
-                               mimeType: file.mimeType,
-                               fileURL: URL(fileURLWithPath: file.path))
-        }
+        // Ziel-Grenze Mail: 20 MB je Anhang (Run 29.09., Feedback) -
+        // uebergrosse Dateien wurden schon im Chooser ausgeblendet.
+        let attachments = share.files
+            .filter { !$0.tooLarge && SouveraPendingShareStore.allows(sizeBytes: $0.size, for: SouveraPendingShareStore.actionMail) }
+            .map { file in
+                OutgoingAttachment(name: file.name,
+                                   mimeType: file.mimeType,
+                                   fileURL: URL(fileURLWithPath: file.path))
+            }
         composeContext = MailComposeContext(
             mode: .new,
             message: nil,

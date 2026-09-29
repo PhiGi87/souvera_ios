@@ -210,6 +210,41 @@ final class JmapApi {
 
     // MARK: - Email/set
 
+    /// Run 29.09. (Feedback: Mail zäh bei langsamer Verbindung): Ungelesen-
+    /// Zahlen für MEHRERE Postfaecher in EINEM JMAP-POST - die seriellen
+    /// Einzel-Queries (bis 138 Stück) blockierten auf langsamen Verbindungen
+    /// den ganzen Mail-Verkehr. callId = mailboxId; geliefert werden nur
+    /// erfolgreiche Ergebnisse (Fehlende fehlen einfach im Dictionary).
+    func queryUnreadTotals(accountId: String, mailboxIds: [String]) async throws -> [String: Int] {
+        guard !mailboxIds.isEmpty else { return [:] }
+        let accArg = try resolveAccountArg(accountId)
+        let calls = mailboxIds.map { mailboxId in
+            JmapMethodCall(
+                name: "Email/query",
+                args: [
+                    "accountId": accArg,
+                    "filter": ["inMailbox": mailboxId, "notKeyword": "$seen"],
+                    "sort": [["property": "receivedAt", "isAscending": false]],
+                    "position": 0,
+                    "limit": 0,
+                    "calculateTotal": true,
+                    "collapseThreads": false
+                ] as [String: Any],
+                callId: mailboxId
+            )
+        }
+        let batch = try await client.call(calls)
+        var totals: [String: Int] = [:]
+        for result in batch.results {
+            guard case let .success(resp) = result,
+                  resp.name == "Email/query",
+                  let total = resp.args["total"] as? Int,
+                  !resp.callId.isEmpty else { continue }
+            totals[resp.callId] = total
+        }
+        return totals
+    }
+
     func setEmailFlags(
         accountId: String,
         emailIds: [String],
