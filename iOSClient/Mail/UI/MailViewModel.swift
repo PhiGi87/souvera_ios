@@ -1839,6 +1839,18 @@ final class MailViewModel: ObservableObject {
                     } catch {
                         JmapLog.write("top-query diff failed - continuing without new-mail detection: \(error)")
                     }
+                    // Run 29.09. (Feedback: bei jedem App-Start der alte
+                    // Cache): den Zwischenstand SOFORT persistieren - der
+                    // tiefe Refetch (bis ~301 Mails) dauert auf langsamen
+                    // Verbindungen Minuten; wurde die App vorher geschlossen,
+                    // blieb sonst der ALTEN Cache stehen. Entfernte Mails
+                    // sind hier schon herausgefiltert.
+                    let interimKept = emails.filter { !self.suppressedIds(in: mailbox.id).contains($0.optString("id") ?? "") }
+                    await MailCache.saveMessagesOffMain(
+                        account: cacheAccountKey,
+                        mailboxId: cacheKey,
+                        emails: interimKept,
+                        queryState: changes.optString("newQueryState") ?? state)
                     let refetch = Array(refetchIds)
                     var fetchedAll: [[String: Any]] = []
                     var cursor = 0
