@@ -23,6 +23,7 @@ struct NCSettingsView: View {
     @State private var showLogsConfirm = false
     @State private var isSendingLogs = false
     @State private var logsResult: (success: Bool, message: String)?
+    @State private var logsLateSuccess = false
     // Push-Diagnose-Sheet
     @State private var showPushDiagnostics = false
     // Cache leeren: Bestätigung + Ergebnis-Overlay
@@ -467,15 +468,16 @@ struct NCSettingsView: View {
     private func sendLogs() {
         isSendingLogs = true
         logsResult = nil
+        logsLateSuccess = false
         Task {
-            // 15s-Timeout: bei langsamen Verbindungen wartete der Nutzer
-            // minutenlang auf den JMAP-Versand (Run-Feedback 12.09.).
-            // Nach dem Timeout oeffnet sich das NATIVE Apple-Teilen mit dem
-            // fertigen Log-File - mit Vorab-Info im Overlay.
+            // Run 29.09.: Der Timeout ist größenabhängig (SouveraLogSender);
+            // nach Ablauf entscheidet der Nutzer per Dialog: WEITER warten
+            // (Hintergrund-Versand läuft eh weiter) oder die Datei teilen.
             let result = await SouveraLogSender.sendLogsWithTimeout {
                 // Späterer Erfolg im Hintergrund: Ergebnis-Overlay zeigen.
                 Task { @MainActor in
-                    self.logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
+                    logsLateSuccess = true
+                    logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
                 }
             }
             isSendingLogs = false
@@ -484,11 +486,8 @@ struct NCSettingsView: View {
                 logsResult = (true, NSLocalizedString("_settings_logs_sent_", comment: ""))
             case .failure(let error):
                 if case SouveraLogSender.MailSendError.timeout = error {
-                    SouveraLog.write("Settings", "logs send timed out - offering native share")
-                    // Vorab-Info: Ergebnis-Overlay informieren, bevor das
-                    // Apple-Teilen erscheint.
-                    logsResult = (true, NSLocalizedString("_settings_logs_timeout_share_", comment: ""))
-                    presentShareFallback()
+                    SouveraLog.write("Settings", "logs send timed out - offering continue/share dialog")
+                    presentTimeoutDialog()
                 } else {
                     SouveraLog.write("Settings", "logs send failed: \(error.localizedDescription)")
                     logsResult = (false, NSLocalizedString("_settings_logs_failed_", comment: ""))
@@ -496,6 +495,40 @@ struct NCSettingsView: View {
                 }
             }
         }
+    }
+
+    /// Run 29.09. (Feedback: "Der Upload ist sehr langsam, aber das kann es
+    /// nicht sein"): Nach dem Timeout fragt ein Dialog, ob weiter gewartet
+    /// wird (weitere 2 Minuten auf den WEITERLAUFenden Hintergrund-Versand;
+    /// danach direkt der Teilen-Fallback) oder sofort geteilt wird.
+    private func presentTimeoutDialog() {
+        guard let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = scene.windows.first?.rootViewController else {
+            presentShareFallback()
+            return
+        }
+        var top = root
+        while let presented = top.presentedViewController { top = presented }
+        let alert = UIAlertController(
+            title: NSLocalizedString("_settings_logs_timeout_title_", comment: ""),
+            message: nil,
+            preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: NSLocalizedString("_settings_logs_continue_send_", comment: ""),
+                                      style: .default) { _ in
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 120_000_000_000)
+                // Späterer Erfolg zeigt das Erfolgs-Overlay (logsLateSuccess);
+                // sonst direkt teilen - ohne erneute Dialogschleife.
+                if !logsLateSuccess {
+                    presentShareFallback()
+                }
+            }
+        })
+        alert.addAction(UIAlertAction(title: NSLocalizedString("_settings_logs_share_now_", comment: ""),
+                                      style: .cancel) { _ in
+            presentShareFallback()
+        })
+        top.present(alert, animated: true)
     }
 
     /// Leert sämtliche App-Caches (Mail + Kalender + Kontakte über MailCache,

@@ -1318,3 +1318,8 @@ _mail_sort_flagged_ = "Flagged first";
 "_share_too_large_mail_" = "A file is larger than 20 MB - not possible as a mail attachment";
 "_share_too_large_talk_" = "A file is larger than 10 MB - not possible for chat";
 "_share_too_large_files_" = "A file is larger than 100 MB - upload not possible";
+
+/* Run 29.09.: Log-Versand Timeout-Dialog */
+"_settings_logs_timeout_title_" = "Sending is taking longer than expected.";
+"_settings_logs_continue_send_" = "Keep sending";
+"_settings_logs_share_now_" = "Share file";
