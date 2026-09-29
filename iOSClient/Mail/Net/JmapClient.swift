@@ -227,18 +227,23 @@ actor JmapClient {
         guard let url = URL(string: urlStr) else {
             throw JmapException.protocolError("Invalid upload URL: \(urlStr)")
         }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue(contentType, forHTTPHeaderField: "Content-Type")
-        req.setValue(authHeader(), forHTTPHeaderField: "Authorization")
-        req.httpBody = data
-
-        let (body, resp) = try await urlSession.data(for: req)
-        let code = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        // Run 29.09. (Feedback: Log-Versand stockt): Der Blob-Upload lief
+        // über URLSession/HTTP-2 zur Front - genau die Stelle, die für die
+        // JMAP-POSTs bereits auf HTTP/1.1 umgestellt wurde, weil der Proxy
+        // dort Probleme macht (Beleg: JMAP-POSTs laufen auf derselben
+        // Leitung, der 4-MB-Upload stalled wiederholt direkt nach der
+        // Session). Jetzt derselbe bewährte Transport.
+        let headers = [
+            "Content-Type": contentType,
+            "Authorization": authHeader(),
+            "User-Agent": "Souvera-iOS/\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0")"
+        ]
+        let response = try await Http1Transport.post(url: url, headers: headers, body: data)
+        let code = response.status
         guard (200..<300).contains(code) else {
-            throw JmapException.httpError(code: code, body: String(data: body, encoding: .utf8) ?? "")
+            throw JmapException.httpError(code: code, body: String(data: response.body, encoding: .utf8) ?? "")
         }
-        guard let json = try JSONSerialization.jsonObject(with: body) as? [String: Any] else {
+        guard let json = try JSONSerialization.jsonObject(with: response.body) as? [String: Any] else {
             throw JmapException.protocolError("Invalid blob upload response")
         }
         return JmapBlobUploadResponse(
