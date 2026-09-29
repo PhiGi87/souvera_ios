@@ -875,7 +875,14 @@ final class MailViewModel: ObservableObject {
                 return
             }
             let primaryAccId = session?.primaryAccountId ?? ""
-            let accountName = mailAccount?.account ?? ""
+            // Run 29.09. (Feedback: alter Cache bei jedem App-Start): die
+            // Account-Quelle für Mailbox-IDs MUSS die geschützte sein - im
+            // Start-Fenster (mailAccount noch nil) erzeugte
+            // mailAccount?.account IDs ohne Präfix ("|Inbox") und die App
+            // öffnete zuerst den fossilen 100-Mails-Cache dieses
+            // Schatten-Keys. cacheAccountKey weicht auf fallbackAccountKey
+            // aus und ist im Start-Fenster bereits korrekt.
+            let accountName = cacheAccountKey
             ownEmailLabel = session?.username ?? mailAccount?.username ?? ownEmailLabel
 
             var all: [Mailbox] = []
@@ -929,6 +936,9 @@ final class MailViewModel: ObservableObject {
             // Verbindung steht wieder: Recovery-Sperre zurücksetzen.
             hasRecoveredCredential = false
             MailCache.saveMailboxes(account: accountName, boxes: rawBoxes)
+            // Run 29.09.: die Schatten-Caches ("|Inbox" etc.) des
+            // Start-Race-Fensters einmalig entsorgen.
+            cleanupLegacyMailboxCaches(sorted)
             if autoOpenInbox {
                 openPreferredMailbox(sorted)
             }
@@ -946,7 +956,7 @@ final class MailViewModel: ObservableObject {
             }
             // Cache-Fallback bei JEDEM Fehler (auch 404/HTML/nicht-JSON vom
             // Server): letzten Stand anzeigen statt Fehlerbildschirm.
-            if let cached = MailCache.loadMailboxes(account: mailAccount?.account ?? "") {
+            if let cached = MailCache.loadMailboxes(account: cacheAccountKey) {
                 let boxes = cached.map { mailbox(from: $0) }
                 let sorted = sortMailboxGroups(filterNonStandardSentFolders(boxes))
                 applyMailboxes(sorted)
@@ -976,7 +986,7 @@ final class MailViewModel: ObservableObject {
 
     private func mailbox(from cached: [String: Any]) -> Mailbox {
         var box = JmapMapper.mapMailbox(
-            account: mailAccount?.account ?? "",
+            account: cacheAccountKey,
             accountId: cached.optString("_accountId") ?? "",
             json: cached,
             path: cached.optString("_path"),
@@ -1264,8 +1274,8 @@ final class MailViewModel: ObservableObject {
         )
         if ok {
             // Cache/Query-State des Papierkorbs invalidieren, Liste leeren.
-            let accountName = mailAccount?.account ?? ""
-            MailCache.remove(account: accountName, mailboxId: mailbox.id)
+            // Run 29.09.: dieselbe Account-Quelle wie die Mailbox-IDs.
+            MailCache.remove(account: cacheAccountKey, mailboxId: mailbox.id)
             queryStates.removeValue(forKey: mailbox.id)
             dirtyFlagIds.removeValue(forKey: mailbox.id)
             pageState = (nil, false)
@@ -1412,14 +1422,52 @@ final class MailViewModel: ObservableObject {
     }
 
     private func openPreferredMailbox(_ boxes: [Mailbox]) {
+        // Run 29.09.: Schatten-IDs ohne Account-Präfix ("|Inbox", aus dem
+        // Start-Race-Fenster) NIE öffnen - ihr Cache ist der fossile
+        // Altstand, den der Nutzer sonst bei jedem Start zuerst sah.
+        let candidates = boxes.filter { !Self.mailboxIdIsLegacyEmptyAccount($0.id) }
         if let lastId = Self.lastMailboxId(account: cacheAccountKey),
-           let last = boxes.first(where: { $0.id == lastId }) {
+           let last = candidates.first(where: { $0.id == lastId }) {
             openMailbox(last)
             return
         }
-        if let inbox = boxes.first(where: { $0.kind == .inbox }) {
+        if let inbox = candidates.first(where: { $0.kind == .inbox }) {
             openMailbox(inbox)
         }
+    }
+
+    /// Reiner Helper (unit-testbar): Legacy-Schatten-ID = Account-Präfix
+    /// fehlt (erzeugbar war das nur im Start-Race-Fenster).
+    nonisolated static func mailboxIdIsLegacyEmptyAccount(_ id: String) -> Bool {
+        id.hasPrefix("|")
+    }
+
+    /// Run 29.09. (Feedback: alter Cache bei jedem App-Start): Im
+    /// Start-Fenster (mailAccount noch nil) entstanden Mailbox-IDs OHNE
+    /// Account-Präfix ("|Inbox") - deren fossile Cache-Dateien (der
+    /// 100-Mails-Altstand; der eigene Sync verlor stets das
+    /// Generation-Rennen und speicherte nie) öffnete die App bei jedem
+    /// Start ZUERST. Einmalig pro Session: die Legacy-Twins der aktuellen
+    /// Postfächer löschen und eine veraltete lastMailboxId verwerfen.
+    private var legacyMailboxCacheCleanupDone = false
+
+    private func cleanupLegacyMailboxCaches(_ boxes: [Mailbox]) {
+        guard !legacyMailboxCacheCleanupDone else { return }
+        legacyMailboxCacheCleanupDone = true
+        for box in boxes where !box.path.isEmpty {
+            MailCache.remove(account: cacheAccountKey, mailboxId: "|" + box.path)
+        }
+        // Generisch auch die Systemordner-Namen ohne Präfix.
+        for name in ["Inbox", "Sent", "Drafts", "Trash", "Junk"] {
+            MailCache.remove(account: cacheAccountKey, mailboxId: "|" + name)
+        }
+        let lastKey = Self.lastMailboxKey + cacheAccountKey
+        if let stored = UserDefaults.standard.string(forKey: lastKey),
+           Self.mailboxIdIsLegacyEmptyAccount(stored) {
+            UserDefaults.standard.removeObject(forKey: lastKey)
+            SouveraLog.write("Mail", "legacy lastMailboxId discarded")
+        }
+        SouveraLog.write("Mail", "legacy mailbox cache cleanup done")
     }
 
     func syncMessages() async {

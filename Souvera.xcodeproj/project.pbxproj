@@ -1106,6 +1106,7 @@
 		AA22C3D4E5F60718293A0503 /* SouveraShareTargetLimitsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */; };
 		AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */; };
 		AA22C3D4E5F60718293A0507 /* SouveraInvitationCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */; };
+		AA22C3D4E5F60718293A0509 /* SouveraMailboxLegacyKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */; };
 		AA22C3D4E5F60718293A0315 /* SouveraJmapMailSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */; };
 		AA22C3D4E5F60718293A0302 /* SouveraPendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */; };
 		AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */; };
@@ -2173,6 +2174,7 @@
 		AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareTargetLimitsTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraCalendarPendingWritesTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraInvitationCandidateTests.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraMailboxLegacyKeyTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraJmapMailSearchTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/SouveraShareFlow.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareView.swift; sourceTree = "<group>"; };
@@ -2515,6 +2517,7 @@
 				AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */,
 				AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */,
 				AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */,
+				AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
 			);
 			path = NextcloudUnitTests;
@@ -4835,6 +4838,7 @@
 				AA22C3D4E5F60718293A0503 /* SouveraShareTargetLimitsTests.swift in Sources */,
 				AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */,
 				AA22C3D4E5F60718293A0507 /* SouveraInvitationCandidateTests.swift in Sources */,
+				AA22C3D4E5F60718293A0509 /* SouveraMailboxLegacyKeyTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
 				F78E2D6C29AF02DB0024D4F3 /* Database.swift in Sources */,
 			);
