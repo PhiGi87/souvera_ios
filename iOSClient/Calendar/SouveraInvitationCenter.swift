@@ -333,18 +333,70 @@ final class SouveraInvitationCenter: ObservableObject {
                 await setMailInvites([], accountKey: accountKey)
                 return
             }
-            let detailed = try await api.getEmails(
-                accountId: accountId,
-                ids: ids,
-                bodyProperties: ["subject", "from", "keywords", "attachments", "partId", "blobId", "size", "type", "name", "disposition", "cid"],
-                fetchAllBodyValues: true
-            )
+            // Run 29.09. (Feedback: Mail zäh bei schlechter Verbindung):
+            // Der Scan lud bisher ALLE Top-Mails inkl. KOMPLETTER Body-
+            // Werte (fetchAllBodyValues) - im Log eine 29-MB-Antwort
+            // (eine Mail mit riesigem HTML-Body), alle 30 s, die die
+            // Leitung frass und den Mail-Sync blockierte. Jetzt zwei
+            // Stufen: zuerst nur Metadaten (wenige KB), das teure
+            // Detail-Fetch nur noch fuer echte Kandidaten.
+            let bodyProperties: [String] = ["subject", "from", "keywords", "attachments",
+                                            "partId", "blobId", "size", "type", "name",
+                                            "disposition", "cid"]
+            let overview = try await api.getEmails(accountId: accountId,
+                                                   ids: ids,
+                                                   bodyProperties: bodyProperties,
+                                                   fetchAllBodyValues: false)
+            let answered = Self.answeredMessageIds
+            let candidateIds: [String] = overview.compactMap { json in
+                guard let id = json["id"] as? String else { return nil }
+                guard !answered.contains(id) else { return nil }
+                let attachments = ((json["attachments"] as? [[String: Any]]) ?? [])
+                    + ((json["inlineAttachments"] as? [[String: Any]]) ?? [])
+                return Self.isInvitationCandidate(subject: (json["subject"] as? String) ?? "",
+                                                  attachments: attachments) ? id : nil
+            }
+            var detailed = overview
+            if !candidateIds.isEmpty {
+                if let detail = try? await api.getEmails(accountId: accountId,
+                                                         ids: candidateIds,
+                                                         bodyProperties: bodyProperties,
+                                                         fetchAllBodyValues: true) {
+                    let byId = Dictionary(detail.compactMap { json -> (String, [String: Any])? in
+                        guard let id = json["id"] as? String else { return nil }
+                        return (id, json)
+                    }, uniquingKeysWith: { _, new in new })
+                    detailed = overview.map { json in
+                        guard let id = json["id"] as? String, let enriched = byId[id] else { return json }
+                        return enriched
+                    }
+                }
+            }
             await scanMailInvites(accountId: accountId, accountKey: accountKey,
                                   ownEmail: ownEmail, candidates: detailed,
                                   client: client, api: api)
         } catch {
             SouveraLog.write("Invitations", "scanInbox failed: \(error)")
         }
+    }
+
+    /// Reiner Kandidaten-Filter (unit-testbar): Betreff-Hinweis
+    /// ("Einladung:"/"Invitation:"/"Abgesagt:...") oder Kalender-/ICS-Anhang.
+    static func isInvitationCandidate(subject: String, attachments: [[String: Any]]) -> Bool {
+        let lowerSubject = subject.lowercased()
+        let cancelHint = lowerSubject.hasPrefix("abgesagt:")
+            || lowerSubject.hasPrefix("cancelled:")
+            || lowerSubject.hasPrefix("canceled:")
+            || lowerSubject.hasPrefix("abgesagt ")
+        let subjectHint = lowerSubject.hasPrefix("invitation:")
+            || lowerSubject.hasPrefix("einladung:")
+            || lowerSubject.hasPrefix("invito:")
+            || lowerSubject.hasPrefix("invitation :")
+        let icsAttachment = attachments.first(where: {
+            ($0["type"] as? String)?.lowercased().contains("calendar") == true
+                || (($0["name"] as? String)?.lowercased().hasSuffix(".ics") == true)
+        })
+        return subjectHint || cancelHint || icsAttachment != nil
     }
 
     func scanMailInvites(accountId: String,
