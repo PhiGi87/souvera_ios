@@ -238,9 +238,17 @@ final class CalDavClient {
     }
 
     func updateEvent(_ entry: CalDavEventEntry, ics: String) async -> Bool {
+        await performEventUpdate(entry, ics: ics).ok
+    }
+
+    /// Run 29.09. (optimistisches Speichern): Variante mit ETag-Rückgabe -
+    /// der neue Server-ETag wird still in den lokalen Cache zurückgeschrieben,
+    /// damit der nächste bedingte PUT (If-Match) nicht an einem
+    /// Zwischenstand scheitert.
+    func performEventUpdate(_ entry: CalDavEventEntry, ics: String) async -> (ok: Bool, etag: String?) {
         guard let home = calendarHomeURLs().first,
               let calendarURL = URL(string: entry.calendarHref, relativeTo: home)?.absoluteURL,
-              let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return false }
+              let url = URL(string: entry.href, relativeTo: calendarURL)?.absoluteURL else { return (false, nil) }
         var req = authorizedRequest(for: url, method: "PUT", contentType: "text/calendar; charset=utf-8")
         if let etag = entry.etag {
             req.setValue(etag, forHTTPHeaderField: "If-Match")
@@ -248,14 +256,15 @@ final class CalDavClient {
         req.httpBody = ics.data(using: .utf8)
         guard let (data, response) = try? await urlSession.data(for: req) else {
             JmapLog.write("CalDAV updateEvent \(url.absoluteString) -> Transportfehler")
-            return false
+            return (false, nil)
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? -1
         if !(200..<300).contains(status) {
             let body = String(data: data.prefix(300), encoding: .utf8) ?? ""
             JmapLog.write("CalDAV updateEvent \(url.absoluteString) -> \(status) \(body)")
         }
-        return (200..<300).contains(status)
+        let etag = (response as? HTTPURLResponse)?.value(forHTTPHeaderField: "ETag")
+        return ((200..<300).contains(status), etag)
     }
 
     /// Run 19.09. (Feedback): ICS nach dem RSVP-PUT zuruecklesen, um den

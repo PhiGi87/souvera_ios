@@ -1312,3 +1312,9 @@ _mail_sort_flagged_ = "Flagged first";
 "account_does_not_exist" = "Account does not exist";
 "favorite" = "Favorite";
 "OK" = "OK";
+
+/* Run 29.09.: optimistisches Kalender-Speichern + Share-Ziel-Grenzen */
+"_calendar_sync_pending_" = "Saved - syncing";
+"_share_too_large_mail_" = "A file is larger than 20 MB - not possible as a mail attachment";
+"_share_too_large_talk_" = "A file is larger than 10 MB - not possible for chat";
+"_share_too_large_files_" = "A file is larger than 100 MB - upload not possible";

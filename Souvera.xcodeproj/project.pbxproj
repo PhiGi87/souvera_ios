@@ -1102,6 +1102,9 @@
 		AA22C3D4E5F60718293A0403 /* SouveraTalkPushActionRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0402 /* SouveraTalkPushActionRunner.swift */; };
 		AA22C3D4E5F60718293A0405 /* SouveraMailPushActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */; };
 		AA22C3D4E5F60718293A0407 /* SouveraTalkPushActionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */; };
+		AA22C3D4E5F60718293A0501 /* SouveraCalendarPendingWrites.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0500 /* SouveraCalendarPendingWrites.swift */; };
+		AA22C3D4E5F60718293A0503 /* SouveraShareTargetLimitsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */; };
+		AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */; };
 		AA22C3D4E5F60718293A0315 /* SouveraJmapMailSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */; };
 		AA22C3D4E5F60718293A0302 /* SouveraPendingShareStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */; };
 		AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */; };
@@ -2165,6 +2168,9 @@
 		AA22C3D4E5F60718293A0402 /* SouveraTalkPushActionRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/SouveraTalkPushActionRunner.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraMailPushActionTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraTalkPushActionTests.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0500 /* SouveraCalendarPendingWrites.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Calendar/SouveraCalendarPendingWrites.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareTargetLimitsTests.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraCalendarPendingWritesTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0314 /* SouveraJmapMailSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraJmapMailSearchTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0304 /* SouveraShareFlow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/SouveraShareFlow.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0306 /* SouveraShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareView.swift; sourceTree = "<group>"; };
@@ -2409,6 +2415,7 @@
 				CA03AE7073634F3BBFF2F610 /* SouveraCalendarView.swift */,
 				FACA7B85C04940FFB3BCBB88 /* CalendarViewModel.swift */,
 				2F29AA3C350B44BB9E7EBCAE /* SouveraCalendarModels.swift */,
+				AA22C3D4E5F60718293A0500 /* SouveraCalendarPendingWrites.swift */,
 				900B0105D1F7FE2D890947B9 /* SouveraInvitationDetailSupport.swift */,
 				B7DDF31129BBA2B432DCB1FA /* SouveraInviteMailSender.swift */,
 				C914E04FA6076D099EBCE40D /* SouveraInvitationCenter.swift */,
@@ -2503,6 +2510,8 @@
 				AA22C3D4E5F60718293A0320 /* SouveraOwnOrganizerTests.swift */,
 				AA22C3D4E5F60718293A0404 /* SouveraMailPushActionTests.swift */,
 				AA22C3D4E5F60718293A0406 /* SouveraTalkPushActionTests.swift */,
+				AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */,
+				AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
 			);
 			path = NextcloudUnitTests;
@@ -4820,6 +4829,8 @@
 				AA22C3D4E5F60718293A0321 /* SouveraOwnOrganizerTests.swift in Sources */,
 				AA22C3D4E5F60718293A0405 /* SouveraMailPushActionTests.swift in Sources */,
 				AA22C3D4E5F60718293A0407 /* SouveraTalkPushActionTests.swift in Sources */,
+				AA22C3D4E5F60718293A0503 /* SouveraShareTargetLimitsTests.swift in Sources */,
+				AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
 				F78E2D6C29AF02DB0024D4F3 /* Database.swift in Sources */,
 			);
@@ -5179,6 +5190,7 @@
 				AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */,
 				AA22C3D4E5F60718293A0401 /* SouveraMailPushActionRunner.swift in Sources */,
 				AA22C3D4E5F60718293A0403 /* SouveraTalkPushActionRunner.swift in Sources */,
+				AA22C3D4E5F60718293A0501 /* SouveraCalendarPendingWrites.swift in Sources */,
 				AA22C3D4E5F60718293A0303 /* SouveraShareFlow.swift in Sources */,
 				8BBF0200451A7DAB1BEE4293 /* SouveraCalendarReminderSound.swift in Sources */,
 				563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */,

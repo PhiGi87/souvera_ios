@@ -42,6 +42,7 @@ final class CalendarViewModel: ObservableObject {
     private var autoRefreshTask: Task<Void, Never>?
     private var lastAutoRefresh: Date = Date()
     private var accountChangeObserver: NSObjectProtocol?
+    private var pendingFlushObserver: NSObjectProtocol?
     /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel.
     private var generation = 0
 
@@ -58,11 +59,24 @@ final class CalendarViewModel: ObservableObject {
                 self?.resetForAccountChange()
             }
         }
+        // Run 29.09.: verzögerter Flush der Offline-Schreib-Warteschlange.
+        pendingFlushObserver = NotificationCenter.default.addObserver(
+            forName: .calendarPendingFlushRequested,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await self?.flushPendingCalendarWrites()
+            }
+        }
     }
 
     deinit {
         if let accountChangeObserver {
             NotificationCenter.default.removeObserver(accountChangeObserver)
+        }
+        if let pendingFlushObserver {
+            NotificationCenter.default.removeObserver(pendingFlushObserver)
         }
     }
 
@@ -549,6 +563,10 @@ final class CalendarViewModel: ObservableObject {
         } else {
             JmapLog.write("Calendar reminders: skipped suspicious-empty schedule (all=\(all.count))")
         }
+        // Run 29.09. (optimistisches Speichern): nach jedem erfolgreichen
+        // Sync die Offline-Schreib-Warteschlange zustellen - der Server
+        // holt damit nach, was bei schlechter Verbindung angestaut hat.
+        await flushPendingCalendarWrites()
     }
 
     // MARK: - Mutations
@@ -616,12 +634,16 @@ final class CalendarViewModel: ObservableObject {
             }
             .joined(separator: " | ")
         JmapLog.write("Calendar saveEvent existing=\(existing != nil) talk=\(draft.talkRoomToken ?? "-") \n\(interesting)")
-        let ok: Bool
+        let optimistic: CalDavEventEntry
+        let kind: SouveraCalendarPendingWrites.Kind
         if let existing {
-            let entry = cachedEntries.first(where: { $0.href == existing.href })
-                ?? CalDavEventEntry(calendarHref: existing.calendarHref, href: existing.href, etag: existing.etag, ics: ics)
-            ok = await client.updateEvent(entry, ics: ics)
+            kind = .update
+            optimistic = CalDavEventEntry(calendarHref: existing.calendarHref,
+                                          href: existing.href,
+                                          etag: existing.etag,
+                                          ics: ics)
         } else {
+            kind = .create
             // Ziel-Kalender: gewählter (schreibbarer) Kalender, sonst der
             // eigene/persönliche, sonst bisheriger Fallback.
             let chosen: CalDavCalendar? =
@@ -631,30 +653,188 @@ final class CalendarViewModel: ObservableObject {
                 ?? calendars.first(where: { !$0.href.contains("deck") })
             guard let targetCalendar = chosen else { return false }
             let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
-            ok = await client.createEvent(calendarHref: targetCalendar.href, ics: ics, uid: uid) != nil
+            // Dateiname aus der UID bereinigen (wie CalDavClient.createEvent).
+            let fileBase = uid.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+            optimistic = CalDavEventEntry(calendarHref: targetCalendar.href,
+                                          href: "\(fileBase).ics",
+                                          etag: nil,
+                                          ics: ics)
         }
-        if ok {
-            await load()
-            actionFeedback = CalendarActionFeedback(
-                success: true,
-                message: NSLocalizedString("_calendar_saved_", comment: "")
-            )
-        }
-        return ok
+        // Run 29.09. (Feedback: Termin-Änderungen dauerten bei schlechter
+        // Verbindung lange, bis sie sichtbar wurden): SOFORT lokal zeigen,
+        // der Server-Schreib läuft im Hintergrund (Offline-Warteschlange).
+        upsertLocalEntry(optimistic)
+        scheduleEventSync(kind: kind, entry: optimistic)
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: NSLocalizedString("_calendar_sync_pending_", comment: "")
+        )
+        return true
     }
 
     func deleteEvent(_ event: CalendarEventModel) async -> Bool {
         let entry = cachedEntries.first(where: { $0.href == event.href })
             ?? CalDavEventEntry(calendarHref: event.calendarHref, href: event.href, etag: event.etag, ics: "")
-        let ok = await client.deleteEvent(entry)
-        if ok {
-            await load()
-            actionFeedback = CalendarActionFeedback(
-                success: true,
-                message: NSLocalizedString("_calendar_deleted_", comment: "")
-            )
+        // Run 29.09. (optimistisch): sofort aus Ansicht + Cache entfernen,
+        // DELETE läuft im Hintergrund (Retry-Ladder + Warteschlange).
+        cachedEntries.removeAll { $0.href == entry.href }
+        Self.saveCachedEntries(cachedEntries, month: visibleMonth)
+        if case var .success(list) = events {
+            list.removeAll { $0.href == entry.href || (!event.uid.isEmpty && $0.uid == event.uid) }
+            events = .success(list.sorted { $0.start < $1.start })
         }
-        return ok
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: NSLocalizedString("_calendar_sync_pending_", comment: "")
+        )
+        Task { [weak self] in
+            guard let self else { return }
+            let ok = await self.client.deleteEvent(entry)
+            if !ok {
+                SouveraCalendarPendingWrites.enqueue(kind: .delete,
+                                                     calendarHref: entry.calendarHref,
+                                                     href: entry.href,
+                                                     uid: event.uid,
+                                                     ics: entry.ics)
+                Self.schedulePendingFlushRetry()
+            }
+        }
+        return true
+    }
+
+    // MARK: - Optimistische Termine (Run 29.09.)
+
+    /// Optimistischen Stand SOFORT in Cache + Liste übernehmen - die
+    /// Ansicht aktualisiert sich ohne Netz-Wartezeit.
+    private func upsertLocalEntry(_ entry: CalDavEventEntry) {
+        if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
+            cachedEntries[idx] = entry
+        } else {
+            cachedEntries.append(entry)
+        }
+        Self.saveCachedEntries(cachedEntries, month: visibleMonth)
+        let parsed = Self.parseEntries([entry], ownEmail: Self.ownAttendeeEmail())
+        if case var .success(list) = events {
+            list.removeAll { item in
+                item.href == entry.href || parsed.contains(where: { !item.uid.isEmpty && $0.uid == item.uid })
+            }
+            list.append(contentsOf: parsed)
+            events = .success(list.sorted { $0.start < $1.start })
+        }
+    }
+
+    /// ETag-Reconcile: der vom Server bestätigte ETag wandert still in den
+    /// lokalen Eintrag (nächste bedingte PUT bleibt zustellbar).
+    private func reconcileLocalEntry(_ entry: CalDavEventEntry, etag: String?) {
+        guard let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) else { return }
+        cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                              href: entry.href,
+                                              etag: etag ?? entry.etag,
+                                              ics: entry.ics)
+        Self.saveCachedEntries(cachedEntries, month: visibleMonth)
+    }
+
+    /// Server-Schreib im Hintergrund: bis zu 3 Versuche mit Backoff, bei
+    /// 412 (stale If-Match) einmal ohne ETag; scheitert alles -> in die
+    /// persistente Warteschlange (Flush bei Gelegenheit).
+    private func scheduleEventSync(kind: SouveraCalendarPendingWrites.Kind, entry: CalDavEventEntry) {
+        Task { [weak self] in
+            guard let self else { return }
+            var ok = false
+            var serverEtag: String?
+            for attempt in 0..<3 {
+                if attempt > 0 {
+                    try? await Task.sleep(nanoseconds: SouveraCalendarPendingWrites.backoffSeconds(attempts: attempt - 1) * 1_000_000_000)
+                }
+                switch kind {
+                case .create:
+                    let uid = entry.href.replacingOccurrences(of: ".ics", with: "")
+                    if let created = await self.client.createEvent(calendarHref: entry.calendarHref,
+                                                                   ics: entry.ics,
+                                                                   uid: uid) {
+                        ok = true
+                        serverEtag = created.etag
+                    }
+                case .update:
+                    let result = await self.client.performEventUpdate(entry, ics: entry.ics)
+                    ok = result.ok
+                    serverEtag = result.etag
+                    if !ok, attempt < 2 {
+                        // 412 (stale If-Match): einmal ohne If-Match (Last-Write-Wins).
+                        let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                                      href: entry.href, etag: nil, ics: entry.ics)
+                        let retry = await self.client.performEventUpdate(noEtag, ics: entry.ics)
+                        if retry.ok {
+                            ok = true
+                            serverEtag = retry.etag
+                        }
+                    }
+                case .delete:
+                    ok = await self.client.deleteEvent(entry)
+                }
+                if ok { break }
+            }
+            if ok {
+                self.reconcileLocalEntry(entry, etag: serverEtag)
+                SouveraLog.write("Calendar", "event sync ok: \(kind.rawValue) \(entry.href)")
+            } else {
+                SouveraCalendarPendingWrites.enqueue(kind: kind,
+                                                     calendarHref: entry.calendarHref,
+                                                     href: entry.href,
+                                                     uid: entry.href,
+                                                     ics: entry.ics)
+                Self.schedulePendingFlushRetry()
+            }
+        }
+    }
+
+    /// Warteschlange zustellen (nach Foreground-Rückkehr, erfolgreichem
+    /// Sync oder Netzrückkehr). Scheiternde Aufträge bleiben mit erhöhtem
+    /// Versuchszähler bestehen.
+    func flushPendingCalendarWrites() async {
+        let queue = SouveraCalendarPendingWrites.loadAll()
+        guard !queue.isEmpty else { return }
+        SouveraLog.write("Calendar", "pending flush: \(queue.count) Aufträge")
+        var doneIds: Set<String> = []
+        var kept: [SouveraCalendarPendingWrites.PendingWrite] = []
+        for var write in queue {
+            write.attempts += 1
+            if write.attempts > SouveraCalendarPendingWrites.maxAttempts {
+                SouveraLog.write("Calendar", "pending write dropped after \(write.attempts) attempts: \(write.href)")
+                continue
+            }
+            let entry = CalDavEventEntry(calendarHref: write.calendarHref,
+                                         href: write.href,
+                                         etag: nil,
+                                         ics: write.ics)
+            let ok: Bool
+            switch write.kind {
+            case .create, .update:
+                let result = await client.performEventUpdate(entry, ics: write.ics)
+                ok = result.ok
+            case .delete:
+                ok = await client.deleteEvent(entry)
+            }
+            if ok {
+                doneIds.insert(write.id)
+            } else {
+                kept.append(write)
+            }
+        }
+        SouveraCalendarPendingWrites.remove(ids: doneIds)
+        SouveraCalendarPendingWrites.save(kept)
+        if !doneIds.isEmpty || !kept.isEmpty {
+            SouveraLog.write("Calendar", "pending flush done: \(doneIds.count) ok, \(kept.count) queued")
+        }
+    }
+
+    /// Einmaliger verzögerter Flush nach einem fehlgeschlagenen
+    /// Sofortversuch (Netz kann sich schnell erholen); der Flush selbst
+    /// läuft über den Observer in init() am lebenden ViewModel.
+    nonisolated private static func schedulePendingFlushRetry(delay: TimeInterval = 30) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+            NotificationCenter.default.post(name: .calendarPendingFlushRequested, object: nil)
+        }
     }
 
     // MARK: - Talk channel for an event
@@ -836,41 +1016,45 @@ final class CalendarViewModel: ObservableObject {
             return false
         }
         let updated = Self.setValarms(ics: entryUnwrapped.ics, minutes: minutes)
-        var ok = await client.updateEvent(entryUnwrapped, ics: updated)
-        if !ok {
-            // 412 (stale ETag): ohne If-Match wiederholen.
-            JmapLog.write("updateReminders: PUT fehlgeschlagen - Retry ohne If-Match")
-            let retryEntry = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
-                                              href: entryUnwrapped.href, etag: nil, ics: entryUnwrapped.ics)
-            ok = await client.updateEvent(retryEntry, ics: updated)
-            // Run 22.09.: Ergebnis des Retrys loggen (vorher unsichtbar -
-            // der Nutzer sah nur "gespeichert nicht").
-            JmapLog.write("updateReminders: Retry-Ergebnis uid=\(event.uid) ok=\(ok) minutes=\(minutes)")
-        }
-        let entryFinal = ok
-            ? CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref, href: entryUnwrapped.href,
-                               etag: entryUnwrapped.etag, ics: updated)
-            : entryUnwrapped
-        if ok, let idx = cachedEntries.firstIndex(where: { $0.href == entryUnwrapped.href }) {
+        // Run 29.09. (optimistisch): Erinnerungen SOFORT lokal übernehmen,
+        // der PUT läuft im Hintergrund (Offline-Warteschlange).
+        if let idx = cachedEntries.firstIndex(where: { $0.href == entryUnwrapped.href }) {
             cachedEntries[idx] = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
                                                   href: entryUnwrapped.href, etag: entryUnwrapped.etag, ics: updated)
-            if case var .success(list) = events {
-                let refreshed = Self.parseEntries([CalDavEventEntry(
-                    calendarHref: entryFinal.calendarHref, href: entryFinal.href,
-                    etag: entryFinal.etag, ics: updated)], ownEmail: Self.ownAttendeeEmail())
-                list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
-                list.append(contentsOf: refreshed)
-                events = .success(list.sorted { $0.start < $1.start })
-            }
-            actionFeedback = CalendarActionFeedback(
-                success: true,
-                message: NSLocalizedString("_calendar_reminder_saved_", comment: ""))
-        } else {
-            actionFeedback = CalendarActionFeedback(
-                success: false,
-                message: NSLocalizedString("_calendar_reminder_save_failed_", comment: ""))
         }
-        return ok
+        let refreshed = Self.parseEntries([CalDavEventEntry(
+            calendarHref: entryUnwrapped.calendarHref, href: entryUnwrapped.href,
+            etag: entryUnwrapped.etag, ics: updated)], ownEmail: Self.ownAttendeeEmail())
+        if case var .success(list) = events {
+            list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
+            list.append(contentsOf: refreshed)
+            events = .success(list.sorted { $0.start < $1.start })
+        }
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: NSLocalizedString("_calendar_reminder_saved_", comment: ""))
+        Task { [weak self] in
+            guard let self else { return }
+            var ok = await self.client.updateEvent(entryUnwrapped, ics: updated)
+            if !ok {
+                // 412 (stale ETag): ohne If-Match wiederholen.
+                let retryEntry = CalDavEventEntry(calendarHref: entryUnwrapped.calendarHref,
+                                                  href: entryUnwrapped.href, etag: nil, ics: updated)
+                ok = await self.client.updateEvent(retryEntry, ics: updated)
+            }
+            if ok {
+                JmapLog.write("updateReminders: PUT ok uid=\(event.uid) minutes=\(minutes)")
+            } else {
+                JmapLog.write("updateReminders: PUT fehlgeschlagen - in Warteschlange uid=\(event.uid)")
+                SouveraCalendarPendingWrites.enqueue(kind: .update,
+                                                     calendarHref: entryUnwrapped.calendarHref,
+                                                     href: entryUnwrapped.href,
+                                                     uid: event.uid,
+                                                     ics: updated)
+                Self.schedulePendingFlushRetry()
+            }
+        }
+        return true
     }
 
     // MARK: - Einladungen (Run 16.09.)
@@ -936,81 +1120,87 @@ final class CalendarViewModel: ObservableObject {
         } else {
             updated = Self.ensureDefaultReminder(ics: updated, status: status.rawValue)
         }
-        var ok = await client.updateEvent(entry, ics: updated)
-        if !ok {
-            // Run 19.09.: 412-Retry ohne If-Match (stale ETag).
-            let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
-                                          href: entry.href, etag: nil, ics: entry.ics)
-            ok = await client.updateEvent(noEtag, ics: updated)
-            JmapLog.write("Invitation RSVP \(status.rawValue) retry(no-etag) for \(event.uid): \(ok)")
+        // Run 29.09. (Feedback: Prio hat lokal auf dem Geraet): der neue
+        // PARTSTAT wird SOFORT lokal uebernommen (Schraffur, Übersichts-
+        // filter, Antwort-Marker) - der CalDAV-PUT laeuft vollstaendig im
+        // Hintergrund (412-Leiter + Offline-Warteschlange), ganz ohne
+        // User-Wartezeit. Vorher wartete der Dialog auf PUT + Verify-GET.
+        if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
+            cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                                  href: entry.href, etag: entry.etag, ics: updated)
         }
-        if ok {
-            JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
-            // Run 19.09. (Feedback): ICS zuruecklesen und den serverseitigen
-            // PARTSTAT loggen - Diagnose fuer den Cross-Device-Status.
-            if let verify = await client.fetchEventICS(entry) {
-                let serverPartstat = Self.serverPartstat(ics: verify, attendeeEmail: me)
-                JmapLog.write("Invitation RSVP verify \(event.uid): server PARTSTAT=\(serverPartstat)")
-            } else {
-                JmapLog.write("Invitation RSVP verify \(event.uid): ICS nicht lesbar")
+        let refreshed = Self.parseEntries([CalDavEventEntry(
+            calendarHref: entry.calendarHref, href: entry.href,
+            etag: entry.etag, ics: updated)], ownEmail: me)
+        if case var .success(list) = events {
+            list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
+            list.append(contentsOf: refreshed)
+            events = .success(list.sorted { $0.start < $1.start })
+        }
+        // Run 19.09. (Feedback: Annehmen leerte die Liste): ALLE
+        // verbleibenden offenen Einladungen uebergeben - vorher wurde
+        // nur das eine (jetzt beantwortete) Event gemeldet, wodurch
+        // die Uebersicht kurz komplett leer war.
+        let remainingInvites: [CalendarEventModel] = {
+            if case let .success(list) = events {
+                return list.filter { $0.ownPartstat == "needs-action" }
             }
-            // Run 22.09. (Feedback: einheitliche Ablehnung, Std-CalDAV-
-            // Logik): Ablehnen LOESCHT den Termin NICHT mehr - er bleibt
-            // mit durchgestrichenem Namen und ohne Erinnerungen im
-            // Kalender (PARTSTAT-PUT oben, Antwortmail serverseitig).
-            // Der generische Pfad unten aktualisiert den Eintrag sofort
-            // lokal (durchgestrichen) ohne Listen-Sprung.
-            // B2: SOFORT-Feedback - betroffenen Eintrag lokal ersetzen und
-            // neu parsen statt vollen Reload abzuwarten.
-            if let idx = cachedEntries.firstIndex(where: { $0.href == entry.href }) {
-                cachedEntries[idx] = CalDavEventEntry(calendarHref: entry.calendarHref,
-                                                      href: entry.href, etag: entry.etag, ics: updated)
+            return []
+        }()
+        await SouveraInvitationCenter.shared.setCalendarInvites(
+            remainingInvites,
+            accountKey: Self.stableAccountKey())
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: "\(NSLocalizedString(status.titleKey, comment: "")): \(event.title)")
+        // Run 19.09.: Antwort lokal markieren (Uebersicht-Filter +
+        // Schraffur sind sofort korrekt, unabhaengig vom Serverstand).
+        if !event.uid.isEmpty {
+            SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                    status: status.rawValue)
+            if status == .declined {
+                // Run 22.09.: Erinnerungs-Override mitgeben - der
+                // Termin bleibt ohne Erinnerungen.
+                SouveraInvitationCenter.clearReminderOverride(uid: event.uid,
+                                                              inviteId: event.href)
             }
-            let refreshed = Self.parseEntries([CalDavEventEntry(
-                calendarHref: entry.calendarHref, href: entry.href,
-                etag: entry.etag, ics: updated)], ownEmail: me)
-            if case var .success(list) = events {
-                list.removeAll { $0.href == event.href || (!event.uid.isEmpty && $0.uid == event.uid) }
-                list.append(contentsOf: refreshed)
-                events = .success(list.sorted { $0.start < $1.start })
+        }
+        // Run 22.09. (Feedback: Server-iTIP): Antwortmails versendet
+        // Nextcloud selbst (PARTSTAT in CalDAV) - keine App-Mail mehr.
+        Task { [weak self] in
+            guard let self else { return }
+            var ok = await self.client.updateEvent(entry, ics: updated)
+            if !ok {
+                // 412-Retry ohne If-Match (stale ETag).
+                let noEtag = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                              href: entry.href, etag: nil, ics: updated)
+                ok = await self.client.updateEvent(noEtag, ics: updated)
+                JmapLog.write("Invitation RSVP \(status.rawValue) retry(no-etag) for \(event.uid): \(ok)")
             }
-            // Run 19.09. (Feedback: Annehmen leerte die Liste): ALLE
-            // verbleibenden offenen Einladungen uebergeben - vorher wurde
-            // nur das eine (jetzt beantwortete) Event gemeldet, wodurch
-            // die Uebersicht kurz komplett leer war.
-            let remainingInvites: [CalendarEventModel] = {
-                if case let .success(list) = events {
-                    return list.filter { $0.ownPartstat == "needs-action" }
+            if ok {
+                JmapLog.write("Invitation RSVP \(status.rawValue) ok for \(event.uid)")
+                // Serverseitigen PARTSTAT zuruecklesen (Diagnose Cross-Device).
+                if let verify = await self.client.fetchEventICS(entry) {
+                    let serverPartstat = Self.serverPartstat(ics: verify, attendeeEmail: me)
+                    JmapLog.write("Invitation RSVP verify \(event.uid): server PARTSTAT=\(serverPartstat)")
+                } else {
+                    JmapLog.write("Invitation RSVP verify \(event.uid): ICS nicht lesbar")
                 }
-                return []
-            }()
-            await SouveraInvitationCenter.shared.setCalendarInvites(
-                remainingInvites,
-                accountKey: Self.stableAccountKey())
-            actionFeedback = CalendarActionFeedback(
-                success: true,
-                message: "\(NSLocalizedString(status.titleKey, comment: "")): \(event.title)")
-            // Run 19.09.: Antwort lokal markieren (Uebersicht-Filter +
-            // Schraffur sind sofort korrekt, unabhaengig vom Serverstand).
-            if !event.uid.isEmpty {
-                SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
-                                                        status: status.rawValue)
-                if status == .declined {
-                    // Run 22.09.: Erinnerungs-Override mitgeben - der
-                    // Termin bleibt ohne Erinnerungen.
-                    SouveraInvitationCenter.clearReminderOverride(uid: event.uid,
-                                                                  inviteId: event.href)
-                }
-            }
-            // Run 22.09. (Feedback: Server-iTIP): Antwortmails versendet
-            // Nextcloud selbst (PARTSTAT in CalDAV) - keine App-Mail mehr.
-            // Stiller Hintergrund-Reload (Badges, weitere Foldes).
-            Task { [weak self] in
+                // Still nachziehen (Badges, weitere Ordner).
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
-                await self?.load()
+                await self.load()
+            } else {
+                // Offline-Warteschlange: die Antwort wird beim naechsten
+                // Flush (Sync/Foreground) zugestellt - ohne User-Interaktion.
+                SouveraCalendarPendingWrites.enqueue(kind: .update,
+                                                     calendarHref: entry.calendarHref,
+                                                     href: entry.href,
+                                                     uid: event.uid,
+                                                     ics: updated)
+                Self.schedulePendingFlushRetry()
             }
         }
-        return ok
+        return true
     }
 
     /// Run 16.09. (B4): Ersetzt alle VALARM-Blöcke durch die gegebenen
