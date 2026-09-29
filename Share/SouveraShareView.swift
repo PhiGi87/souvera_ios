@@ -19,9 +19,33 @@ struct SouveraShareView: View {
 
     private static var brandPrimary: Color { SouveraAppearance.accentColor }
 
-    private var usableFiles: [SouveraPendingShareStore.SharedFile] { files.filter { !$0.tooLarge } }
+    // Ziel-Grenzen (Run 29.09., Feedback): Chat/Raum 10 MB, Mail 20 MB,
+    // Dateien 100 MB. Ueberschrittene Ziele werden AUSGEBLENDET und mit
+    // einem dezenten Hinweis erklaert.
     private var trimmedText: String { sharedText.trimmingCharacters(in: .whitespacesAndNewlines) }
-    private var canAct: Bool { !trimmedText.isEmpty || !usableFiles.isEmpty }
+    private var hasText: Bool { !trimmedText.isEmpty }
+    private var hasFiles: Bool { files.contains { !$0.tooLarge } }
+    private var tooLargeForMail: Bool { !SouveraPendingShareStore.allowsAll(files, for: SouveraPendingShareStore.actionMail) }
+    private var tooLargeForTalk: Bool { !SouveraPendingShareStore.allowsAll(files, for: SouveraPendingShareStore.actionTalk) }
+    private var tooLargeForFiles: Bool { files.contains { $0.tooLarge } }
+    private var canMail: Bool { (hasText || hasFiles) && !tooLargeForMail }
+    private var canTalk: Bool { (hasText || hasFiles) && !tooLargeForTalk }
+    private var canUpload: Bool { hasFiles && !tooLargeForFiles }
+    private var canAct: Bool { canMail || canTalk || canUpload }
+
+    private var limitHints: [String] {
+        var hints: [String] = []
+        if tooLargeForMail {
+            hints.append(NSLocalizedString("_share_too_large_mail_", comment: ""))
+        }
+        if tooLargeForTalk {
+            hints.append(NSLocalizedString("_share_too_large_talk_", comment: ""))
+        }
+        if tooLargeForFiles {
+            hints.append(NSLocalizedString("_share_too_large_files_", comment: ""))
+        }
+        return hints
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -137,24 +161,34 @@ struct SouveraShareView: View {
 
     private var actions: some View {
         VStack(spacing: 10) {
-            Button {
-                onMail()
-            } label: {
-                Text(NSLocalizedString("_share_mail_", comment: ""))
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 46)
-                    .background(RoundedRectangle(cornerRadius: 12).fill(Self.brandPrimary))
-                    .foregroundStyle(.white)
+            if canMail {
+                Button {
+                    onMail()
+                } label: {
+                    Text(NSLocalizedString("_share_mail_", comment: ""))
+                        .font(.body.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 46)
+                        .background(RoundedRectangle(cornerRadius: 12).fill(Self.brandPrimary))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .disabled(!canAct)
 
-            if !usableFiles.isEmpty {
+            if canUpload {
                 outlinedButton(NSLocalizedString("_share_upload_", comment: "")) { onUpload() }
             }
-            outlinedButton(NSLocalizedString("_share_talk_", comment: "")) { onTalk() }
-                .disabled(!canAct)
+            if canTalk {
+                outlinedButton(NSLocalizedString("_share_talk_", comment: "")) { onTalk() }
+            }
+
+            // Dezente Erklaerung, warum Ziele ausgeblendet sind.
+            ForEach(limitHints, id: \.self) { hint in
+                Text(hint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -168,6 +202,5 @@ struct SouveraShareView: View {
                 .foregroundStyle(Self.brandPrimary)
         }
         .buttonStyle(.plain)
-        .disabled(!canAct)
     }
 }

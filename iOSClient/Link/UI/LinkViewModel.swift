@@ -1829,7 +1829,11 @@ final class LinkViewModel: ObservableObject {
     func sendSharedToRoom(token: String, title: String, message: String) async -> Bool {
         guard let share = shareHandoff, let api else { return false }
         let text = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        let files = share.files.filter { !$0.tooLarge }
+        // Ziel-Grenze Chat/Raum: 10 MB je Datei (Run 29.09., Feedback) -
+        // uebergrosse Dateien wurden schon im Chooser ausgeblendet.
+        let files = share.files.filter {
+            !$0.tooLarge && SouveraPendingShareStore.allows(sizeBytes: $0.size, for: SouveraPendingShareStore.actionTalk)
+        }
         var ok = true
         if files.isEmpty {
             if !text.isEmpty, !(await api.sendMessage(token: token, message: text)).ok { ok = false }

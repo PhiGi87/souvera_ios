@@ -9,15 +9,71 @@ import Foundation
 
 enum SouveraPendingShareStore {
 
-    /// Maximalgroesse je Datei fuer alle Teilen-Wege (Android-Paritaet).
-    static let maxFileBytes: Int64 = 10 * 1024 * 1024
+    /// Aktionen des Teilen-Handoffs.
+    static let actionMail = "mail"
+    static let actionTalk = "talk"
+    static let actionFiles = "files"
+
+    /// Ziel-Abhängige Grenzen je Datei (Run 29.09., Feedback): Chat/Raum
+    /// 10 MB, Mail-Anhang 20 MB, Dateien-Upload 100 MB. Dateien bis zur
+    /// Files-Grenze werden kopiert und von jedem Ziel nach seiner Grenze
+    /// bewertet; darueber hinaus bleibt nur der Hinweis.
+    static let talkLimitBytes: Int64 = 10 * 1024 * 1024
+    static let mailLimitBytes: Int64 = 20 * 1024 * 1024
+    static let filesLimitBytes: Int64 = 100 * 1024 * 1024
+
+    /// Kompatibilitaet: groesste kopierbare Datei (= Files-Grenze).
+    static var maxFileBytes: Int64 { filesLimitBytes }
+
+    /// Ziel-Grenze fuer eine Aktion ("mail"/"talk"/"files").
+    static func limitBytes(for action: String) -> Int64 {
+        switch action {
+        case actionMail: return mailLimitBytes
+        case actionTalk: return talkLimitBytes
+        default: return filesLimitBytes
+        }
+    }
+
+    /// Pure Pruefung (unit-testbar): passt die Dateigroesse zum Ziel?
+    static func allows(sizeBytes: Int64, for action: String) -> Bool {
+        sizeBytes <= limitBytes(for: action)
+    }
+
+    /// Alle Dateien des Shares passen zum Ziel (Text-only immer ja).
+    static func allowsAll(_ files: [SharedFile], for action: String) -> Bool {
+        files.allSatisfy { allows(sizeBytes: $0.size, for: action) }
+    }
+
+    /// Groesse der ersten Datei, die das Ziel-Limit sprengt (fuer den Hinweis).
+    static func firstOversize(_ files: [SharedFile], for action: String) -> SharedFile? {
+        files.first { !allows(sizeBytes: $0.size, for: action) }
+    }
 
     struct SharedFile: Codable {
         let name: String
         let mimeType: String
         let path: String
         let size: Int64
+        /// Decode-Kompatibilitaet (alter 10-MB-Store): im neuen Modell
+        /// nur noch true, wenn die Datei NICHT kopiert wurde (>100 MB).
         let tooLarge: Bool
+
+        init(name: String, mimeType: String, path: String, size: Int64, tooLarge: Bool) {
+            self.name = name
+            self.mimeType = mimeType
+            self.path = path
+            self.size = size
+            self.tooLarge = tooLarge
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            name = try container.decode(String.self, forKey: .name)
+            mimeType = try container.decode(String.self, forKey: .mimeType)
+            path = try container.decode(String.self, forKey: .path)
+            size = try container.decode(Int64.self, forKey: .size)
+            tooLarge = try container.decodeIfPresent(Bool.self, forKey: .tooLarge) ?? false
+        }
     }
 
     struct Share: Codable {

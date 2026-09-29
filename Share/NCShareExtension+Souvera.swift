@@ -37,9 +37,22 @@ extension NCShareExtension {
         var index = 0
 
         for provider in providers {
-            // 1) Text oder URL (Safari teilt URLs als public.url).
+            // 1) Datei aus der Dateien-App/Cloud zuerst: Diese Provider
+            //    tragen public.file-url, das KONFORM zu public.url ist -
+            //    die URL darf deshalb NICHT in den Text-Zweig laufen
+            //    (sonst wurde nur der Pfad als Text uebergeben, Run
+            //    29.09. Feedback "Datei wird nicht uebertragen").
+            if let file = await copyFileURLProvider(from: provider,
+                                                    index: index + 1,
+                                                    directory: directory,
+                                                    usedNames: &usedNames) {
+                index += 1
+                payload.files.append(file)
+                continue
+            }
+            // 2) Web-URL (Safari teilt http/https als public.url).
             if payload.text.isEmpty,
-               let url = await loadURL(from: provider) {
+               let url = await loadURL(from: provider), !url.isFileURL {
                 payload.text = url.absoluteString
                 continue
             }
@@ -48,7 +61,7 @@ extension NCShareExtension {
                 payload.text = text
                 continue
             }
-            // 2) Datei.
+            // 3) Binär-Provider (Fotos etc.) ohne URL-Darstellung.
             if let identifier = fileTypeIdentifier(for: provider) {
                 index += 1
                 if let file = await copyFile(from: provider,
@@ -61,6 +74,60 @@ extension NCShareExtension {
             }
         }
         return payload
+    }
+
+    /// Datei-Provider (public.file-url) in den App-Group-Container kopieren.
+    /// Liefert nil, wenn der Provider KEINE lokale Datei-URL trägt (dann
+    /// entscheiden die Text-/Daten-Zweige weiter).
+    private func copyFileURLProvider(from provider: NSItemProvider,
+                                     index: Int,
+                                     directory: URL,
+                                     usedNames: inout Set<String>) async -> SouveraPendingShareStore.SharedFile? {
+        guard provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) else { return nil }
+        let url: URL? = await withCheckedContinuation { continuation in
+            provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                if let url = item as? URL {
+                    continuation.resume(returning: url)
+                } else if let data = item as? Data,
+                          let string = String(data: data, encoding: .utf8),
+                          let url = URL(string: string.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                    continuation.resume(returning: url)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+        guard let url, url.isFileURL else { return nil }
+        // Security-scoped: Shares aus der Dateien-App geben Zugriff nur
+        // für die Dauer des Zugriffs frei.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard FileManager.default.fileExists(atPath: url.path) else { return nil }
+
+        let rawName = url.lastPathComponent.isEmpty ? provider.suggestedName ?? "datei" : url.lastPathComponent
+        let safeName = uniqueName(rawName, usedNames: &usedNames, index: index)
+        let target = directory.appendingPathComponent(safeName)
+        do {
+            try FileManager.default.copyItem(at: url, to: target)
+        } catch {
+            print("SouveraShare file-url copy failed: \(error.localizedDescription)")
+            return nil
+        }
+        let size = (try? FileManager.default.attributesOfItem(atPath: target.path)[.size] as? Int64) ?? 0
+        let mime = UTType(filenameExtension: target.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+        if size > SouveraPendingShareStore.filesLimitBytes {
+            try? FileManager.default.removeItem(at: target)
+            return SouveraPendingShareStore.SharedFile(name: safeName,
+                                                       mimeType: mime,
+                                                       path: "",
+                                                       size: size,
+                                                       tooLarge: true)
+        }
+        return SouveraPendingShareStore.SharedFile(name: safeName,
+                                                   mimeType: mime,
+                                                   path: target.path,
+                                                   size: size,
+                                                   tooLarge: false)
     }
 
     /// Zeigt den Souvera-Auswahlschirm ueber der bestehenden Extension-UI.
