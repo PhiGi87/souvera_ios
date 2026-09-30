@@ -59,6 +59,18 @@ enum SouveraMailPushActionRunner {
         }
     }
 
+    /// Run 30.09. (Feedback: Lesestatus sofort sichtbar): spiegelt den
+    /// Server-erfolgreichen Flag-Change in die OFFENE App (Zeile, Badge,
+    /// Pills, persistierter Cache). App nicht offen/hintergrund: nichts zu
+    /// tun - der Server-Stand stimmt bereits, der Foreground-Sync zeigt ihn.
+    private static func mirrorLocally(emailId: String, keyword: String, value: Bool) async {
+        NotificationCenter.default.post(
+            name: .souveraMailFlagsChangedLocally,
+            object: nil,
+            userInfo: ["emailId": emailId, "keyword": keyword, "value": value]
+        )
+    }
+
     /// Führt die Aktion aus; true = erfolgreich.
     @MainActor
     static func run(actionIdentifier: String, account: String, emailId: String) async -> Bool {
@@ -85,9 +97,12 @@ enum SouveraMailPushActionRunner {
             case AppDelegate.mailMarkReadAction:
                 _ = try await api.setEmailFlags(accountId: accId, emailIds: [canonical],
                                                 keywordsToAdd: ["$seen": true])
+                await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
             case AppDelegate.mailMarkFlaggedAction:
                 _ = try await api.setEmailFlags(accountId: accId, emailIds: [canonical],
                                                 keywordsToAdd: ["$seen": true, "$flagged": true])
+                await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
+                await mirrorLocally(emailId: canonical, keyword: "$flagged", value: true)
             case AppDelegate.mailDeleteAction:
                 // Wie die Swipe-Löschung (performDelete): in den Papierkorb
                 // des Accounts verschieben (wiederherstellbar); nur ohne
@@ -120,4 +135,10 @@ enum SouveraMailPushActionRunner {
             return false
         }
     }
+}
+
+extension Notification.Name {
+    /// Push-Aktion hat den Flag serverseitig gesetzt - die offene App
+    /// spiegelt den Stand sofort lokal (Zeile/Badge/Cache).
+    static let souveraMailFlagsChangedLocally = Notification.Name("souveraMailFlagsChangedLocally")
 }

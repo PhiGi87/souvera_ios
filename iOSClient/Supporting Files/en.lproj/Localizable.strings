@@ -1323,3 +1323,6 @@ _mail_sort_flagged_ = "Flagged first";
 "_settings_logs_timeout_title_" = "Sending is taking longer than expected.";
 "_settings_logs_continue_send_" = "Keep sending";
 "_settings_logs_share_now_" = "Share file";
+
+/* Run 30.09.: Body-Ladekreis mit Kontext */
+"_mail_body_loading_" = "Loading message…";

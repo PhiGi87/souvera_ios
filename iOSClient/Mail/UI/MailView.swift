@@ -2058,11 +2058,17 @@ private func attachmentChip(_ att: AttachmentMeta) -> some View {
     private var bodyArea: some View {
         switch viewModel.body {
         case .loading:
-            HStack {
-                Spacer()
+            // Run 30.09. (Feedback: Nutzer nicht hängen lassen): Ladekreis
+            // MIT Kontext-Text - der nackte Spinner wirkte wie ein Hänger,
+            // besonders wenn der Body-Aufbau bei langsamer Verbindung
+            // länger dauert.
+            VStack(spacing: 10) {
                 ProgressView()
-                Spacer()
+                Text(NSLocalizedString("_mail_body_loading_", comment: ""))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
             }
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
         case let .error(m):
             VStack(spacing: 8) {
