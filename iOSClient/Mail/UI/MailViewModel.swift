@@ -413,7 +413,7 @@ final class MailViewModel: ObservableObject {
             // führt dorthin) und die Mail NICHT in die aktuelle Liste
             // gepinnt - vorher klebte sie dort (protectingLiveMessages
             // re-injizierte sie in jeden Publish).
-            let mailMailboxIds = ((json["mailboxIds"] as? [String: Any])?.keys.map(String.init)) ?? []
+            let mailMailboxIds = ((json["mailboxIds"] as? [String: Any])?.keys.map { $0 }) ?? []
             let belongsToCurrent = currentMailbox?.jmapId.map { mailMailboxIds.contains($0) } ?? false
             var targetBox: Mailbox?
             if !belongsToCurrent,
