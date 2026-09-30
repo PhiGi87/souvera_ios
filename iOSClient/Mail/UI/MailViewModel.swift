@@ -173,6 +173,7 @@ final class MailViewModel: ObservableObject {
     private var pushRefreshObserver: NSObjectProtocol?
     /// Multi-Account: Account-Wechsel-Beobachter.
     private var accountChangeObserver: NSObjectProtocol?
+    private var flagsMirrorObserver: NSObjectProtocol?
     /// Multi-Account-Generation: erhöht sich bei jedem Account-Wechsel/
     /// Reset. Laufende asynchrone Ladungen verwerfen veraltete Ergebnisse
     /// (sonst überschreibt ein alter Task den Zustand mit den Mails des
@@ -206,6 +207,23 @@ final class MailViewModel: ObservableObject {
                 self?.refreshOnEntry(force: true)
             }
         }
+        // Run 30.09.: Push-Aktion ("gelesen"/"markiert") serverseitig ok ->
+        // den Stand SOFORT in die offene App spiegeln (Zeile, Badge, Pills,
+        // persistierter Cache) - statt auf den nächsten Sync zu warten.
+        flagsMirrorObserver = NotificationCenter.default.addObserver(
+            forName: .souveraMailFlagsChangedLocally,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let info = notification.userInfo ?? [:]
+            let emailId = info["emailId"] as? String ?? ""
+            let keyword = info["keyword"] as? String ?? "$seen"
+            let value = (info["value"] as? Bool) ?? true
+            guard !emailId.isEmpty else { return }
+            Task { @MainActor [weak self] in
+                self?.applyExternalKeyword(emailId: emailId, keyword: keyword, value: value)
+            }
+        }
         // Multi-Account: beim Account-Wechsel den gesamten Mail-Zustand
         // (JmapClient, Cache, UI) auf den neuen Account umstellen.
         accountChangeObserver = NotificationCenter.default.addObserver(
@@ -225,6 +243,9 @@ final class MailViewModel: ObservableObject {
         }
         if let pushRefreshObserver {
             NotificationCenter.default.removeObserver(pushRefreshObserver)
+        }
+        if let flagsMirrorObserver {
+            NotificationCenter.default.removeObserver(flagsMirrorObserver)
         }
         if let accountChangeObserver {
             NotificationCenter.default.removeObserver(accountChangeObserver)
@@ -251,11 +272,39 @@ final class MailViewModel: ObservableObject {
         }
     }
 
+    /// Reiner Guard (unit-testbar): Wiederholzustellungen des Deep-Links
+    /// (3×-Retry nach 0,5/2,5/6 s) dürfen eine bereits offene Mail nicht
+    /// stören (Body-Reload + Sync-Stampede). true = verarbeiten.
+    nonisolated static func shouldProcessDeepLinkDelivery(currentEmailId: String,
+                                                          targetEmailId: String,
+                                                          lastOpenedAt: Date?,
+                                                          now: Date) -> Bool {
+        if currentEmailId != targetEmailId { return true }
+        guard let lastOpenedAt else { return true }
+        return now.timeIntervalSince(lastOpenedAt) >= 30
+    }
+
     /// Öffnet eine Mail direkt aus einer Push-Notification (Deep-Link):
     /// Ordner-Kontext sicherstellen (mailboxPath, Fallback INBOX), die Mail
     /// per JMAP laden und die Detail-Ansicht öffnen. "Zurück" führt in den
     /// jeweiligen Ordner.
+    /// Run 30.09. (Feedback: nichts passiert beim Tap, Ladekreis fehlt):
+    /// SOFORT-Feedback vor dem Netz-Fetch - liegt die Zeile in der Liste,
+    /// öffnet das Detail mit echtem Header + Body-Ladekreis; liegt sie
+    /// nicht (Kaltstart), ein Header-Skelett aus einer Platzhalter-Nachricht.
+    /// Der Fetch ersetzt danach still den kanonischen Stand.
+    /// Wiederholzustellungen (3×-Deep-Link-Retry) werden im 30-s-Fenster
+    /// verworfen (shouldProcessDeepLinkDelivery) - sie brachen vorher den
+    /// offenen Ladevorgang ab (Body-Reload + Voll-Refresh).
     func openMailByJmapId(account: String, emailId: String, mailboxPath: String = "") async {
+        if case let .detail(current) = route,
+           !Self.shouldProcessDeepLinkDelivery(currentEmailId: current.emailId,
+                                               targetEmailId: emailId,
+                                               lastOpenedAt: lastOpenedMailAt,
+                                               now: Date()) {
+            SouveraLog.write("Mail", "deep link: duplicate delivery for open mail \(emailId) - ignored")
+            return
+        }
         if case let .success(boxes) = mailboxes {
             var contextBox: Mailbox?
             let trimmedPath = mailboxPath.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -275,6 +324,44 @@ final class MailViewModel: ObservableObject {
                     // dem Push-Tap stehen (nur die Detailansicht öffnete).
                     Task { await refreshMessages() }
                 }
+            }
+        }
+        // Run 30.09.: SOFORT-Feedback - Detail (Header + Body-Ladekreis)
+        // JETZT öffnen, nicht erst nach dem Netz-Fetch (auf langsamen
+        // Verbindungen 5-15 s Leere). Liegt die Zeile in der Liste (per
+        // emailId oder Kurzform-ID), echten Header zeigen; sonst ein
+        // Header-Skelett aus einer Platzhalter-Nachricht (isRead=true,
+        // damit das Skelett KEINE Gelesen-Markierung auslöst - die macht
+        // der spätere kanonische openMessage-Aufruf).
+        if case let .success(list) = messages {
+            let row = list.first(where: { $0.emailId == emailId })
+                ?? list.first(where: { $0.emailId.hasSuffix(emailId) })
+            if let row {
+                openMessage(row)
+            } else {
+                let placeholder = MailMessage(
+                    id: "deeplink-\(emailId)",
+                    account: cacheAccountKey,
+                    accountId: currentMailbox?.accountId ?? "",
+                    mailboxId: currentMailbox?.id ?? "",
+                    emailId: emailId,
+                    messageId: nil,
+                    subject: "",
+                    fromAddress: "",
+                    fromDisplayName: nil,
+                    toAddresses: "",
+                    ccAddresses: "",
+                    bccAddresses: "",
+                    dateSent: Date(),
+                    isRead: true,
+                    isFlagged: false,
+                    hasAttachments: false,
+                    sizeBytes: 0,
+                    blobId: nil,
+                    threadId: nil,
+                    keywords: nil
+                )
+                openMessage(placeholder)
             }
         }
         guard let api = jmapApi, let client = jmapClient else {
@@ -1773,7 +1860,16 @@ final class MailViewModel: ObservableObject {
                     && (lastRecoveryAttempt.map { Date().timeIntervalSince($0) < 600 } ?? false)
                 if !blocked {
                     await recoverCredentialAndReload()
-                    if let mailbox = currentMailbox { openMailbox(mailbox) }
+                    // Run 30.09. (Feedback: Detail sprang zurück in die
+                    // Übersicht): Die Recovery darf die Navigation NICHT
+                    // zurücksetzen - der Nutzer liest evtl. gerade eine
+                    // Mail (openMailbox schrieb route = .messages). Nur
+                    // die Daten nachziehen.
+                    if case .detail = route {
+                        Task { [weak self] in await self?.refreshMessagesIncremental() }
+                    } else if let mailbox = currentMailbox {
+                        openMailbox(mailbox)
+                    }
                     return
                 }
             }
@@ -2253,7 +2349,14 @@ final class MailViewModel: ObservableObject {
                 if !blocked {
                     SouveraLog.write("Mail", "sync 401 for \(mailbox.id) (pwd=…\(SouveraMailCredentialManager.suffix(mailAccount?.mailPassword ?? ""))) - renewing credential")
                     await recoverCredentialAndReload()
-                    if let mailbox = currentMailbox {
+                    // Run 30.09. (Feedback: Detail sprang zurück in die
+                    // Übersicht): Die Recovery darf die Navigation NICHT
+                    // zurücksetzen - der Nutzer liest evtl. gerade eine
+                    // Mail (openMailbox schrieb route = .messages). Nur
+                    // die Daten nachziehen.
+                    if case .detail = route {
+                        Task { [weak self] in await self?.refreshMessagesIncremental() }
+                    } else if let mailbox = currentMailbox {
                         openMailbox(mailbox)
                     }
                     return
@@ -3085,35 +3188,44 @@ final class MailViewModel: ObservableObject {
                 if !read && message.isRead { badgeDelta += 1 }
             }
         }
+        // Run 30.09. (Feedback: Lesestatus soll SOFORT sichtbar sein, Sync
+        // im Hintergrund): LOKAL ZUERST - Zeile, persistierter Cache,
+        // Badge und Pills flippen ohne Netz-Wartezeit. Vorher wartete der
+        // Flip auf refreshSession + setEmailFlags; schlug die Session
+        // fehl, flippte GAR NICHTS.
+        for message in messagesToMark {
+            applyLocalKeyword(message, keyword: "$seen", value: read)
+        }
+        if badgeDelta != 0 {
+            postUnreadBadge(personalInboxUnread + badgeDelta)
+        }
+        applyUnreadDeltaToMailboxList(delta: badgeDelta)
+        // Server im Hintergrund (JmapClient retryt transient einmal);
+        // scheitert er, korrigiert der autoritative Unread-Refresh.
         if useJmap {
-            guard let api = jmapApi,
-                  let client = jmapClient,
-                  let session = try? await client.refreshSession() else { return }
-            let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
             let ids = messagesToMark.map(\.emailId)
-            if read {
-                _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToAdd: ["$seen": true])
-            } else {
-                _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToRemove: ["$seen"])
-            }
-            for message in messagesToMark {
-                applyLocalKeyword(message, keyword: "$seen", value: read)
+            let accountId = first.accountId
+            Task { [weak self] in
+                guard let self, let api = self.jmapApi, let client = self.jmapClient,
+                      let session = try? await client.refreshSession() else {
+                    SouveraLog.write("Mail", "setRead background: no session - authoritative refresh will reconcile")
+                    await self?.scheduleUnreadRefresh()
+                    return
+                }
+                let accId = accountId.isEmpty ? session.primaryAccountId : accountId
+                if read {
+                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToAdd: ["$seen": true])
+                } else {
+                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToRemove: ["$seen"])
+                }
             }
         } else {
             guard let client = imapClient, let mailbox = currentMailbox else { return }
             for message in messagesToMark {
                 guard let uid = UInt64(message.emailId) else { continue }
                 _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .seen, value: read)
-                applyLocalKeyword(message, keyword: "$seen", value: read)
             }
         }
-        // Badge + Ordnerzähler sofort lokal anpassen - KEIN loadMailboxes()
-        // hinterher: dessen openMailbox würde die Route umschalten und den
-        // Nutzer aus Detail-/Listenansicht werfen.
-        if badgeDelta != 0 {
-            postUnreadBadge(personalInboxUnread + badgeDelta)
-        }
-        applyUnreadDeltaToMailboxList(delta: badgeDelta)
         // Run 15.09.: autoritativer Nachlauf (debounced) - korrigiert die
         // Pills aller Ordner, auch geteilte Inboxes und Abweichungen durch
         // Fremd-Clients. Kein loadMailboxes() (wuerde die Route umschalten).
@@ -3157,10 +3269,17 @@ final class MailViewModel: ObservableObject {
     func toggleFlagged(_ message: MailMessage) {
         Task {
             let newValue = !message.isFlagged
+            // Run 30.09.: LOKAL ZUERST (wie setRead) - Flag-Stern sofort,
+            // Server-Call im Hintergrund; vorher flippte bei Session-Fehl
+            // gar nichts.
+            applyLocalKeyword(message, keyword: "$flagged", value: newValue)
             if useJmap {
                 guard let api = jmapApi,
                       let client = jmapClient,
-                      let session = try? await client.refreshSession() else { return }
+                      let session = try? await client.refreshSession() else {
+                    await scheduleUnreadRefresh()
+                    return
+                }
                 let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
                 if newValue {
                     _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$flagged": true])
@@ -3171,7 +3290,6 @@ final class MailViewModel: ObservableObject {
                 guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
                 _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: .flagged, value: newValue)
             }
-            applyLocalKeyword(message, keyword: "$flagged", value: newValue)
             if currentMailbox == nil, !lastSearchQuery.isEmpty {
                 await search(lastSearchQuery)
             }
@@ -3180,6 +3298,31 @@ final class MailViewModel: ObservableObject {
 
     /// Updates the in-memory message (list + detail + search results) and the
     /// cached snapshot for a keyword change.
+    /// Run 30.09.: Spiegelt einen extern (Push-Aktion) gesetzten Flag in
+    /// die offene App. Die Nachricht wird über Liste/Suche gefunden -
+    /// existiert sie nicht im Speicher, übernimmt der nächste Sync den
+    /// Server-Stand.
+    private func applyExternalKeyword(emailId: String, keyword: String, value: Bool) {
+        var target: MailMessage?
+        if case let .success(list) = messages {
+            target = list.first(where: { $0.emailId == emailId || $0.emailId.hasSuffix(emailId) })
+        }
+        if target == nil, case let .success(results) = searchResults {
+            target = results.first(where: { $0.emailId == emailId || $0.emailId.hasSuffix(emailId) })
+        }
+        guard let message = target else { return }
+        var badgeDelta = 0
+        if keyword == "$seen", value, !message.isRead,
+           currentMailbox?.kind == .inbox, currentMailbox?.namespace == .personal {
+            badgeDelta -= 1
+        }
+        applyLocalKeyword(message, keyword: keyword, value: value)
+        if badgeDelta != 0 {
+            postUnreadBadge(personalInboxUnread + badgeDelta)
+        }
+        applyUnreadDeltaToMailboxList(delta: badgeDelta)
+    }
+
     private func applyLocalKeyword(_ message: MailMessage, keyword: String, value: Bool) {
         var updated = message
         if keyword == "$seen" {
@@ -3443,12 +3586,18 @@ final class MailViewModel: ObservableObject {
             searchResults = .success(results)
         }
         if let mailbox = currentMailbox {
-            // Route nur erzwingen, wenn der Nutzer nicht inzwischen zur
-            // Ordnerliste zurückgegangen ist - sonst würde eine fertige
-            // Lösch-Task die Navigation überschreiben (Zurück-Button
-            // wirkungslos).
-            if case .folders = route { return }
-            route = .messages(mailbox: mailbox)
+            // Run 30.09. (Feedback: Detail sprang zurück): Die Navigation
+            // nur überschreiben, wenn der Nutzer in der LISTE ist - in der
+            // Ordnerliste gar nicht, im DETAIL nur die Daten nachziehen
+            // (eine fertige Lösch-/Verschieb-Aktion darf den Leser nicht
+            // zurück in die Übersicht werfen).
+            if case .folders = route {
+                // Ordnerliste: Navigation unberührt lassen.
+            } else if case .detail = route {
+                Task { [weak self] in await self?.refreshMessagesIncremental() }
+            } else {
+                route = .messages(mailbox: mailbox)
+            }
             // P62d: Voller Sync DEBOUNCED (ein Refresh 0,8 s nach der
             // LETZTEN Mutation statt pro Swipe) - schnelle Swipe-Löschungen
             // lösen keine Refresh-Stürme mehr aus (Flap-Ursache).
