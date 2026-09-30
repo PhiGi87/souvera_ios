@@ -284,6 +284,18 @@ final class MailViewModel: ObservableObject {
         return now.timeIntervalSince(lastOpenedAt) >= 30
     }
 
+    /// Reiner Helfer (unit-testbar): Ziel-Ordner einer Deep-Link-Mail.
+    /// nil = die Mail gehört zum aktuell offenen Ordner (oder hat keinen) -
+    /// dann bleibt der Kontext; sonst die JMAP-Id des (ersten) anderen
+    /// Ordners, der als Kontext geöffnet werden soll.
+    nonisolated static func targetMailboxJmapId(mailboxIds: [String],
+                                                currentJmapId: String?) -> String? {
+        let ids = mailboxIds.filter { !$0.isEmpty }
+        guard !ids.isEmpty else { return nil }
+        if let currentJmapId, ids.contains(currentJmapId) { return nil }
+        return ids.sorted().first
+    }
+
     /// Öffnet eine Mail direkt aus einer Push-Notification (Deep-Link):
     /// Ordner-Kontext sicherstellen (mailboxPath, Fallback INBOX), die Mail
     /// per JMAP laden und die Detail-Ansicht öffnen. "Zurück" führt in den
@@ -390,7 +402,25 @@ final class MailViewModel: ObservableObject {
                 )
                 return
             }
-            let mailboxId = currentMailbox?.id ?? ""
+            // Run 01.10. (Feedback: Mail lag im falschen Ordner): Die
+            // JMAP-`mailboxIds` bestimmen den ECHTEN Ordner (per Sieve
+            // verschobene Mails liegen z. B. in INBOX/Bloonix, nicht im
+            // Posteingang). Gehört die Mail NICHT zur aktuell offenen
+            // Liste, wird der Zielordner als Kontext geöffnet (Zurück
+            // führt dorthin) und die Mail NICHT in die aktuelle Liste
+            // gepinnt - vorher klebte sie dort (protectingLiveMessages
+            // re-injizierte sie in jeden Publish).
+            let mailMailboxIds = ((json["mailboxIds"] as? [String: Any])?.keys.map(String.init)) ?? []
+            let belongsToCurrent = currentMailbox?.jmapId.map { mailMailboxIds.contains($0) } ?? false
+            var targetBox: Mailbox?
+            if !belongsToCurrent,
+               let otherId = Self.targetMailboxJmapId(mailboxIds: mailMailboxIds,
+                                                      currentJmapId: currentMailbox?.jmapId) {
+                targetBox = allMailboxes.first { $0.jmapId == otherId }
+            }
+            let mailboxId = belongsToCurrent
+                ? (currentMailbox?.id ?? "")
+                : (targetBox?.id ?? currentMailbox?.id ?? "")
             var message = JmapMapper.mapMessage(
                 account: mailAccount?.account ?? "",
                 accountId: accId,
@@ -410,17 +440,26 @@ final class MailViewModel: ObservableObject {
                 message = canonical
                 SouveraLog.write("Mail", "deep link: canonical id found for \(emailId) -> \(canonical.emailId)")
             }
-            // P66b: Die Mail SOFORT in die Liste mergen, damit die Übersicht
-            // augenblicklich stimmt (der Refresh läuft parallel weiter).
-            // P62c: Die Mail bleibt bis zum Server-Nachweis GESCHÜTZT -
-            // parallele Sync-Publishes können sie nicht mehr entfernen
-            // (das war die Ursache "Mail fehlt nach Zurück").
-            protectedListIds.insert(message.emailId)
-            if case let .success(items) = messages,
-               !items.contains(where: { $0.emailId == message.emailId || ($0.blobId != nil && $0.blobId == message.blobId) }) {
-                var updated = items
-                updated.insert(message, at: 0)
-                messages = .success(updated)
+            if belongsToCurrent {
+                // P66b: Die Mail SOFORT in die Liste mergen, damit die
+                // Übersicht augenblicklich stimmt (der Refresh läuft
+                // parallel weiter). P62c: Die Mail bleibt bis zum
+                // Server-Nachweis GESCHÜTZT - parallele Sync-Publishes
+                // können sie nicht mehr entfernen.
+                protectedListIds.insert(message.emailId)
+                if case let .success(items) = messages,
+                   !items.contains(where: { $0.emailId == message.emailId || ($0.blobId != nil && $0.blobId == message.blobId) }) {
+                    var updated = items
+                    updated.insert(message, at: 0)
+                    messages = .success(updated)
+                }
+            } else if let targetBox {
+                if targetBox.id != currentMailbox?.id {
+                    SouveraLog.write("Mail", "deep link: mail belongs to \(targetBox.path) - switching folder context")
+                    openMailbox(targetBox)
+                }
+            } else {
+                SouveraLog.write("Mail", "deep link: mail folder unknown - detail only")
             }
             // Über openMessage statt direkt route = .detail: lädt den Body
             // (Cache-first, Fallbacks) und markiert die Mail als gelesen -
@@ -1115,14 +1154,13 @@ final class MailViewModel: ObservableObject {
 
     /// Builds the collapsible mailbox tree from the JMAP parentId hierarchy.
     func mailboxTree(for boxes: [Mailbox]) -> [MailboxNode] {
-        // Run 21.09. (Feedback: Hierarchie wurde flach gerendert):
-        // (1) Eltern mit sichtbaren Kindern bleiben sichtbar (sonst
-        //     verschluckt ein unsubscribed-Elternteil seinen ganzen Zweig),
-        // (2) Kinder fehlender/unsichtbarer Eltern werden an Root adoptiert
-        //     (keine unsichtbaren Ordner / Luecken mehr),
-        // (3) Rollen-Ordner nur noch dann auf Root zwingen, wenn ihr echter
-        //     Eltern-Knoten nicht sichtbar ist.
-        var visible = boxes.filter { $0.isSubscribed || $0.role != nil }
+        // Run 01.10. (Feedback: Ordner wie INBOX/Bloonix fehlten): Stalwart
+        // legt Nutzer-/Sieve-Ordner als NICHT abonniert an; der frühere
+        // Filter `isSubscribed || role != nil` blendete sie komplett aus
+        // (verifiziert am Account: Bloonix/_OnCloud/_Digital Realty/Eingang
+        // = isSubscribed false). Jetzt werden ALLE Ordner angezeigt - wie
+        // im Webmail -, ohne Filter und ohne optische Abwertung.
+        var visible = boxes
         var visibleIds = Set(visible.compactMap { $0.jmapId })
         var byJmapId: [String: Mailbox] = [:]
         for box in boxes {
