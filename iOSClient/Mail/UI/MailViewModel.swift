@@ -340,41 +340,44 @@ final class MailViewModel: ObservableObject {
         }
         // Run 30.09.: SOFORT-Feedback - Detail (Header + Body-Ladekreis)
         // JETZT öffnen, nicht erst nach dem Netz-Fetch (auf langsamen
-        // Verbindungen 5-15 s Leere). Liegt die Zeile in der Liste (per
-        // emailId oder Kurzform-ID), echten Header zeigen; sonst ein
-        // Header-Skelett aus einer Platzhalter-Nachricht (isRead=true,
-        // damit das Skelett KEINE Gelesen-Markierung auslöst - die macht
-        // der spätere kanonische openMessage-Aufruf).
+        // Verbindungen 5-15 s Leere). Run 01.10. (Feedback: Tap hing in der
+        // Übersicht): IMMER öffnen, auch wenn die Liste gerade lädt -
+        // openMailbox setzt messages = .loading, der frühere
+        // `if case .success`-Guard übersprang das Skeleton genau dann.
+        var previewRow: MailMessage?
         if case let .success(list) = messages {
-            let row = list.first(where: { $0.emailId == emailId })
+            previewRow = list.first(where: { $0.emailId == emailId })
                 ?? list.first(where: { $0.emailId.hasSuffix(emailId) })
-            if let row {
-                openMessage(row)
-            } else {
-                let placeholder = MailMessage(
-                    id: "deeplink-\(emailId)",
-                    account: cacheAccountKey,
-                    accountId: currentMailbox?.accountId ?? "",
-                    mailboxId: currentMailbox?.id ?? "",
-                    emailId: emailId,
-                    messageId: nil,
-                    subject: "",
-                    fromAddress: "",
-                    fromDisplayName: nil,
-                    toAddresses: "",
-                    ccAddresses: "",
-                    bccAddresses: "",
-                    dateSent: Date(),
-                    isRead: true,
-                    isFlagged: false,
-                    hasAttachments: false,
-                    sizeBytes: 0,
-                    blobId: nil,
-                    threadId: nil,
-                    keywords: nil
-                )
-                openMessage(placeholder)
-            }
+        }
+        if let row = previewRow {
+            openMessage(row)
+        } else {
+            // Header-Skelett aus einer Platzhalter-Nachricht (isRead=true,
+            // damit das Skelett KEINE Gelesen-Markierung auslöst - die
+            // macht der spätere kanonische openMessage-Aufruf).
+            let placeholder = MailMessage(
+                id: "deeplink-\(emailId)",
+                account: cacheAccountKey,
+                accountId: currentMailbox?.accountId ?? "",
+                mailboxId: currentMailbox?.id ?? "",
+                emailId: emailId,
+                messageId: nil,
+                subject: "",
+                fromAddress: "",
+                fromDisplayName: nil,
+                toAddresses: "",
+                ccAddresses: "",
+                bccAddresses: "",
+                dateSent: Date(),
+                isRead: true,
+                isFlagged: false,
+                hasAttachments: false,
+                sizeBytes: 0,
+                blobId: nil,
+                threadId: nil,
+                keywords: nil
+            )
+            openMessage(placeholder)
         }
         guard let api = jmapApi, let client = jmapClient else {
             SouveraLog.write("Mail", "deep link: no jmap client")
