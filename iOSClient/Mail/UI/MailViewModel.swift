@@ -3461,6 +3461,16 @@ final class MailViewModel: ObservableObject {
     }
 
     func delete(_ messagesToDelete: [MailMessage]) {
+        // Run 01.10. (Feedback): Wird die GEOFFNETE Mail gelöscht, sofort
+        // zurück in die Liste - vorher blieb die gelöschte Mail im Detail
+        // stehen. (Der Run-30.09.-Route-Schutz bleibt unberührt: er gilt
+        // nur für Hintergrund-Refreshes, nicht für das explizite Löschen
+        // der offenen Mail.)
+        if case let .detail(open) = route,
+           messagesToDelete.contains(where: { $0.emailId == open.emailId || ($0.blobId != nil && $0.blobId == open.blobId) }),
+           let mailbox = currentMailbox {
+            route = .messages(mailbox: mailbox)
+        }
         // P62d: OPTIMISTISCH - Zeile/Badge/Cache sofort entfernen, damit der
         // Swipe nicht "flappt", während der Server-Call läuft.
         optimisticRemove(messagesToDelete.map(\.emailId))
