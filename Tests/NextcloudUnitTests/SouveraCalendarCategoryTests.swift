@@ -40,4 +40,15 @@ struct SouveraCalendarTaskDurationTests {
         guard let event = events.first else { return }
         #expect(event.end.timeIntervalSince(event.start) == 3600)
     }
+
+    @Test("Upcoming filter uses the event end, not the start")
+    func upcomingByEnd() {
+        let now = Date()
+        // Laufender Termin (endet in 30 min): sichtbar.
+        #expect(CalendarViewModel.isUpcoming(end: now.addingTimeInterval(1800), now: now))
+        // Beendeter Termin (Ende vor 10 min): NICHT sichtbar.
+        #expect(!CalendarViewModel.isUpcoming(end: now.addingTimeInterval(-600), now: now))
+        // Endet exakt jetzt: nicht mehr "Als Nächstes".
+        #expect(!CalendarViewModel.isUpcoming(end: now, now: now))
+    }
 }

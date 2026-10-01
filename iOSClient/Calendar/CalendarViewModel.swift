@@ -247,10 +247,17 @@ final class CalendarViewModel: ObservableObject {
 
     /// The next upcoming events of the currently selected calendars (used
     /// below the month grid when the selected day has no events).
+    /// Run 01.10. (Feedback: beendeter Termin erschien unter "Als Nächstes"):
+    /// nach ENDE filtern statt nach Start - ein beendeter Termin kann nie
+    /// mehr erscheinen, ein laufender bleibt als "jetzt" sichtbar.
+    nonisolated static func isUpcoming(end: Date, now: Date) -> Bool {
+        end >= now
+    }
+
     func upcomingEvents(after date: Date = Date(), limit: Int = 3) -> [CalendarEventModel] {
         guard case let .success(all) = events else { return [] }
         return all.filter {
-            selectedCalendarHrefs.contains($0.calendarHref) && $0.start >= date
+            selectedCalendarHrefs.contains($0.calendarHref) && Self.isUpcoming(end: $0.end, now: date)
         }.sorted { $0.start < $1.start }.prefix(limit).map { $0 }
     }
 

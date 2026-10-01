@@ -34,6 +34,9 @@ struct SouveraCalendarView: View {
     @State private var searchActive = false
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var scrollToNowTrigger = 0
+    /// Run 01.10. (Feedback: beendeter Termin blieb unter "Als Nächstes"):
+    /// Minuten-Tick - die Upcoming-Liste rechnet ohne Interaktion neu.
+    @State private var nowTick = Date()
     @State private var detailEvent: CalendarEventModel?
     @State private var editState: EditSheetState?
     @State private var showCalendarPicker = false
@@ -609,12 +612,13 @@ struct SouveraCalendarView: View {
     // MARK: - Event rows
 
     @ViewBuilder
-    private func eventRow(_ event: CalendarEventModel) -> some View {
+    private func eventRow(_ event: CalendarEventModel, showDate: Bool = false) -> some View {
         Button {
             detailEvent = event
         } label: {
             CalendarEventRow(event: event, color: viewModel.color(for: event),
-                             partstat: viewModel.displayPartstat(for: event))
+                             partstat: viewModel.displayPartstat(for: event),
+                             showDate: showDate)
         }
         .buttonStyle(.plain)
     }
@@ -627,7 +631,7 @@ struct SouveraCalendarView: View {
                 .padding(.horizontal)
                 .padding(.top, 6)
             let dayEvents = viewModel.events(on: selectedDay)
-            let upcoming = viewModel.upcomingEvents()
+            let upcoming = viewModel.upcomingEvents(after: nowTick)
             if dayEvents.isEmpty {
                 if upcoming.isEmpty {
                     Spacer()
@@ -637,7 +641,7 @@ struct SouveraCalendarView: View {
                     List {
                         Section(NSLocalizedString("_calendar_upcoming_", comment: "")) {
                             ForEach(upcoming) { event in
-                                eventRow(event)
+                                eventRow(event, showDate: !Calendar.current.isDate(event.start, inSameDayAs: nowTick))
                             }
                         }
                     }
@@ -650,6 +654,9 @@ struct SouveraCalendarView: View {
                 .listStyle(.plain)
             }
         }
+        .onReceive(Timer.publish(every: 60, on: .main, in: .common).autoconnect()) { tick in
+            nowTick = tick
+        }
         .refreshable { await viewModel.load() }
     }
 
@@ -658,8 +665,12 @@ struct SouveraCalendarView: View {
 private struct CalendarEventRow: View {
     let event: CalendarEventModel
     var color: Color = Color(NCBrandColor.shared.customer)
-    /// Run 22.09.: effektiver Teilnahme-Status (NC-Darstellung).
-    var partstat: String = "" 
+    /// Run 22.09.: effektive Teilnahme-Status (NC-Darstellung).
+    var partstat: String = ""
+    /// Run 01.10.: Datum in der Zeile zeigen (Upcoming-Liste unter einem
+    /// anderen Tageskopf) - sonst liest sich ein Termine eines ANDEREN Tags
+    /// wie einer des gewählten Tages.
+    var showDate: Bool = false
 
 
     private var isDeclined: Bool { partstat.lowercased() == "declined" }
@@ -717,10 +728,20 @@ private struct CalendarEventRow: View {
 
     private var timeLabel: String {
         if event.allDay {
+            if showDate {
+                let df = DateFormatter()
+                df.setLocalizedDateFormatFromTemplate("EdMMM")
+                return df.string(from: event.start)
+            }
             return NSLocalizedString("_calendar_all_day_", comment: "")
         }
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
+        if showDate {
+            let df = DateFormatter()
+            df.setLocalizedDateFormatFromTemplate("EdMMM")
+            return "\(df.string(from: event.start)) · \(formatter.string(from: event.start)) – \(formatter.string(from: event.end))"
+        }
         return "\(formatter.string(from: event.start)) – \(formatter.string(from: event.end))"
     }
 }
