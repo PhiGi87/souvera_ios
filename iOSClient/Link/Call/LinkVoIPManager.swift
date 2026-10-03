@@ -37,6 +37,11 @@ final class LinkVoIPManager: NSObject {
     /// The currently running outgoing call (owned by this manager so it can
     /// outlive the call UI when the user switches to the chat).
     private(set) var activeSession: CallSession?
+    /// Run 04.10. (Fix: Chat-Wechsel beendete den Call): Startzeit des
+    /// laufenden Calls - der `call_ended_everyone`-Check darf nur auf
+    /// Nachrichten NACH diesem Zeitpunkt reagieren (sonst beendet eine
+    /// historische Systemnachricht den laufenden Call).
+    private(set) var activeCallStartedAt: Date?
     private(set) var activeCallInfo: (token: String, title: String, withVideo: Bool)?
     /// Room token of the call currently reported to CallKit, keyed by CallKit UUID.
     private var activeCalls: [UUID: String] = [:]
@@ -81,6 +86,7 @@ final class LinkVoIPManager: NSObject {
     /// Bereinigung (leaveCall) für JEDE Session.
     func noteSessionStarted(_ session: CallSession, token: String, title: String, withVideo: Bool) {
         activeSession = session
+        activeCallStartedAt = Date()
         activeCallInfo = (token, title, withVideo)
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
     }
@@ -207,6 +213,7 @@ final class LinkVoIPManager: NSObject {
         endActiveCall()
         let session = CallSession(account: account, token: token, callbacks: callbacks, withVideo: withVideo)
         activeSession = session
+        activeCallStartedAt = Date()
         activeCallInfo = (token, title, withVideo)
         session.start()
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
@@ -247,6 +254,7 @@ final class LinkVoIPManager: NSObject {
         // erzeugt (audio-only statt kaputtem Capture).
         let session = CallSession(account: account, token: token, callbacks: nil, withVideo: withVideo, silent: false)
         activeSession = session
+        activeCallStartedAt = Date()
         activeCallInfo = (token, title, withVideo)
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
         Task {
@@ -273,6 +281,7 @@ final class LinkVoIPManager: NSObject {
     /// running while the user switches to the chat.
     func takeOverCall(_ session: CallSession, token: String, title: String, withVideo: Bool) {
         activeSession = session
+        activeCallStartedAt = Date()
         activeCallInfo = (token, title, withVideo)
         session.callbacks = nil
         NotificationCenter.default.post(name: .linkCallStateChanged, object: nil)
@@ -283,6 +292,7 @@ final class LinkVoIPManager: NSObject {
     func callSessionDidEnd(_ session: CallSession) {
         guard activeSession === session else { return }
         activeSession = nil
+        activeCallStartedAt = nil
         activeCallInfo = nil
         // Den CallKit-System-Call mitbeenden: Sonst bleibt der
         // iOS-Fullscreen-Call nach dem App-Auflegen sichtbar.

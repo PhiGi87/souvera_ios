@@ -1284,12 +1284,19 @@ final class LinkViewModel: ObservableObject {
                 }
                 // "Anruf fuer alle beenden" (talk-ios NCChatController):
                 // der Server schreibt eine Systemnachricht call_ended_
-                // everyone/call_ended in den Raum - vor dem (gewuenschten)
-                // Filtern auf diese Nachricht pruefen und den aktiven Call
-                // fuer diesen Raum beenden (Run-Feedback 12.09.).
-                if fresh.contains(where: { ($0.systemMessage == "call_ended_everyone" || $0.systemMessage == "call_ended") && $0.token == token }),
+                // everyone/call_ended in den Raum - den aktiven Call fuer
+                // diesen Raum beenden. Run 04.10. (Fix: Chat-Wechsel beendete
+                // den Call): NUR Nachrichten NACH dem Call-Start zaehlen -
+                // beim Öffnen des Chats lieferte der Poll eine HISTORISCHE
+                // call_ended-Systemnachricht, die den laufenden Call killte.
+                let callStartedAt = LinkVoIPManager.shared.activeCallStartedAt?.timeIntervalSince1970 ?? 0
+                if fresh.contains(where: {
+                        ($0.systemMessage == "call_ended_everyone" || $0.systemMessage == "call_ended")
+                            && $0.token == token
+                            && $0.timestamp >= callStartedAt
+                    }),
                    LinkVoIPManager.shared.hasActiveCall(for: token) {
-                    CallDebugLog.log("LinkVM", "call_ended_everyone received - ending active call for \(token)")
+                    CallDebugLog.log("LinkVM", "call_ended (new) received - ending active call for \(token)")
                     LinkVoIPManager.shared.endActiveCall()
                 }
                 // Zugestellte pendent Nachrichten aus der Queue raeumen:

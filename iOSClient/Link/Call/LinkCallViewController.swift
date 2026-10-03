@@ -35,7 +35,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         private let overlay = UIView()
         private let overlayAvatar = UILabel()
         private let overlayAvatarImage = UIImageView()
-        private let overlayName = UILabel()
+        // Run 04.10. (Feedback: Name doppelt): Der Overlay-Name unten links
+        // entfaellt - der Name steht genau EINMAL oben mittig (attachNameLabel).
 
         init(session: String, roomType: String) {
             self.session = session
@@ -70,13 +71,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             overlayAvatarImage.clipsToBounds = true
             overlayAvatarImage.isHidden = true
             overlayAvatarImage.translatesAutoresizingMaskIntoConstraints = false
-            overlayName.textColor = .white
-            overlayName.font = .preferredFont(forTextStyle: .footnote)
-            overlayName.lineBreakMode = .byTruncatingTail
-            overlayName.translatesAutoresizingMaskIntoConstraints = false
             overlay.addSubview(overlayAvatar)
             overlay.addSubview(overlayAvatarImage)
-            overlay.addSubview(overlayName)
             container.addSubview(overlay)
             NSLayoutConstraint.activate([
                 overlayAvatar.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
@@ -86,10 +82,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 overlayAvatarImage.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
                 overlayAvatarImage.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
                 overlayAvatarImage.widthAnchor.constraint(equalToConstant: 110),
-                overlayAvatarImage.heightAnchor.constraint(equalToConstant: 110),
-                overlayName.leadingAnchor.constraint(equalTo: overlay.leadingAnchor, constant: 12),
-                overlayName.trailingAnchor.constraint(lessThanOrEqualTo: overlay.trailingAnchor, constant: -12),
-                overlayName.bottomAnchor.constraint(equalTo: overlay.bottomAnchor, constant: -10)
+                overlayAvatarImage.heightAnchor.constraint(equalToConstant: 110)
             ])
         }
 
@@ -99,7 +92,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         private(set) var currentName: String = ""
 
         func setOverlayIdentity(initials: String, name: String) {
-            guard !name.isEmpty else { return }
+            guard !name.isEmpty, !LinkCallViewController.isDeletedUserName(name) else { return }
             currentName = name
             overlayAvatar.text = initials.uppercased()
             overlayAvatar.textColor = .white
@@ -107,7 +100,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             overlayAvatar.clipsToBounds = true
             overlayAvatarImage.layer.cornerRadius = 55
             overlayAvatarImage.clipsToBounds = true
-            overlayName.text = name
+            // Der Name steht oben mittig (attachNameLabel) - hier nur Avatar.
         }
 
         /// Run 25.09.: Server-Avatar (wie die Raumliste) - ersetzt die
@@ -123,6 +116,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         func showOverlay() {
             hasRenderedFrame = false
             overlay.isHidden = false
+            // Run 04.10. (Fix: schwarzer Screen statt Avatar nach App-Wechsel):
+            // Overlay IMMER vor das Video legen - sonst kann ein schwarzer,
+            // noch nicht rendernder VideoView den Avatar verdecken.
+            container.bringSubviewToFront(overlay)
             // Fallback: feuert didChangeVideoSize nicht, verschwindet das
             // Overlay spaetestens nach 10s - echtes Video bleibt nie
             // verdeckt (Run 12.09.).
@@ -500,10 +497,18 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     /// Name-Label an EINER Kachel (tag 4711 = austauschbar).
+    /// Run 04.10.: Namen gelöschter Nutzer/Geister nie anzeigen.
+    static func isDeletedUserName(_ name: String) -> Bool {
+        let deleted = ["Deleted user", "Gelöschter Benutzer", "Gelöschte Benutzerin",
+                       "Deleted user (Guest)", "Gelöschter Benutzer (Gast)"]
+        return deleted.contains(name.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
     private func attachNameLabel(to container: UIView, name: String) {
         // Run 25.09.: Leer (Poll kennt die Session noch nicht) -> das
         // bestehende Label BEHALTEN statt es zu entfernen.
-        guard !name.isEmpty else { return }
+        // Run 04.10.: Gelöschter-Benutzer-Namen nie anzeigen (Geister).
+        guard !name.isEmpty, !Self.isDeletedUserName(name) else { return }
         container.viewWithTag(4711)?.removeFromSuperview()
         let label = UILabel()
         label.tag = 4711
@@ -631,6 +636,17 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // P68e: Vollscreen verlassen (Call beendet/verlassen) - Banner
         // wieder erlauben, Presenter kann erneut präsentieren.
         LinkVoIPManager.shared.noteCallUIDismissed()
+    }
+
+    /// Run 04.10. (Fix: schwarzer Screen statt Avatar nach App-Wechsel):
+    /// Beim Re-Attach für alle Remote-Kacheln ohne laufendes Video das
+    /// Avatar-Overlay erneut zeigen (der 10-s-Fallback hatte es evtl.
+    /// ausgeblendet, während die App im Hintergrund war).
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        for (_, tile) in tiles where tile.isVideoMuted {
+            tile.showOverlay()
+        }
     }
 
     /// Layout-Dispatcher: Raster (Standard) oder Fokus/Speaker.
@@ -1078,6 +1094,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         DispatchQueue.main.async {
             // Session->Name AUS DEM SIGNALING (sofort statt 10s-Poll);
             // behebt die "?"-Kreise bei Eigen-Test-Sessions (Run 12.09.).
+            // Run 04.10.: Gelöschter-Benutzer-Namen ignorieren (Geister).
+            guard !Self.isDeletedUserName(name) else { return }
             let changed = self.sessionNames[session] != name
             self.sessionNames[session] = name
             guard changed else { return }
