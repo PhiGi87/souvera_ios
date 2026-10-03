@@ -2659,6 +2659,8 @@ struct LinkParticipantsSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
     @State private var removeCandidate: LinkParticipant?
+    /// Run 01.10.: Debounce für das Personen-Autocomplete.
+    @State private var searchDebounceTask: Task<Void, Never>?
 
     var body: some View {
         NavigationStack {
@@ -2767,7 +2769,19 @@ struct LinkParticipantsSheet: View {
             }
         }
         .onChange(of: query) { _, newValue in
-            viewModel.searchUsers(query: newValue)
+            // Run 01.10.: 400-ms-Debounce (wie das Such-Overlay) statt
+            // eines Requests pro Tastendruck.
+            searchDebounceTask?.cancel()
+            let trimmed = newValue.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else {
+                viewModel.searchUsers(query: "")
+                return
+            }
+            searchDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
+                viewModel.searchUsers(query: trimmed)
+            }
         }
     }
 
@@ -3465,10 +3479,13 @@ private struct LinkSearchOverlayModifier: ViewModifier {
                     try? await Task.sleep(nanoseconds: 400_000_000)
                     guard !Task.isCancelled else { return }
                     viewModel.searchUsers(query: trimmed)
-                    await MainActor.run {
-                        people = viewModel.userResults
-                    }
                 }
+            }
+            // Run 01.10.: Anzeige direkt an die publizierten Ergebnisse
+            // binden - vorher wurde viewModel.userResults DIREKT nach dem
+            // (asynchronen) Aufruf kopiert und zeigte damit den ALTEN Stand.
+            .onReceive(viewModel.$userResults) { results in
+                people = results
             }
             .overlay {
                 if isPresented {
@@ -3500,7 +3517,9 @@ private struct LinkSearchOverlayView: View {
         let trimmed = query.trimmingCharacters(in: .whitespaces)
         var items: [SouveraLinkSearchItem] = []
         if case let .success(rooms) = viewModel.conversations, !trimmed.isEmpty {
-            for room in rooms where room.displayName.localizedCaseInsensitiveContains(trimmed) {
+            // Run 01.10.: term-basiert (alle Begriffe, Reihenfolge egal).
+            let terms = trimmed.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+            for room in rooms where LinkViewModel.matchesTerms(terms, in: room.displayName) {
                 items.append(.room(room))
             }
         }
@@ -3517,7 +3536,7 @@ private struct LinkSearchOverlayView: View {
             isPresented: $isPresented,
             query: $query,
             items: items,
-            isLoading: false,
+            isLoading: viewModel.isSearchingUsers,
             display: { $0.display },
             onSelect: onSelect
         )

@@ -50,6 +50,16 @@ final class LinkViewModel: ObservableObject {
     @Published var conversations: LinkUiState<[LinkConversation]> = .loading
     @Published var messages: LinkUiState<[LinkChatMessage]> = .loading
     @Published var userResults: [LinkSuggestion] = []
+    /// Run 01.10.: Ladezustand des Autocomplete (Overlay-Spinner).
+    @Published var isSearchingUsers = false
+    private var userSearchGeneration = 0
+
+    /// Reiner Treffer-Test (unit-testbar): ALLE Begriffe (case-insensitive)
+    /// muessen im Text vorkommen - Paritaet zur Kalender-/Mail-Suche.
+    nonisolated static func matchesTerms(_ terms: [String], in text: String) -> Bool {
+        let lower = text.lowercased()
+        return terms.allSatisfy { lower.contains($0.lowercased()) }
+    }
     /// In-Memory-Avatar-Cache (URL -> Bilddaten) für Raum- und Nutzer-Avatare.
     @Published var avatarCache: [String: Data] = [:]
     /// P68k: Inline-Bilder des Chats (Key = Message-ID; leeres Data =
@@ -363,21 +373,29 @@ final class LinkViewModel: ObservableObject {
 
     func searchUsers(query: String) {
         guard let api else { return }
+        // Run 01.10. (Parität zur Mail-Suche): Generation-Guard - eine
+        // langsame Alt-Antwort darf die Ergebnisse einer neueren Query
+        // nicht überschreiben.
+        userSearchGeneration += 1
+        let generation = userSearchGeneration
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.isEmpty {
+        guard !trimmed.isEmpty else {
             userResults = []
+            isSearchingUsers = false
             return
         }
-        Task {
+        isSearchingUsers = true
+        Task { [weak self] in
             let results = await api.searchUsers(query: trimmed)
-            var all = results
+            guard let self, generation == self.userSearchGeneration else { return }
             // Unbekannte E-Mail-Adresse: externen Nutzer einladen anbieten
             // (Federation, falls serverseitig aktiv, sonst Gast per E-Mail).
             // Run 15.09.: KEINE E-Mail-/Federation-Vorschlaege mehr im
             // Teilnehmer-Sheet - Hinzufuegen erfolgt ausschliesslich als
             // interner User (sonst landen Adds bei aktiver Lobby in der
             // Lobby, Feedback des Testers).
-            self.userResults = all.filter { $0.source == "users" || $0.source == "groups" }
+            self.userResults = results.filter { $0.source == "users" || $0.source == "groups" }
+            self.isSearchingUsers = false
         }
     }
 

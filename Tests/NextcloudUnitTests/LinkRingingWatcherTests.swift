@@ -57,4 +57,12 @@ struct LinkRingingWatcherTests {
         let participants = [participant(actorId: "", inCall: 5)]
         #expect(!LinkRingingWatcher.evaluate(participants: participants, ownUserId: "").answeredElsewhere)
     }
+
+    @Test("Link search terms match in any order, case-insensitive")
+    func searchTermsMatching() {
+        #expect(LinkViewModel.matchesTerms(["host", "on"], in: "Host-On Support"))
+        #expect(LinkViewModel.matchesTerms(["support", "host"], in: "Host-On Support"))
+        #expect(!LinkViewModel.matchesTerms(["host", "fehlt"], in: "Host-On Support"))
+        #expect(LinkViewModel.matchesTerms([], in: "beliebig"))
+    }
 }
