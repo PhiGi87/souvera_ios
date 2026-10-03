@@ -3792,6 +3792,13 @@ final class MailViewModel: ObservableObject {
 
     /// JMAP Email/query with a text filter across all mailboxes
     /// (mirrors the Android search screen).
+    /// Reiner Helfer (unit-testbar): dieselbe, bereits beantwortete Query
+    /// erneut aufrufen -> vorhandene Ergebnisse behalten (kein Ladeblinken
+    /// beim Wiederöffnen des Overlays).
+    nonisolated static func shouldSkipSearch(previousQuery: String, newQuery: String, hasExistingResults: Bool) -> Bool {
+        newQuery == previousQuery && hasExistingResults
+    }
+
     func search(_ query: String) async {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -3799,14 +3806,21 @@ final class MailViewModel: ObservableObject {
             searchResults = .success([])
             return
         }
-        lastSearchQuery = trimmed
-        // Run 25.09.: Ergebnisse werden im Such-Overlay gecacht und bleiben
-        // beim Schliessen/Wiederoeffnen erhalten - hier NICHT mehr auf
-        // .loading zuruecksetzen, wenn dieselbe Query erneut laeuft.
-        if case let .success(existing) = searchResults, !existing.isEmpty,
-           lastSearchQuery == trimmed {
+        // Run 01.10. (Feedback: geänderte Query aktualisierte die Ergebnisse
+        // nicht): lastSearchQuery wurde VOR dem Vergleich gesetzt - die
+        // Bedingung traf damit IMMER zu und jede GEÄNDERTE Suche wurde
+        // still verworfen (Abbrechen + neu war der einzige Ausweg). Jetzt
+        // zählt die VORHERIGE Query.
+        let previous = lastSearchQuery
+        let hasExistingResults: Bool = {
+            if case let .success(existing) = searchResults { return !existing.isEmpty }
+            return false
+        }()
+        if Self.shouldSkipSearch(previousQuery: previous, newQuery: trimmed,
+                                 hasExistingResults: hasExistingResults) {
             return
         }
+        lastSearchQuery = trimmed
         searchResults = .loading
         guard useJmap, let api = jmapApi,
               let client = jmapClient,
@@ -3815,6 +3829,11 @@ final class MailViewModel: ObservableObject {
             return
         }
         let accId = session.primaryAccountId
+        // Run 01.10. (Stale-Schutz, schlechte Verbindung): eine langsame
+        // ALT-Antwort darf die Ergebnisse einer neueren Query nicht
+        // überschreiben - vor jedem Publish prüfen, ob die Query noch
+        // aktuell ist.
+        func isCurrent() -> Bool { lastSearchQuery == trimmed }
 
         func fetch(_ filter: [String: Any]) async throws -> [String] {
             let resp = try await api.queryEmailsRaw(accountId: accId, filter: filter, limit: 100)
@@ -3841,17 +3860,20 @@ final class MailViewModel: ObservableObject {
                 }
                 ids = Array(merged)
             }
+            guard isCurrent() else { return }
             guard !ids.isEmpty else {
                 searchResults = .success([])
                 return
             }
             let list = try await api.getEmails(accountId: accId, ids: Array(ids.prefix(100)), properties: JmapApi.listSyncProperties)
+            guard isCurrent() else { return }
             let mapped = list.map {
                 JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: "search", json: $0)
             }.sorted { $0.dateSent > $1.dateSent }
             searchResults = .success(mapped)
             SouveraLog.write("MailSearch", "query=\(trimmed.prefix(40)) ids=\(ids.count) mapped=\(mapped.count)")
         } catch {
+            guard isCurrent() else { return }
             SouveraLog.write("MailSearch", "query=\(trimmed.prefix(40)) failed: \(error.localizedDescription)")
             searchResults = .error(errorText(error.localizedDescription))
         }

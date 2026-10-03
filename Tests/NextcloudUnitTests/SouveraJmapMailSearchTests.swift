@@ -55,4 +55,15 @@ struct SouveraJmapMailSearchTests {
         let conditions = (filter["conditions"] as? [[String: Any]]) ?? []
         #expect((conditions.first?["text"] as? String) == "jan@selh.de")
     }
+
+    @Test("Search skip only for the identical, already answered query")
+    func shouldSkipSearch() {
+        // Gleiche Query + vorhandene Ergebnisse: überspringen (kein Blinken).
+        #expect(MailViewModel.shouldSkipSearch(previousQuery: "hosting", newQuery: "hosting", hasExistingResults: true))
+        // GEÄNDERTE Query: immer suchen (der alte Selbstvergleich-Bug).
+        #expect(!MailViewModel.shouldSkipSearch(previousQuery: "hosting", newQuery: "hosting ssl", hasExistingResults: true))
+        #expect(!MailViewModel.shouldSkipSearch(previousQuery: "hosting", newQuery: "host", hasExistingResults: true))
+        // Gleiche Query, aber keine Ergebnisse vorhanden: suchen.
+        #expect(!MailViewModel.shouldSkipSearch(previousQuery: "hosting", newQuery: "hosting", hasExistingResults: false))
+    }
 }
