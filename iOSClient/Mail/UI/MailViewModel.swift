@@ -3846,21 +3846,29 @@ final class MailViewModel: ObservableObject {
             // From/To. Adress-artige Queries laufen deshalb als OR ueber
             // text/from/to/cc/bcc; scheitert der OR-Operator, Fallback auf
             // Einzelsuchen mit ID-Merge.
+            // Run 01.10. (Feedback "Suche nicht genau"): gestufte Filter -
+            // Stalwart scheitert an Punkt-Begriffen ("1.0.324", Adressen),
+            // Wort-Terme treffen. Die Stufen laufen von praezise (AND aller
+            // Tokens) bis breit (OR) bis roher text (letzter Ausweg).
             var ids: [String] = []
-            let filter = SouveraJmapMailSearch.buildFilter(query: trimmed)
-            do {
-                ids = try await fetch(filter)
-            } catch {
-                guard SouveraJmapMailSearch.isAddressLike(trimmed) else { throw error }
-                var merged: Set<String> = []
-                for fallback in SouveraJmapMailSearch.fallbackFilters(query: trimmed) {
-                    for id in (try? await fetch(fallback)) ?? [] {
-                        merged.insert(id)
+            var anyStageSucceeded = false
+            for stage in SouveraJmapMailSearch.filterStages(query: trimmed) {
+                do {
+                    let fetched = try await fetch(stage)
+                    anyStageSucceeded = true
+                    if !fetched.isEmpty {
+                        ids = fetched
+                        break
                     }
+                } catch {
+                    continue
                 }
-                ids = Array(merged)
             }
             guard isCurrent() else { return }
+            guard anyStageSucceeded else {
+                searchResults = .error(errorText("Search unavailable"))
+                return
+            }
             guard !ids.isEmpty else {
                 searchResults = .success([])
                 return

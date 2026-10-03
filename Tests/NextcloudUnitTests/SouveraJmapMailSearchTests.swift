@@ -8,21 +8,42 @@ import Testing
 @Suite("Souvera JMAP mail search filter")
 struct SouveraJmapMailSearchTests {
 
-    @Test("Plain text query uses the text filter")
-    func plainTextFilter() {
-        let filter = SouveraJmapMailSearch.buildFilter(query: "Jan")
-        #expect(filter.count == 1)
-        #expect((filter["text"] as? String) == "Jan")
+    @Test("Tokenizer keeps the most meaningful alphanumeric run per term")
+    func tokenizer() {
+        // Punktierte Version -> laengster Lauf (Server kann "1.0.324" nicht).
+        #expect(SouveraJmapMailSearch.searchTokens(for: "Souvera Workspace - Logs 1.0.324")
+                == ["Souvera", "Workspace", "Logs", "324"])
+        // Adresse -> Local-Part-Lauf (Punkte brechen den Serverfilter).
+        #expect(SouveraJmapMailSearch.searchTokens(for: "p.grassegger@host-on.de") == ["grassegger"])
+        // Einzelner Name bleibt.
+        #expect(SouveraJmapMailSearch.searchTokens(for: "Kiessling") == ["Kiessling"])
+        // Nur Trennzeichen -> keine Tokens.
+        #expect(SouveraJmapMailSearch.searchTokens(for: " - ").isEmpty)
     }
 
-    @Test("Address-like query combines text, from, to, cc, bcc via OR")
-    func addressFilter() {
-        let filter = SouveraJmapMailSearch.buildFilter(query: "JanDominik.Schmidt@selh.de")
-        #expect((filter["operator"] as? String) == "OR")
-        let conditions = (filter["conditions"] as? [[String: Any]]) ?? []
+    @Test("Multiple tokens produce an AND stage, then a broader OR stage")
+    func stagedFilters() {
+        let stages = SouveraJmapMailSearch.filterStages(query: "Souvera Logs 324")
+        #expect(stages.count >= 3)
+        // Stufe 1: AND ueber die Tokens (praezise).
+        #expect((stages[0]["operator"] as? String) == "AND")
+        let andConds = (stages[0]["conditions"] as? [[String: Any]]) ?? []
+        #expect(andConds.count == 3)
+        #expect((andConds.first?["operator"] as? String) == "OR")
+        // Stufe 2: OR ueber alle Felder/Tokens (breiter).
+        #expect((stages[1]["operator"] as? String) == "OR")
+        // Stufe 3: roher text als letzter Ausweg.
+        #expect((stages.last?["text"] as? String) == "Souvera Logs 324")
+    }
+
+    @Test("Single token searches text and address fields via OR")
+    func singleTokenFilter() {
+        let stages = SouveraJmapMailSearch.filterStages(query: "grassegger")
+        #expect((stages.first?["operator"] as? String) == "OR")
+        let conditions = (stages.first?["conditions"] as? [[String: Any]]) ?? []
         #expect(conditions.count == 5)
-        #expect((conditions.first?["text"] as? String) == "JanDominik.Schmidt@selh.de")
-        #expect((conditions.dropFirst().first?["from"] as? String) == "JanDominik.Schmidt@selh.de")
+        #expect((conditions.first?["text"] as? String) == "grassegger")
+        #expect((conditions.dropFirst().first?["from"] as? String) == "grassegger")
     }
 
     @Test("Address detection requires the @ sign")
@@ -33,8 +54,9 @@ struct SouveraJmapMailSearchTests {
         #expect(!SouveraJmapMailSearch.isAddressLike(""))
     }
 
-    @Test("Empty query yields an empty filter")
+    @Test("Empty query yields no filters")
     func emptyQuery() {
+        #expect(SouveraJmapMailSearch.filterStages(query: "   ").isEmpty)
         #expect(SouveraJmapMailSearch.buildFilter(query: "   ").isEmpty)
         #expect(SouveraJmapMailSearch.fallbackFilters(query: "  ").isEmpty)
     }
@@ -46,14 +68,6 @@ struct SouveraJmapMailSearchTests {
         #expect((filters[0]["text"] as? String) == "jan@selh.de")
         #expect((filters[1]["from"] as? String) == "jan@selh.de")
         #expect((filters[2]["to"] as? String) == "jan@selh.de")
-    }
-
-    @Test("Whitespace is trimmed before matching")
-    func trimmedQueries() {
-        let filter = SouveraJmapMailSearch.buildFilter(query: "  jan@selh.de  ")
-        #expect((filter["operator"] as? String) == "OR")
-        let conditions = (filter["conditions"] as? [[String: Any]]) ?? []
-        #expect((conditions.first?["text"] as? String) == "jan@selh.de")
     }
 
     @Test("Search skip only for the identical, already answered query")
