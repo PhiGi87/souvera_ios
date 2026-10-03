@@ -43,4 +43,32 @@ struct SouveraTalkPushActionTests {
                                     text: "Hallo",
                                     replyParent: nil)
     }
+
+    @Test("Newest notification is decided by the highest nid")
+    func newestByNid() {
+        let now = Date()
+        let notes: [(nid: Int?, date: Date)] = [(7146, now.addingTimeInterval(-60)),
+                                                (7150, now.addingTimeInterval(-30)),
+                                                (7154, now)]
+        #expect(SouveraTalkPushActionRunner.isNewestNotification(tappedNid: 7154, tappedDate: now, roomNotifications: notes))
+        #expect(!SouveraTalkPushActionRunner.isNewestNotification(tappedNid: 7150, tappedDate: now.addingTimeInterval(-30), roomNotifications: notes))
+    }
+
+    @Test("Without nids the delivery date decides")
+    func newestByDate() {
+        let now = Date()
+        let notes: [(nid: Int?, date: Date)] = [(nil, now.addingTimeInterval(-60)),
+                                                (nil, now)]
+        #expect(SouveraTalkPushActionRunner.isNewestNotification(tappedNid: nil, tappedDate: now, roomNotifications: notes))
+        #expect(!SouveraTalkPushActionRunner.isNewestNotification(tappedNid: nil, tappedDate: now.addingTimeInterval(-60), roomNotifications: notes))
+    }
+
+    @Test("nid values parse from Int, NSNumber and String")
+    func nidParsing() {
+        #expect(SouveraTalkPushActionRunner.nidValue(7154) == 7154)
+        #expect(SouveraTalkPushActionRunner.nidValue(NSNumber(value: 42)) == 42)
+        #expect(SouveraTalkPushActionRunner.nidValue("99") == 99)
+        #expect(SouveraTalkPushActionRunner.nidValue(nil) == nil)
+        #expect(SouveraTalkPushActionRunner.nidValue("abc") == nil)
+    }
 }

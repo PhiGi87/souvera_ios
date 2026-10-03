@@ -12,6 +12,13 @@ import UIKit
 
 enum SouveraMailPushActionRunner {
 
+    /// Reiner Helfer (Regression gegen Mail-Kaskaden): eine Mail-Aktion
+    /// betrifft IMMER genau eine Mail (anders als die raumweite
+    /// Talk-Kaskade) - leere Eingabe ergibt keine Aktion.
+    nonisolated static func targetEmailIds(canonicalId: String) -> [String] {
+        canonicalId.isEmpty ? [] : [canonicalId]
+    }
+
     /// Reiner Helfer (unit-testbar): wählt aus den Kandidaten die Zeile
     /// mit passender blobId und liefert deren (kanonische) Id.
     static func canonicalEmailId(blobId: String, in candidates: [(id: String, blobId: String?)]) -> String? {
@@ -93,13 +100,17 @@ enum SouveraMailPushActionRunner {
             // Kanonische Id (Push-Id = Kurzform, P62e); ohne Auflösung
             // Fallback auf die Push-Id, damit die Aktion versucht wird.
             let canonical = await resolveCanonicalEmailId(api: api, accountId: accId, emailId: emailId) ?? emailId
+            // Run 01.10. (Regression gegen Mail-Kaskaden): eine Mail-Aktion
+            // betrifft IMMER genau eine Mail - anders als die raumweite
+            // Talk-Kaskade. Der Helper dokumentiert/absichert das.
+            let targetIds = Self.targetEmailIds(canonicalId: canonical)
             switch actionIdentifier {
             case AppDelegate.mailMarkReadAction:
-                _ = try await api.setEmailFlags(accountId: accId, emailIds: [canonical],
+                _ = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
                                                 keywordsToAdd: ["$seen": true])
                 await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
             case AppDelegate.mailMarkFlaggedAction:
-                _ = try await api.setEmailFlags(accountId: accId, emailIds: [canonical],
+                _ = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
                                                 keywordsToAdd: ["$seen": true, "$flagged": true])
                 await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
                 await mirrorLocally(emailId: canonical, keyword: "$flagged", value: true)
@@ -112,10 +123,10 @@ enum SouveraMailPushActionRunner {
                     .map { JmapMapper.mapMailbox(account: account, accountId: accId, json: $0) }
                     .first(where: { $0.kind == .trash })?.jmapId
                 if let trashJmapId, !trashJmapId.isEmpty {
-                    _ = try await api.moveEmails(accountId: accId, emailIds: [canonical],
+                    _ = try await api.moveEmails(accountId: accId, emailIds: targetIds,
                                                  targetMailboxId: trashJmapId)
                 } else {
-                    _ = try await api.deleteEmails(accountId: accId, emailIds: [canonical])
+                    _ = try await api.deleteEmails(accountId: accId, emailIds: targetIds)
                 }
             default:
                 return false

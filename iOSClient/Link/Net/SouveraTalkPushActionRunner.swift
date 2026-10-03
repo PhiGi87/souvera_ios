@@ -3,10 +3,11 @@
 //
 // Run 27.09.: Führt die Long-Press-Aktionen auf Link/Talk-Push-Meldungen
 // aus - "Antworten" (System-TextInput, auch bei Kaltstart) und "Als
-// gelesen markieren". Beide räumen raumweit auf: der Read-Marker wird
-// auf die NEUESTE Nachricht des Raums gesetzt (alle vorigen ungelesenen
-// sind damit serverseitig gelesen) und ALLE Meldungen des Raums
-// verschwinden aus der Mitteilungszentrale.
+// gelesen markieren". Run 01.10. (Feedback): Die raumweite Kaskade beim
+// "Gelesen" greift NUR, wenn die getappte Meldung die NEUESTE des Raums
+// ist. Eine ältere Meldung wird nur EINZELN entfernt - der Server-Marker
+// bleibt unberührt (Talk kennt keinen Einzel-Lesestatus mitten in der
+// Liste). "Antworten" räumt weiterhin raumweit auf (bei Erfolg).
 
 import Foundation
 import UIKit
@@ -24,6 +25,27 @@ enum SouveraTalkPushActionRunner {
         messages.map(\.id).max()
     }
 
+    /// Reiner Helfer (unit-testbar): Ist die getappte Meldung die NEUESTE
+    /// des Raums? Bevorzugt die Server-`nid`; fehlt sie (Altnachrichten),
+    /// entscheidet die Zustellzeit.
+    static func isNewestNotification(tappedNid: Int?, tappedDate: Date,
+                                     roomNotifications: [(nid: Int?, date: Date)]) -> Bool {
+        let nids = roomNotifications.compactMap { $0.nid }
+        if let tappedNid, let maxNid = nids.max() {
+            return tappedNid >= maxNid
+        }
+        let maxDate = roomNotifications.map { $0.date }.max() ?? tappedDate
+        return tappedDate >= maxDate
+    }
+
+    /// `nid` aus der userInfo (Int/NSNumber/String).
+    static func nidValue(_ raw: Any?) -> Int? {
+        if let i = raw as? Int { return i }
+        if let n = raw as? NSNumber { return n.intValue }
+        if let s = raw as? String { return Int(s) }
+        return nil
+    }
+
     /// Account aus der Push-Meldung auflösen (auch im Kaltstart).
     static func resolveAccount(_ account: String) -> LinkAccount? {
         guard let tbl = NCManageDatabase.shared.getTableAccount(predicate: NSPredicate(format: "account == %@", account)) else {
@@ -36,6 +58,7 @@ enum SouveraTalkPushActionRunner {
     /// (der NSE schreibt das Raum-Token in jede Talk-Meldung; Meldungen
     /// anderer Räume bleiben unberührt).
     static func cleanupRoomNotifications(token: String) async {
+        guard !token.isEmpty else { return }
         let center = UNUserNotificationCenter.current()
         let delivered = await center.deliveredNotifications()
         let matching = delivered.filter {
@@ -50,6 +73,7 @@ enum SouveraTalkPushActionRunner {
     /// Read-Marker raumweit auf die neueste Nachricht setzen.
     @MainActor
     static func markRoomRead(account: String, token: String) async {
+        guard !token.isEmpty else { return }
         guard let link = resolveAccount(account) else {
             SouveraLog.write("TalkAction", "markRoomRead: kein Account \(account)")
             return
@@ -93,22 +117,49 @@ enum SouveraTalkPushActionRunner {
             return false
         }
         SouveraLog.write("TalkAction", "reply ok (http=\(result.httpCode)) token=\(token)")
-        // Dasselbe raumweite Aufräumen wie bei "Gelesen".
+        // Dasselbe raumweite Aufräumen wie bei "Gelesen" (Feedback: so
+        // belassen - Antworten räumt weiterhin raumweit auf).
         await markRoomRead(account: account, token: token)
         await cleanupRoomNotifications(token: token)
         return true
     }
 
-    /// "Als gelesen markieren": raumweit lesen + aufräumen.
+    /// "Als gelesen markieren":
+    ///  - getappte Meldung = NEUESTE des Raums -> raumweite Kaskade
+    ///    (Read-Marker auf die neueste Nachricht + alle Meldungen des
+    ///    Raums entfernen),
+    ///  - getappte Meldung = ÄLTERE -> nur diese EINE Meldung entfernen;
+    ///    der Server-Marker bleibt unberührt.
     @MainActor
     @discardableResult
-    static func runMarkRead(account: String, token: String) async -> Bool {
+    static func runMarkRead(account: String, token: String, notificationIdentifier: String = "") async -> Bool {
         guard !account.isEmpty, !token.isEmpty else {
             SouveraLog.write("TalkAction", "markRead: account/token fehlen")
             return false
         }
-        await markRoomRead(account: account, token: token)
-        await cleanupRoomNotifications(token: token)
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let roomNotes = delivered.filter {
+            $0.request.content.categoryIdentifier == AppDelegate.talkCategoryIdentifier
+                && ($0.request.content.userInfo["token"] as? String) == token
+        }
+        let tapped = roomNotes.first { $0.request.identifier == notificationIdentifier }
+        let tappedDate = tapped?.date ?? Date()
+        let tappedNid = tapped.flatMap { nidValue($0.request.content.userInfo["nid"]) }
+        let infos: [(nid: Int?, date: Date)] = roomNotes.map {
+            (nidValue($0.request.content.userInfo["nid"]), $0.date)
+        }
+        let newest = isNewestNotification(tappedNid: tappedNid, tappedDate: tappedDate,
+                                          roomNotifications: infos)
+        if newest {
+            await markRoomRead(account: account, token: token)
+            await cleanupRoomNotifications(token: token)
+        } else {
+            if !notificationIdentifier.isEmpty {
+                center.removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])
+            }
+            SouveraLog.write("TalkAction", "markRead single (older notification) token=\(token)")
+        }
         return true
     }
 }

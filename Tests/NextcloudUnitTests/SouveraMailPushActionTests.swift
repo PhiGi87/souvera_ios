@@ -45,4 +45,10 @@ struct SouveraMailPushActionTests {
         ]
         #expect(SouveraMailPushActionRunner.canonicalEmailId(blobId: "blob-1", in: candidates) == "first-canonical")
     }
+
+    @Test("A mail action targets exactly one mail id (no cascade)")
+    func singleTargetId() {
+        #expect(SouveraMailPushActionRunner.targetEmailIds(canonicalId: "dp1yaaa93w") == ["dp1yaaa93w"])
+        #expect(SouveraMailPushActionRunner.targetEmailIds(canonicalId: "").isEmpty)
+    }
 }

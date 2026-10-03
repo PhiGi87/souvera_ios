@@ -244,6 +244,12 @@ class NotificationService: UNNotificationServiceExtension {
                                     bestAttemptContent.userInfo["token"] = objectId
                                     bestAttemptContent.userInfo["account"] = tableAccount.account
                                     bestAttemptContent.categoryIdentifier = "souvera_talk_actions"
+                                    // Run 01.10.: Server-Notification-ID mitschreiben -
+                                    // damit die App erkennt, ob die getappte Meldung die
+                                    // NEUESTE des Raums ist (nur dann Kaskade).
+                                    if let nid = json["nid"] as? Int {
+                                        bestAttemptContent.userInfo["nid"] = nid
+                                    }
                                 }
                                 if let pref = UserDefaults(suiteName: NCBrandOptions.shared.capabilitiesGroup) {
                                     json["account"] = tableAccount.account as AnyObject

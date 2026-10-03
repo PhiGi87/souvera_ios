@@ -358,7 +358,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                                                                 userText: userText)
                 } else if response.actionIdentifier == Self.talkMarkReadAction {
                     await SouveraTalkPushActionRunner.runMarkRead(account: account,
-                                                                   token: token)
+                                                                   token: token,
+                                                                   notificationIdentifier: identifier)
                 }
             }
             completionHandler()
