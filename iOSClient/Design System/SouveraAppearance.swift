@@ -71,7 +71,16 @@ enum SouveraAppearance {
     static func blueNavigationBarAppearance() -> UINavigationBarAppearance {
         let appearance = UINavigationBarAppearance()
         appearance.configureWithOpaqueBackground()
-        appearance.backgroundColor = UIColor(patternImage: gradientPatternImage())
+        // Run 04.10. (Fix: schmaler hellblauer Streifen am linken Rand auf
+        // dem iPad): UIColor(patternImage:) KACHELT das nur 1x120 pt grosse
+        // Gradientbild - in einer schmalen Spalte (iOS-26-Leading-Edge)
+        // entstand daraus ein voll-hoher hellblauer Streifen. Als
+        // backgroundImage wird der Verlauf von iOS auf die Bar-Groesse
+        // GESTRECKT (nicht gekachelt); zusaetzlich eine solide
+        // Fallback-Farbe in Verlaufsrichtung oben.
+        appearance.backgroundImage = gradientPatternImage()
+        appearance.backgroundImageContentMode = .scaleToFill
+        appearance.backgroundColor = UIColor(red: 0x2E / 255.0, green: 0x9B / 255.0, blue: 0xD8 / 255.0, alpha: 1)
         appearance.backgroundEffect = nil
         appearance.shadowColor = .clear
         appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
