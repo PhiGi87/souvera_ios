@@ -338,7 +338,7 @@ final class CalendarViewModel: ObservableObject {
         eventSearchResults = Self.filterEvents(loadedEvents(), query: trimmed)
         eventSearchTask = Task { [weak self] in
             guard let self else { return }
-            let wide = await self.searchEventsWide(trimmed)
+            let wide = await self.searchEventsWide(trimmed, generation: generation)
             guard !Task.isCancelled, generation == self.eventSearchGeneration else { return }
             self.eventSearchResults = wide
         }
@@ -349,19 +349,47 @@ final class CalendarViewModel: ObservableObject {
         return []
     }
 
+    /// Reine Suchbegriffe (unit-testbar): Whitespace-Zerlegung, leere raus.
+    nonisolated static func searchTerms(_ query: String) -> [String] {
+        query.trimmingCharacters(in: .whitespaces)
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+    }
+
+    /// Reiner Treffer-Test (unit-testbar): ALLE Begriffe (case-insensitive)
+    /// muessen im Haystack vorkommen.
+    nonisolated static func matchesSearchTerms(_ terms: [String], in haystack: String) -> Bool {
+        let lower = haystack.lowercased()
+        return terms.allSatisfy { lower.contains($0.lowercased()) }
+    }
+
     static func filterEvents(_ events: [CalendarEventModel], query: String) -> [CalendarEventModel] {
-        let trimmed = query.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return events }
-        return events.filter {
-            $0.title.localizedCaseInsensitiveContains(trimmed)
-                || ($0.location ?? "").localizedCaseInsensitiveContains(trimmed)
-                || ($0.description ?? "").localizedCaseInsensitiveContains(trimmed)
+        let terms = searchTerms(query)
+        guard !terms.isEmpty else { return events }
+        // Run 01.10. (Feedback: Suche nicht genau): term-basiert - ALLE
+        // Begriffe muessen vorkommen (case-insensitive), irgendwo in
+        // Titel/Ort/Beschreibung/Teilnehmern/Organisator. Vorher musste die
+        // GANZE Query als zusammenhaengender Substring vorkommen.
+        return events.filter { event in
+            let haystack = [
+                event.title,
+                event.location ?? "",
+                event.description ?? "",
+                event.attendees.joined(separator: " "),
+                event.organizerName,
+                event.organizerEmail
+            ].joined(separator: " ")
+            return Self.matchesSearchTerms(terms, in: haystack)
         }.sorted { $0.start < $1.start }
     }
 
-    private func searchEventsWide(_ query: String) async -> [CalendarEventModel] {
-        isSearchingEvents = true
-        defer { isSearchingEvents = false }
+    private func searchEventsWide(_ query: String, generation: Int) async -> [CalendarEventModel] {
+        // Run 01.10.: Ladezustand nur setzen/zuruecksetzen, solange die
+        // Generation aktuell ist - sonst blinkte der Hinweis bei schnellem
+        // Weitertippen aus, weil die abgebrochene Vorgaenger-Suche ihr
+        // defer feuerte.
+        if generation == eventSearchGeneration { isSearchingEvents = true }
+        defer { if generation == eventSearchGeneration { isSearchingEvents = false } }
         let client = CalDavClient(account: nil)
         let calendar = Calendar.current
         let now = Date()

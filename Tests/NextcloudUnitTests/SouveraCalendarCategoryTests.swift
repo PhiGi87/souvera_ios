@@ -51,4 +51,15 @@ struct SouveraCalendarTaskDurationTests {
         // Endet exakt jetzt: nicht mehr "Als Nächstes".
         #expect(!CalendarViewModel.isUpcoming(end: now, now: now))
     }
+
+    @Test("Calendar search matches all terms, ignoring word order")
+    func searchTerms() {
+        #expect(CalendarViewModel.searchTerms("  TSL   Umbau ") == ["TSL", "Umbau"])
+        #expect(CalendarViewModel.searchTerms("   ") == [])
+        // Alle Begriffe muessen vorkommen, Reihenfolge egal:
+        #expect(CalendarViewModel.matchesSearchTerms(["umbau", "tsl"], in: "TSL Umbau Besprechung"))
+        #expect(CalendarViewModel.matchesSearchTerms(["tsl", "geburtstag"], in: "TSL Umbau") == false)
+        // Teilnehmer/Organisator sind im Haystack enthalten:
+        #expect(CalendarViewModel.matchesSearchTerms(["grassegger"], in: "TSL Umbau Philip Grassegger p.grassegger@host-on.de"))
+    }
 }
