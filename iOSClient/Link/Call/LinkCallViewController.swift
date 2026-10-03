@@ -931,6 +931,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             try audioSession.setMode(isSpeakerOn ? .videoChat : .voiceChat)
             try audioSession.setActive(true)
             try audioSession.overrideOutputAudioPort(isSpeakerOn ? .speaker : .none)
+            // Run 04.10.: Manual-Audio - Unit nach dem Routenwechsel offen halten.
+            audioSession.isAudioEnabled = true
         } catch {
             CallDebugLog.log("CallVC", "audio route error \(error.localizedDescription)")
         }

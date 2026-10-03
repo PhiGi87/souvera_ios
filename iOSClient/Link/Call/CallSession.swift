@@ -371,17 +371,29 @@ final class CallSession: NSObject, HpbSignalingListener {
 
     /// Aktiviert die Call-Audio-Session: playAndRecord + voiceChat (Standard
     /// = Hörmuschel); der Speaker-Button schaltet auf .speaker/.videoChat um.
+    /// Run 04.10. (Fix: kein Audio bei CallKit-Annahme): Unter CallKit
+    /// aktiviert iOS die Session SELBST (provider didActivate). Ein
+    /// vorzeitiges setActive(true) scheiterte dort ("Session activation
+    /// failed"). Bei aktivem CallKit wird daher NUR konfiguriert und WebRTC
+    /// über isAudioEnabled gestartet; sonst wie bisher aktiviert.
     static func activateCallAudioSession() {
         let audioSession = RTCAudioSession.sharedInstance()
         audioSession.lockForConfiguration()
         do {
+            // Manual-Audio: das WebRTC-Audio-Device wird über isAudioEnabled
+            // exakt dann gestartet, wenn CallKit die Session hält (bzw. im
+            // UI-Pfad direkt nach setActive).
+            audioSession.useManualAudio = true
             try audioSession.setCategory(.playAndRecord, with: [.allowBluetooth, .allowBluetoothA2DP])
             try audioSession.setMode(.voiceChat)
-            try audioSession.setActive(true)
+            if !LinkVoIPManager.callKitAudioSessionActive {
+                try audioSession.setActive(true)
+            }
             try audioSession.overrideOutputAudioPort(.none)
-            CallDebugLog.log("CallSession", "audio session active (playAndRecord/voiceChat/earpiece)")
+            audioSession.isAudioEnabled = true
+            CallDebugLog.log("CallSession", "audio session active (playAndRecord/voiceChat/earpiece) callkit=\(LinkVoIPManager.callKitAudioSessionActive)")
         } catch {
-            CallDebugLog.log("CallSession", "audio session error: \(error.localizedDescription)")
+            CallDebugLog.log("CallSession", "audio session error: \(error.localizedDescription) callkit=\(LinkVoIPManager.callKitAudioSessionActive)")
         }
         audioSession.unlockForConfiguration()
     }
@@ -944,6 +956,8 @@ final class CallSession: NSObject, HpbSignalingListener {
         // a dead "call running" state (status bar, routing, mic).
         let audioSession = RTCAudioSession.sharedInstance()
         audioSession.lockForConfiguration()
+        // Run 04.10.: Audio-Unit vor der Deaktivierung stoppen (Manual-Audio).
+        audioSession.isAudioEnabled = false
         try? audioSession.setActive(false)
         audioSession.unlockForConfiguration()
 

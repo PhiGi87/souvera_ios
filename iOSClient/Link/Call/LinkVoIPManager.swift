@@ -120,6 +120,9 @@ final class LinkVoIPManager: NSObject {
                 }
                 return
             }
+            // App ist aktiv: ggf. die CallKit-Audio-Session nachträglich
+            // adoptieren/aktivieren (Fix: Lock-Screen-Annahme war stumm).
+            self.ensureCallKitAudioActiveIfNeeded()
             guard let session = self.activeSession, !session.hasEnded,
                   let info = self.activeCallInfo,
                   let account = LinkAccount.active() else {
@@ -190,6 +193,13 @@ final class LinkVoIPManager: NSObject {
     var hasRingingCall: Bool {
         pendingIncomingCall != nil || !activeCalls.isEmpty
     }
+
+    /// Run 04.10. (Fix: kein Audio bei Annahme vom Sperrbildschirm): true,
+    /// solange CallKit die Audio-Session hält (zwischen didActivate und
+    /// didDeactivate). CallSession konfiguriert dann NUR und aktiviert NICHT
+    /// selbst - sonst scheitert setActive(true) ("Session activation failed"),
+    /// weil CallKit die Session noch nicht aktiviert hat.
+    static var callKitAudioSessionActive = false
 
     /// Starts an outgoing call; the session stays alive independently of the
     /// call view controller so the UI can be re-attached later.
@@ -857,10 +867,17 @@ extension LinkVoIPManager: PKPushRegistryDelegate {
 extension LinkVoIPManager: CXProviderDelegate {
     func providerDidReset(_ provider: CXProvider) {
         activeCalls.removeAll()
+        Self.callKitAudioSessionActive = false
     }
 
     func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
         cancelRingingTimeout()
+        // Run 04.10. (Fix: kein Audio bei CallKit-Annahme): Ab jetzt hält
+        // CallKit die Audio-Session - der gleich startende Session-Start darf
+        // daher NICHT selbst setActive(true) versuchen (das scheiterte:
+        // "Session activation failed"). Aktiviert wird in didActivate bzw.
+        // im Fallback beim Präsentieren der UI.
+        Self.callKitAudioSessionActive = true
         // Run 16.09. (Crash-/Suspend-Fix): Background-Assertion vom Answer
         // bis zum abgeschlossenen Signaling-Join — sonst suspendiert iOS
         // die App beim Antworten aus Sperrbildschirm/Banner, bevor der
@@ -928,20 +945,42 @@ extension LinkVoIPManager: CXProviderDelegate {
     }
 
     func provider(_ provider: CXProvider, didActivate audioSession: AVAudioSession) {
-        CallDebugLog.log("LinkVoIPManager", "CallKit didActivate audioSession")
+        // Run 04.10. (Fix: kein Audio bei CallKit-Annahme): CallKit hält die
+        // Session - WebRTC MUSS sie adoptieren, sonst läuft die Audio-Unit
+        // nicht (genau das war der stumme Lock-Screen-Call). Danach nur noch
+        // konfigurieren + Audio freigeben (kein eigenes setActive).
+        Self.callKitAudioSessionActive = true
+        RTCAudioSession.sharedInstance().audioSessionDidActivate(audioSession)
+        CallDebugLog.log("LinkVoIPManager", "CallKit didActivate audioSession - adopted by WebRTC")
         CallSession.activateCallAudioSession()
     }
 
     func provider(_ provider: CXProvider, didDeactivate audioSession: AVAudioSession) {
+        Self.callKitAudioSessionActive = false
+        // Run 04.10.: WebRTC über die Deaktivierung informieren (CallKit-
+        // Integration) + Audio-Unit stoppen.
+        RTCAudioSession.sharedInstance().audioSessionDidDeactivate(audioSession)
         CallDebugLog.log("LinkVoIPManager", "CallKit didDeactivate audioSession")
         let session = RTCAudioSession.sharedInstance()
         session.lockForConfiguration()
+        session.isAudioEnabled = false
         try? session.setActive(false)
         session.unlockForConfiguration()
         // P68e: "In Souvera öffnen"/Video im System-Fullscreen -> genau hier
         // in den App-Call-Vollscreen übergehen (Guard im Presenter greift
         // nur bei noch laufender Session - beim Auflegen passiert nichts).
         presentCallUIIfNeeded()
+    }
+
+    /// Run 04.10. (Fallback): Hat CallKit die Session nie aktiviert (z. B.
+    /// Annahme vom Sperrbildschirm, didActivate blieb aus), beim Präsentieren
+    /// der UI nachholen - damit hilft der Wechsel in die App.
+    private func ensureCallKitAudioActiveIfNeeded() {
+        guard activeCallUUID != nil, !Self.callKitAudioSessionActive else { return }
+        Self.callKitAudioSessionActive = true
+        RTCAudioSession.sharedInstance().audioSessionDidActivate(AVAudioSession.sharedInstance())
+        CallSession.activateCallAudioSession()
+        CallDebugLog.log("LinkVoIPManager", "CallKit audio session adopted (fallback on app active)")
     }
 }
 
