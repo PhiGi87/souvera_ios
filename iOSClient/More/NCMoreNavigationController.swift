@@ -12,6 +12,9 @@ class NCMoreNavigationController: NCMainNavigationController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        // Run 01.10.: neutraler Hintergrund der gemeinsamen Ebene (kein
+        // Durchscheinen eines hellblauen Streifens am Rand).
+        view.backgroundColor = .systemGroupedBackground
     }
 
     override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
@@ -39,6 +42,17 @@ class NCMoreNavigationController: NCMainNavigationController {
             applyBlueHeader()
             viewController.navigationItem.leftBarButtonItem = nil
             showSouveraLogo(false)
+            // Run 01.10. (Feedback: hellblauer Streifen am linken Rand auf
+            // ALLEN Mehr-Unterseiten): die gemeinsame Ebene leuchtet durch,
+            // wenn die gepushte View transparent ist. Nav-Controller-View
+            // und klar/nil-Views der gepushten Controller auf den Standard-
+            // Hintergrund setzen (eigene Backgrounds der Screens bleiben
+            // unberuehrt).
+            view.backgroundColor = .systemGroupedBackground
+            if viewController.view.backgroundColor == nil
+                || viewController.view.backgroundColor == .clear {
+                viewController.view.backgroundColor = .systemGroupedBackground
+            }
             Task { @MainActor in
                 if viewController === navigationController.topViewController {
                     applyBlueHeader()

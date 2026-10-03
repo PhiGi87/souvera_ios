@@ -241,19 +241,12 @@ final class NCMoreModel: ObservableObject {
             )
         )
 
+        // Run 01.10. (Feedback): Reihenfolge der Mehr-Funktionen.
         functionItems.append(
             Item(
-                titleKey: "_media_",
-                image: "photo.fill",
-                destination: .media
-            )
-        )
-
-        functionItems.append(
-            Item(
-                titleKey: "_activity_",
-                image: "bolt.fill",
-                destination: .activity
+                titleKey: "_shield_",
+                image: "shield",
+                destination: .shield
             )
         )
 
@@ -267,25 +260,11 @@ final class NCMoreModel: ObservableObject {
 
         functionItems.append(
             Item(
-                titleKey: "_shield_",
-                image: "shield",
-                destination: .shield
+                titleKey: "_media_",
+                image: "photo.fill",
+                destination: .media
             )
         )
-
-        functionItems.append(
-            Item(
-                titleKey: "_recent_",
-                image: "clock.arrow.circlepath",
-                destination: .storyboard(
-                    name: "NCRecent",
-                    presentation: .push
-                )
-            )
-        )
-
-        // Notes were removed from the menu on request; the destination
-        // (.notes) and SouveraNotesView stay in the source on hold.
 
         if capabilities?.fileSharingApiEnabled == true {
             functionItems.append(
@@ -299,6 +278,28 @@ final class NCMoreModel: ObservableObject {
                 )
             )
         }
+
+        functionItems.append(
+            Item(
+                titleKey: "_recent_",
+                image: "clock.arrow.circlepath",
+                destination: .storyboard(
+                    name: "NCRecent",
+                    presentation: .push
+                )
+            )
+        )
+
+        functionItems.append(
+            Item(
+                titleKey: "_activity_",
+                image: "bolt.fill",
+                destination: .activity
+            )
+        )
+
+        // Notes were removed from the menu on request; the destination
+        // (.notes) and SouveraNotesView stay in the source on hold.
 
         functionItems.append(
             Item(
