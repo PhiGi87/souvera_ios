@@ -19,18 +19,35 @@ enum SouveraReminderScheduler {
     /// app is not running). PRO ACCOUNT: nur die eigenen Erinnerungen werden
     /// ersetzt (Multi-Account: A löscht nicht die Erinnerungen von B).
     static func schedule(for events: [CalendarEventModel], account: String = "") {
+        // Run 05.10. (Fix: keine Erinnerung für "Domains umziehen"):
+        // Ein LEERER Lauf (leere Event-Liste, z. B. zweite View-Instanz /
+        // leerer Sync) hat bisher ALLE Erinnerungen des Accounts gelöscht -
+        // direkt nach jedem vollen Lauf ("6 of 6" -> "0 of 0" im Log), so
+        // dass die 13:45-Erinnerung nie feuerte. Jetzt: gar nicht erst
+        // anfassen.
+        guard !events.isEmpty else {
+            JmapLog.write("Calendar reminders: skipped empty schedule (kept pending)")
+            return
+        }
         let prefix = account.isEmpty ? Self.prefix : Self.prefix + account + "_"
         let center = UNUserNotificationCenter.current()
         center.requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
         center.getPendingNotificationRequests { existing in
-            let stale = existing.filter { $0.identifier.hasPrefix(prefix) }
-            center.removePendingNotificationRequests(withIdentifiers: stale.map(\.identifier))
+            let prefixed = existing.filter { $0.identifier.hasPrefix(prefix) }
 
             let now = Date()
             var pending: [(fireDate: Date, request: UNNotificationRequest)] = []
+            // Run 05.10.: Kandidaten-IDs ALLER übergebenen Termine (auch
+            // vergangener) - nur diese werden ersetzt/entfernt; Erinnerungen
+            // anderer Termine (anderes Monatsfenster) bleiben erhalten.
+            var candidateIds = Set<String>()
             for event in events {
-                guard event.start > now, !event.reminders.isEmpty else { continue }
+                guard !event.uid.isEmpty else { continue }
                 for minutes in event.reminders {
+                    let id = "\(prefix)\(event.uid)_\(minutes)"
+                    candidateIds.insert(id)
+                    candidateIds.insert("\(prefix)catchup_\(event.uid)_\(minutes)")
+                    guard event.start > now else { continue }
                     let fireDate = event.start.addingTimeInterval(-Double(minutes) * 60)
                     guard fireDate > now else { continue }
                     let content = UNMutableNotificationContent()
@@ -59,7 +76,7 @@ enum SouveraReminderScheduler {
                     let components = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
                     let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
                     let request = UNNotificationRequest(
-                        identifier: "\(prefix)\(event.uid)_\(minutes)",
+                        identifier: id,
                         content: content,
                         trigger: trigger
                     )
@@ -67,11 +84,23 @@ enum SouveraReminderScheduler {
                 }
             }
             pending.sort { $0.fireDate < $1.fireDate }
-            let scheduled = min(pending.count, 64)
-            for item in pending.prefix(64) {
+            let wanted = Array(pending.prefix(64))
+            let wantedIds = Set(wanted.map { $0.request.identifier })
+            // Run 05.10.: per-UID-Merge statt Prefix-Wipe - nur Erinnerungen
+            // der übergebenen Termine, die nicht mehr gebraucht werden
+            // (vergangen/entfernte Erinnerung), werden entfernt.
+            let stale = prefixed.filter { candidateIds.contains($0.identifier) && !wantedIds.contains($0.identifier) }
+            if !stale.isEmpty {
+                center.removePendingNotificationRequests(withIdentifiers: stale.map(\.identifier))
+            }
+            for item in wanted {
                 center.add(item.request)
             }
-            JmapLog.write("Calendar reminders: scheduled \(scheduled) of \(pending.count) notifications (max 64)")
+            JmapLog.write("Calendar reminders: scheduled \(wanted.count) of \(pending.count) notifications (max 64, kept \(prefixed.count - stale.count + wanted.count) total, replaced/removed \(stale.count))")
+            for item in wanted {
+                let uid = (item.request.content.userInfo["uid"] as? String) ?? "?"
+                JmapLog.write("Calendar reminder: '\(item.request.content.title.prefix(40))' uid=\(uid.prefix(10)) fire=\(item.fireDate)")
+            }
 
             // Catch-up (Run 15.09., Log d29maaa3g2): Termine, die BEI
             // geschlossener App angelegt wurden, haben keine geplante

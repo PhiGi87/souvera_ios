@@ -590,13 +590,16 @@ final class CalendarViewModel: ObservableObject {
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")
         }
-        // Run 15.09.: nie mit einer "verdächtig leeren" Liste planen -
-        // schedule() ersetzt geplante Erinnerungen und wuerde sie sonst
-        // löschen.
-        if !all.isEmpty || previousByHref.values.allSatisfy({ $0 == 0 }) {
+        // Run 05.10. (Fix: Erinnerung wurde nicht zugestellt): Nur mit
+        // ECHTEN Events planen. Der frühere Guard
+        // `!all.isEmpty || previousByHref.values.allSatisfy({ $0 == 0 })`
+        // war bei LEEREM previousByHref TRUE und plante eine LEERE Liste -
+        // das leerte die Reminder-Queue des Accounts (Log "6 of 6" ->
+        // "0 of 0") und löschte u. a. die 13:45-Erinnerung.
+        if !all.isEmpty {
             SouveraReminderScheduler.schedule(for: all, account: NCManageDatabase.shared.getActiveTableAccount()?.account ?? "")
         } else {
-            JmapLog.write("Calendar reminders: skipped suspicious-empty schedule (all=\(all.count))")
+            JmapLog.write("Calendar reminders: skipped empty schedule (all=0, previous=\(previousByHref.count))")
         }
         // Run 29.09. (optimistisches Speichern): nach jedem erfolgreichen
         // Sync die Offline-Schreib-Warteschlange zustellen - der Server
