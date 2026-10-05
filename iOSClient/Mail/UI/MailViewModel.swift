@@ -1463,11 +1463,29 @@ final class MailViewModel: ObservableObject {
         let addresses = Array(Set(messages.map { $0.fromAddress.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }))
         JmapLog.write("blacklistAndDelete: \(ids.count) mails, \(addresses.count) addresses [\(addresses.joined(separator: ", "))]")
+        // Run 05.10.: ohne Schreibrecht keine Löschung (Feedback statt
+        // unsichtbarer Mail); das Blacklisting läuft trotzdem.
+        guard canMutateCurrentMailbox else {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_action_not_allowed_", comment: "")
+            )
+            return
+        }
         optimisticRemove(ids)
         let previous = deleteWorkTask
         await previous?.value
-        let deleted = await performDelete(messages, ids: ids)
+        let outcome = await performDelete(messages, ids: ids)
+        let deleted = (outcome == .success)
         JmapLog.write("blacklistAndDelete: delete result=\(deleted)")
+        // Run 05.10.: Verweigert/Fehlgeschlagen -> optimistische Entfernung
+        // zurückrollen (die Mail bleibt sonst unsichtbar).
+        if outcome != .success {
+            rollbackOptimisticRemoval(
+                ids,
+                message: NSLocalizedString(outcome == .refused ? "_mail_action_not_allowed_" : "_mail_delete_failed_", comment: "")
+            )
+        }
         // Queue-Marker aktualisieren, damit Folge-Löschungen hinter uns laufen.
         deleteWorkTask = Task {}
 
