@@ -31,7 +31,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         private var hasRenderedFrame = false
         /// Run 25.09.: Video stumm/aus -> das Avatar-Overlay darf NICHT
         /// durch den 10-s-Fallback verschwinden (es kommt nie ein Frame).
-        var isVideoMuted = false
+        /// Run 04.10. (Fix: schwarzer Screen statt Avatar nach App-Wechsel):
+        /// Kacheln starten ALS STUMM - das Avatar-Overlay bleibt stehen, bis
+        /// ein explizites `unmute`-Signaling kommt. Der 10-s-Fallback
+        /// blendete sonst das Overlay aus (hasRenderedFrame bleibt bei
+        /// audio-only Gegnern leer) und hinterliess Schwarz.
+        var isVideoMuted = true
         private let overlay = UIView()
         private let overlayAvatar = UILabel()
         private let overlayAvatarImage = UIImageView()
@@ -358,6 +363,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             let api = LinkOcsApi(account: account)
             let participants = await api.callParticipants(token: token)
                 .filter { $0.userId != account.username }
+            // Run 05.10. (Diagnose): Namen je Session loggen - Quelle für
+            // unerklärliche Kachel-Namen ("Gelöschter Benutzer") finden.
+            CallDebugLog.log("CallVC", "callParticipants: \(participants.map { "\($0.sessionId.prefix(10))|\($0.displayName.prefix(20))" }.joined(separator: " "))")
             await MainActor.run {
                 if participants != callParticipants {
                     callParticipants = participants
@@ -1030,6 +1038,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // Run 25.09.: Unbekannter Name -> den zuletzt bekannten der
             // Kachel behalten (kein "?"-Rueckschritt beim Re-Offer).
             let name = names[session] ?? tile.currentName
+            // Run 05.10. (Diagnose): aufgeloesten Namen + Quelle loggen.
+            CallDebugLog.log("CallVC", "tile \(key.prefix(14)) name='\(name.prefix(24))' poll=\(names[session] != nil) nick=\(self.sessionNames[session] != nil)")
             if name.isEmpty {
                 CallDebugLog.log("CallVC", "remote tile \(key.prefix(14)) name unknown - identity kept")
             }
@@ -1095,7 +1105,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // Session->Name AUS DEM SIGNALING (sofort statt 10s-Poll);
             // behebt die "?"-Kreise bei Eigen-Test-Sessions (Run 12.09.).
             // Run 04.10.: Gelöschter-Benutzer-Namen ignorieren (Geister).
-            guard !Self.isDeletedUserName(name) else { return }
+            // Run 05.10. (Diagnose): empfangenen Namen loggen - der String
+            // "Gelöschter Benutzer" war im Log nicht auffindbar.
+            CallDebugLog.log("CallVC", "nick from=\(session.prefix(8)) name='\(name.prefix(24))'")
+            guard !Self.isDeletedUserName(name) else {
+                CallDebugLog.log("CallVC", "nick SUPPRESSED (deleted user name) from=\(session.prefix(8))")
+                return
+            }
             let changed = self.sessionNames[session] != name
             self.sessionNames[session] = name
             guard changed else { return }
