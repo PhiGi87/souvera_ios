@@ -51,7 +51,9 @@ enum JmapMapper {
             isSubscribed: (json["isSubscribed"] as? Bool) ?? true,
             mayRename: (rights?["mayRename"] as? Bool) ?? true,
             mayDelete: (rights?["mayDelete"] as? Bool) ?? true,
-            mayCreateChild: (rights?["mayCreateChild"] as? Bool) ?? true
+            mayCreateChild: (rights?["mayCreateChild"] as? Bool) ?? true,
+            mayRemoveItems: (rights?["mayRemoveItems"] as? Bool) ?? true,
+            maySetSeen: (rights?["maySetSeen"] as? Bool) ?? true
         )
     }
 

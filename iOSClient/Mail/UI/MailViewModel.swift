@@ -144,6 +144,14 @@ final class MailViewModel: ObservableObject {
     }
     /// Öffentlicher Account-Schlüssel (z. B. für den Empfänger-Verlauf).
     var accountKey: String { cacheAccountKey }
+
+    /// Run 05.10. (Feedback: nur-lesender freigegebener Ordner): Darf die
+    /// Mailbox verändert werden (Löschen/Verschieben raus = mayRemoveItems)?
+    /// Default true, wenn der Server die Rechte nicht liefert - der
+    /// Server-Ablehnungs-Rollback greift dann trotzdem.
+    var canMutateCurrentMailbox: Bool {
+        currentMailbox?.mayRemoveItems ?? true
+    }
     private var queryStates: [String: String] = [:]
     private let cacheBannerGate = SouveraCacheBannerGate()
     /// Signatur der Postfachliste (Redundanz-Guard gegen identische
@@ -1133,7 +1141,8 @@ final class MailViewModel: ObservableObject {
                 ownerIdentity: box.ownerIdentity, parentId: parentId,
                 isSubscribed: box.isSubscribed,
                 mayRename: box.mayRename, mayDelete: box.mayDelete,
-                mayCreateChild: box.mayCreateChild
+                mayCreateChild: box.mayCreateChild,
+                mayRemoveItems: box.mayRemoveItems, maySetSeen: box.maySetSeen
             )
         }
         return box
@@ -3254,10 +3263,24 @@ final class MailViewModel: ObservableObject {
                     return
                 }
                 let accId = accountId.isEmpty ? session.primaryAccountId : accountId
+                // Run 05.10. (Feedback: nur-lesender Ordner): Verweigert der
+                // Server das Gelesen-Markieren, den lokalen Flip zurücknehmen
+                // (sonst bleibt der Status lokal "gelesen", obwohl er es
+                // serverseitig nicht ist).
                 if read {
-                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToAdd: ["$seen": true])
+                    let resp = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToAdd: ["$seen": true])
+                    if let resp, !JmapApi.emailSetFailures(resp).isEmpty {
+                        for message in messagesToMark {
+                            applyLocalKeyword(message, keyword: "$seen", value: false)
+                        }
+                    }
                 } else {
-                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToRemove: ["$seen"])
+                    let resp = try? await api.setEmailFlags(accountId: accId, emailIds: ids, keywordsToRemove: ["$seen"])
+                    if let resp, !JmapApi.emailSetFailures(resp).isEmpty {
+                        for message in messagesToMark {
+                            applyLocalKeyword(message, keyword: "$seen", value: true)
+                        }
+                    }
                 }
             }
         } else {
@@ -3322,10 +3345,18 @@ final class MailViewModel: ObservableObject {
                     return
                 }
                 let accId = message.accountId.isEmpty ? session.primaryAccountId : message.accountId
+                // Run 05.10. (Feedback: nur-lesender Ordner): Verweigert der
+                // Server das Flaggen, den lokalen Flip zurücknehmen.
                 if newValue {
-                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$flagged": true])
+                    let resp = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToAdd: ["$flagged": true])
+                    if let resp, !JmapApi.emailSetFailures(resp).isEmpty {
+                        applyLocalKeyword(message, keyword: "$flagged", value: false)
+                    }
                 } else {
-                    _ = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$flagged"])
+                    let resp = try? await api.setEmailFlags(accountId: accId, emailIds: [message.emailId], keywordsToRemove: ["$flagged"])
+                    if let resp, !JmapApi.emailSetFailures(resp).isEmpty {
+                        applyLocalKeyword(message, keyword: "$flagged", value: true)
+                    }
                 }
             } else {
                 guard let client = imapClient, let mailbox = currentMailbox, let uid = UInt64(message.emailId) else { return }
@@ -3461,6 +3492,16 @@ final class MailViewModel: ObservableObject {
     }
 
     func delete(_ messagesToDelete: [MailMessage]) {
+        // Run 05.10. (Feedback: nur-lesender Ordner): Ohne Schreibrecht
+        // (mayRemoveItems) gar nicht erst optimistisch löschen - Feedback
+        // statt unsichtbarer Mail.
+        guard canMutateCurrentMailbox else {
+            actionFeedback = MailSendFeedback(
+                success: false,
+                message: NSLocalizedString("_mail_action_not_allowed_", comment: "")
+            )
+            return
+        }
         // Run 01.10. (Feedback): Wird die GEOFFNETE Mail gelöscht, sofort
         // zurück in die Liste - vorher blieb die gelöschte Mail im Detail
         // stehen. (Der Run-30.09.-Route-Schutz bleibt unberührt: er gilt
@@ -3482,11 +3523,25 @@ final class MailViewModel: ObservableObject {
         // P62f: FIFO - Folge-Löschungen laufen nicht parallel (Session-Races).
         let ids = messagesToDelete.map(\.emailId)
         let work = { [weak self] in
-            let ok = await self?.performDelete(messagesToDelete, ids: ids) ?? false
-            if ok {
-                self?.actionFeedback = MailSendFeedback(
+            guard let self else { return }
+            switch await self.performDelete(messagesToDelete, ids: ids) {
+            case .success:
+                self.actionFeedback = MailSendFeedback(
                     success: true,
                     message: NSLocalizedString("_mail_deleted_", comment: "")
+                )
+            case .refused:
+                // Run 05.10.: Der Server hat die Löschung verweigert - die
+                // Mail darf nicht unsichtbar bleiben (Rollback + Feedback
+                // erfolgen in rollbackOptimisticRemoval).
+                self.rollbackOptimisticRemoval(
+                    ids,
+                    message: NSLocalizedString("_mail_action_not_allowed_", comment: "")
+                )
+            case .failed:
+                self.rollbackOptimisticRemoval(
+                    ids,
+                    message: NSLocalizedString("_mail_delete_failed_", comment: "")
                 )
             }
         }
@@ -3500,17 +3555,36 @@ final class MailViewModel: ObservableObject {
     /// Server-Call des Löschens + Ergebnisprüfung (P62f): No-Op
     /// (oldState==newState) = bereits verschoben; echter Fehler = Zeile
     /// wiederherstellen + Feedback statt still schlucken.
-    private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async -> Bool {
+    /// Run 05.10. (Feedback: nur-lesender freigegebener Ordner): Ergebnis
+    /// einer Server-Mutation - "refused" = der Server hat sie abgelehnt
+    /// (notDestroyed/notUpdated, z. B. ohne Schreibrecht); der Aufrufer
+    /// rollt dann die optimistische Änderung zurück.
+    enum MutationOutcome { case success, refused, failed }
+
+    /// Rollback einer optimistisch entfernten Mail: Entfernungs-/Schutz-
+    /// Marker raeumen und ein Sync holt den Server-Stand zurueck (die Mail
+    /// ist ja noch da - sie darf nicht unsichtbar bleiben).
+    private func rollbackOptimisticRemoval(_ ids: [String], message: String) {
+        pendingRemovedIds.subtract(ids)
+        recentlyRemoved = recentlyRemoved.filter { !ids.contains($0.key) }
+        if let mailbox = currentMailbox {
+            movedOutIds[mailbox.id]?.subtract(ids)
+        }
+        actionFeedback = MailSendFeedback(success: false, message: message)
+        Task { await refreshMessages() }
+    }
+
+    private func performDelete(_ messagesToDelete: [MailMessage], ids: [String]) async -> MutationOutcome {
         guard let first = messagesToDelete.first else {
             JmapLog.write("delete: no messages to delete")
-            return false
+            return .failed
         }
         do {
             if useJmap {
                 guard let api = jmapApi,
                       let client = jmapClient else {
                     JmapLog.write("delete: jmapApi/jmapClient nil (useJmap=true, account=\(mailAccount?.account ?? "-"))")
-                    return false
+                    return .failed
                 }
                 let session = try await client.refreshSession()
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
@@ -3520,19 +3594,28 @@ final class MailViewModel: ObservableObject {
                    let trashJmapId = trash.jmapId,
                    trashJmapId != currentMailbox?.jmapId {
                     let resp = try await api.moveEmails(accountId: accId, emailIds: ids, targetMailboxId: trashJmapId)
+                    // Run 05.10.: Server-Ablehnung (nur-lesend) -> Rollback.
+                    if !JmapApi.emailSetFailures(resp).isEmpty {
+                        JmapLog.write("delete: server REFUSED move for \(ids.joined(separator: ","))")
+                        return .refused
+                    }
                     let noOp = (resp["oldState"] as? String) == (resp["newState"] as? String)
                     if noOp {
                         JmapLog.write("delete: already moved (no-op) for \(ids.joined(separator: ","))")
                     }
                     invalidateCache(for: trash)
                 } else {
-                    _ = try await api.deleteEmails(accountId: accId, emailIds: ids)
+                    let resp = try await api.deleteEmails(accountId: accId, emailIds: ids)
+                    if !JmapApi.emailSetFailures(resp).isEmpty {
+                        JmapLog.write("delete: server REFUSED destroy for \(ids.joined(separator: ","))")
+                        return .refused
+                    }
                 }
             } else {
                 guard let mailbox = currentMailbox,
                       let client = imapClient else {
                     JmapLog.write("delete: imap mailbox/client nil")
-                    return false
+                    return .failed
                 }
                 for message in messagesToDelete {
                     guard let uid = UInt64(message.emailId) else { continue }
@@ -3542,19 +3625,13 @@ final class MailViewModel: ObservableObject {
                 }
             }
         } catch {
-            // P62f: Server-Fehler - Filter aufheben, Zeilen wiederherstellen
-            // (Refresh holt den Server-Stand) und Feedback zeigen.
+            // P62f: Server-Fehler - der Aufrufer rollt zurueck (Refresh holt
+            // den Server-Stand) und zeigt Feedback.
             JmapLog.write("delete FAILED for \(ids.joined(separator: ",")): \(error.localizedDescription)")
-            pendingRemovedIds.subtract(ids)
-            actionFeedback = MailSendFeedback(
-                success: false,
-                message: NSLocalizedString("_mail_delete_failed_", comment: "")
-            )
-            Task { await refreshMessages() }
-            return false
+            return .failed
         }
         afterListMutation(ids)
-        return true
+        return .success
     }
 
     /// Moves messages to another mailbox of the same JMAP account
@@ -3576,7 +3653,21 @@ final class MailViewModel: ObservableObject {
                       let session = try? await client.refreshSession() else { return }
                 let accId = first.accountId.isEmpty ? session.primaryAccountId : first.accountId
                 guard let targetJmapId = target.jmapId, !targetJmapId.isEmpty else { return }
-                _ = try? await api.moveEmails(accountId: accId, emailIds: messagesToMove.map(\.emailId), targetMailboxId: targetJmapId)
+                // Run 05.10. (Feedback: nur-lesender Ordner): Server-Ablehnung
+                // -> Verschiebung zurückrollen (Mail bleibt im Quellordner
+                // sichtbar) statt sie lokal "verschwinden" zu lassen.
+                do {
+                    let resp = try await api.moveEmails(accountId: accId, emailIds: messagesToMove.map(\.emailId), targetMailboxId: targetJmapId)
+                    if !JmapApi.emailSetFailures(resp).isEmpty {
+                        JmapLog.write("move: server REFUSED for \(moveIds.joined(separator: ","))")
+                        rollbackOptimisticRemoval(moveIds, message: NSLocalizedString("_mail_action_not_allowed_", comment: ""))
+                        return
+                    }
+                } catch {
+                    JmapLog.write("move FAILED: \(error.localizedDescription)")
+                    rollbackOptimisticRemoval(moveIds, message: NSLocalizedString("_mail_move_failed_", comment: ""))
+                    return
+                }
                 // The target folder's cached snapshot and query state are now
                 // stale - force a full refresh the next time it opens.
                 invalidateCache(for: target)
@@ -3965,7 +4056,8 @@ final class MailViewModel: ObservableObject {
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,
                     namespace: .personal, ownerIdentity: nil, parentId: nil,
                     isSubscribed: true,
-                    mayRename: false, mayDelete: false, mayCreateChild: false
+                    mayRename: false, mayDelete: false, mayCreateChild: false,
+                    mayRemoveItems: true, maySetSeen: true
                 ))
                 await syncMessages()
             case .failure(let error):

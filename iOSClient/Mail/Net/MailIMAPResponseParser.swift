@@ -36,7 +36,9 @@ enum MailIMAPResponseParser {
                 isSubscribed: true,
                 mayRename: true,
                 mayDelete: true,
-                mayCreateChild: true
+                mayCreateChild: true,
+                mayRemoveItems: true,
+                maySetSeen: true
             ))
         }
         return boxes

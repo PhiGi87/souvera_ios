@@ -66,6 +66,12 @@ struct Mailbox: Identifiable, Hashable {
     let mayRename: Bool
     let mayDelete: Bool
     let mayCreateChild: Bool
+    /// Run 05.10. (Feedback: nur-lesender freigegebener Ordner): May
+    /// Mails in diesem Ordner entfernt/gelesen markiert werden?
+    /// (myRights.mayRemoveItems / maySetSeen; Default true, wenn der
+    /// Server die Rechte nicht liefert - der Rollback greift dann.)
+    let mayRemoveItems: Bool
+    let maySetSeen: Bool
 
     static func makeId(account: String, path: String) -> String { "\(account)|\(path)" }
 

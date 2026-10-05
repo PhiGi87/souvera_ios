@@ -1326,3 +1326,7 @@ _mail_sort_flagged_ = "Flagged first";
 
 /* Run 30.09.: Body-Ladekreis mit Kontext */
 "_mail_body_loading_" = "Loading message…";
+
+/* Run 05.10.: Mutation in nur-lesenden Ordnern abgelehnt */
+"_mail_action_not_allowed_" = "Not allowed - this folder is read-only";
+"_mail_move_failed_" = "Moving failed";

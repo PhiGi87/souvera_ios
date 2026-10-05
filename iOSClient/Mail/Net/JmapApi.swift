@@ -297,6 +297,28 @@ final class JmapApi {
         return try await client.singleCall("Email/set", args: args)
     }
 
+    /// Run 05.10. (Feedback: nur-lesender freigegebener Ordner): Extrahiert
+    /// fehlgeschlagene IDs aus einer Email/set-Antwort ("notDestroyed" /
+    /// "notUpdated" -> Fehlertyp). Reine Funktion (unit-testbar) - der
+    /// Aufrufer rollt optimistische Aenderungen zurueck, wenn der Server
+    /// die Mutation verweigert, statt den lokalen Stand zu behalten.
+    static func emailSetFailures(_ response: [String: Any]) -> [String: String] {
+        var failures: [String: String] = [:]
+        for key in ["notDestroyed", "notUpdated"] {
+            guard let map = response[key] as? [String: Any] else { continue }
+            for (id, err) in map {
+                if let errDict = err as? [String: Any] {
+                    failures[id] = (errDict["type"] as? String)
+                        ?? (errDict["description"] as? String)
+                        ?? "error"
+                } else {
+                    failures[id] = "error"
+                }
+            }
+        }
+        return failures
+    }
+
     // MARK: - Draft creation + submission
 
     func createDraft(
