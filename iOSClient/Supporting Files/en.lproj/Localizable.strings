@@ -1330,3 +1330,6 @@ _mail_sort_flagged_ = "Flagged first";
 /* Run 05.10.: Mutation in nur-lesenden Ordnern abgelehnt */
 "_mail_action_not_allowed_" = "Not allowed - this folder is read-only";
 "_mail_move_failed_" = "Moving failed";
+
+/* Run 06.10.: Overlay bei langsamem Mail-Versand */
+"_mail_send_slow_" = "Poor connection – the message will be sent with delay";

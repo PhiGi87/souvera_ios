@@ -85,6 +85,9 @@ final class MailViewModel: ObservableObject {
     @Published var fromAddresses: [String] = []
     @Published var ownEmailLabel = ""
     @Published var isSending = false
+    /// Run 06.10. (Feedback): mittiges Overlay bei langsamem Mail-Versand.
+    @Published var showSlowSendNotice = false
+    private var slowSendNoticeTask: Task<Void, Never>?
     @Published var sendError: String?
     @Published var searchResults: MailUiState<[MailMessage]> = .success([])
 
@@ -4050,6 +4053,19 @@ final class MailViewModel: ObservableObject {
         Task {
             isSending = true
             sendError = nil
+            // Run 06.10. (Feedback): Overlay-Hinweis bei langsamem Versand
+            // (schlechter Empfang): dauert der Versand laenger als 6 s,
+            // einmalig 3 s lang mittig einblenden. Der Versand laeuft
+            // unabhaengig weiter.
+            slowSendNoticeTask?.cancel()
+            slowSendNoticeTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 6_000_000_000)
+                guard let self, !Task.isCancelled, self.isSending else { return }
+                self.showSlowSendNotice = true
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                guard !Task.isCancelled else { return }
+                self.showSlowSendNotice = false
+            }
             let result: Result<Void, Error>
             if useJmap {
                 result = await sendJmap(outgoing)
@@ -4057,6 +4073,8 @@ final class MailViewModel: ObservableObject {
                 result = await sendImap(outgoing)
             }
             isSending = false
+            slowSendNoticeTask?.cancel()
+            showSlowSendNotice = false
             switch result {
             case .success:
                 sendFeedback = MailSendFeedback(

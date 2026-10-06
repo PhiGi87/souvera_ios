@@ -2439,6 +2439,31 @@ struct MailComposeView: View {
                 }
             }
         }
+        // Run 06.10. (Feedback): mittiger Hinweis bei langsamem Versand
+        // (schlechter Empfang) - erscheint nach 6 s einmalig fuer 3 s.
+        .overlay {
+            if viewModel.showSlowSendNotice {
+                slowSendOverlay
+            }
+        }
+    }
+
+    /// Run 06.10.: zentriertes Overlay "wird verspaetet gesendet".
+    private var slowSendOverlay: some View {
+        VStack(spacing: 10) {
+            ProgressView()
+            Text(NSLocalizedString("_mail_send_slow_", comment: ""))
+                .font(.subheadline)
+                .multilineTextAlignment(.center)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
+        .frame(maxWidth: 300)
+        .allowsHitTesting(false)
+        .transition(.opacity)
     }
 
     /// Attachment chips plus the attach menu (local file / Souvera files).
