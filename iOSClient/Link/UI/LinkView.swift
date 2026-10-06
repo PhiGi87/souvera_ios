@@ -2566,11 +2566,17 @@ private struct LinkMessageBubble: View {
 
     /// Run 22.09.: Caption (optionale Nachricht beim Teilen) UNTER Bild
     /// bzw. PDF - Talk liefert sie als Nachrichtentext der Datei-Nachricht.
+    /// Run 06.10. (Feedback: Bubble in Überbreite): Die Caption ist mit
+    /// einem `.frame(maxWidth: 260)` gekapselt - im `fixedSize(horizontal:
+    /// true)`-Kontext der Bild-/PDF-Bubble wurde sie sonst als EINE Zeile
+    /// ohne Umbruch gerendert (469-Zeichen-Caption = mehrfache
+    /// Bildschirmbreite, Log/Beleg "Ausschreibungen").
     @ViewBuilder
     private var captionText: some View {
         if message.captionText != nil {
             Text(message.attributedDisplayText())
                 .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: 260, alignment: .leading)
                 .souveraOpenURLAction()
                 .padding(.top, 4)
         }
