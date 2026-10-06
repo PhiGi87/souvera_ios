@@ -69,6 +69,11 @@ final class LinkViewModel: ObservableObject {
     /// Versuche) - die Zelle zeigt dann "nicht verfuegbar" statt fuer
     /// immer "Bild wird geladen..." (Run-Feedback 11.09.).
     @Published var chatImageFailed: Set<Int64> = []
+    /// Run 06.10. (Feedback: PDF-Vorschau fehlt): endgueltig fehlgeschlagene
+    /// PDF-Thumbnails - die View zeigt dann Icon + Dateiname statt endlosem
+    /// "laedt".
+    @Published var chatPdfFailed: Set<Int64> = []
+    private var pdfLoadAttempts: [Int64: Int] = [:]
     /// Versuchszaehler pro Bild (Session-scoped, nicht publiziert).
     private var imageLoadAttempts: [Int64: Int] = [:]
     /// P68o: PDF-Anhänge: Thumbnail (1. Seite) + Temp-URL für QuickLook.
@@ -213,6 +218,8 @@ final class LinkViewModel: ObservableObject {
         chatImageCache = [:]
         chatPdfThumbCache = [:]
         chatPdfCache = [:]
+        chatPdfFailed = []
+        pdfLoadAttempts = [:]
         chatImageFailed = []
         imageLoadAttempts = [:]
         loadPendingMessages()
@@ -279,23 +286,44 @@ final class LinkViewModel: ObservableObject {
     func loadChatPdf(for message: LinkChatMessage) async {
         // Pendent Zeilen: Thumbnail aus den lokalen Bytes (siehe loadChatImage).
         if message.id < 0 { return }
-        guard chatPdfThumbCache[message.id] == nil,
-              let info = message.fileInfo(),
+        let id = message.id
+        // Run 06.10.: Erfolg/Scheitern unterscheidbar halten (vorher markierte
+        // ein Fehlschlag mit leerem Data() alles als "laedt").
+        if let cached = chatPdfThumbCache[id], !cached.isEmpty { return }
+        if chatPdfFailed.contains(id), (pdfLoadAttempts[id] ?? 0) >= 2 { return }
+        guard let info = message.fileInfo(),
               let path = info.path,
-              let api else { return }
+              let api else {
+            CallDebugLog.log("LinkVM", "chat pdf: kein fileInfo/path/api id=\(id)")
+            return
+        }
+        pdfLoadAttempts[id, default: 0] += 1
         guard let url = await api.downloadChatAttachment(path: path) else {
-            await MainActor.run { chatPdfThumbCache[message.id] = Data() }
+            CallDebugLog.log("LinkVM", "chat pdf download FAILED id=\(id) path=\(path)")
+            await MainActor.run { chatPdfFailed.insert(id) }
             return
         }
         guard let thumb = NCUtility().pdfThumbnail(url: url, width: 220),
               let thumbData = thumb.jpegData(compressionQuality: 0.85) else {
-            await MainActor.run { chatPdfThumbCache[message.id] = Data() }
+            CallDebugLog.log("LinkVM", "chat pdf thumbnail FAILED id=\(id) file=\(url.lastPathComponent)")
+            await MainActor.run { chatPdfFailed.insert(id) }
             return
         }
         await MainActor.run {
-            chatPdfThumbCache[message.id] = thumbData
-            chatPdfCache[message.id] = url
+            chatPdfFailed.remove(id)
+            chatPdfThumbCache[id] = thumbData
+            chatPdfCache[id] = url
+            CallDebugLog.log("LinkVM", "chat pdf thumb ok id=\(id) (\(thumbData.count) bytes)")
         }
+    }
+
+    /// Run 06.10.: Tap auf den PDF-Platzhalter -> Download erneut versuchen.
+    func retryChatPdf(for message: LinkChatMessage) {
+        guard message.id > 0 else { return }
+        chatPdfFailed.remove(message.id)
+        chatPdfThumbCache[message.id] = nil
+        pdfLoadAttempts[message.id] = 0
+        Task { await loadChatPdf(for: message) }
     }
 
     /// P68k: Ist die Nachricht eine anzeigbare Bild-Datei?

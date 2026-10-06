@@ -2259,9 +2259,11 @@ private struct LinkMessageRow: View {
                         imageFailed: message.id > 0 && viewModel.chatImageFailed.contains(message.id),
                         isPdfMessage: viewModel.isPdfMessage(message),
                         pdfThumbData: viewModel.chatPdfThumbCache[message.id],
+                        pdfFailed: message.id > 0 && viewModel.chatPdfFailed.contains(message.id),
                         pendingState: pendingState,
                         onImageTap: { onImageTap(message) },
-                        onPdfTap: { onPdfTap(message) }
+                        onPdfTap: { onPdfTap(message) },
+                        onPdfRetry: { viewModel.retryChatPdf(for: message) }
                     )
                     .task {
                         if viewModel.isImageMessage(message) {
@@ -2393,12 +2395,16 @@ private struct LinkMessageBubble: View {
     /// P68o: PDF-Nachricht (Thumbnail der 1. Seite + QuickLook-Tap).
     var isPdfMessage: Bool = false
     var pdfThumbData: Data?
+    /// Run 06.10. (Feedback: PDF-Vorschau fehlt): Download/Thumbnail
+    /// endgueltig fehlgeschlagen -> Icon + Dateiname statt endlosem "laedt".
+    var pdfFailed: Bool = false
     /// Sende-Status (Offline-Warteschlange): .queued = 1 Haken, .sent =
     /// 2 Haken; nil = zugestellte Nachricht. Haken IN der Bubble rechts
     /// neben der Nachricht (talk-web-Stil, Run-Feedback 12.09.).
     var pendingState: LinkPendingMessage.PendingState?
     var onImageTap: () -> Void = {}
     var onPdfTap: () -> Void = {}
+    var onPdfRetry: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
@@ -2498,6 +2504,23 @@ private struct LinkMessageBubble: View {
                         .padding(4)
                 }
                 .onTapGesture { onPdfTap() }
+        } else if pdfFailed {
+            // Run 06.10. (Feedback: PDF-Vorschau fehlt): Download/Thumbnail
+            // endgueltig fehlgeschlagen -> Icon + Dateiname; Tippen startet
+            // den Download erneut. Vorher lief hier endlos "wird geladen".
+            VStack(spacing: 8) {
+                Image(systemName: "doc.richtext")
+                    .font(.title2)
+                    .foregroundStyle(.secondary)
+                Text(message.fileInfo()?.name ?? "PDF")
+                    .font(.caption)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+            }
+            .frame(width: 220)
+            .padding(12)
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .onTapGesture { onPdfRetry() }
         } else {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(.secondarySystemBackground))

@@ -195,6 +195,9 @@ actor LinkOcsApi {
             CallDebugLog.log("LinkOcsApi", "chat attachment download FAILED status=\(statusCode) path=\(path)")
             return nil
         }
+        // Run 06.10.: Erfolg loggen (bisher nur Fehler) - Diagnose der
+        // fehlenden PDF-Vorschau.
+        CallDebugLog.log("LinkOcsApi", "chat attachment download ok status=\(statusCode) bytes=\(data.count) path=\(path)")
         let tempDir = FileManager.default.temporaryDirectory
         let fileURL = tempDir.appendingPathComponent(name)
         try? FileManager.default.removeItem(at: fileURL)
