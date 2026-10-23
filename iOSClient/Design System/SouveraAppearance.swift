@@ -15,7 +15,10 @@ enum SouveraAppearance {
     /// Landscape); iPhone (Portrait + Landscape) behalt den Glas-Header
     /// (SouveraModuleHeader) der SwiftUI-Views.
     static var useBridgeHeader: Bool {
-        UIDevice.current.userInterfaceIdiom == .pad
+        // Run 07.10. (iPhone Duo): regular width statt Idiom - das
+        // Innendisplay ist regular/regular, der Idiom bleibt aber .phone.
+        if UIDevice.current.userInterfaceIdiom == .pad { return true }
+        return SouveraFormFactor.isRegularWidth
     }
 
     /// Vertikaler Souvera-Gradient als SwiftUI-Farben.

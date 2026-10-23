@@ -292,7 +292,7 @@ struct MailView: View {
     /// Overlay über der Listenspalte), sonst bei aktivem Account-Setting.
     private var focusReaderActive: Bool {
         landscapeLayout
-            && UIDevice.current.userInterfaceIdiom != .phone
+            && SouveraAppearance.useBridgeHeader
             && SouveraMailDisplaySettings.focusReaderEnabled(
                 account: viewModel.accountKey
             )

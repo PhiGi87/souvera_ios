@@ -264,7 +264,8 @@ public class NCPopupViewController: UIViewController {
             //  Getting UIKeyboardSize.
             if let keyboardFrame = info[frameEndUserInfoKey] as? CGRect {
 
-                let screenSize = UIScreen.main.bounds
+                // Run 07.10. (iPhone Duo): Fenster-Bounds statt UIScreen.main.
+                let screenSize = view.window?.bounds ?? SouveraFormFactor.currentWindowBounds
 
                 // Calculating actual keyboard displayed size, keyboard frame may be different when hardware keyboard is attached (Bug ID: #469) (Bug ID: #381)
                 let intersectRect = keyboardFrame.intersection(screenSize)

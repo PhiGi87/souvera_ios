@@ -90,7 +90,9 @@ class NCCollectionViewCommon: UIViewController, NCAccountSettingsModelDelegate, 
     internal var lastScale: CGFloat = 1.0
     internal var currentScale: CGFloat = 1.0
     internal var maxColumns: Int {
-        let screenWidth = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+        // Run 07.10. (iPhone Duo): Fenster-Bounds statt UIScreen.main.
+        let bounds = view.window?.bounds ?? SouveraFormFactor.currentWindowBounds
+        let screenWidth = min(bounds.width, bounds.height)
         let column = Int(screenWidth / 44)
 
         return column
@@ -706,7 +708,7 @@ class NCCollectionViewCommon: UIViewController, NCAccountSettingsModelDelegate, 
            !isSearchingMode,
            let richWorkspaceText = self.richWorkspaceText,
            !richWorkspaceText.trimmingCharacters(in: .whitespaces).isEmpty {
-            heightHeaderRichWorkspace = UIScreen.main.bounds.size.height / 6
+            heightHeaderRichWorkspace = (view.window?.bounds.height ?? SouveraFormFactor.currentWindowBounds.height) / 6
         }
 
         if isRecommendationActived,

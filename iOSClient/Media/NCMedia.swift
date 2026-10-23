@@ -43,7 +43,9 @@ class NCMedia: UIViewController {
     var lastScale: CGFloat = 1.0
     var currentScale: CGFloat = 1.0
     var maxColumns: Int {
-        let screenWidth = min(UIScreen.main.bounds.width, UIScreen.main.bounds.height)
+        // Run 07.10. (iPhone Duo): Fenster-Bounds statt UIScreen.main.
+        let bounds = view.window?.bounds ?? SouveraFormFactor.currentWindowBounds
+        let screenWidth = min(bounds.width, bounds.height)
         let column = Int(screenWidth / 44)
 
         return column

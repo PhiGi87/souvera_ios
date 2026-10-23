@@ -147,7 +147,7 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
                         }
                     }
                 }
-                .frame(maxHeight: UIScreen.main.bounds.height * 0.55)
+                .frame(maxHeight: SouveraFormFactor.currentWindowBounds.height * 0.55)
                 .onChange(of: query) { _, _ in
                     // Neue Query: Liste startet wieder oben.
                     proxy.scrollTo("souvera-search-top", anchor: .top)
