@@ -20,4 +20,13 @@ enum SouveraMailDisplaySettings {
     static func setFocusReader(_ enabled: Bool, account: String) {
         UserDefaults.standard.set(enabled, forKey: key("souvera_mail_focus_reader", account: account))
     }
+
+    /// Run 23.10.: Ordnerspalte im Split-Layout eingeklappt (pro Account).
+    static func foldersCollapsed(account: String) -> Bool {
+        UserDefaults.standard.bool(forKey: key("souvera_mail_folders_collapsed", account: account))
+    }
+
+    static func setFoldersCollapsed(_ collapsed: Bool, account: String) {
+        UserDefaults.standard.set(collapsed, forKey: key("souvera_mail_folders_collapsed", account: account))
+    }
 }

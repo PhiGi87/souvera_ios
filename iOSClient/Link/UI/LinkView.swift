@@ -13,6 +13,8 @@ struct LinkView: View {
     @StateObject private var viewModel = LinkViewModel()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Run 23.10.: Layout-Modus dieses Tabs/Fensters.
+    @EnvironmentObject private var layout: SouveraLayoutMode
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
@@ -88,7 +90,7 @@ struct LinkView: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
-                if !SouveraAppearance.useBridgeHeader {
+                if !layout.usesBridgeHeader && !layout.isPushed {
                     moduleHeader
                 }
             }
@@ -104,6 +106,14 @@ struct LinkView: View {
             }
         }
         .onChange(of: viewModel.route) { _, _ in
+            populateHeaderBridge()
+        }
+        // Run 23.10.: Header/Spalten bei Layout- oder Fensterwechsel neu
+        // aufbauen - sonst bleiben Start-Buttons stehen.
+        .onChange(of: layout.usesBridgeHeader) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: landscapeLayout) { _, _ in
             populateHeaderBridge()
         }
         .onChange(of: viewModel.currentRoom?.hasCall) { _, _ in
@@ -447,7 +457,7 @@ struct LinkView: View {
         .padding(.top, 4)
         // Run 25.09. (Feedback: ueberlappte den Header noch): 60 pt =
         // 44-pt-Buttons + 12 pt Header-Padding + 4 pt Abstand.
-        .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 60)
+        .padding(.top, layout.usesBridgeHeader ? 0 : 60)
     }
 
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
@@ -682,7 +692,7 @@ struct LinkView: View {
         // Run 25.09. (Feedback iPad): Auf dem iPad IMMER die 2-Spalten-
         // Darstellung (Raeume links, Chat rechts) - auch im Hochformat;
         // die Einschspalte verschwendet dort nur Platz.
-        if SouveraAppearance.useBridgeHeader {
+        if layout.usesBridgeHeader {
             guard landscapeLayout != true else { return }
             landscapeLayout = true
             SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split)")

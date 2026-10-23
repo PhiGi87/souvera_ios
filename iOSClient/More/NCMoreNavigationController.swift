@@ -94,18 +94,29 @@ class NCMoreNavigationController: NCMainNavigationController {
         guard let root = viewControllers.first, root === topViewController else { return }
         let bar = navigationBar
         let contentHeight: CGFloat = 44
-        let topInset = bar.bounds.height - contentHeight
+        // Run 23.10. (Feedback: "Souvera" oben abgeschnitten, Screenshot
+        // nicht beschnitten): Die Ableitung aus der Bar-Hoehe konnte in
+        // Fenster-Szenen negativ werden und schob das Logo ueber die Kante.
+        // Jetzt echte Safe-Area verwenden und y nie unter 0 klemmen.
+        // Content-Bereich der Bar (unter der Status-/Fensterleiste). Nur
+        // nach unten klemmen - ein negativer Wert schob das Logo aus dem
+        // Bild.
+        let topInset = max(0, bar.bounds.height - contentHeight)
         let logoHeight: CGFloat = 32
         let image = logo.image
         let ratio = (image?.size.height ?? logoHeight) > 0 ? (image?.size.width ?? 1) / (image?.size.height ?? 1) : 1
-        let width = min(logoHeight * ratio, bar.bounds.width - 32)
-        let y = max(topInset, topInset + (contentHeight - logoHeight) / 2 - 6)
-        logo.frame = CGRect(
+        let width = min(logoHeight * ratio, max(0, bar.bounds.width - 32))
+        let y = max(0, topInset + (contentHeight - logoHeight) / 2 - 6)
+        let frame = CGRect(
             x: 20,
             y: y,
             width: width,
             height: logoHeight
         )
+        if logo.frame != frame {
+            logo.frame = frame
+            SouveraLog.write("More", "[MoreHeader] bar=\(Int(bar.bounds.width))x\(Int(bar.bounds.height)) safeTop=\(Int(bar.safeAreaInsets.top)) logoY=\(Int(y)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))")
+        }
     }
 
     /// Zeigt/versteckt das Logo (nur auf der Mehr-Root sichtbar).

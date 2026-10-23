@@ -45,11 +45,29 @@ class NCMainTabBarController: UITabBarController {
     /// Run 07.10.: Sidebar-Platzierung auf regular width (iPad, Duo innen).
     /// `sidebar` existiert ab iOS 18; auf Systemen ohne Sidebar-Unterstützung
     /// bleibt die Anfrage wirkungslos.
-    private func updateSidebarPlacement() {
+    /// Run 23.10. (Log: 5 Wechsel in 2 Minuten): Beim Ziehen an der
+    /// Fenstergroesse kommen mehrere Zwischen-Traits. Kurz entprellen,
+    /// damit die Leiste nicht zwischen Sidebar und Tabs flattert.
+    private var sidebarPlacementTask: Task<Void, Never>?
+
+    private func updateSidebarPlacement(immediately: Bool = false) {
         guard #available(iOS 27.0, *) else { return }
-        let regular = traitCollection.horizontalSizeClass == .regular
-        sidebar.preferredPlacement = regular ? .sidebar : .automatic
-        SouveraLog.write("TabBar", "sidebar placement=\(regular ? "sidebar" : "automatic")")
+        sidebarPlacementTask?.cancel()
+        let apply = { [weak self] in
+            guard let self else { return }
+            let regular = self.traitCollection.horizontalSizeClass == .regular
+            self.sidebar.preferredPlacement = regular ? .sidebar : .automatic
+            SouveraLog.write("TabBar", "sidebar placement=\(regular ? "sidebar" : "automatic") width=\(Int(self.view.bounds.width))")
+        }
+        if immediately {
+            apply()
+            return
+        }
+        sidebarPlacementTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            guard !Task.isCancelled else { return }
+            apply()
+        }
     }
 
     override func viewDidLoad() {
@@ -71,7 +89,7 @@ class NCMainTabBarController: UITabBarController {
                 controller.updateSidebarPlacement()
             }
         }
-        updateSidebarPlacement()
+        updateSidebarPlacement(immediately: true)
 
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: self.global.notificationCenterChangeTheming), object: nil, queue: .main) { [weak self] notification in
             if let userInfo = notification.userInfo as? NSDictionary,
@@ -562,14 +580,54 @@ class NCMainTabBarController: UITabBarController {
     /// ignoriert Hide-Versuche auf dem iPad - die Bar bleibt sichtbar
     /// (1:1 Mehr/Dateien). Auf dem iPhone gilt das Hidden weiterhin
     /// (dort zeichnet der Glas-Header).
-    final class SouveraHostedNavigationController: UINavigationController {
+    final class SouveraHostedNavigationController: UINavigationController, SouveraLayoutModeProviding {
+        /// Run 23.10.: Eine Layout-Wahrheit pro Fenster/Tab. Der Modus wird
+        /// aus dem EIGENEN traitCollection gespeist und bei Trait-Wechseln
+        /// aktualisiert - nicht mehr aus der ersten aktiven Szene.
+        let layoutMode: SouveraLayoutMode
+
+        init(rootViewController: UIViewController, layoutMode: SouveraLayoutMode) {
+            self.layoutMode = layoutMode
+            super.init(rootViewController: rootViewController)
+        }
+
+        @available(*, unavailable)
+        required init?(coder aDecoder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidLoad() {
+            super.viewDidLoad()
+            if #available(iOS 17.0, *) {
+                registerForTraitChanges([UITraitHorizontalSizeClass.self,
+                                         UITraitUserInterfaceIdiom.self]) { (controller: Self, _) in
+                    controller.applyLayoutMode()
+                }
+            }
+            applyLayoutMode()
+        }
+
+        /// Setzt Bar-Sichtbarkeit und Appearance konsistent zum Modus.
+        /// Wird bei Trait-Wechseln, Erscheinen und Layout aufgerufen.
+        func applyLayoutMode() {
+            layoutMode.update(traitCollection: traitCollection)
+            let bridge = layoutMode.usesBridgeHeader
+            super.setNavigationBarHidden(bridge ? false : true, animated: false)
+            if bridge {
+                SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+            }
+        }
+
         override func setNavigationBarHidden(_ hidden: Bool, animated: Bool) {
-            super.setNavigationBarHidden(SouveraAppearance.useBridgeHeader ? false : hidden,
+            // Nur im Bridge-Modus bleibt die Bar sichtbar; kompakt gewinnt
+            // der SwiftUI-Glas-Header. So kann nie ein doppelter Header
+            // entstehen, egal wer zuerst aufruft.
+            super.setNavigationBarHidden(layoutMode.usesBridgeHeader ? false : hidden,
                                          animated: animated)
         }
 
         override var isNavigationBarHidden: Bool {
-            get { SouveraAppearance.useBridgeHeader ? false : super.isNavigationBarHidden }
+            get { layoutMode.usesBridgeHeader ? false : super.isNavigationBarHidden }
             set { super.isNavigationBarHidden = newValue }
         }
 
@@ -579,38 +637,31 @@ class NCMainTabBarController: UITabBarController {
         /// "verfaelscht", hellblaue Glas-Bar).
         override func viewWillAppear(_ animated: Bool) {
             super.viewWillAppear(animated)
-            guard SouveraAppearance.useBridgeHeader else { return }
-            SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+            applyLayoutMode()
         }
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
-            guard SouveraAppearance.useBridgeHeader else { return }
+            guard layoutMode.usesBridgeHeader else { return }
             SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
         }
     }
 
     private func makeHostedTab<Content: View>(root: Content, bridge: SouveraHeaderBridge, tag: Int, imageName: String, titleKey: String) -> UIViewController {
-        let hostingController = UIHostingController(rootView: root)
-        let navigationController = SouveraHostedNavigationController(rootViewController: hostingController)
+        // Run 23.10.: Layout-Modus sofort erzeugen und in die Module
+        // injizieren. Startwerte kommen vom Tab-Controller; der Hosting-
+        // Controller aktualisiert sie bei Trait-Wechseln (Fenster/Display).
+        let layoutMode = SouveraLayoutMode(traitCollection: traitCollection)
+        let hostingController = UIHostingController(rootView: root.environmentObject(layoutMode))
+        let navigationController = SouveraHostedNavigationController(
+            rootViewController: hostingController,
+            layoutMode: layoutMode
+        )
         // Run 18.09. (Feedback: "iPad-Header komplett weg"): Die aeussere
-        // UIKit-Bar ist WIEDER SICHTBAR - 1:1 wie Mehr/Dateien (blauer
-        // Verlauf, Glas-Kreis-Buttons via Coordinator). Die innere
-        // SwiftUI-Bar bleibt in den Modul-Views versteckt
-        // (.toolbar(.hidden)).
-        // Nur auf dem iPad (bridge mode); auf dem iPhone bleibt die
-        // aeussere Bar hidden - dort zeichnet der Glas-Header.
-        navigationController.setNavigationBarHidden(!SouveraAppearance.useBridgeHeader, animated: false)
-        if SouveraAppearance.useBridgeHeader {
-            // Run 19.09.: gemeinsamer Appearance-Helper (alle vier Slots,
-            // deckend, dunkle Icons) - 1:1 Mehr/Dateien.
-            SouveraAppearance.applyBlueNavigationBar(to: navigationController.navigationBar)
-            navigationController.setNavigationBarHidden(false, animated: false)
-            // Run 25.09. (Feedback: doppelter Header auf iOS 17/18-iPhones):
-            // Beides nur im Bridge-Modus - auf dem iPhone verliess der
-            // unbedingte Un-Hide die aeussere Bar sichtbar, neben dem
-            // Glas-Header (doppelter Header).
-        }
+        // UIKit-Bar ist im Bridge-Modus SICHTBAR - 1:1 wie Mehr/Dateien.
+        // Kompakt bleibt sie hidden (SwiftUI-Glas-Header). Die Entscheidung
+        // haengt jetzt am Modus dieses Tabs, nicht am globalen Zustand.
+        navigationController.applyLayoutMode()
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString(titleKey, comment: ""),
             image: UIImage(systemName: imageName),

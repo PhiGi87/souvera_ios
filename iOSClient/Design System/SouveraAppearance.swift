@@ -286,16 +286,21 @@ final class SouveraHeaderBridge: ObservableObject {
         let icon: String?
         let isChecked: Bool
         let isDestructive: Bool
+        /// Run 23.10.: Untermenue (z. B. Sortierung) - wird als UIMenu
+        /// gerendert und im Overflow mit Titel angezeigt.
+        let children: [MenuEntry]?
         let handler: () -> Void
 
         init(id: String, title: String, icon: String? = nil,
              isChecked: Bool = false, isDestructive: Bool = false,
+             children: [MenuEntry]? = nil,
              handler: @escaping () -> Void) {
             self.id = id
             self.title = title
             self.icon = icon
             self.isChecked = isChecked
             self.isDestructive = isDestructive
+            self.children = children
             self.handler = handler
         }
     }
@@ -304,14 +309,20 @@ final class SouveraHeaderBridge: ObservableObject {
         let icon: String
         /// Run 19.09.: Text-Button (z. B. "Woche") statt Icon - 1:1 iPhone.
         let title: String?
+        /// Run 23.10.: Beschriftung im Overflow (kollabierte Gruppe).
+        /// Getrennt von `title`, damit Icon-Buttons im Balken ihr Icon
+        /// behalten und nur im Overflow Text zeigen.
+        let overflowTitle: String?
         let accessibilityLabel: String
         let entries: [MenuEntry]
 
         init(id: String, icon: String, title: String? = nil,
+             overflowTitle: String? = nil,
              accessibilityLabel: String = "", entries: [MenuEntry]) {
             self.id = id
             self.icon = icon
             self.title = title
+            self.overflowTitle = overflowTitle
             self.accessibilityLabel = accessibilityLabel
             self.entries = entries
         }
@@ -353,7 +364,20 @@ final class SouveraBarCoordinator {
             .receive(on: DispatchQueue.main)
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
+        // Run 23.10.: Auch der Layout-Modus muss neu bauen - sonst bleibt
+        // der Header nach Hoch-/Querformat- oder Fensterwechsel stehen.
+        if let provider = navigationController as? SouveraLayoutModeProviding {
+            provider.layoutMode.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.rebuild() }
+                .store(in: &cancellables)
+        }
         rebuild()
+    }
+
+    /// Bridge-Modus dieses Tabs (nicht mehr global).
+    private var usesBridgeHeader: Bool {
+        (navigationController as? SouveraLayoutModeProviding)?.layoutMode.usesBridgeHeader ?? false
     }
 
     func rebuild() {
@@ -361,7 +385,7 @@ final class SouveraBarCoordinator {
         // Die Bridge gehoert NUR zur iPad-Bridge-Bar - auf dem iPhone
         // bleibt die aeussere Bar versteckt (Glas-Header), hier keine
         // Items setzen und nicht loggen.
-        guard SouveraAppearance.useBridgeHeader else { return }
+        guard usesBridgeHeader else { return }
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
         // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
         // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
@@ -387,16 +411,16 @@ final class SouveraBarCoordinator {
             item.leftBarButtonItems = nil
             item.rightBarButtonItems = nil
             item.leadingItemGroups = leading.map {
-                UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+                UIBarButtonItemGroup(barButtonItems: [$0.bar], representativeItem: $0.representative)
             }
             item.trailingItemGroups = trailing.map {
-                UIBarButtonItemGroup(barButtonItems: [$0], representativeItem: nil)
+                UIBarButtonItemGroup(barButtonItems: [$0.bar], representativeItem: $0.representative)
             }
         } else {
             item.leadingItemGroups = []
             item.trailingItemGroups = []
-            item.leftBarButtonItems = leading.isEmpty ? nil : leading
-            item.rightBarButtonItems = trailing.isEmpty ? nil : trailing
+            item.leftBarButtonItems = leading.isEmpty ? nil : leading.map(\.bar)
+            item.rightBarButtonItems = trailing.isEmpty ? nil : trailing.map(\.bar)
         }
         #if !EXTENSION
         SouveraLog.write("Header", "[Header] \(bridge.title.isEmpty ? "-" : bridge.title) leading=\(leading.count) trailing=\(trailing.count) api=\(useGroups ? "groups" : "buttons")")
@@ -407,8 +431,12 @@ final class SouveraBarCoordinator {
     /// Aenderungen, ignoriert die sieben Einzel-Publishes.
     private static func signature(_ bridge: SouveraHeaderBridge) -> String {
         func item(_ i: SouveraHeaderBridge.Item) -> String { "\(i.id):\(i.icon):\(i.text ?? ""):\(i.isGreen):\(i.isDestructive)" }
+        func entry(_ e: SouveraHeaderBridge.MenuEntry) -> String {
+            let kids = (e.children ?? []).map(entry).joined(separator: ",")
+            return "\(e.id):\(e.title):\(e.isChecked):\(e.isDestructive):[\(kids)]"
+        }
         func menu(_ m: SouveraHeaderBridge.MenuGroup) -> String {
-            "\(m.id):\(m.icon):\(m.title ?? ""):" + m.entries.map { "\($0.id):\($0.title):\($0.isChecked):\($0.isDestructive)" }.joined(separator: ";")
+            "\(m.id):\(m.icon):\(m.title ?? ""):\(m.overflowTitle ?? ""):" + m.entries.map(entry).joined(separator: ";")
         }
         let parts = [bridge.title]
             + bridge.leadingItems.map(item) + bridge.leadingMenus.map(menu) + bridge.leadingCustoms.map(\.id)
@@ -418,12 +446,35 @@ final class SouveraBarCoordinator {
 
     /// Run 19.09.: Baut die einzelnen Bar-Items (Items, Menues, Custom-
     /// Views). Custom-Views zuerst (Ring/Status), damit sie innen liegen.
+    /// Ein Bar-Item plus optionales Repraesentativ-Item. iOS zeigt beim
+    /// Kollabieren einer Gruppe das Repraesentativ-Item im Overflow an -
+    /// ohne Titel blieben dort nur Icon + Chevron sichtbar (Feedback 23.10.).
+    private struct BarEntry {
+        let bar: UIBarButtonItem
+        let representative: UIBarButtonItem?
+    }
+
+    private static func menuElement(_ entry: SouveraHeaderBridge.MenuEntry) -> UIMenuElement {
+        let image = entry.icon.flatMap { UIImage(systemName: $0) }
+        if let children = entry.children, !children.isEmpty {
+            return UIMenu(title: entry.title,
+                          image: image,
+                          children: children.map(menuElement))
+        }
+        return UIAction(title: entry.title,
+                        image: image,
+                        attributes: entry.isDestructive ? .destructive : [],
+                        state: entry.isChecked ? .on : .off) { _ in
+            entry.handler()
+        }
+    }
+
     private static func bars(_ items: [SouveraHeaderBridge.Item],
                              _ menus: [SouveraHeaderBridge.MenuGroup],
-                             _ customs: [SouveraHeaderBridge.Custom]) -> [UIBarButtonItem] {
-        var bars: [UIBarButtonItem] = []
+                             _ customs: [SouveraHeaderBridge.Custom]) -> [BarEntry] {
+        var bars: [BarEntry] = []
         for custom in customs {
-            bars.append(UIBarButtonItem(customView: custom.view))
+            bars.append(BarEntry(bar: UIBarButtonItem(customView: custom.view), representative: nil))
         }
         // Run 19.09. (Feedback iPad-Header): DUNKLE Icons - 1:1 mit dem
         // iPhone-Glas-Header und dem Mehr-Menue (die hellen Icons passten
@@ -443,26 +494,30 @@ final class SouveraBarCoordinator {
             }
             bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : itemTint)
             bar.accessibilityLabel = item.accessibilityLabel
-            bars.append(bar)
+            bars.append(BarEntry(bar: bar, representative: nil))
         }
         for menu in menus where !menu.icon.isEmpty || !(menu.title ?? "").isEmpty {
+            let displayTitle = menu.overflowTitle?.isEmpty == false
+                ? menu.overflowTitle!
+                : (menu.title?.isEmpty == false ? menu.title! : menu.accessibilityLabel)
+            let image = UIImage(systemName: menu.icon)
+            let uiMenu = UIMenu(title: displayTitle,
+                                children: menu.entries.map(menuElement))
             let bar: UIBarButtonItem
             if let title = menu.title, !title.isEmpty {
                 bar = UIBarButtonItem(title: title, style: .plain, target: nil, action: nil)
             } else {
-                bar = UIBarButtonItem(image: UIImage(systemName: menu.icon))
+                bar = UIBarButtonItem(image: image)
             }
-            bar.menu = UIMenu(children: menu.entries.map { entry in
-                UIAction(title: entry.title,
-                         image: entry.icon.flatMap { UIImage(systemName: $0) },
-                         attributes: entry.isDestructive ? .destructive : [],
-                         state: entry.isChecked ? .on : .off) { _ in
-                    entry.handler()
-                }
-            })
+            bar.menu = uiMenu
             bar.tintColor = itemTint
             bar.accessibilityLabel = menu.accessibilityLabel
-            bars.append(bar)
+            let representative = UIBarButtonItem(title: displayTitle,
+                                                 image: image,
+                                                 primaryAction: nil,
+                                                 menu: uiMenu)
+            representative.tintColor = itemTint
+            bars.append(BarEntry(bar: bar, representative: representative))
         }
         return bars
     }

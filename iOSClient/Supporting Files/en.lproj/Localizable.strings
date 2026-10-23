@@ -1336,3 +1336,6 @@ _mail_sort_flagged_ = "Flagged first";
 
 /* Run 07.10.: iPhone Duo - neues Fenster */
 "_new_window_" = "New window";
+
+/* Run 23.10.: Ordner-Zugang im Mail-Header */
+"_mail_folders_" = "Folders";

@@ -449,7 +449,47 @@ final class NCMoreModel: ObservableObject {
             pushHosted(LinkView(), title: NSLocalizedString("_link_", comment: ""))
 
         case .mail:
-            pushHosted(MailView(), title: NSLocalizedString("_mail_", comment: ""))
+            // Run 23.10.: Das Modul rendert im gepushten Kontext keinen
+            // eigenen Header (sonst doppelt unter dem Mehr-Bar). Suche und
+            // Verfassen liegen deshalb als Bar-Buttons oben.
+            let folders = UIBarButtonItem(
+                image: UIImage(systemName: "folder"),
+                primaryAction: UIAction { _ in
+                    NotificationCenter.default.post(
+                        name: .souveraMailExternalCommand,
+                        object: nil,
+                        userInfo: ["action": "folders"]
+                    )
+                }
+            )
+            folders.accessibilityLabel = NSLocalizedString("_mail_folders_", comment: "")
+            let search = UIBarButtonItem(
+                image: UIImage(systemName: "magnifyingglass"),
+                primaryAction: UIAction { _ in
+                    NotificationCenter.default.post(
+                        name: .souveraMailExternalCommand,
+                        object: nil,
+                        userInfo: ["action": "search"]
+                    )
+                }
+            )
+            search.accessibilityLabel = NSLocalizedString("_mail_search_", comment: "")
+            let compose = UIBarButtonItem(
+                image: UIImage(systemName: "square.and.pencil"),
+                primaryAction: UIAction { _ in
+                    NotificationCenter.default.post(
+                        name: .souveraMailExternalCommand,
+                        object: nil,
+                        userInfo: ["action": "compose"]
+                    )
+                }
+            )
+            compose.accessibilityLabel = NSLocalizedString("_mail_compose_", comment: "")
+            pushHosted(
+                MailView(),
+                title: NSLocalizedString("_mail_", comment: ""),
+                trailing: [folders, search, compose]
+            )
 
         case .notes:
             pushHosted(SouveraNotesView(), title: NSLocalizedString("_souvera_notes_", comment: ""))
@@ -586,7 +626,12 @@ final class NCMoreModel: ObservableObject {
         guard let navigationController = controller?.currentNavigationController() else {
             return
         }
-        let hosting = NCHostedController(rootView: view)
+        // Run 23.10.: Gepushte Module bekommen einen eigenen Layout-Modus
+        // (kein eigener Header, kein Split) - die aeussere Bar liefert
+        // Titel und Zurueck.
+        let hosting = NCHostedController(
+            rootView: view.environmentObject(SouveraLayoutMode.pushed())
+        )
         hosting.title = title
         hosting.navigationItem.rightBarButtonItems = trailing ?? []
         navigationController.pushViewController(hosting, animated: true)
