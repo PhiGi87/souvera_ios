@@ -27,7 +27,7 @@ on:
 env:
   PROJECT: Souvera.xcodeproj
   SCHEME: Nextcloud
-  XCODE_VERSION: '26.0.1'
+  XCODE_VERSION: '27.1'
   TEAM_ID: S76D7JCS9V
   DERIVED_DATA: DerivedDataArchive
   SIM_DERIVED_DATA: DerivedDataSim
@@ -35,7 +35,7 @@ env:
 jobs:
   build-check:
     name: Compile check (no signing)
-    runs-on: macos-15
+    runs-on: macos-26
     if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
 
     steps:
@@ -64,7 +64,7 @@ jobs:
 
   archive:
     name: Archive & IPA
-    runs-on: macos-15
+    runs-on: macos-26
     needs: build-check
     timeout-minutes: 120
     if: |
@@ -311,7 +311,7 @@ jobs:
 
   simulator:
     name: Simulator App (.app)
-    runs-on: macos-15
+    runs-on: macos-26
     needs: build-check
     timeout-minutes: 90
     if: |
