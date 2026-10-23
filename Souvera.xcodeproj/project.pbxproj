@@ -1106,6 +1106,9 @@
 		AA22C3D4E5F60718293A0503 /* SouveraShareTargetLimitsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */; };
 		AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */; };
 		AA22C3D4E5F60718293A0507 /* SouveraInvitationCandidateTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */; };
+		AA22C3D4E5F60718293A0531 /* SouveraFormFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */; };
+		AA22C3D4E5F60718293A0533 /* SouveraHinge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */; };
+		AA22C3D4E5F60718293A0535 /* SouveraFormFactorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */; };
 		AA22C3D4E5F60718293A0509 /* SouveraMailboxLegacyKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */; };
 		AA22C3D4E5F60718293A0511 /* SouveraDeepLinkDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0510 /* SouveraDeepLinkDeliveryTests.swift */; };
 		AA22C3D4E5F60718293A0513 /* SouveraMailMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0512 /* SouveraMailMutationTests.swift */; };
@@ -2176,6 +2179,9 @@
 		AA22C3D4E5F60718293A0502 /* SouveraShareTargetLimitsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraShareTargetLimitsTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraCalendarPendingWritesTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraInvitationCandidateTests.swift; sourceTree = "<group>"; };
+		AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraFormFactor.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHinge.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraFormFactorTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraMailboxLegacyKeyTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0510 /* SouveraDeepLinkDeliveryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraDeepLinkDeliveryTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0512 /* SouveraMailMutationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraMailMutationTests.swift; sourceTree = "<group>"; };
@@ -2522,6 +2528,7 @@
 				AA22C3D4E5F60718293A0504 /* SouveraCalendarPendingWritesTests.swift */,
 				AA22C3D4E5F60718293A0506 /* SouveraInvitationCandidateTests.swift */,
 				AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */,
+				AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */,
 				AA22C3D4E5F60718293A0510 /* SouveraDeepLinkDeliveryTests.swift */,
 				AA22C3D4E5F60718293A0512 /* SouveraMailMutationTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
@@ -3415,6 +3422,8 @@
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
 				AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */,
 				AA22C3D4E5F60718293A0310 /* SouveraSearchOverlay.swift */,
+				AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */,
+				AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */,
 				AA22C3D4E5F60718293A0316 /* LinkRingingWatcher.swift */,
 				AA22C3D4E5F60718293A031A /* SouveraMailFromAddresses.swift */,
 				AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */,
@@ -4845,6 +4854,7 @@
 				AA22C3D4E5F60718293A0505 /* SouveraCalendarPendingWritesTests.swift in Sources */,
 				AA22C3D4E5F60718293A0507 /* SouveraInvitationCandidateTests.swift in Sources */,
 				AA22C3D4E5F60718293A0509 /* SouveraMailboxLegacyKeyTests.swift in Sources */,
+				AA22C3D4E5F60718293A0535 /* SouveraFormFactorTests.swift in Sources */,
 				AA22C3D4E5F60718293A0511 /* SouveraDeepLinkDeliveryTests.swift in Sources */,
 				AA22C3D4E5F60718293A0513 /* SouveraMailMutationTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
@@ -5201,6 +5211,8 @@
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
 				AA22C3D4E5F60718293A0301 /* SouveraPendingShareStore.swift in Sources */,
 				AA22C3D4E5F60718293A0311 /* SouveraSearchOverlay.swift in Sources */,
+				AA22C3D4E5F60718293A0531 /* SouveraFormFactor.swift in Sources */,
+				AA22C3D4E5F60718293A0533 /* SouveraHinge.swift in Sources */,
 				AA22C3D4E5F60718293A0317 /* LinkRingingWatcher.swift in Sources */,
 				AA22C3D4E5F60718293A031B /* SouveraMailFromAddresses.swift in Sources */,
 				AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */,
