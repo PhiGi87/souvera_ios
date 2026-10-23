@@ -140,12 +140,22 @@ jobs:
           echo "IOS_CERT_P12_BASE64 length: $(wc -c < ~/certs/souvera.p12.b64) (expected 4308)"
           echo "IOS_CERT_PASSWORD length: ${#IOS_CERT_PASSWORD} (expected 24)"
           base64 --decode < ~/certs/souvera.p12.b64 > ~/certs/souvera.p12
-          if ! openssl pkcs12 -in ~/certs/souvera.p12 -noout -passin "pass:${IOS_CERT_PASSWORD}" 2>/dev/null; then
+          # macOS 27 ships OpenSSL 3/4, which no longer decodes the legacy
+          # RC2 encryption of older .p12 exports unless -legacy is passed.
+          # Probe both variants; LibreSSL in /usr/bin still handles RC2.
+          CERT_OK=0
+          for EXTRA in "" "-legacy"; do
+            if /usr/bin/openssl pkcs12 -in ~/certs/souvera.p12 $EXTRA -noout -passin "pass:${IOS_CERT_PASSWORD}" 2>/dev/null; then
+              if /usr/bin/openssl pkcs12 -in ~/certs/souvera.p12 $EXTRA -noout -info -passin "pass:${IOS_CERT_PASSWORD}" 2>&1 | grep -qE "MAC: sha256"; then
+                echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
+                exit 1
+              fi
+              CERT_OK=1
+              break
+            fi
+          done
+          if [ "$CERT_OK" -ne 1 ]; then
             echo "::error::The .p12 does not match IOS_CERT_PASSWORD (wrong password or truncated base64)"
-            exit 1
-          fi
-          if openssl pkcs12 -in ~/certs/souvera.p12 -noout -info -passin "pass:${IOS_CERT_PASSWORD}" 2>&1 | grep -qE "MAC: sha256"; then
-            echo "::error::The .p12 is not Apple-compatible (MAC is sha256). Re-export with: openssl pkcs12 -export -legacy ..."
             exit 1
           fi
           # Import into a dedicated CI keychain with a KNOWN password and put it
