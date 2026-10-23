@@ -163,6 +163,10 @@ final class NCMoreModel: ObservableObject {
         /// Opens the native mail client.
         case mail
 
+        /// Run 07.10. (iPhone Duo): öffnet eine zweite Szene der App
+        /// (nur auf dem Innendisplay, sofern das System es erlaubt).
+        case newWindow
+
         /// Opens the native Notes client.
         case notes
 
@@ -301,6 +305,20 @@ final class NCMoreModel: ObservableObject {
         // Notes were removed from the menu on request; the destination
         // (.notes) and SouveraNotesView stay in the source on hold.
 
+        // Run 07.10. (iPhone Duo): Zweites Fenster aktiv anbieten - nur
+        // wenn das System Multi-Scene erlaubt und wir auf einem
+        // regular-width-Display sind (Duo innen/iPad); auf dem Duo-
+        // Außendisplay kann kein neues Fenster entstehen.
+        if UIApplication.shared.supportsMultipleScenes, SouveraFormFactor.isRegularWidth {
+            functionItems.append(
+                Item(
+                    titleKey: "_new_window_",
+                    image: "rectangle.on.rectangle",
+                    destination: .newWindow
+                )
+            )
+        }
+
         functionItems.append(
             Item(
                 titleKey: "_manage_file_offline_",
@@ -415,6 +433,17 @@ final class NCMoreModel: ObservableObject {
 
         case .settings:
             openSettings()
+
+        case .newWindow:
+            // Run 07.10.: Multi-Scene - neues Fenster anfordern. Auf dem
+            // Außendisplay/ohne Unterstützung schlägt der Request fehl
+            // (nur Log, kein UI-Bruch).
+            let activity = NSUserActivity(activityType: "eu.souvera.app.newWindow")
+            UIApplication.shared.requestSceneSessionActivation(nil,
+                                                               userActivity: activity,
+                                                               options: nil) { error in
+                SouveraLog.write("More", "new window failed: \(error.localizedDescription)")
+            }
 
         case .link:
             pushHosted(LinkView(), title: NSLocalizedString("_link_", comment: ""))

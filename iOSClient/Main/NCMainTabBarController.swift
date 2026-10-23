@@ -42,6 +42,16 @@ class NCMainTabBarController: UITabBarController {
         return tabBar.frame.height - tabBar.safeAreaInsets.top
     }
 
+    /// Run 07.10.: Sidebar-Platzierung auf regular width (iPad, Duo innen).
+    /// `sidebar` existiert ab iOS 18; auf Systemen ohne Sidebar-Unterstützung
+    /// bleibt die Anfrage wirkungslos.
+    private func updateSidebarPlacement() {
+        guard #available(iOS 18.0, *) else { return }
+        let regular = traitCollection.horizontalSizeClass == .regular
+        sidebar.preferredPlacement = regular ? .sidebar : .automatic
+        SouveraLog.write("TabBar", "sidebar placement=\(regular ? "sidebar" : "automatic")")
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         delegate = self
@@ -52,6 +62,16 @@ class NCMainTabBarController: UITabBarController {
 
         configureTabControllers()
         configureTabBarAppearance()
+
+        // Run 07.10. (iPhone Duo/iPad): Sidebar-Tabs bei regular width,
+        // sofern das System es anbietet (iPad ab iOS 18, iPhone Duo innen
+        // ab iOS 27.1). Auf kompakter Breite bleiben die bekannten Tabs.
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (controller: Self, _) in
+                controller.updateSidebarPlacement()
+            }
+        }
+        updateSidebarPlacement()
 
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: self.global.notificationCenterChangeTheming), object: nil, queue: .main) { [weak self] notification in
             if let userInfo = notification.userInfo as? NSDictionary,

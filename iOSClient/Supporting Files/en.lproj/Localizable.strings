@@ -1333,3 +1333,6 @@ _mail_sort_flagged_ = "Flagged first";
 
 /* Run 06.10.: Overlay bei langsamem Mail-Versand */
 "_mail_send_slow_" = "Poor connection – the message will be sent with delay";
+
+/* Run 07.10.: iPhone Duo - neues Fenster */
+"_new_window_" = "New window";
