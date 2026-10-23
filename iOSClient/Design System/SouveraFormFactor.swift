@@ -58,6 +58,6 @@ enum SouveraFormFactor {
     private static var sharedApplication: UIApplication? {
         let selector = NSSelectorFromString("sharedApplication")
         guard UIApplication.responds(to: selector) else { return nil }
-        return (UIApplication as AnyObject).perform(selector)?.takeUnretainedValue() as? UIApplication
+        return UIApplication.perform(selector)?.takeUnretainedValue() as? UIApplication
     }
 }
