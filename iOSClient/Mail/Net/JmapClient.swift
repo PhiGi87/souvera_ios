@@ -159,6 +159,14 @@ actor JmapClient {
             if let jmapError = error as? JmapException, case .authNeedsBearer = jmapError {
                 throw error
             }
+            // Run 23.10.: Ein Limit-Fehler (zu viele Methoden pro Request)
+            // ist kein transienter Netzfehler - Retry trifft dieselbe Wand.
+            // Der Aufrufer teilt die Calls auf (queryUnreadTotals).
+            if case let .httpError(code, body)? = error as? JmapException,
+               code == 400, body.contains("maxCallsInRequest") {
+                JmapLog.write("JMAP limit: too many method calls in one request - not retrying")
+                throw error
+            }
             // Run 29.09. (Feedback: Mail zäh/flappend bei schlechter
             // Verbindung): transienter Fehler - Session verwerfen, 1 s
             // Backoff (immediate Retry traf auf dieselbe Stausituation)

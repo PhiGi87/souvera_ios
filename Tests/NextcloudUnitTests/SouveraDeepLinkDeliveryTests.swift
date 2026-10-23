@@ -53,4 +53,29 @@ struct SouveraDeepLinkDeliveryTests {
         // Ohne aktuellen Ordner den (ersten) Mail-Ordner bestimmen.
         #expect(MailViewModel.targetMailboxJmapId(mailboxIds: ["j"], currentJmapId: nil) == "j")
     }
+
+    @Test("Short push id matches the canonical JMAP id")
+    func shortIdMatchesCanonical() {
+        #expect(MailViewModel.mailIdsMatch("bbhg", "ee2yaabbhg"))
+        #expect(MailViewModel.mailIdsMatch("ee2yaabbhg", "ee2yaabbhg"))
+        #expect(MailViewModel.mailIdsMatch("BBHG", "ee2yaabbhg"))
+    }
+
+    @Test("Different ids do not match")
+    func differentIds() {
+        #expect(MailViewModel.mailIdsMatch("bbhg", "ee2yaabchg") == false)
+        #expect(MailViewModel.mailIdsMatch("", "ee2yaabbhg") == false)
+        // Zu kurze Kurzformen werden nicht verglichen (False-Positives).
+        #expect(MailViewModel.mailIdsMatch("hg", "ee2yaabbhg") == false)
+    }
+
+    @Test("A repeated short-id delivery is ignored within the window")
+    func redeliveryWithShortId() {
+        let now = Date()
+        #expect(MailViewModel.shouldProcessDeepLinkDelivery(
+            currentEmailId: "ee2yaabbhg",
+            targetEmailId: "bbhg",
+            lastOpenedAt: now.addingTimeInterval(-5),
+            now: now) == false)
+    }
 }

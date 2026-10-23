@@ -218,29 +218,38 @@ final class JmapApi {
     func queryUnreadTotals(accountId: String, mailboxIds: [String]) async throws -> [String: Int] {
         guard !mailboxIds.isEmpty else { return [:] }
         let accArg = try resolveAccountArg(accountId)
-        let calls = mailboxIds.map { mailboxId in
-            JmapMethodCall(
-                name: "Email/query",
-                args: [
-                    "accountId": accArg,
-                    "filter": ["inMailbox": mailboxId, "notKeyword": "$seen"],
-                    "sort": [["property": "receivedAt", "isAscending": false]],
-                    "position": 0,
-                    "limit": 0,
-                    "calculateTotal": true,
-                    "collapseThreads": false
-                ] as [String: Any],
-                callId: mailboxId
-            )
-        }
-        let batch = try await client.call(calls)
+        // Run 23.10. (Log: JMAP 400 maxCallsInRequest): Der Server begrenzt
+        // die Methoden pro Request. Frueher gingen ALLE Postfaecher (bis
+        // 138) in einen POST und schlugen fehl. Jetzt in Batches.
+        let batchSize = 8
         var totals: [String: Int] = [:]
-        for result in batch.results {
-            guard case let .success(resp) = result,
-                  resp.name == "Email/query",
-                  let total = resp.args["total"] as? Int,
-                  !resp.callId.isEmpty else { continue }
-            totals[resp.callId] = total
+        var index = 0
+        while index < mailboxIds.count {
+            let slice = Array(mailboxIds[index..<min(index + batchSize, mailboxIds.count)])
+            index += batchSize
+            let calls = slice.map { mailboxId in
+                JmapMethodCall(
+                    name: "Email/query",
+                    args: [
+                        "accountId": accArg,
+                        "filter": ["inMailbox": mailboxId, "notKeyword": "$seen"],
+                        "sort": [["property": "receivedAt", "isAscending": false]],
+                        "position": 0,
+                        "limit": 0,
+                        "calculateTotal": true,
+                        "collapseThreads": false
+                    ] as [String: Any],
+                    callId: mailboxId
+                )
+            }
+            let batch = try await client.call(calls)
+            for result in batch.results {
+                guard case let .success(resp) = result,
+                      resp.name == "Email/query",
+                      let total = resp.args["total"] as? Int,
+                      !resp.callId.isEmpty else { continue }
+                totals[resp.callId] = total
+            }
         }
         return totals
     }

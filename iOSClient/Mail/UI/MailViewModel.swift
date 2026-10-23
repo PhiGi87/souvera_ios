@@ -268,7 +268,8 @@ final class MailViewModel: ObservableObject {
         case .mail:
             // Run 26.09.: Delivery-Retrys derselben Mail innerhalb kurzer
             // Zeit ueberspringen, wenn sie bereits erfolgreich geoeffnet war.
-            if lastOpenedMailEmailId == target.emailId,
+            if let lastId = lastOpenedMailEmailId,
+               Self.mailIdsMatch(lastId, target.emailId),
                Date().timeIntervalSince(lastOpenedMailAt) < 15 {
                 SouveraLog.write("Mail", "deep link retry skipped (already open) emailId=\(target.emailId)")
                 return
@@ -290,9 +291,22 @@ final class MailViewModel: ObservableObject {
                                                           targetEmailId: String,
                                                           lastOpenedAt: Date?,
                                                           now: Date) -> Bool {
-        if currentEmailId != targetEmailId { return true }
+        if !mailIdsMatch(currentEmailId, targetEmailId) { return true }
         guard let lastOpenedAt else { return true }
         return now.timeIntervalSince(lastOpenedAt) >= 30
+    }
+
+    /// Run 23.10.: Push-/Notification-IDs sind teils Kurzformen
+    /// ("bbhg") der kanonischen JMAP-ID ("ee2yaabbhg"). Der frueher
+    /// exakte Vergleich liess dieselbe Mail als neue Zustellung gelten.
+    nonisolated static func mailIdsMatch(_ lhs: String, _ rhs: String) -> Bool {
+        let a = lhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let b = rhs.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if a.isEmpty || b.isEmpty { return false }
+        if a == b { return true }
+        let short = a.count <= b.count ? a : b
+        let long = a.count <= b.count ? b : a
+        return short.count >= 4 && long.hasSuffix(short)
     }
 
     /// Reiner Helfer (unit-testbar): Ziel-Ordner einer Deep-Link-Mail.
@@ -338,7 +352,10 @@ final class MailViewModel: ObservableObject {
             if contextBox == nil {
                 contextBox = boxes.first(where: { $0.kind == .inbox })
             }
-            if let box = contextBox {
+            // Run 23.10.: Ein verspaeteter Push (Mail inzwischen geloescht)
+            // darf nicht in Papierkorb/Spam springen - dort bleibt der
+            // aktuelle Kontext.
+            if let box = contextBox, box.kind != .trash, box.kind != .junk {
                 if currentMailbox?.id != box.id {
                     openMailbox(box)
                 } else {
@@ -427,10 +444,17 @@ final class MailViewModel: ObservableObject {
             let mailMailboxIds = ((json["mailboxIds"] as? [String: Any])?.keys.map { $0 }) ?? []
             let belongsToCurrent = currentMailbox?.jmapId.map { mailMailboxIds.contains($0) } ?? false
             var targetBox: Mailbox?
-            if !belongsToCurrent,
-               let otherId = Self.targetMailboxJmapId(mailboxIds: mailMailboxIds,
-                                                      currentJmapId: currentMailbox?.jmapId) {
-                targetBox = allMailboxes.first { $0.jmapId == otherId }
+            if !belongsToCurrent {
+                // Run 23.10.: Nur echte Zielordner als Kontext oeffnen -
+                // Papierkorb/Spam nie automatisch anspringen.
+                let candidates = mailMailboxIds
+                    .compactMap { id in allMailboxes.first { $0.jmapId == id } }
+                    .filter { $0.kind != .trash && $0.kind != .junk }
+                if let otherId = Self.targetMailboxJmapId(
+                    mailboxIds: candidates.compactMap(\.jmapId),
+                    currentJmapId: currentMailbox?.jmapId) {
+                    targetBox = candidates.first { $0.jmapId == otherId }
+                }
             }
             let mailboxId = belongsToCurrent
                 ? (currentMailbox?.id ?? "")
@@ -4285,4 +4309,7 @@ extension Notification.Name {
     static let mailTotalUnreadChanged = Notification.Name("mailTotalUnreadChanged")
     /// Mail- und/oder Link-Totals geändert (Mehr-Tab-Badge neu rendern).
     static let souveraBadgeTotalsChanged = Notification.Name("SouveraBadgeTotalsChanged")
+    /// Run 23.10.: Aktion aus der aeusseren Bar (Mehr-Menue → Mail).
+    /// userInfo["action"] = "compose" | "search".
+    static let souveraMailExternalCommand = Notification.Name("souveraMailExternalCommand")
 }
