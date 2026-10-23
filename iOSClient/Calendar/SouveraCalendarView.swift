@@ -34,6 +34,9 @@ struct SouveraCalendarView: View {
     @State private var searchActive = false
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var scrollToNowTrigger = 0
+    /// Run 07.10. (iPhone Duo): teilgefaltet (Tent) - dann Inhalte oben,
+    /// Bedienung unten statt der 50/50-Spalten.
+    @State private var tentMode = false
     /// Run 01.10. (Feedback: beendeter Termin blieb unter "Als Nächstes"):
     /// Minuten-Tick - die Upcoming-Liste rechnet ohne Interaktion neu.
     @State private var nowTick = Date()
@@ -86,7 +89,7 @@ struct SouveraCalendarView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                let isWide = geometry.size.width > geometry.size.height
+                let isWide = geometry.size.width > geometry.size.height && !tentMode
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 // (Offline-Banner haengt am Root-NavigationStack, siehe unten.)
                 VStack(spacing: 0) {
@@ -290,6 +293,7 @@ struct SouveraCalendarView: View {
         .sheet(item: $editState) { state in
             CalendarEventEditSheet(viewModel: viewModel, draft: state.draft, existing: state.existing)
         }
+        .souveraHingeTracking { tentMode = $0 }
     }
 
     @ViewBuilder
