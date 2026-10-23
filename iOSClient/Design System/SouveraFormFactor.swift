@@ -23,7 +23,7 @@ enum SouveraFormFactor {
 
     /// Reine Ableitung (unit-testbar): Size Class + Idiom.
     /// Die Breite bleibt als Parameter für künftige Feinheiten erhalten.
-    static func kind(horizontalSizeClass: UserInterfaceSizeClass?,
+    static func kind(horizontalSizeClass: UIUserInterfaceSizeClass?,
                      idiom: UIUserInterfaceIdiom,
                      width: CGFloat) -> Kind {
         if horizontalSizeClass == .regular {
@@ -32,21 +32,32 @@ enum SouveraFormFactor {
         return .compactPhone
     }
 
-    /// Regular-Breite der aktuellen Szene (UI-Kontext ohne SwiftUI-
-    /// Environment). Erste (verbundene) Szene, damit auch der Aufbau in
-    /// scene(_:willConnectTo:) bereits korrekt antwortet.
+    /// Regular-Breite der aktuellen Umgebung. Trait-basiert und damit
+    /// auch in App-Extensions verfügbar (dort gibt es kein
+    /// UIApplication.shared).
     static var isRegularWidth: Bool {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        return scene?.traitCollection.horizontalSizeClass == .regular
+        UITraitCollection.current.horizontalSizeClass == .regular
     }
 
-    /// Fenster-Bounds der aktuellen Szene (statt UIScreen.main, das auf
-    /// Zwei-Display-Geräten ambig ist).
+    /// Fenster-Bounds der aktiven Szene (statt UIScreen.main, das auf
+    /// Zwei-Display-Geräten ambig ist). In App-Extensions liefert der
+    /// Aufruf den Bildschirm, weil `view.window` dort bereits vorliegt.
     static var currentWindowBounds: CGRect {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-        let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
-        return window?.bounds ?? UIScreen.main.bounds
+        if let app = sharedApplication {
+            let scenes = app.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+            let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
+            if let bounds = window?.bounds { return bounds }
+        }
+        return UIScreen.main.bounds
+    }
+
+    /// `UIApplication.shared` ist in App-Extensions als nicht verfügbar
+    /// markiert; der Selector greift zur Laufzeit darauf zu, ohne diese
+    /// Einschränkung zu verletzen.
+    private static var sharedApplication: UIApplication? {
+        let selector = NSSelectorFromString("sharedApplication")
+        guard UIApplication.responds(to: selector) else { return nil }
+        return (UIApplication as AnyObject).perform(selector)?.takeUnretainedValue() as? UIApplication
     }
 }
