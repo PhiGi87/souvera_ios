@@ -1109,6 +1109,7 @@
 		AA22C3D4E5F60718293A0531 /* SouveraFormFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */; };
 		AA22C3D4E5F60718293A0533 /* SouveraHinge.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */; };
 		AA22C3D4E5F60718293A0535 /* SouveraFormFactorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */; };
+		AA22C3D4E5F60718293A0536 /* SouveraFormFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */; };
 		AA22C3D4E5F60718293A0509 /* SouveraMailboxLegacyKeyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0508 /* SouveraMailboxLegacyKeyTests.swift */; };
 		AA22C3D4E5F60718293A0511 /* SouveraDeepLinkDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0510 /* SouveraDeepLinkDeliveryTests.swift */; };
 		AA22C3D4E5F60718293A0513 /* SouveraMailMutationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0512 /* SouveraMailMutationTests.swift */; };
@@ -5076,6 +5077,7 @@
 				F76B3CCF1EAE01BD00921AC9 /* NCBrand.swift in Sources */,
 				F72944F32A84246400246839 /* NCEndToEndMetadataV2.swift in Sources */,
 				F7BAADCC1ED5A87C00B7EAD4 /* NCManageDatabase.swift in Sources */,
+				AA22C3D4E5F60718293A0536 /* SouveraFormFactor.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

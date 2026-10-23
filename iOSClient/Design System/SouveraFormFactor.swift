@@ -44,6 +44,9 @@ enum SouveraFormFactor {
     /// Fenster-Bounds der aktuellen Szene (statt UIScreen.main, das auf
     /// Zwei-Display-Geräten ambig ist).
     static var currentWindowBounds: CGRect {
-        UIApplication.shared.mainAppWindow?.bounds ?? UIScreen.main.bounds
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+        let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
+        return window?.bounds ?? UIScreen.main.bounds
     }
 }
