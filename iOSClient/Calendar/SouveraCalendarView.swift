@@ -24,6 +24,8 @@ enum SouveraCalendarSettings {
 struct SouveraCalendarView: View {
     /// Run 16.09.: UIKit-Bar-Bridge (Landscape/iPad 1:1 Files/More).
     var headerBridge: SouveraHeaderBridge? = nil
+    /// Run 23.10.: Layout-Modus dieses Tabs/Fensters.
+    @EnvironmentObject private var layout: SouveraLayoutMode
     @State private var calendarPopulateToken = 0
     @StateObject private var viewModel = CalendarViewModel()
     @State private var selectedDay = Date()
@@ -97,14 +99,14 @@ struct SouveraCalendarView: View {
                     // immer stehen, Ergebnisse zeigt das Overlay.
                     content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                 }
-                .padding(.top, SouveraAppearance.useBridgeHeader ? 0 : 8)
+                .padding(.top, layout.usesBridgeHeader ? 0 : 8)
             }
             .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
             .safeAreaInset(edge: .top, spacing: 0) {
                 // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
                 // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
-                if !SouveraAppearance.useBridgeHeader {
+                if !layout.usesBridgeHeader && !layout.isPushed {
                     calendarHeader
                 }
             }
@@ -323,16 +325,25 @@ struct SouveraCalendarView: View {
             let splitWidth: CGFloat = width >= Self.wideSplitThreshold
                 ? width / 2
                 : max(230, width * 0.4)
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    monthSwitcher(compact: true)
-                    monthGrid(compact: true, availableHeight: height - bottomInset)
-                    Spacer(minLength: 0)
+            let monthPane = VStack(spacing: 0) {
+                monthSwitcher(compact: true)
+                monthGrid(compact: true, availableHeight: height - bottomInset)
+                Spacer(minLength: 0)
+            }
+            // Run 23.10.: Bei aktiver Falz (Duo, iOS 27.1) übernimmt
+            // ArrangementView die Aufteilung um die Falz; sonst bleibt die
+            // gewohnte 50/50-Spalte.
+            SouveraDuoSplit(
+                primary: AnyView(monthPane),
+                secondary: AnyView(dayEventList)
+            ) {
+                HStack(spacing: 0) {
+                    monthPane
+                        .frame(width: splitWidth)
+                    Divider()
+                    dayEventList
+                        .frame(maxWidth: .infinity)
                 }
-                .frame(width: splitWidth)
-                Divider()
-                dayEventList
-                    .frame(maxWidth: .infinity)
             }
             .safeAreaPadding(.bottom, 8)
             .refreshable {

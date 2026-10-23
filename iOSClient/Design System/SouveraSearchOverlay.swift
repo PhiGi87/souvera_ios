@@ -47,6 +47,23 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
     }
 
     var body: some View {
+        Group {
+            if #available(iOS 27.1, *) {
+                GeometryReader { proxy in
+                    // Run 23.10. (iPhone Duo): Die Suchkarte darf nicht
+                    // ueber die Falz laufen - sie wird in die Haelfte
+                    // neben/ueber der Falz verschoben.
+                    let constraints = SouveraDivisionConstraints.read(proxy)
+                    overlayBody(constraints: constraints)
+                }
+            } else {
+                overlayBody(constraints: .none)
+            }
+        }
+        .onAppear { fieldFocused = true }
+    }
+
+    private func overlayBody(constraints: SouveraDivisionConstraints) -> some View {
         ZStack(alignment: .top) {
             // Abdunkelung: Tap daneben schliesst (Zustand bleibt erhalten).
             Color.black.opacity(0.35)
@@ -64,8 +81,11 @@ struct SouveraSearchOverlay<Item: Identifiable>: View {
             .shadow(color: .black.opacity(0.28), radius: 18, y: 6)
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .frame(maxWidth: constraints.maxWidth ?? .infinity,
+                   maxHeight: constraints.maxHeight ?? .infinity,
+                   alignment: .top)
+            .offset(x: constraints.offsetX)
         }
-        .onAppear { fieldFocused = true }
     }
 
     // MARK: - Suchzeile
