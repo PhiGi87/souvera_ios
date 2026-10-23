@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Run 07.10. (iPhone Duo): Hinge-Beobachtung für den Tent-Modus.
-// iOS 27 führt `onHingeChange` ein (Status geschlossen/teilgefaltet/offen
+// iOS 27.1 führt `onHingeChange` ein (Status geschlossen/teilgefaltet/offen
 // plus kontinuierlicher Winkel). Die App nutzt das nur als Layout-Hinweis
 // (teilgefaltet = Inhalte oben, Bedienung unten) - auf älteren Systemen
 // bleibt alles unverändert.
@@ -16,7 +16,7 @@ struct SouveraHingeTracking: ViewModifier {
 
     @ViewBuilder
     func body(content: Content) -> some View {
-        if #available(iOS 27.0, *) {
+        if #available(iOS 27.1, *) {
             content.onHingeChange { _, context in
                 let partiallyFolded = context.hinge?.status == .partiallyOpen
                 onChange(partiallyFolded)

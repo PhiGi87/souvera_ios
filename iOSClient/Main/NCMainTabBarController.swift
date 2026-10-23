@@ -46,7 +46,7 @@ class NCMainTabBarController: UITabBarController {
     /// `sidebar` existiert ab iOS 18; auf Systemen ohne Sidebar-Unterstützung
     /// bleibt die Anfrage wirkungslos.
     private func updateSidebarPlacement() {
-        guard #available(iOS 18.0, *) else { return }
+        guard #available(iOS 27.0, *) else { return }
         let regular = traitCollection.horizontalSizeClass == .regular
         sidebar.preferredPlacement = regular ? .sidebar : .automatic
         SouveraLog.write("TabBar", "sidebar placement=\(regular ? "sidebar" : "automatic")")
