@@ -15,8 +15,9 @@ struct NavigationCollectionViewCommon {
 
 /// Run 24.10.: Gemessene Hoehe der sichtbaren UIKit-Bridge-Bar
 /// (Mail/Kalender/Link im Innendisplay quer). Der Mehr-Header uebernimmt
-/// sie, damit alle Header gleich hoch sind.
-@MainActor
+/// sie, damit alle Header gleich hoch sind. Updates erfolgen vom
+/// Main-Thread (Tab-Controller); bewusst nicht @MainActor, damit die
+/// SwiftUI-Inits sie ohne Isolation anlegen koennen (wie SouveraHeaderBridge).
 final class SouveraBridgeBarMetrics: ObservableObject {
     @Published var barHeight: CGFloat?
 }
