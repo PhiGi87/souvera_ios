@@ -1111,6 +1111,7 @@
 		AA22C3D4E5F60718293A0535 /* SouveraFormFactorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */; };
 		AA22C3D4E5F60718293A0536 /* SouveraFormFactor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */; };
 		AA22C3D4E5F60718293A0538 /* SouveraLayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */; };
+		AA22C3D4E5F60718293A0541 /* SouveraBridgeNavigationBar.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0540 /* SouveraBridgeNavigationBar.swift */; };
 		AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */; };
 		AA22C3D4E5F60718293A053D /* SouveraLayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */; };
 		AA22C3D4E5F60718293A053C /* SouveraLayoutModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */; };
@@ -2187,6 +2188,7 @@
 		AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraFormFactor.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHinge.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraLayoutMode.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0540 /* SouveraBridgeNavigationBar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraBridgeNavigationBar.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraFoldSupport.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraLayoutModeTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraFormFactorTests.swift; sourceTree = "<group>"; };
@@ -3434,6 +3436,7 @@
 				AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */,
 				AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */,
 				AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */,
+				AA22C3D4E5F60718293A0540 /* SouveraBridgeNavigationBar.swift */,
 				AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */,
 				AA22C3D4E5F60718293A0316 /* LinkRingingWatcher.swift */,
 				AA22C3D4E5F60718293A031A /* SouveraMailFromAddresses.swift */,
@@ -5228,6 +5231,7 @@
 				AA22C3D4E5F60718293A0531 /* SouveraFormFactor.swift in Sources */,
 				AA22C3D4E5F60718293A0533 /* SouveraHinge.swift in Sources */,
 				AA22C3D4E5F60718293A0538 /* SouveraLayoutMode.swift in Sources */,
+				AA22C3D4E5F60718293A0541 /* SouveraBridgeNavigationBar.swift in Sources */,
 				AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */,
 				AA22C3D4E5F60718293A0317 /* LinkRingingWatcher.swift in Sources */,
 				AA22C3D4E5F60718293A031B /* SouveraMailFromAddresses.swift in Sources */,

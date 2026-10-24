@@ -140,6 +140,10 @@ struct NCMoreView: View {
     /// liegen im System-Seitenband.
     private var moreHeader: some View {
         SouveraModuleHeader(
+            // Run 24.10.: Innendisplay hochkant reserviert die rechte Zone
+            // der iOS-Statuskapsel (wie die UIKit-Bars von Mail/Kalender) -
+            // die Pills enden dann links neben der Statuskapsel.
+            extraTrailing: headerMetrics.statusReservedWidth,
             // Run 24.10.: Gemessene Systembar-Hoehe uebernehmen (Innendisplay
             // quer); ohne Messung gilt die Standard-Hoehe der Glas-Header.
             heightOverride: headerMetrics.barHeight,

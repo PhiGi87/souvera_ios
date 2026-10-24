@@ -20,6 +20,12 @@ struct NavigationCollectionViewCommon {
 /// SwiftUI-Inits sie ohne Isolation anlegen koennen (wie SouveraHeaderBridge).
 final class SouveraBridgeBarMetrics: ObservableObject {
     @Published var barHeight: CGFloat?
+    /// Run 24.10.: Reservierte Zone der iOS-Statuskapsel rechts oben
+    /// (Innendisplay hochkant). Die UIKit-Bars halten sie automatisch
+    /// frei (Trailing-Buttons enden links daneben, Pixel-Messung
+    /// Kalender-Bar: Statuszone ab ~463 pt bei 669 pt Breite). Der
+    /// SwiftUI-More-Header reserviert sie ueber diesen Wert.
+    @Published var statusReservedWidth: CGFloat = 0
 }
 
 class NCMainTabBarController: UITabBarController {
@@ -484,9 +490,12 @@ class NCMainTabBarController: UITabBarController {
         // Run 24.10.: SICHTBARE Hoehe messen - die Bar-Hintergrund-View
         // zeichnet im Innendisplay QUER ueber ihre Bounds hinaus
         // (Layout 58 pt, sichtbar ~82 pt; Pixel-Messung IMG_1320). Im
-        // HOCHFORMAT ist diese Messung instabil (24/82/140/136 im Log) -
-        // dort gilt die Layout-Hoehe (58 pt), identisch zu Mail/Kalender/Link.
+        // HOCHFORMAT ist die Messung unbrauchbar (24/82/140/136 im Log,
+        // Build 202610241928 lieferte dauerhaft 140) - bei regulaer
+        // Breite (Innendisplay) gilt deshalb die feste Layout-Hoehe
+        // (58 pt), identisch zu Mail/Kalender/Link.
         let isLandscape = view.bounds.width > view.bounds.height
+        let isRegularWidth = resolvedTraitCollection().horizontalSizeClass == .regular
         let height = visible.flatMap { nav in
             let bar = nav.navigationBar
             if isLandscape {
@@ -497,11 +506,17 @@ class NCMainTabBarController: UITabBarController {
                 let maxH = heights.max() ?? 0
                 return maxH > 1 ? maxH : nil
             }
+            if isRegularWidth { return SouveraLayoutMode.bridgeBarLayoutHeight }
             return bar.bounds.height > 1 ? bar.bounds.height : nil
         }
         if bridgeBarMetrics.barHeight != height {
             bridgeBarMetrics.barHeight = height
             SouveraLog.write("SidebarActions", "[SidebarActions] bridgeBarHeight=\(height.map { Int($0) } ?? -1)")
+        }
+        let reserved = (!isLandscape && isRegularWidth) ? SouveraLayoutMode.statusReservedWidth : 0
+        if bridgeBarMetrics.statusReservedWidth != reserved {
+            bridgeBarMetrics.statusReservedWidth = reserved
+            SouveraLog.write("SidebarActions", "[SidebarActions] statusReservedWidth=\(Int(reserved))")
         }
     }
 
@@ -656,7 +671,11 @@ class NCMainTabBarController: UITabBarController {
              headerBridge: SouveraHeaderBridge) {
             self.layoutMode = layoutMode
             self.headerBridge = headerBridge
-            super.init(rootViewController: rootViewController)
+            // Run 24.10.: Eigene Bar-Klasse mit fixierter Layout-Hoehe -
+            // kollabiert die Systembar sonst auf ~24 pt (Einzel-Mail,
+            // Innendisplay quer), siehe SouveraBridgeNavigationBar.
+            super.init(navigationBarClass: SouveraBridgeNavigationBar.self, toolbarClass: nil)
+            viewControllers = [rootViewController]
         }
 
         @available(*, unavailable)
