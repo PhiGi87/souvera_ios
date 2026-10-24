@@ -13,6 +13,14 @@ struct NavigationCollectionViewCommon {
     var viewController: NCCollectionViewCommon
 }
 
+/// Run 24.10.: Gemessene Hoehe der sichtbaren UIKit-Bridge-Bar
+/// (Mail/Kalender/Link im Innendisplay quer). Der Mehr-Header uebernimmt
+/// sie, damit alle Header gleich hoch sind.
+@MainActor
+final class SouveraBridgeBarMetrics: ObservableObject {
+    @Published var barHeight: CGFloat?
+}
+
 class NCMainTabBarController: UITabBarController {
     var sceneIdentifier: String = UUID().uuidString
     var account: String = "" {
@@ -450,9 +458,10 @@ class NCMainTabBarController: UITabBarController {
     /// reagieren dann nicht).
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Run 24.10.: Nur die Geometrie auffrischen; die Aktionen selbst
+        // Run 24.10.: Nur die Geometrie auffrischern; die Aktionen selbst
         // kommen aus der Quelle des gewaehlten Tabs.
         refreshSidebarActions()
+        updateBridgeBarHeight()
         if let bannerView = callBannerHost?.view {
             view.bringSubviewToFront(bannerView)
         }
@@ -468,13 +477,28 @@ class NCMainTabBarController: UITabBarController {
 
     // MARK: - System sidebar actions
 
-    /// Run 24.10.: Rechte Header-Aktionen liegen im iOS-Seitenband
-    /// (`sidebar.bottomBarView`) - also dort, wo die Tab-Leiste ist.
+    let bridgeBarMetrics = SouveraBridgeBarMetrics()
+
+    private func updateBridgeBarHeight() {
+        let hosted = (viewControllers ?? []).compactMap { $0 as? SouveraHostedNavigationController }
+        let visible = hosted.first { $0 === selectedViewController && $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
+            ?? hosted.first { $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
+        let height = visible.flatMap { navigationBar in
+            navigationBar.navigationBar.bounds.height > 1 ? navigationBar.navigationBar.bounds.height : nil
+        }
+        if bridgeBarMetrics.barHeight != height {
+            bridgeBarMetrics.barHeight = height
+            SouveraLog.write("SidebarActions", "[SidebarActions] bridgeBarHeight=\(height.map { Int($0) } ?? -1)")
+        }
+    }
+
+    /// Run 24.10.: Rechte Header-Aktionen liegen im iOS-Seitenband - als
+    /// Subview der System-Tab-Bar (siehe positionSidebarActionBar).
     private var sidebarActionBar: SouveraSidebarActionBar?
     private var sidebarActionCancellables = Set<AnyCancellable>()
-    private var lastSidebarActionsSignature = ""
     private var lastSidebarActionsLog = ""
     private var lastSidebarActionsActive: Bool?
+    private var lastRailActionsFrameLog = ""
 
     /// Run 24.10.: Außendisplay HOCHKANT - dort wandern die rechten
     /// Header-Aktionen von Mail/Kalender/Link/Dateien/Mehr ins Seitenband.
@@ -527,19 +551,21 @@ class NCMainTabBarController: UITabBarController {
         }
 
         let actions = currentSidebarActions(outerActive: outerActive, bandVisible: bandVisible)
-        let signature = actions.map(\.signature).joined(separator: "|")
-        if signature != lastSidebarActionsSignature {
-            lastSidebarActionsSignature = signature
-            if actions.isEmpty || !bandVisible {
-                setSidebarBottomBar(nil)
-            } else {
-                // Neue Instanz erzwingt eine frische Höhenmessung durch das
-                // System-Seitenband (Aktionsanzahl kann sich je Tab ändern).
-                let bar = SouveraSidebarActionBar()
-                bar.update(actions: actions)
-                sidebarActionBar = bar
-                setSidebarBottomBar(bar)
+        if actions.isEmpty || !bandVisible {
+            sidebarActionBar?.removeFromSuperview()
+            sidebarActionBar = nil
+        } else {
+            // Run 24.10.: Immer installieren/positionieren - die Leiste kann
+            // ihre Geometrie und Safe-Area je Layout aendern. `update` dedupt
+            // den Inhalt intern (Signatur), Frame-Setzen deduppt ebenfalls.
+            if sidebarActionBar == nil {
+                sidebarActionBar = SouveraSidebarActionBar()
             }
+            sidebarActionBar?.update(actions: actions)
+            if let bar = sidebarActionBar, bar.superview !== tabBar {
+                tabBar.addSubview(bar)
+            }
+            positionSidebarActionBar()
         }
 
         let log = "outer=\(outerActive) band=\(bandVisible) actions=\(actions.count) tab=\(Int(tabBar.frame.width))x\(Int(tabBar.frame.height))@(\(Int(tabBar.frame.minX)),\(Int(tabBar.frame.minY))) \(sidebarApiDiagnostics)"
@@ -549,10 +575,31 @@ class NCMainTabBarController: UITabBarController {
         }
     }
 
-    private func setSidebarBottomBar(_ view: UIView?) {
-        guard #available(iOS 18.0, *) else { return }
-        if sidebar.bottomBarView !== view {
-            sidebar.bottomBarView = view
+    /// Run 24.10.: Die Sidebar-API (`bottomBarView`) wird auf dem Duo
+    /// ignoriert (Log: `isAvailable=false`). Die ActionBar lebt deshalb
+    /// direkt IN der System-Tab-Bar (Rail-Container) - oberhalb der
+    /// Hauptmenue-Icons, unterhalb der Status-Kapsel. Sie ist damit Teil
+    /// des iOS-Bands und bewegt sich mit der Leiste.
+    private func positionSidebarActionBar() {
+        guard let bar = sidebarActionBar else { return }
+        // Unterhalb der Status-Kapsel (Safe-Area-Top der Leiste), zentriert
+        // in der Band-Saeule.
+        let top = tabBar.safeAreaInsets.top + 8
+        let width = max(44, tabBar.bounds.width - 12)
+        let height = min(bar.contentHeight, max(44, tabBar.bounds.height - top - 8))
+        let frame = CGRect(
+            x: (tabBar.bounds.width - width) / 2,
+            y: top,
+            width: width,
+            height: height
+        )
+        if bar.frame != frame {
+            bar.frame = frame
+        }
+        let log = "railActions frame=\(Int(frame.width))x\(Int(frame.height))@(\(Int(frame.minX)),\(Int(frame.minY))) tabSafeTop=\(Int(tabBar.safeAreaInsets.top)) actions=\(bar.actions.count)"
+        if log != lastRailActionsFrameLog {
+            lastRailActionsFrameLog = log
+            SouveraLog.write("SidebarActions", "[SidebarActions] \(log)")
         }
     }
 
@@ -857,7 +904,7 @@ class NCMainTabBarController: UITabBarController {
     }
 
     private func makeMoreNavigationController() -> UIViewController {
-        let moreView = NCMoreView(account: account, controller: self)
+        let moreView = NCMoreView(account: account, controller: self, headerMetrics: bridgeBarMetrics)
         let hostingController = UIHostingController(rootView: moreView)
 
         hostingController.navigationItem.title = NSLocalizedString("_more_", comment: "")

@@ -18,19 +18,26 @@ struct NCMoreView: View {
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
     @ObservedObject private var badgeStore = SouveraBadgeStore.shared
+    /// Run 24.10.: Gemessene Systembar-Hoehe - der Mehr-Header ist damit
+    /// exakt so hoch wie Mail/Kalender/Link im Innendisplay quer.
+    @ObservedObject private var headerMetrics: SouveraBridgeBarMetrics
     private let loadItemsOnAppear: Bool
 
-    init(account: String, controller: NCMainTabBarController?) {
+    init(account: String,
+         controller: NCMainTabBarController?,
+         headerMetrics: SouveraBridgeBarMetrics = SouveraBridgeBarMetrics()) {
         _model = StateObject(
             wrappedValue: NCMoreModel(
                 controller: controller
             )
         )
+        _headerMetrics = ObservedObject(wrappedValue: headerMetrics)
         loadItemsOnAppear = true
     }
 
     init(model: NCMoreModel) {
         _model = StateObject(wrappedValue: model)
+        _headerMetrics = ObservedObject(wrappedValue: SouveraBridgeBarMetrics())
         loadItemsOnAppear = false
     }
 
@@ -134,6 +141,9 @@ struct NCMoreView: View {
     private var moreHeader: some View {
         SouveraModuleHeader(
             showsTrailing: false,
+            // Run 24.10.: Gemessene Systembar-Hoehe uebernehmen (Innendisplay
+            // quer); ohne Messung gilt die Standard-Hoehe der Glas-Header.
+            heightOverride: headerMetrics.barHeight,
             leading: {
                 Image("souveraLogo")
                     .resizable()

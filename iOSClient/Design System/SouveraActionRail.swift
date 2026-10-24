@@ -1,11 +1,11 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Run 24.10. (Duo, System-Sidebar):
-// Die rechten Header-Aktionen wandern in das iOS-Seitenband
-// (`UITabBarController.sidebar.bottomBarView`) - also dorthin, wo auch die
-// Tab-Leiste liegt. Keine eigene schwebende Pille mehr: Das System verwaltet
-// Breite/Höhe und die Position innerhalb des Bands.
+// Run 24.10. (Duo, System-Leiste):
+// Die rechten Header-Aktionen wandern in die iOS-Leiste (Rail-Container der
+// System-Tab-Bar) - also dorthin, wo auch die Tab-Leiste liegt, oberhalb der
+// Hauptmenue-Icons. (`sidebar.bottomBarView` wird vom System auf dem Duo
+// ignoriert - Log 24.10., isAvailable=false - daher eigenes Subview.)
 //
 // Die Aktionen kommen aus denselben Quellen wie zuvor:
 // - Mail/Kalender/Link ueber die SouveraHeaderBridge
@@ -131,10 +131,14 @@ enum SouveraSidebarActions {
     }
 }
 
-/// Vertikale System-Toolbar fuer die rechte Sidebar. Wird als
-/// `sidebar.bottomBarView` gesetzt; das System verwaltet Breite und Höhe.
+/// Vertikale ActionBar fuer die System-Leiste. Wird vom Tab-Controller als
+/// Subview in den Rail-Container der Tab-Bar gehaengt - oberhalb der
+/// Hauptmenue-Icons, unterhalb der Status-Kapsel.
 final class SouveraSidebarActionBar: UIView {
     private let stack = UIStackView()
+    /// Glas-Kapsel passend zum System-Band (damit die ActionBar wie ein
+    /// Segment der Leiste wirkt).
+    private let effectView = UIVisualEffectView()
     private(set) var actions: [SouveraRailAction] = []
 
     private let buttonSide: CGFloat = 44
@@ -144,17 +148,36 @@ final class SouveraSidebarActionBar: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         backgroundColor = .clear
+        if #available(iOS 26.0, *) {
+            effectView.effect = UIGlassEffect()
+        } else {
+            effectView.effect = UIBlurEffect(style: .systemChromeMaterial)
+        }
+        effectView.translatesAutoresizingMaskIntoConstraints = false
+        effectView.isUserInteractionEnabled = false
+        addSubview(effectView)
         stack.axis = .vertical
         stack.alignment = .center
         stack.spacing = spacing
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
+            effectView.topAnchor.constraint(equalTo: topAnchor),
+            effectView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            effectView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            effectView.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
             stack.widthAnchor.constraint(greaterThanOrEqualToConstant: buttonSide)
         ])
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // Kapsel: Radius folgt der Hoehe.
+        effectView.layer.cornerRadius = bounds.height / 2
+        effectView.layer.masksToBounds = true
     }
 
     @available(*, unavailable)
@@ -189,7 +212,8 @@ final class SouveraSidebarActionBar: UIView {
         CGSize(width: max(buttonSide, size.width), height: contentHeight)
     }
 
-    private var contentHeight: CGFloat {
+    /// Gesamtcontent-Hoehe (fuer die Platzierung im Rail-Container).
+    var contentHeight: CGFloat {
         guard !actions.isEmpty else { return 0 }
         return CGFloat(actions.count) * buttonSide
             + CGFloat(actions.count - 1) * spacing

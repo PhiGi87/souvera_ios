@@ -207,6 +207,7 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// Feste Inhaltshoehe wie die UIKit-Bar - auf iOS 26/27 58 pt, auf
     /// aelteren Systemen das bisherige Mass (46 pt).
     private var contentHeight: CGFloat {
+        if let heightOverride, heightOverride > 1 { return heightOverride }
         if #available(iOS 26.0, *) { return 58 }
         return 46
     }
@@ -223,6 +224,9 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// Aktionen in die separate Pille; der Header zeigt dann nur noch
     /// Leading/Titel.
     var showsTrailing: Bool = true
+    /// Run 24.10.: Optionale Hohe (z. B. gemessene Systembar-Hoehe), damit
+    /// der Mehr-Header exakt so hoch wie die Bridge-Bars ist.
+    var heightOverride: CGFloat? = nil
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -419,7 +423,9 @@ final class SouveraHeaderBridge: ObservableObject {
                 menu: menu.entries.map { Self.railEntry($0) }
             ) {}
         }
-        return itemActions + menuActions
+        // Run 24.10.: BUGFIX - "leading" ("Heute", "Kalenderauswahl") wurde
+        // berechnet, aber nie zurueckgegeben (Log: actions=1 statt 3).
+        return leading + itemActions + menuActions
     }
 
     private static func railEntry(_ entry: MenuEntry) -> SouveraRailMenuEntry {
