@@ -91,7 +91,7 @@ struct NCMoreView: View {
         }
         .listStyle(.insetGrouped)
         .tint(Color.Souvera.brandPrimaryDeep)
-        .safeAreaInset(edge: .top, spacing: 0) {
+        .safeAreaInset(edge: .top, spacing: 12) {
             moreHeader
         }
         .sheet(isPresented: $showAccountSettings) {
@@ -127,26 +127,23 @@ struct NCMoreView: View {
                                 autoUploadStart: model.autoUploadStart)
     }
 
-    /// Run 24.10.: Permanenter blauer Mehr-Header (Souvera-Logo). Die
-    /// UIKit-Bar ist auf der Mehr-Root ausgeblendet; die rechten Aktionen
+    /// Run 24.10.: Permanenter blauer Mehr-Header - bewusst derselbe
+    /// `SouveraModuleHeader` wie bei Mail/Kalender/Link, damit Hoehe,
+    /// Verlauf und Padding exakt identisch sind. Die rechten Aktionen
     /// liegen im System-Seitenband.
     private var moreHeader: some View {
-        HStack(spacing: 8) {
-            Image("souveraLogo")
-                .resizable()
-                .scaledToFit()
-                .frame(height: 30)
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .frame(height: 58)
-        .frame(maxWidth: .infinity)
-        .environment(\.colorScheme, .light)
-        .background(
-            LinearGradient(colors: SouveraAppearance.gradientColors,
-                           startPoint: .top,
-                           endPoint: .bottom)
-                .ignoresSafeArea()
+        SouveraModuleHeader(
+            showsTrailing: false,
+            leading: {
+                Image("souveraLogo")
+                    .resizable()
+                    .scaledToFit()
+                    .frame(height: 32)
+                    // Module-Leading liegt bei 12 pt - das Logo sass bisher
+                    // bei 20 pt (Flucht mit der Menueliste).
+                    .padding(.leading, 8)
+            },
+            trailing: { EmptyView() }
         )
         .accessibilityHidden(true)
     }

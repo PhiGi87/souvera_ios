@@ -566,8 +566,12 @@ struct LinkView: View {
 
     private func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
-        // Run 24.10.: Rail-Beschreibung immer neu aufbauen, damit beim
-        // Wechsel Home <-> Chat keine alten Aktionen stehen bleiben.
+        // Run 24.10.: Band-Inhalte nur im Außendisplay hochkant; das
+        // Innendisplay bleibt unveraendert (Trailing an der Bandkante).
+        bridge.sidebarBandEnabled = layout.usesSidebarActions
+        // Rail-Beschreibung immer neu aufbauen, damit beim Wechsel
+        // Home <-> Chat keine alten Aktionen stehen bleiben.
+        bridge.railLeadingItems = []
         bridge.railTrailingItems = []
         bridge.railTrailingMenus = []
         if case let .chat(token, title) = viewModel.route {
@@ -626,6 +630,10 @@ struct LinkView: View {
             bridge.trailingMenus = trailingMenus
             bridge.leadingCustoms = []
             bridge.trailingCustoms = []
+            if layout.usesSidebarActions {
+                bridge.railTrailingItems = trailing
+                bridge.railTrailingMenus = trailingMenus
+            }
         } else {
             // Home: Suche links, Status + "+" rechts.
             bridge.title = NSLocalizedString("_link_", comment: "")
@@ -637,17 +645,19 @@ struct LinkView: View {
             ]
             bridge.trailingItems = []
             bridge.trailingMenus = []
-            bridge.railTrailingItems = [
-                .init(id: "status", icon: "person.crop.circle",
-                      accessibilityLabel: NSLocalizedString("_set_user_status_", comment: "")) {
-                    showUserStatus = true
-                },
-                .init(id: "create", icon: "plus",
-                      accessibilityLabel: NSLocalizedString("_link_create_channel_", comment: "")) {
-                    channelName = ""
-                    showCreateChannel = true
-                }
-            ]
+            if layout.usesSidebarActions {
+                bridge.railTrailingItems = [
+                    .init(id: "status", icon: "person.crop.circle",
+                          accessibilityLabel: NSLocalizedString("_set_user_status_", comment: "")) {
+                        showUserStatus = true
+                    },
+                    .init(id: "create", icon: "plus",
+                          accessibilityLabel: NSLocalizedString("_link_create_channel_", comment: "")) {
+                        channelName = ""
+                        showCreateChannel = true
+                    }
+                ]
+            }
             bridge.leadingCustoms = []
             bridge.trailingCustoms = [SouveraHeaderBridge.Custom(
                 id: "status-plus", view: {

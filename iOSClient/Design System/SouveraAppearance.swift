@@ -21,6 +21,15 @@ enum SouveraAppearance {
         return SouveraFormFactor.isRegularWidth
     }
 
+    /// Obere Verlauffarbe - wird auch fuer den Füller oberhalb der
+    /// UIKit-Bar verwendet (nahtloser Uebergang).
+    static let gradientTopColor = UIColor(
+        red: 0x2E / 255.0,
+        green: 0x9B / 255.0,
+        blue: 0xD8 / 255.0,
+        alpha: 1
+    )
+
     /// Vertikaler Souvera-Gradient als SwiftUI-Farben.
     /// P68w: deutlich dunkleres Blau als der frühere Verlauf
     /// (#4BBFEA → #496BBF war oben fast identisch zur alten Flachfarbe).
@@ -364,25 +373,38 @@ final class SouveraHeaderBridge: ObservableObject {
     @Published var trailingItems: [Item] = []
     @Published var trailingMenus: [MenuGroup] = []
     @Published var trailingCustoms: [Custom] = []
-    /// Run 24.10. (Duo-Außendisplay): Eigene Beschreibung fuer die rechte
-    /// Aktions-Pille. Bleiben diese Felder leer, nutzt die Pille die
-    /// normalen Trailing-Felder (z. B. Mail). Kalender/Link befuellen sie,
-    /// weil ihre UIKit-Pills als einzelne Icon-Buttons erscheinen sollen.
+    /// Run 24.10. (Duo): Explizite Band-Inhalte. Die Felder werden von den
+    /// Modulen befuellt, wenn `sidebarBandEnabled` gesetzt ist - es gibt
+    /// bewusst KEINEN Fallback auf die Header-Felder mehr, damit jedes
+    /// Modul selbst entscheidet, was ins Seitenband gehoert.
+    @Published var railLeadingItems: [Item] = []
     @Published var railTrailingItems: [Item] = []
     @Published var railTrailingMenus: [MenuGroup] = []
+    /// Das Modul nutzt das System-Seitenband aktuell (true) oder belaesst
+    /// alles im Header (false).
+    @Published var sidebarBandEnabled: Bool = false
     @Published var title: String = ""
 
-    /// Aktionen fuer die rechte Pille (nur Trailing - Leading bleibt im
-    /// Header). Menues werden als SwiftUI-Menue abgebildet.
+    /// Aktionen fuer das Seitenband: zuerst Leading (z. B. Kalender
+    /// "Heute"), dann Trailing. Text-Items ("Heute") werden als
+    /// Schrift-Button gerendert, Menues als UIKit-Menue.
     func railActions() -> [SouveraRailAction] {
-        let useRailFields = !railTrailingItems.isEmpty || !railTrailingMenus.isEmpty
-        let items = useRailFields ? railTrailingItems : trailingItems
-        let menus = useRailFields ? railTrailingMenus : trailingMenus
-
-        let itemActions = items.map { item in
+        let leading = railLeadingItems.map { item in
             SouveraRailAction(
                 id: item.id,
                 icon: item.icon,
+                title: item.text,
+                tint: item.isGreen ? .green : (item.isDestructive ? .red : nil),
+                accessibilityLabel: item.accessibilityLabel
+            ) {
+                item.handler()
+            }
+        }
+        let itemActions = railTrailingItems.map { item in
+            SouveraRailAction(
+                id: item.id,
+                icon: item.icon,
+                title: item.text,
                 tint: item.isGreen ? .green : (item.isDestructive ? .red : nil),
                 accessibilityLabel: item.accessibilityLabel
             ) {
@@ -453,11 +475,6 @@ final class SouveraBarCoordinator {
         (navigationController as? SouveraLayoutModeProviding)?.layoutMode.usesBridgeHeader ?? false
     }
 
-    /// Rechte Aktionen liegen im System-Seitenband statt im Header.
-    private var usesSidebarActions: Bool {
-        (navigationController as? SouveraLayoutModeProviding)?.layoutMode.usesSidebarActions ?? false
-    }
-
     func rebuild() {
         // Run 25.09. (Feedback: doppelter Header auf iOS 17/18-iPhones):
         // Die Bridge gehoert NUR zur iPad-Bridge-Bar - auf dem iPhone
@@ -468,16 +485,14 @@ final class SouveraBarCoordinator {
         // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
         // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
         // Nur bei echter Inhaltsaenderung neu bauen/loggen.
-        let sidebarActions = usesSidebarActions
-        let signature = "\(sidebarActions)|\(Self.signature(bridge))"
+        let signature = Self.signature(bridge)
         if signature == lastSignature { return }
         lastSignature = signature
         item.title = bridge.title.isEmpty ? nil : bridge.title
+        // Run 24.10.: Was in der Bar steht, entscheiden die Module selbst
+        // (der Kalender traegt im Band-Modus Leading/Trailing direkt um).
         let leading = Self.bars(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
-        // Im Sidebar-Modus wandern die rechten Aktionen in das Systemband.
-        let trailing = sidebarActions
-            ? []
-            : Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
+        let trailing = Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
         // Run 21.09. (Feedback iPadOS 17: Buttons fehlten): iPadOS 26
         // rendert left/rightBarButtonItems in der zentrierten Tab-Pill-Bar
         // NICHT (nur Item-Groups); iOS 17 rendert Plain-Image-Items in

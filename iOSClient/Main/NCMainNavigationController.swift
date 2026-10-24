@@ -19,6 +19,23 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     /// Pille exakt dieselben Aktionen wie die UIKit-Bar zeigt.
     let actionRailSource = SouveraActionRailSource()
 
+    /// Run 24.10.: Füllfläche zwischen Fensteroberkante und Navigationsbar.
+    /// iOS 27.1 reserviert im Seitenband-Modus oben Platz fuer die
+    /// Status-Kapsel - opake UIKit-Bars ruecken dann herunter und der
+    /// weisse View-Hintergrund blitzt auf. Die Fläche fuellt diese Lücke
+    /// mit der oberen Verlaufsfarbe (nahtlos zur Bar).
+    private lazy var headerFillerView: UIView = {
+        let view = UIView()
+        view.backgroundColor = SouveraAppearance.gradientTopColor
+        view.isHidden = true
+        return view
+    }()
+
+    /// Hoehe des Füllers oberhalb der Bar (fuer Diagnose in Subclasses).
+    var headerFillerHeight: CGFloat {
+        headerFillerView.isHidden ? -1 : headerFillerView.frame.height
+    }
+
     var controller: NCMainTabBarController? {
         self.tabBarController as? NCMainTabBarController
     }
@@ -77,6 +94,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         setNavigationBarAppearance()
         setNavigationBarHidden(false, animated: false)
+        view.insertSubview(headerFillerView, belowSubview: navigationBar)
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")
@@ -228,6 +246,26 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         let hosting = UIHostingController(rootView: rootView)
         hosting.modalPresentationStyle = .pageSheet
         present(hosting, animated: true)
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        layoutHeaderFiller()
+    }
+
+    /// Run 24.10.: Fuellt den Streifen oberhalb der Navigationsbar, falls
+    /// das System ihn herunterrueckt (Safe-Area der Status-Kapsel).
+    func layoutHeaderFiller() {
+        guard !isNavigationBarHidden, !navigationBar.isHidden else {
+            if !headerFillerView.isHidden { headerFillerView.isHidden = true }
+            return
+        }
+        let height = max(0, min(navigationBar.frame.minY, view.bounds.height))
+        let frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
+        headerFillerView.isHidden = height <= 0.5
+        if headerFillerView.frame != frame {
+            headerFillerView.frame = frame
+        }
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {

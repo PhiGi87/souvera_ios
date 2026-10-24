@@ -84,54 +84,54 @@ struct SouveraLayoutModeTests {
                                            width: 900) == false)
     }
 
-    @Test("Sidebar actions follow the visible system sidebar band")
+    @Test("Sidebar band hosts header buttons only on the outer display in portrait")
     func sidebarActionsActivation() {
         let view = CGRect(x: 0, y: 0, width: 466, height: 678)
-        let trailingRail = CGRect(x: 397, y: 0, width: 69, height: 678)
-        let bottomTabBar = CGRect(x: 0, y: 868, width: 669, height: 83)
+        let rail = CGRect(x: 397, y: 0, width: 69, height: 678)
 
-        // Außendisplay hochkant: Band rechts -> Aktionen ins Band.
+        // Außendisplay hochkant: Buttons ins Seitenband.
         #expect(SouveraSidebarActions.isActive(
-            sidebarAvailable: true,
-            sidebarHidden: false,
-            tabBarFrame: trailingRail,
+            horizontalSizeClass: .compact,
+            isPortrait: true,
+            tabBarFrame: rail,
             viewBounds: view,
             tabBarHidden: false
         ))
 
-        // Innendisplay quer: gleiches Band -> ebenfalls aktiv.
-        let innerLandscape = CGRect(x: 882, y: 0, width: 69, height: 669)
+        // Außendisplay quer: Buttons bleiben im Header.
         #expect(SouveraSidebarActions.isActive(
-            sidebarAvailable: true,
-            sidebarHidden: false,
-            tabBarFrame: innerLandscape,
+            horizontalSizeClass: .compact,
+            isPortrait: false,
+            tabBarFrame: rail,
+            viewBounds: CGRect(x: 0, y: 0, width: 678, height: 466),
+            tabBarHidden: false
+        ) == false)
+
+        // Innendisplay (regular): unveraendert, Header zustaendig.
+        #expect(SouveraSidebarActions.isActive(
+            horizontalSizeClass: .regular,
+            isPortrait: false,
+            tabBarFrame: CGRect(x: 882, y: 0, width: 69, height: 669),
             viewBounds: CGRect(x: 0, y: 0, width: 951, height: 669),
             tabBarHidden: false
-        ))
+        ) == false)
 
-        // Innendisplay hochkant: untere Tab-Leiste -> Header bleibt zuständig.
+        // Untere Tab-Leiste (Innendisplay hochkant).
         #expect(SouveraSidebarActions.isActive(
-            sidebarAvailable: true,
-            sidebarHidden: false,
-            tabBarFrame: bottomTabBar,
+            horizontalSizeClass: .compact,
+            isPortrait: true,
+            tabBarFrame: CGRect(x: 0, y: 868, width: 669, height: 83),
             viewBounds: CGRect(x: 0, y: 0, width: 669, height: 951),
             tabBarHidden: false
         ) == false)
 
-        // Ausgeblendete/fehlende Sidebar.
+        // Ausgeblendete Leiste.
         #expect(SouveraSidebarActions.isActive(
-            sidebarAvailable: false,
-            sidebarHidden: false,
-            tabBarFrame: trailingRail,
+            horizontalSizeClass: .compact,
+            isPortrait: true,
+            tabBarFrame: rail,
             viewBounds: view,
-            tabBarHidden: false
-        ) == false)
-        #expect(SouveraSidebarActions.isActive(
-            sidebarAvailable: true,
-            sidebarHidden: true,
-            tabBarFrame: trailingRail,
-            viewBounds: view,
-            tabBarHidden: false
+            tabBarHidden: true
         ) == false)
     }
 

@@ -476,39 +476,61 @@ class NCMainTabBarController: UITabBarController {
     private var lastSidebarActionsLog = ""
     private var lastSidebarActionsActive: Bool?
 
-    /// Wird von den Tabs gelesen, um ihre Header-Aktionen ins Seitenband zu
-    /// verschieben. Gilt überall, wo das System-Seitenband sichtbar ist
-    /// (Außendisplay hoch/quer, Innendisplay quer).
+    /// Run 24.10.: Außendisplay HOCHKANT - dort wandern die rechten
+    /// Header-Aktionen von Mail/Kalender/Link/Dateien/Mehr ins Seitenband.
+    /// Quer bleiben sie im Header, das Innendisplay ist unveraendert.
     var isSidebarActionsActive: Bool {
-        // `sidebar.isAvailable` ist ab iOS 27 verfuegbar.
-        guard #available(iOS 27.0, *) else { return false }
-        return SouveraSidebarActions.isActive(
-            sidebarAvailable: sidebar.isAvailable,
-            sidebarHidden: sidebar.isHidden,
+        SouveraSidebarActions.isActive(
+            horizontalSizeClass: traitCollection.horizontalSizeClass,
+            isPortrait: view.bounds.height > view.bounds.width,
             tabBarFrame: tabBar.frame,
             viewBounds: view.bounds,
             tabBarHidden: tabBar.isHidden
         )
     }
 
+    /// Das System-Seitenband ist sichtbar (jede Groesse/Orientierung).
+    private var sidebarBandVisible: Bool {
+        guard !tabBar.isHidden else { return false }
+        guard tabBar.frame.width > 0, tabBar.frame.height > 0 else { return false }
+        guard tabBar.frame.intersects(view.bounds) else { return false }
+        guard tabBar.frame.height > tabBar.frame.width else { return false }
+        guard tabBarFrameMidX > view.bounds.midX else { return false }
+        return true
+    }
+
+    private var tabBarFrameMidX: CGFloat {
+        tabBar.frame.midX
+    }
+
+    /// Diagnose: Die Sidebar-API meldet auf dem Duo durchweg false/false -
+    /// zur Erkennung unbrauchbar, deshalb nur Logging.
+    private var sidebarApiDiagnostics: String {
+        if #available(iOS 27.0, *) {
+            return "isAvailable=\(sidebar.isAvailable) isHidden=\(sidebar.isHidden)"
+        }
+        return "api<27"
+    }
+
     /// Baut die System-Toolbar aus dem aktuell gewaehlten Tab neu auf.
     private func refreshSidebarActions() {
-        let active = isSidebarActionsActive
-        updateHostedSidebarActionModes(active)
+        let bandVisible = sidebarBandVisible
+        let outerActive = isSidebarActionsActive
+        updateHostedSidebarActionModes(outer: outerActive, bandVisible: bandVisible)
 
-        if lastSidebarActionsActive != active {
-            lastSidebarActionsActive = active
+        if lastSidebarActionsActive != outerActive {
+            lastSidebarActionsActive = outerActive
             // UIKit-Tabs (Dateien/Mehr) muessen ihre Bar-Items neu setzen:
-            // im Sidebar-Modus raus, ausserhalb wieder rein.
+            // im Band-Modus raus, ausserhalb wieder rein.
             (selectedViewController as? NCMainNavigationController)?
                 .refreshHeaderItemsForSidebarMode()
         }
 
-        let actions = active ? currentSidebarActions() : []
+        let actions = currentSidebarActions(outerActive: outerActive, bandVisible: bandVisible)
         let signature = actions.map(\.signature).joined(separator: "|")
         if signature != lastSidebarActionsSignature {
             lastSidebarActionsSignature = signature
-            if actions.isEmpty {
+            if actions.isEmpty || !bandVisible {
                 setSidebarBottomBar(nil)
             } else {
                 // Neue Instanz erzwingt eine frische Höhenmessung durch das
@@ -520,19 +542,11 @@ class NCMainTabBarController: UITabBarController {
             }
         }
 
-        let available = sidebarAvailable
-        let log = "active=\(active) available=\(available) actions=\(actions.count) tab=\(Int(tabBar.frame.width))x\(Int(tabBar.frame.height))@(\(Int(tabBar.frame.minX)),\(Int(tabBar.frame.minY)))"
+        let log = "outer=\(outerActive) band=\(bandVisible) actions=\(actions.count) tab=\(Int(tabBar.frame.width))x\(Int(tabBar.frame.height))@(\(Int(tabBar.frame.minX)),\(Int(tabBar.frame.minY))) \(sidebarApiDiagnostics)"
         if log != lastSidebarActionsLog {
             lastSidebarActionsLog = log
             SouveraLog.write("SidebarActions", "[SidebarActions] \(log)")
         }
-    }
-
-    private var sidebarAvailable: Bool {
-        if #available(iOS 27.0, *) {
-            return sidebar.isAvailable && !sidebar.isHidden
-        }
-        return false
     }
 
     private func setSidebarBottomBar(_ view: UIView?) {
@@ -542,20 +556,24 @@ class NCMainTabBarController: UITabBarController {
         }
     }
 
-    private func currentSidebarActions() -> [SouveraRailAction] {
+    private func currentSidebarActions(outerActive: Bool, bandVisible: Bool) -> [SouveraRailAction] {
         guard let nav = selectedViewController else { return [] }
         if let hosted = nav as? SouveraHostedNavigationController {
+            // Nur Module mit Opt-in liefern Band-Inhalte (Kalender in beiden
+            // Layouts, Mail/Link ausschliesslich Außendisplay hochkant).
+            guard bandVisible, hosted.headerBridge.sidebarBandEnabled else { return [] }
             return hosted.headerBridge.railActions()
         }
         if let base = nav as? NCMainNavigationController {
+            guard outerActive else { return [] }
             return base.actionRailSource.actions
         }
         return []
     }
 
-    private func updateHostedSidebarActionModes(_ active: Bool) {
+    private func updateHostedSidebarActionModes(outer: Bool, bandVisible: Bool) {
         for controller in viewControllers ?? [] {
-            (controller as? SouveraHostedNavigationController)?.layoutMode.updateSidebarActions(active)
+            (controller as? SouveraHostedNavigationController)?.layoutMode.updateSidebarActions(outer: outer, bandVisible: bandVisible)
         }
     }
 

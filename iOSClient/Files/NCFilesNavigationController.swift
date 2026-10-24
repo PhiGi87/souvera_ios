@@ -59,7 +59,19 @@ class NCFilesNavigationController: NCMainNavigationController {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         applyBlueHeader()
+        logHeaderLayout()
     }
+
+    /// Run 24.10.: Diagnose fuer den weissen Rand ueber der Bar
+    /// (Safe-Area-Top der Status-Kapsel im Seitenband-Modus).
+    private func logHeaderLayout() {
+        let log = "bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) minY=\(Int(navigationBar.frame.minY)) safeTop=\(Int(view.safeAreaInsets.top)) filler=\(Int(headerFillerHeight)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
+        guard log != lastHeaderLog else { return }
+        lastHeaderLog = log
+        SouveraLog.write("Files", "[FilesHeader] \(log)")
+    }
+
+    private var lastHeaderLog = ""
 
     // MARK: - Right
 

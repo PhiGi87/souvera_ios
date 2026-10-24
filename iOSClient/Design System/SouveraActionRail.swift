@@ -112,12 +112,17 @@ final class SouveraActionRailSource: ObservableObject {
 /// hoch/quer. Bei der unteren Tab-Leiste (Innendisplay hochkant) bleibt der
 /// Header zustaendig.
 enum SouveraSidebarActions {
-    static func isActive(sidebarAvailable: Bool,
-                         sidebarHidden: Bool,
+    /// Header-Buttons wandern nur im Außendisplay HOCHKANT ins Seitenband -
+    /// quer bleiben sie im Header, das Innendisplay ist unveraendert.
+    /// (`sidebar.isAvailable` meldet auf dem Duo durchweg `false` und ist
+    /// zur Erkennung unbrauchbar - Log 24.10., Build 202610241112.)
+    static func isActive(horizontalSizeClass: UIUserInterfaceSizeClass,
+                         isPortrait: Bool,
                          tabBarFrame: CGRect,
                          viewBounds: CGRect,
                          tabBarHidden: Bool) -> Bool {
-        guard sidebarAvailable, !sidebarHidden, !tabBarHidden else { return false }
+        guard horizontalSizeClass == .compact, isPortrait else { return false }
+        guard !tabBarHidden else { return false }
         guard tabBarFrame.width > 0, tabBarFrame.height > 0 else { return false }
         guard tabBarFrame.intersects(viewBounds) else { return false }
         guard tabBarFrame.height > tabBarFrame.width else { return false }
@@ -148,7 +153,7 @@ final class SouveraSidebarActionBar: UIView {
             stack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
             stack.centerXAnchor.constraint(equalTo: centerXAnchor),
-            stack.widthAnchor.constraint(equalToConstant: buttonSide)
+            stack.widthAnchor.constraint(greaterThanOrEqualToConstant: buttonSide)
         ])
     }
 
@@ -195,7 +200,13 @@ final class SouveraSidebarActionBar: UIView {
         let button = UIButton(type: .system)
         button.translatesAutoresizingMaskIntoConstraints = false
         button.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
-        button.setImage(iconImage(action.icon), for: .normal)
+        // Run 24.10.: Text-Items (z. B. "Heute") als Schrift-Button, sonst Icon.
+        if action.icon.isEmpty, let title = action.title, !title.isEmpty {
+            button.setTitle(title, for: .normal)
+            button.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
+        } else {
+            button.setImage(iconImage(action.icon), for: .normal)
+        }
         button.accessibilityLabel = action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel
 
         if let uiMenu = action.uiMenu {

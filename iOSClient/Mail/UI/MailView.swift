@@ -386,25 +386,18 @@ struct MailView: View {
                         viewModel.back()
                     }
                     .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
-                }
-                // Run 24.10.: Ordner-Toggle ist IMMER sichtbar - im Split
-                // klappt er die Ordnerspalte ein/aus, kompakt oeffnet er
-                // die Ordnerliste.
-                if isWideLayout {
+                } else if isWideLayout {
+                    // Run 24.10.: Ordner-Toggle im Split bleibt immer
+                    // sichtbar und klappt die Ordnerspalte ein/aus.
                     SouveraHeaderButton(icon: "sidebar.left") {
                         foldersCollapsed.toggle()
                     }
                     .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                } else {
+                } else if !isFolders {
                     SouveraHeaderButton(icon: "folder") {
                         viewModel.showFolders()
                     }
                     .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                }
-                if !(focusReaderActive && viewModel.route.isDetail) {
-                    AutoRefreshRingView(viewModel: viewModel)
-                        .frame(width: 44, height: 44)
-                        .modifier(SouveraHeaderGlass(shape: Circle()))
                 }
             },
             trailing: {
@@ -556,16 +549,6 @@ struct MailView: View {
             id: "back", icon: "chevron.backward",
             accessibilityLabel: NSLocalizedString("_back_", comment: "")
         ) { viewModel.back() }
-        let ringCustom: SouveraHeaderBridge.Custom? = {
-            guard !(focusReaderActive && viewModel.route.isDetail) else { return nil }
-            let ring = UIHostingController(
-                rootView: AutoRefreshRingView(viewModel: viewModel)
-                    .frame(width: 34, height: 34)
-                    .padding(.trailing, 6)
-            ).view!
-            ring.backgroundColor = .clear
-            return SouveraHeaderBridge.Custom(id: "ring", view: ring)
-        }()
 
         // Run 24.10.: Ordner-Toggle IMMER im Leading-Bereich.
         let folderToggle = SouveraHeaderBridge.Item(
@@ -580,10 +563,40 @@ struct MailView: View {
             }
         }
 
+        // Run 24.10.: Band-Inhalte nur im Außendisplay hochkant
+        // (usesSidebarActions); das Innendisplay bleibt unveraendert.
+        bridge.sidebarBandEnabled = layout.usesSidebarActions
+        if layout.usesSidebarActions {
+            bridge.railLeadingItems = []
+            if case let .detail(message) = viewModel.route {
+                bridge.railTrailingItems = [
+                    .init(id: "reply", icon: "arrowshape.turn.up.left",
+                          accessibilityLabel: NSLocalizedString("_mail_reply_", comment: "")) {
+                        viewModel.startCompose(mode: .reply, message: message)
+                    }
+                ]
+                bridge.railTrailingMenus = [detailMoreMenu(message)]
+            } else {
+                bridge.railTrailingItems = [
+                    .init(id: "search", icon: "magnifyingglass",
+                          accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
+                        searchActive = true
+                    },
+                    .init(id: "compose", icon: "square.and.pencil",
+                          accessibilityLabel: NSLocalizedString("_mail_compose_", comment: "")) {
+                        viewModel.startCompose(mode: .new)
+                    }
+                ]
+                bridge.railTrailingMenus = [listMoreMenu()]
+            }
+        } else {
+            bridge.railLeadingItems = []
+            bridge.railTrailingItems = []
+            bridge.railTrailingMenus = []
+        }
+
         if case let .detail(message) = viewModel.route {
             leading.append(backItem)
-            leading.append(folderToggle)
-            if let ringCustom { leadingCustoms.append(ringCustom) }
             trailing.append(SouveraHeaderBridge.Item(
                 id: "reply", icon: "arrowshape.turn.up.left",
                 accessibilityLabel: NSLocalizedString("_mail_reply_", comment: "")
@@ -591,7 +604,6 @@ struct MailView: View {
             menus.append(detailMoreMenu(message))
         } else {
             leading.append(folderToggle)
-            if let ringCustom { leadingCustoms.append(ringCustom) }
             trailing.append(SouveraHeaderBridge.Item(
                 id: "search", icon: "magnifyingglass",
                 accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")
