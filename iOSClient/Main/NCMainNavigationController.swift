@@ -204,7 +204,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         let assistant = NCAssistant(
             assistantModel: NCAssistantModel(controller: controller, inputModel: inputModel),
             chatModel: NCAssistantChatModel(controller: controller, inputModel: inputModel),
-            conversationsModel: NCAssistantChatConversationsModel(controller: controller, inputModel: inputModel)
+            conversationsModel: NCAssistantChatConversationsModel(controller: controller)
         )
         let hostingController = UIHostingController(rootView: assistant)
         present(hostingController, animated: true, completion: nil)
