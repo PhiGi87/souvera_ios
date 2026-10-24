@@ -51,31 +51,17 @@ struct SouveraRailMenuEntry: Identifiable {
 }
 
 extension SouveraRailMenuEntry {
-    /// Baut die Pille aus einem bestehenden `UIMenu` (z. B. dem "... "-Menue
-    /// von Dateien/Mehr), ohne die Menue-Logik zu duplizieren.
-    static func entries(from menu: UIMenu) -> [SouveraRailMenuEntry] {
-        menu.children.compactMap { element in
+    /// Menue-Signatur fuer den Rail-Host (erkennt echte Aenderungen).
+    static func signature(of menu: UIMenu) -> String {
+        menu.children.map { element in
             if let action = element as? UIAction {
-                return SouveraRailMenuEntry(
-                    id: action.identifier.rawValue,
-                    title: action.title,
-                    icon: nil,
-                    isChecked: action.state == .on,
-                    isDestructive: action.attributes.contains(.destructive)
-                ) {
-                    action.handler?(action)
-                }
+                return "\(action.title):\(action.state == .on):\(action.attributes.contains(.destructive))"
             }
             if let submenu = element as? UIMenu {
-                return SouveraRailMenuEntry(
-                    id: submenu.identifier.rawValue,
-                    title: submenu.title,
-                    icon: nil,
-                    children: entries(from: submenu)
-                ) {}
+                return "\(submenu.title):[\(signature(of: submenu))]"
             }
-            return nil
-        }
+            return ""
+        }.joined(separator: ",")
     }
 }
 
@@ -87,6 +73,10 @@ struct SouveraRailAction: Identifiable {
     var tint: Color?
     var accessibilityLabel: String
     var menu: [SouveraRailMenuEntry]?
+    /// UIKit-Menue (z. B. das "... "-Menue von Dateien). Wird ueber einen
+    /// UIButton mit `showsMenuAsPrimaryAction` gerendert, weil UIActions
+    /// ihre Handler nicht oeffentlich preisgeben.
+    var uiMenu: UIMenu?
     let handler: () -> Void
 
     init(id: String,
@@ -95,6 +85,7 @@ struct SouveraRailAction: Identifiable {
          tint: Color? = nil,
          accessibilityLabel: String = "",
          menu: [SouveraRailMenuEntry]? = nil,
+         uiMenu: UIMenu? = nil,
          handler: @escaping () -> Void) {
         self.id = id
         self.icon = icon
@@ -102,13 +93,15 @@ struct SouveraRailAction: Identifiable {
         self.tint = tint
         self.accessibilityLabel = accessibilityLabel
         self.menu = menu
+        self.uiMenu = uiMenu
         self.handler = handler
     }
 
     /// Stabiler Vergleichswert fuer den Rail-Host (erkennt echte Aenderungen).
     var signature: String {
         let menus = (menu ?? []).map(\.signature).joined(separator: ";")
-        return "\(id):\(icon):\(accessibilityLabel):\(String(describing: tint)):[\(menus)]"
+        let uikitMenu = uiMenu.map { SouveraRailMenuEntry.signature(of: $0) } ?? ""
+        return "\(id):\(icon):\(accessibilityLabel):\(String(describing: tint)):[\(menus)]:[\(uikitMenu)]"
     }
 }
 
@@ -204,7 +197,11 @@ struct SouveraActionRailView: View {
 
     @ViewBuilder
     private func actionButton(_ action: SouveraRailAction) -> some View {
-        if let entries = action.menu {
+        if let uiMenu = action.uiMenu {
+            SouveraRailMenuButton(menu: uiMenu, icon: action.icon)
+                .frame(width: 44, height: 44)
+                .accessibilityLabel(Text(action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel))
+        } else if let entries = action.menu {
             Menu {
                 ForEach(entries) { entry in
                     menuEntry(entry)
@@ -231,17 +228,21 @@ struct SouveraActionRailView: View {
             .contentShape(Circle())
     }
 
-    @ViewBuilder
-    private func menuEntry(_ entry: SouveraRailMenuEntry) -> some View {
+    /// Rekursive Menues koennen keinen opaken Rueckgabetyp ableiten -
+    /// deshalb hier bewusst `AnyView`.
+    private func menuEntry(_ entry: SouveraRailMenuEntry) -> AnyView {
         if let children = entry.children, !children.isEmpty {
-            Menu {
-                ForEach(children) { child in
-                    menuEntry(child)
+            return AnyView(
+                Menu {
+                    ForEach(children) { child in
+                        menuEntry(child)
+                    }
+                } label: {
+                    Label(entry.title, systemImage: entry.icon ?? "chevron.right")
                 }
-            } label: {
-                Label(entry.title, systemImage: entry.icon ?? "chevron.right")
-            }
-        } else {
+            )
+        }
+        return AnyView(
             Button(role: entry.isDestructive ? .destructive : nil) {
                 entry.handler()
             } label: {
@@ -253,6 +254,26 @@ struct SouveraActionRailView: View {
                     Text(entry.title)
                 }
             }
-        }
+        )
+    }
+}
+
+/// Icon-Button, der ein bestehendes `UIMenu` ueber UIKit praesentiert.
+private struct SouveraRailMenuButton: UIViewRepresentable {
+    let menu: UIMenu
+    let icon: String
+
+    func makeUIView(context: Context) -> UIButton {
+        let button = UIButton(type: .system)
+        button.showsMenuAsPrimaryAction = true
+        button.contentHorizontalAlignment = .center
+        return button
+    }
+
+    func updateUIView(_ button: UIButton, context: Context) {
+        button.menu = menu
+        button.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+        let configuration = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
+        button.setImage(UIImage(systemName: icon, withConfiguration: configuration), for: .normal)
     }
 }

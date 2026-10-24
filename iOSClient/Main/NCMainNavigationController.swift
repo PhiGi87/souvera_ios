@@ -87,37 +87,23 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         assistantButtonItem.image = UIImage(systemName: "sparkles")
         assistantButtonItem.title = NSLocalizedString("_assistant_", comment: "")
         assistantButtonItem.tintColor = NCBrandColor.shared.iconImageColor
-        assistantButtonItem.primaryAction = UIAction(handler: { _ in
-            let inputModel = NCAssistantInputModel()
-            let assistant = NCAssistant(assistantModel: NCAssistantModel(controller: self.controller, inputModel: inputModel), chatModel: NCAssistantChatModel(controller: self.controller, inputModel: inputModel), conversationsModel: NCAssistantChatConversationsModel(controller: self.controller))
-            let hostingController = UIHostingController(rootView: assistant)
-            self.present(hostingController, animated: true, completion: nil)
-        })
+        assistantButtonItem.primaryAction = UIAction { [weak self] _ in
+            self?.presentAssistant()
+        }
 
         notificationsButtonItem.image = UIImage(systemName: "bell.fill")
         notificationsButtonItem.title = NSLocalizedString("_notifications_", comment: "")
         notificationsButtonItem.tintColor = NCBrandColor.shared.iconImageColor
-        notificationsButtonItem.primaryAction = UIAction(handler: { _ in
-            if let navigationController = UIStoryboard(name: "NCNotification", bundle: nil).instantiateInitialViewController() as? UINavigationController,
-               let viewController = navigationController.topViewController as? NCNotification {
-                viewController.modalPresentationStyle = .pageSheet
-                viewController.session = self.session
-                self.present(navigationController, animated: true, completion: nil)
-            }
-        })
+        notificationsButtonItem.primaryAction = UIAction { [weak self] _ in
+            self?.presentNotifications()
+        }
 
         transfersButtonItem.image = UIImage(systemName: "arrow.left.arrow.right.circle.fill")
         transfersButtonItem.title = NSLocalizedString("_transfers_", comment: "")
         transfersButtonItem.tintColor = NCBrandColor.shared.iconImageColor
-        transfersButtonItem.primaryAction = UIAction(handler: { _ in
-            let rootView = TransfersView(session: self.session, onClose: { [weak self = self] in
-                self?.dismiss(animated: true)
-            })
-            let hosting = UIHostingController(rootView: rootView)
-            hosting.modalPresentationStyle = .pageSheet
-
-            self.present(hosting, animated: true)
-        })
+        transfersButtonItem.primaryAction = UIAction { [weak self] _ in
+            self?.presentTransfers()
+        }
 
         // PLUS BUTTON MENU
         let widthAnchor: CGFloat
@@ -209,6 +195,39 @@ class NCMainNavigationController: UINavigationController, UINavigationController
                 await self.menuPlus?.create(session: session)
             }
         }
+    }
+
+    /// Run 24.10.: Gemeinsame Handler fuer Header-Bar UND rechte Pille.
+    @MainActor
+    private func presentAssistant() {
+        let inputModel = NCAssistantInputModel()
+        let assistant = NCAssistant(
+            assistantModel: NCAssistantModel(controller: controller, inputModel: inputModel),
+            chatModel: NCAssistantChatModel(controller: controller, inputModel: inputModel),
+            conversationsModel: NCAssistantChatConversationsModel(controller: controller, inputModel: inputModel)
+        )
+        let hostingController = UIHostingController(rootView: assistant)
+        present(hostingController, animated: true, completion: nil)
+    }
+
+    @MainActor
+    private func presentNotifications() {
+        if let navigationController = UIStoryboard(name: "NCNotification", bundle: nil).instantiateInitialViewController() as? UINavigationController,
+           let viewController = navigationController.topViewController as? NCNotification {
+            viewController.modalPresentationStyle = .pageSheet
+            viewController.session = session
+            present(navigationController, animated: true, completion: nil)
+        }
+    }
+
+    @MainActor
+    private func presentTransfers() {
+        let rootView = TransfersView(session: session, onClose: { [weak self] in
+            self?.dismiss(animated: true)
+        })
+        let hosting = UIHostingController(rootView: rootView)
+        hosting.modalPresentationStyle = .pageSheet
+        present(hosting, animated: true)
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
@@ -333,30 +352,33 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         if !(self is NCFilesNavigationController) {
             if controller?.availableNotifications ?? false {
                 desiredItems.append(notificationsButtonItem)
-                railActions.append(railAction(
+                railActions.append(SouveraRailAction(
                     id: "notifications",
                     icon: "bell.fill",
-                    item: notificationsButtonItem,
-                    label: NSLocalizedString("_notifications_", comment: "")
-                ))
+                    accessibilityLabel: NSLocalizedString("_notifications_", comment: "")
+                ) { [weak self] in
+                    self?.presentNotifications()
+                })
             }
             desiredItems.append(transfersButtonItem)
-            railActions.append(railAction(
+            railActions.append(SouveraRailAction(
                 id: "transfers",
                 icon: "arrow.left.arrow.right.circle.fill",
-                item: transfersButtonItem,
-                label: NSLocalizedString("_transfers_", comment: "")
-            ))
+                accessibilityLabel: NSLocalizedString("_transfers_", comment: "")
+            ) { [weak self] in
+                self?.presentTransfers()
+            })
         }
 
         if capabilities.assistantEnabled {
             desiredItems.append(assistantButtonItem)
-            railActions.append(railAction(
+            railActions.append(SouveraRailAction(
                 id: "assistant",
                 icon: "sparkles",
-                item: assistantButtonItem,
-                label: NSLocalizedString("_assistant_", comment: "")
-            ))
+                accessibilityLabel: NSLocalizedString("_assistant_", comment: "")
+            ) { [weak self] in
+                self?.presentAssistant()
+            })
         }
 
         if let optionMenu = await createOptionMenu() {
@@ -366,7 +388,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
                 id: "option",
                 icon: "ellipsis",
                 accessibilityLabel: NSLocalizedString("_more_", comment: ""),
-                menu: SouveraRailMenuEntry.entries(from: optionMenu)
+                uiMenu: optionMenu
             ) {})
         }
 
@@ -410,20 +432,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         )
 
         topViewController.navigationItem.trailingItemGroups = [group]
-    }
-
-    /// Baut eine Pille-Aktion aus einem bestehenden Bar-Item, damit Handler
-    /// und Menue exakt dieselben bleiben.
-    @MainActor
-    private func railAction(id: String,
-                            icon: String,
-                            item: UIBarButtonItem,
-                            label: String) -> SouveraRailAction {
-        SouveraRailAction(id: id, icon: icon, accessibilityLabel: label) {
-            if let action = item.primaryAction {
-                action.handler?(action)
-            }
-        }
     }
 
     /// Run 24.10.: Der Rail-Modus hat sich geaendert (z. B. Drehen zwischen
