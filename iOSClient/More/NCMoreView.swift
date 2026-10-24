@@ -140,7 +140,6 @@ struct NCMoreView: View {
     /// liegen im System-Seitenband.
     private var moreHeader: some View {
         SouveraModuleHeader(
-            showsTrailing: false,
             // Run 24.10.: Gemessene Systembar-Hoehe uebernehmen (Innendisplay
             // quer); ohne Messung gilt die Standard-Hoehe der Glas-Header.
             heightOverride: headerMetrics.barHeight,
@@ -153,7 +152,28 @@ struct NCMoreView: View {
                     // bei 20 pt (Flucht mit der Menueliste).
                     .padding(.leading, 8)
             },
-            trailing: { EmptyView() }
+            trailing: {
+                // Run 24.10.: Die Aktionen der ehemaligen UIKit-Bar direkt
+                // im SwiftUI-Header (die Bar ist auf der Mehr-Root versteckt).
+                SouveraHeaderPill(glass: true) {
+                    if model.availableNotifications {
+                        SouveraHeaderButton(icon: "bell.fill") {
+                            model.moreNavigationController?.presentNotifications()
+                        }
+                        .accessibilityLabel(NSLocalizedString("_notifications_", comment: ""))
+                    }
+                    SouveraHeaderButton(icon: "arrow.left.arrow.right.circle.fill") {
+                        model.moreNavigationController?.presentTransfers()
+                    }
+                    .accessibilityLabel(NSLocalizedString("_transfers_", comment: ""))
+                    if model.assistantEnabled {
+                        SouveraHeaderButton(icon: "sparkles") {
+                            model.moreNavigationController?.presentAssistant()
+                        }
+                        .accessibilityLabel(NSLocalizedString("_assistant_", comment: ""))
+                    }
+                }
+            }
         )
         .accessibilityHidden(true)
     }

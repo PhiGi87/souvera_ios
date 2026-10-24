@@ -20,32 +20,6 @@ struct NavigationCollectionViewCommon {
 /// SwiftUI-Inits sie ohne Isolation anlegen koennen (wie SouveraHeaderBridge).
 final class SouveraBridgeBarMetrics: ObservableObject {
     @Published var barHeight: CGFloat?
-    /// Run 24.10.: Unterkante der Status-Kapsel im rechten Band
-    /// (in Tab-Bar-Koordinaten), ermittelt ueber die SwiftUI-ReservedRegion
-    /// `.occlusion` (iOS 27.1).
-    @Published var occlusionBottom: CGFloat?
-}
-
-/// Unsichtbare Sonde: liest die System-Overlays (`.occlusion`) im Fenster.
-/// Auf dem Duo ist die Status-Kapsel rechts oben ein solches Overlay; UIKit
-/// stellt dafuer keine Geometrie bereit.
-private struct SouveraOcclusionProbeView: View {
-    let onChange: ([CGRect]) -> Void
-
-    var body: some View {
-        GeometryReader { proxy in
-            Color.clear
-                .onAppear { report(proxy) }
-                .onChange(of: proxy.size) { _, _ in report(proxy) }
-        }
-        .allowsHitTesting(false)
-    }
-
-    private func report(_ proxy: GeometryProxy) {
-        guard #available(iOS 27.1, *) else { return }
-        let frames = proxy.reservedRegions(kind: .occlusion).map(\.frame)
-        onChange(frames)
-    }
 }
 
 class NCMainTabBarController: UITabBarController {
@@ -121,8 +95,6 @@ class NCMainTabBarController: UITabBarController {
 
         configureTabControllers()
         configureTabBarAppearance()
-        installOcclusionProbe()
-        observeSidebarActions(for: selectedViewController)
 
         // Run 07.10. (iPhone Duo/iPad): Sidebar-Tabs bei regular width,
         // sofern das System es anbietet (iPad ab iOS 18, iPhone Duo innen
@@ -486,9 +458,7 @@ class NCMainTabBarController: UITabBarController {
     /// reagieren dann nicht).
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Run 24.10.: Nur die Geometrie auffrischern; die Aktionen selbst
-        // kommen aus der Quelle des gewaehlten Tabs.
-        refreshSidebarActions()
+        // Run 24.10.: Gemessene Bridge-Bar-Hoehe fuer den Mehr-Header.
         updateBridgeBarHeight()
         if let bannerView = callBannerHost?.view {
             view.bringSubviewToFront(bannerView)
@@ -518,239 +488,6 @@ class NCMainTabBarController: UITabBarController {
             bridgeBarMetrics.barHeight = height
             SouveraLog.write("SidebarActions", "[SidebarActions] bridgeBarHeight=\(height.map { Int($0) } ?? -1)")
         }
-    }
-
-    /// Run 24.10.: Rechte Header-Aktionen liegen im iOS-Seitenband - als
-    /// Subview der System-Tab-Bar (siehe positionSidebarActionBar).
-    private var sidebarActionBar: SouveraSidebarActionBar?
-    private var sidebarActionCancellables = Set<AnyCancellable>()
-    private var lastSidebarActionsLog = ""
-    private var lastSidebarActionsActive: Bool?
-    private var lastRailActionsFrameLog = ""
-
-    /// Run 24.10.: Außendisplay HOCHKANT - dort wandern die rechten
-    /// Header-Aktionen von Mail/Kalender/Link/Dateien/Mehr ins Seitenband.
-    /// Quer bleiben sie im Header, das Innendisplay ist unveraendert.
-    var isSidebarActionsActive: Bool {
-        SouveraSidebarActions.isActive(
-            horizontalSizeClass: traitCollection.horizontalSizeClass,
-            isPortrait: view.bounds.height > view.bounds.width,
-            tabBarFrame: tabBar.frame,
-            viewBounds: view.bounds,
-            tabBarHidden: tabBar.isHidden
-        )
-    }
-
-    /// Das System-Seitenband ist sichtbar (jede Groesse/Orientierung).
-    private var sidebarBandVisible: Bool {
-        guard !tabBar.isHidden else { return false }
-        guard tabBar.frame.width > 0, tabBar.frame.height > 0 else { return false }
-        guard tabBar.frame.intersects(view.bounds) else { return false }
-        guard tabBar.frame.height > tabBar.frame.width else { return false }
-        guard tabBarFrameMidX > view.bounds.midX else { return false }
-        return true
-    }
-
-    private var tabBarFrameMidX: CGFloat {
-        tabBar.frame.midX
-    }
-
-    /// Diagnose: Die Sidebar-API meldet auf dem Duo durchweg false/false -
-    /// zur Erkennung unbrauchbar, deshalb nur Logging.
-    private var sidebarApiDiagnostics: String {
-        if #available(iOS 27.0, *) {
-            return "isAvailable=\(sidebar.isAvailable) isHidden=\(sidebar.isHidden)"
-        }
-        return "api<27"
-    }
-
-    /// Baut die System-Toolbar aus dem aktuell gewaehlten Tab neu auf.
-    private func refreshSidebarActions() {
-        let bandVisible = sidebarBandVisible
-        let outerActive = isSidebarActionsActive
-        updateHostedSidebarActionModes(outer: outerActive, bandVisible: bandVisible)
-
-        if lastSidebarActionsActive != outerActive {
-            lastSidebarActionsActive = outerActive
-            // UIKit-Tabs (Dateien/Mehr) muessen ihre Bar-Items neu setzen:
-            // im Band-Modus raus, ausserhalb wieder rein.
-            (selectedViewController as? NCMainNavigationController)?
-                .refreshHeaderItemsForSidebarMode()
-        }
-
-        let actions = currentSidebarActions(outerActive: outerActive, bandVisible: bandVisible)
-        if actions.isEmpty || !bandVisible {
-            sidebarActionBar?.removeFromSuperview()
-            sidebarActionBar = nil
-        } else {
-            // Run 24.10.: Immer installieren/positionieren - die Leiste kann
-            // ihre Geometrie und Safe-Area je Layout aendern. `update` dedupt
-            // den Inhalt intern (Signatur), Frame-Setzen deduppt ebenfalls.
-            if sidebarActionBar == nil {
-                sidebarActionBar = SouveraSidebarActionBar()
-            }
-            sidebarActionBar?.update(actions: actions)
-            if let bar = sidebarActionBar, bar.superview !== tabBar {
-                tabBar.addSubview(bar)
-            }
-            positionSidebarActionBar()
-        }
-
-        let log = "outer=\(outerActive) band=\(bandVisible) actions=\(actions.count) tab=\(Int(tabBar.frame.width))x\(Int(tabBar.frame.height))@(\(Int(tabBar.frame.minX)),\(Int(tabBar.frame.minY))) \(sidebarApiDiagnostics)"
-        if log != lastSidebarActionsLog {
-            lastSidebarActionsLog = log
-            SouveraLog.write("SidebarActions", "[SidebarActions] \(log)")
-        }
-    }
-
-    /// Run 24.10.: Die Sidebar-API (`bottomBarView`) wird auf dem Duo
-    /// ignoriert (Log: `isAvailable=false`). Die ActionBar lebt deshalb
-    /// direkt IN der System-Tab-Bar (Rail-Container) - oberhalb der
-    /// Hauptmenue-Icons, unterhalb der Status-Kapsel. Sie ist damit Teil
-    /// des iOS-Bands und bewegt sich mit der Leiste.
-    private func positionSidebarActionBar() {
-        guard let bar = sidebarActionBar else { return }
-        // Run 24.10.: Referenz-Lage = zwischen Status-Kapsel (oben) und
-        // Tab-Leiste (unten). Oberer Rand der Tab-Kapsel aus den
-        // Tab-Icons ableiten; Status-Unterkante aus der Occlusion-Region.
-        let railTop = sidebarRailTop() ?? (tabBar.bounds.height * 0.55)
-        let upperLimit = railTop - 16
-        let width = max(44, tabBar.bounds.width - 12)
-        let height = min(bar.contentHeight, max(44, upperLimit - 8))
-
-        var top: CGFloat
-        if let occlusion = bridgeBarMetrics.occlusionBottom,
-           occlusion > 8,
-           occlusion + 8 + height <= upperLimit {
-            // Direkt unter den Status-Anzeigen (Referenz).
-            top = occlusion + 8
-        } else {
-            // Fallback: sauber oberhalb der Tab-Kapsel.
-            top = upperLimit - height
-        }
-        top = max(8, min(top, upperLimit - height))
-
-        let frame = CGRect(
-            x: (tabBar.bounds.width - width) / 2,
-            y: top,
-            width: width,
-            height: height
-        )
-        if bar.frame != frame {
-            bar.frame = frame
-        }
-        let log = "railActions frame=\(Int(frame.width))x\(Int(frame.height))@(\(Int(frame.minX)),\(Int(frame.minY))) railTop=\(Int(railTop)) occlusionBottom=\(bridgeBarMetrics.occlusionBottom.map { Int($0) } ?? -1) actions=\(bar.actions.count)"
-        if log != lastRailActionsFrameLog {
-            lastRailActionsFrameLog = log
-            SouveraLog.write("SidebarActions", "[SidebarActions] \(log)")
-        }
-    }
-
-    /// Oberer Rand der sichtbaren Tab-Rail-Kapsel: kleinste minY der
-    /// Tab-Buttons (UIControl-Subviews), rekursiv, in Tab-Bar-Koordinaten.
-    private func sidebarRailTop() -> CGFloat? {
-        var frames: [CGRect] = []
-        func collect(_ view: UIView, depth: Int) {
-            for sub in view.subviews {
-                if sub.isKind(of: UIControl.self),
-                   sub.bounds.width > 1,
-                   sub.bounds.height > 1 {
-                    frames.append(sub.convert(sub.bounds, to: tabBar))
-                }
-                if depth < 4 { collect(sub, depth: depth + 1) }
-            }
-        }
-        collect(tabBar, depth: 0)
-        let tops = frames
-            .map(\.minY)
-            .filter { $0 > tabBar.bounds.height * 0.15 }
-        return tops.min()
-    }
-
-    // MARK: - Occlusion probe
-
-    private var occlusionProbeHost: UIHostingController<SouveraOcclusionProbeView>?
-
-    private func installOcclusionProbe() {
-        let probe = SouveraOcclusionProbeView { [weak self] frames in
-            self?.handleOcclusionRegions(frames)
-        }
-        let host = UIHostingController(rootView: probe)
-        host.view.backgroundColor = .clear
-        host.view.isUserInteractionEnabled = false
-        host.view.translatesAutoresizingMaskIntoConstraints = false
-        view.insertSubview(host.view, belowSubview: tabBar)
-        NSLayoutConstraint.activate([
-            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            host.view.topAnchor.constraint(equalTo: view.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        ])
-        occlusionProbeHost = host
-    }
-
-    private func handleOcclusionRegions(_ frames: [CGRect]) {
-        guard !frames.isEmpty else {
-            if bridgeBarMetrics.occlusionBottom != nil {
-                bridgeBarMetrics.occlusionBottom = nil
-                positionSidebarActionBar()
-            }
-            return
-        }
-        // Nur Overlays in der rechten Band-Spalte und oberhalb der Tab-Leiste.
-        let midX = view.bounds.midX
-        let bandTop = tabBar.frame.minY
-        let bandLimit = bandTop + tabBar.frame.height * 0.6
-        let relevant = frames.filter { frame in
-            frame.midX > midX && frame.maxY > bandTop + 8 && frame.maxY <= bandLimit
-        }
-        let bottom = relevant.map { $0.maxY - bandTop }.max()
-        if bridgeBarMetrics.occlusionBottom != bottom {
-            bridgeBarMetrics.occlusionBottom = bottom
-            positionSidebarActionBar()
-        }
-    }
-
-    private func currentSidebarActions(outerActive: Bool, bandVisible: Bool) -> [SouveraRailAction] {
-        guard let nav = selectedViewController else { return [] }
-        if let hosted = nav as? SouveraHostedNavigationController {
-            // Nur Module mit Opt-in liefern Band-Inhalte (Kalender in beiden
-            // Layouts, Mail/Link ausschliesslich Außendisplay hochkant).
-            guard bandVisible, hosted.headerBridge.sidebarBandEnabled else { return [] }
-            return hosted.headerBridge.railActions()
-        }
-        if let base = nav as? NCMainNavigationController {
-            guard outerActive else { return [] }
-            return base.actionRailSource.actions
-        }
-        return []
-    }
-
-    private func updateHostedSidebarActionModes(outer: Bool, bandVisible: Bool) {
-        for controller in viewControllers ?? [] {
-            (controller as? SouveraHostedNavigationController)?.layoutMode.updateSidebarActions(outer: outer, bandVisible: bandVisible)
-        }
-    }
-
-    /// Beobachtet die Aktionsquelle des gewaehlten Tabs.
-    private func observeSidebarActions(for nav: UIViewController?) {
-        sidebarActionCancellables.removeAll()
-        guard let nav else {
-            refreshSidebarActions()
-            return
-        }
-        if let hosted = nav as? SouveraHostedNavigationController {
-            hosted.headerBridge.objectWillChange
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in self?.refreshSidebarActions() }
-                .store(in: &sidebarActionCancellables)
-        } else if let base = nav as? NCMainNavigationController {
-            base.actionRailSource.objectWillChange
-                .receive(on: DispatchQueue.main)
-                .sink { [weak self] _ in self?.refreshSidebarActions() }
-                .store(in: &sidebarActionCancellables)
-        }
-        refreshSidebarActions()
     }
 
     /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
@@ -865,7 +602,6 @@ class NCMainTabBarController: UITabBarController {
         for controller in viewControllers ?? [] {
             (controller as? SouveraHostedNavigationController)?.applyLayoutMode()
         }
-        refreshSidebarActions()
     }
 
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
@@ -1074,7 +810,6 @@ class NCMainTabBarController: UITabBarController {
         } else {
             tabBar.isHidden = true
         }
-        refreshSidebarActions()
     }
 
     func show() {
@@ -1083,7 +818,6 @@ class NCMainTabBarController: UITabBarController {
         } else {
             tabBar.isHidden = false
         }
-        refreshSidebarActions()
     }
 }
 
@@ -1093,7 +827,6 @@ extension NCMainTabBarController: UITabBarControllerDelegate {
             scrollToTop(viewController: viewController)
         }
         previousIndex = tabBarController.selectedIndex
-        observeSidebarActions(for: viewController)
     }
 
     private func scrollToTop(viewController: UIViewController) {

@@ -379,7 +379,6 @@ struct MailView: View {
             titleAfterLeading: !headerTitle.isEmpty,
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
-            showsTrailing: !layout.usesSidebarActions,
             leading: {
                 if isDetail {
                     SouveraHeaderButton(icon: "chevron.backward") {
@@ -561,38 +560,6 @@ struct MailView: View {
             } else {
                 viewModel.showFolders()
             }
-        }
-
-        // Run 24.10.: Band-Inhalte nur im Außendisplay hochkant
-        // (usesSidebarActions); das Innendisplay bleibt unveraendert.
-        bridge.sidebarBandEnabled = layout.usesSidebarActions
-        if layout.usesSidebarActions {
-            bridge.railLeadingItems = []
-            if case let .detail(message) = viewModel.route {
-                bridge.railTrailingItems = [
-                    .init(id: "reply", icon: "arrowshape.turn.up.left",
-                          accessibilityLabel: NSLocalizedString("_mail_reply_", comment: "")) {
-                        viewModel.startCompose(mode: .reply, message: message)
-                    }
-                ]
-                bridge.railTrailingMenus = [detailMoreMenu(message)]
-            } else {
-                bridge.railTrailingItems = [
-                    .init(id: "search", icon: "magnifyingglass",
-                          accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
-                        searchActive = true
-                    },
-                    .init(id: "compose", icon: "square.and.pencil",
-                          accessibilityLabel: NSLocalizedString("_mail_compose_", comment: "")) {
-                        viewModel.startCompose(mode: .new)
-                    }
-                ]
-                bridge.railTrailingMenus = [listMoreMenu()]
-            }
-        } else {
-            bridge.railLeadingItems = []
-            bridge.railTrailingItems = []
-            bridge.railTrailingMenus = []
         }
 
         if case let .detail(message) = viewModel.route {

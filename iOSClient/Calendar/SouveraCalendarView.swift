@@ -128,12 +128,6 @@ struct SouveraCalendarView: View {
         .onChange(of: layout.usesBridgeHeader) { _, _ in
             populateHeaderBridge()
         }
-        .onChange(of: layout.sidebarBandVisible) { _, _ in
-            populateHeaderBridge()
-        }
-        .onChange(of: layout.usesSidebarActions) { _, _ in
-            populateHeaderBridge()
-        }
         .onChange(of: searchActive) { _, _ in
             populateHeaderBridge()
         }
@@ -2335,20 +2329,8 @@ extension SouveraCalendarView {
         SouveraModuleHeader(
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
-            leading: {
-                // Run 24.10.: Im Band-Modus (Außendisplay hochkant) wandern
-                // "Heute" und die Kalenderauswahl in die Sidebar.
-                if !layout.usesSidebarActions {
-                    calendarTodayPill(glass: true)
-                }
-            },
-            trailing: {
-                if layout.usesSidebarActions {
-                    calendarViewModeMenuPill(glass: true)
-                } else {
-                    calendarViewModePill(glass: true)
-                }
-            }
+            leading: { calendarTodayPill(glass: true) },
+            trailing: { calendarViewModePill(glass: true) }
         )
     }
 
@@ -2419,88 +2401,54 @@ extension SouveraCalendarView {
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         bridge.title = ""
-        // Run 24.10.: Der Kalender nutzt das Seitenband im Außendisplay
-        // HOCHKANT und im Innendisplay QUER. Außendisplay quer bleibt
-        // bewusst im Header (Rückmeldung 24.10.).
-        let bandMode = layout.usesSidebarActions
-            || (layout.sidebarBandVisible && layout.isRegularWidth)
-        bridge.sidebarBandEnabled = bandMode
-        if bandMode {
-            bridge.railLeadingItems = [
-                .init(id: "today", icon: "",
-                      text: NSLocalizedString("_calendar_today_", comment: ""),
-                      accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")) {
-                    selectedDay = Date()
-                    viewModel.visibleMonth = Date()
-                    scrollToNowTrigger += 1
-                },
-                .init(id: "calPicker", icon: "calendar.badge.checkmark",
-                      accessibilityLabel: NSLocalizedString("_settings_calendar_default_view_", comment: "")) {
-                    showCalendarPicker = true
-                }
-            ]
-            bridge.railTrailingItems = [
-                .init(id: "newEvent", icon: "plus",
-                      accessibilityLabel: NSLocalizedString("_calendar_new_event_", comment: "")) {
-                    editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
-                }
-            ]
-            bridge.railTrailingMenus = []
-            bridge.leadingItems = []
-            bridge.trailingItems = []
-            bridge.leadingMenus = []
-            bridge.trailingMenus = []
-            bridge.leadingCustoms = []
-            bridge.trailingCustoms = [
-                headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
-                                 pill: calendarViewModeMenuPill(glass: false))
-            ]
-        } else {
-            bridge.railLeadingItems = []
-            bridge.railTrailingItems = []
-            bridge.railTrailingMenus = []
-            bridge.leadingItems = []
-            bridge.trailingItems = []
-            bridge.leadingMenus = []
-            bridge.trailingMenus = []
-            bridge.leadingCustoms = [
-                headerPillCustom(id: "today", pill: calendarTodayPill(glass: false))
-            ]
-            bridge.trailingCustoms = [
-                // Die ID enthaelt den Modus, damit der Coordinator den Balken
-                // beim Wechsel neu baut (sonst bliebe der alte Titel stehen).
-                headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
-                                 pill: calendarViewModePill(glass: false))
-            ]
+        // Run 24.10. (Feedback: Icons fehlten in der Bridge): Dieselben
+        // SwiftUI-Pills wie im Glas-Header rendern - Text+Icon bleiben so
+        // garantiert zusammen und sehen auf allen Groessen gleich aus.
+        bridge.leadingItems = []
+        bridge.trailingItems = []
+        bridge.leadingMenus = []
+        bridge.trailingMenus = []
+        bridge.leadingCustoms = [
+            headerPillCustom(id: "today", pill: calendarTodayPill(glass: false))
+        ]
+        bridge.trailingCustoms = [
+            // Die ID enthaelt den Modus, damit der Coordinator den Balken
+            // beim Wechsel neu baut (sonst bliebe der alte Titel stehen).
+            headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
+                             pill: calendarViewModePill(glass: false))
+        ]
+    }
+
+    /// Run 25.09.: Suchtreffer aus dem Overlay (Hauptansicht UND
+    /// Kalender-Übersicht) in die normale Ansicht überführen.
+    func openEventFromSearch(_ event: CalendarEventModel) {
+        selectedDay = event.start
+        viewModel.visibleMonth = event.start
+        viewMode = .day
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            detailEvent = event
         }
     }
 
-    /// "Monat ⌄" — Ansichtsmenue OHNE "+" (der Plus-Button liegt im Band).
-    fileprivate func calendarViewModeMenuPill(glass: Bool) -> some View {
-        SouveraHeaderPill(glass: glass) {
-            Menu {
-                ForEach(CalendarViewMode.allCases) { mode in
-                    Button {
-                        viewMode = mode
-                    } label: {
-                        if viewMode == mode {
-                            Label(mode.title, systemImage: "checkmark")
-                        } else {
-                            Text(mode.title)
-                        }
-                    }
-                }
-            } label: {
-                HStack(spacing: 3) {
-                    Text(viewMode.title).font(.subheadline)
-                    Image(systemName: "chevron.down").font(.caption2)
-                }
-                .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                .padding(.horizontal, 8)
-                .frame(height: 34)
-            }
-            .accessibilityLabel(NSLocalizedString("_settings_calendar_default_view_", comment: ""))
-        }
+    fileprivate func populateHeaderBridge() {
+        guard let bridge = headerBridge else { return }
+        bridge.title = ""
+        // Run 24.10. (Feedback: Icons fehlten in der Bridge): Dieselben
+        // SwiftUI-Pills wie im Glas-Header rendern - Text+Icon bleiben so
+        // garantiert zusammen und sehen auf allen Groessen gleich aus.
+        bridge.leadingItems = []
+        bridge.trailingItems = []
+        bridge.leadingMenus = []
+        bridge.trailingMenus = []
+        bridge.leadingCustoms = [
+            headerPillCustom(id: "today", pill: calendarTodayPill(glass: false))
+        ]
+        bridge.trailingCustoms = [
+            // Die ID enthaelt den Modus, damit der Coordinator den Balken
+            // beim Wechsel neu baut (sonst bliebe der alte Titel stehen).
+            headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
+                             pill: calendarViewModePill(glass: false))
+        ]
     }
 
     private func headerPillCustom<V: View>(id: String, pill: V) -> SouveraHeaderBridge.Custom {

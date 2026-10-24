@@ -21,8 +21,6 @@
 		A945F64BF0DF50D2E4CB9A16 /* LinkImageViewer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */; };
 		E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
 		A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */; };
-		A1B2C3D4E5F60718293A0540 /* SouveraActionRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A053F /* SouveraActionRail.swift */; };
-		A1B2C3D4E5F60718293A0541 /* SouveraActionRail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F60718293A053F /* SouveraActionRail.swift */; };
 		D8E4B2C6A1F34928E5B7C9A3 /* LinkSignalingClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */; };
 		A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */; };
 		A9F2C6E4D1B34808E8A5C7B3 /* SouveraOfflineBanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8E3A6F5B2D14929F7B9A1C5 /* SouveraOfflineBanner.swift */; };
@@ -1334,7 +1332,6 @@
 		A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkCache.swift"; sourceTree = SOURCE_ROOT; };
 		76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/UI/LinkImageViewer.swift"; sourceTree = SOURCE_ROOT; };
 		B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraAppearance.swift"; sourceTree = SOURCE_ROOT; };
-		A1B2C3D4E5F60718293A053F /* SouveraActionRail.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraActionRail.swift"; sourceTree = SOURCE_ROOT; };
 		C7F2A5D3B9E14806A4C6D8B2 /* LinkSignalingClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Net/LinkSignalingClient.swift"; sourceTree = SOURCE_ROOT; };
 		C8E3A6F5B2D14928F7B9A1C4 /* SouveraCacheBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCacheBanner.swift"; sourceTree = SOURCE_ROOT; };
 		C8E3A6F5B2D14929F7B9A1C5 /* SouveraOfflineBanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraOfflineBanner.swift"; sourceTree = SOURCE_ROOT; };
@@ -3432,7 +3429,6 @@
 				A6B3E8D4C0F24917F4D7A0B3 /* LinkCache.swift */,
 				76CA24D244B7B272752A4C26 /* LinkImageViewer.swift */,
 				B5F1E9C3D2A64928F6C8B1D4 /* SouveraAppearance.swift */,
-				A1B2C3D4E5F60718293A053F /* SouveraActionRail.swift */,
 				AA22C3D4E5F60718293A0300 /* SouveraPendingShareStore.swift */,
 				AA22C3D4E5F60718293A0310 /* SouveraSearchOverlay.swift */,
 				AA22C3D4E5F60718293A0530 /* SouveraFormFactor.swift */,
@@ -4977,7 +4973,6 @@
 				F343A4B62A1E084200DDA874 /* PHAsset+Extension.swift in Sources */,
 				F70BFC7520E0FA7D00C67599 /* NCUtility.swift in Sources */,
 				A7C3E5B1D9F24806C4B2A8D6 /* SouveraAppearance.swift in Sources */,
-				A1B2C3D4E5F60718293A0541 /* SouveraActionRail.swift in Sources */,
 				B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */,
 				A9F2C6E4D1B34807E8A5C7B2 /* SouveraCacheBanner.swift in Sources */,
 				A9F2C6E4D1B34808E8A5C7B3 /* SouveraOfflineBanner.swift in Sources */,
@@ -5228,7 +5223,6 @@
 				F2C8B4A6D1E3497F03C5B8D2 /* LinkCache.swift in Sources */,
 				A945F64BF0DF50D2E4CB9A16 /* LinkImageViewer.swift in Sources */,
 				E6C2A7D4F0B14815E7A3C9D5 /* SouveraAppearance.swift in Sources */,
-				A1B2C3D4E5F60718293A0540 /* SouveraActionRail.swift in Sources */,
 				AA22C3D4E5F60718293A0301 /* SouveraPendingShareStore.swift in Sources */,
 				AA22C3D4E5F60718293A0311 /* SouveraSearchOverlay.swift in Sources */,
 				AA22C3D4E5F60718293A0531 /* SouveraFormFactor.swift in Sources */,

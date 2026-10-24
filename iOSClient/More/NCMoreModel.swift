@@ -47,6 +47,9 @@ final class NCMoreModel: ObservableObject {
     private var shieldAddVisibility: AnyCancellable?
     @Published var activeAvatar: UIImage?
     @Published var accountList: [AccountItem] = []
+    /// Run 24.10.: Header-Aktionen der Mehr-Root (Glocke/Assistent sichtbar?)
+    @Published var availableNotifications: Bool = false
+    @Published var assistantEnabled: Bool = false
 
     struct AccountItem: Identifiable {
         let account: String
@@ -56,6 +59,12 @@ final class NCMoreModel: ObservableObject {
     }
 
     var tabBarController: NCMainTabBarController? { controller }
+
+    /// Run 24.10.: Der Nav-Controller der Mehr-Root - Quelle der
+    /// Header-Aktionen (Glocke/Transfers/Assistent) im SwiftUI-Header.
+    var moreNavigationController: NCMoreNavigationController? {
+        tabBarController?.viewControllers?.compactMap { $0 as? NCMoreNavigationController }.first
+    }
 
     private weak var controller: NCMainTabBarController?
     var account: String {
@@ -220,6 +229,10 @@ final class NCMoreModel: ObservableObject {
     func loadItems() async {
         let tableAccount = database.getTableAccount(predicate: NSPredicate(format: "account == %@", account))
         let capabilities = tableAccount.flatMap { NCNetworking.shared.capabilities[$0.account] }
+
+        // Run 24.10.: Sichtbarkeit der Mehr-Header-Aktionen (wie die alte Bar).
+        availableNotifications = tabBarController?.availableNotifications ?? false
+        assistantEnabled = capabilities?.assistantEnabled == true
 
         autoUploadStart = tableAccount?.autoUploadStart ?? false
 

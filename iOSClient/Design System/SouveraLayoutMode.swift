@@ -34,14 +34,6 @@ final class SouveraLayoutMode: ObservableObject {
     @Published private(set) var headerExtraTop: CGFloat = 0
     @Published private(set) var headerExtraTrailing: CGFloat = 0
 
-    /// Run 24.10. (Duo-Außendisplay HOCHKANT): Nur dort wandern die rechten
-    /// Header-Aktionen in das System-Seitenband. Quer bleiben sie im Header,
-    /// das Innendisplay ist unveraendert. Wird vom Tab-Controller gesetzt
-    /// (er kennt die Tab-Leisten-Geometrie).
-    @Published private(set) var usesSidebarActions: Bool = false
-    /// Run 24.10.: Das System-Seitenband ist sichtbar (jede Groesse/Orientierung).
-    /// Opt-in-Signal fuer Module, die eigene Band-Inhalte pflegen (Kalender).
-    @Published private(set) var sidebarBandVisible: Bool = false
 
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
@@ -98,17 +90,6 @@ final class SouveraLayoutMode: ObservableObject {
         }
     }
 
-    /// Setzt beide Band-Zustaende. Der Tab-Controller ist die einzige
-    /// Quelle, damit Header und Seitenband nie auseinanderlaufen.
-    func updateSidebarActions(outer: Bool, bandVisible: Bool) {
-        guard !isPushed else { return }
-        if outer != usesSidebarActions {
-            usesSidebarActions = outer
-        }
-        if bandVisible != sidebarBandVisible {
-            sidebarBandVisible = bandVisible
-        }
-    }
 }
 
 /// Zugriff fuer UIKit-Klassen (Bar-Coordinator), ohne den konkreten

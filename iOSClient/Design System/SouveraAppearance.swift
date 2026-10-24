@@ -223,7 +223,6 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// Run 24.10. (Duo-Außendisplay): Im Rail-Modus wandern die rechten
     /// Aktionen in die separate Pille; der Header zeigt dann nur noch
     /// Leading/Titel.
-    var showsTrailing: Bool = true
     /// Run 24.10.: Optionale Hohe (z. B. gemessene Systembar-Hoehe), damit
     /// der Mehr-Header exakt so hoch wie die Bridge-Bars ist.
     var heightOverride: CGFloat? = nil
@@ -252,10 +251,8 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
                 Spacer(minLength: 0)
             }
 
-            if showsTrailing {
-                HStack(spacing: 8) { trailing }
-                    .fixedSize(horizontal: true, vertical: false)
-            }
+            HStack(spacing: 8) { trailing }
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.leading, 12)
         .padding(.trailing, 12 + extraTrailing)
@@ -377,69 +374,8 @@ final class SouveraHeaderBridge: ObservableObject {
     @Published var trailingItems: [Item] = []
     @Published var trailingMenus: [MenuGroup] = []
     @Published var trailingCustoms: [Custom] = []
-    /// Run 24.10. (Duo): Explizite Band-Inhalte. Die Felder werden von den
-    /// Modulen befuellt, wenn `sidebarBandEnabled` gesetzt ist - es gibt
-    /// bewusst KEINEN Fallback auf die Header-Felder mehr, damit jedes
-    /// Modul selbst entscheidet, was ins Seitenband gehoert.
-    @Published var railLeadingItems: [Item] = []
-    @Published var railTrailingItems: [Item] = []
-    @Published var railTrailingMenus: [MenuGroup] = []
-    /// Das Modul nutzt das System-Seitenband aktuell (true) oder belaesst
-    /// alles im Header (false).
-    @Published var sidebarBandEnabled: Bool = false
     @Published var title: String = ""
 
-    /// Aktionen fuer das Seitenband: zuerst Leading (z. B. Kalender
-    /// "Heute"), dann Trailing. Text-Items ("Heute") werden als
-    /// Schrift-Button gerendert, Menues als UIKit-Menue.
-    func railActions() -> [SouveraRailAction] {
-        let leading = railLeadingItems.map { item in
-            SouveraRailAction(
-                id: item.id,
-                icon: item.icon,
-                title: item.text,
-                tint: item.isGreen ? .green : (item.isDestructive ? .red : nil),
-                accessibilityLabel: item.accessibilityLabel
-            ) {
-                item.handler()
-            }
-        }
-        let itemActions = railTrailingItems.map { item in
-            SouveraRailAction(
-                id: item.id,
-                icon: item.icon,
-                title: item.text,
-                tint: item.isGreen ? .green : (item.isDestructive ? .red : nil),
-                accessibilityLabel: item.accessibilityLabel
-            ) {
-                item.handler()
-            }
-        }
-        let menuActions = railTrailingMenus.map { menu in
-            SouveraRailAction(
-                id: menu.id,
-                icon: menu.icon,
-                accessibilityLabel: menu.accessibilityLabel,
-                menu: menu.entries.map { Self.railEntry($0) }
-            ) {}
-        }
-        // Run 24.10.: BUGFIX - "leading" ("Heute", "Kalenderauswahl") wurde
-        // berechnet, aber nie zurueckgegeben (Log: actions=1 statt 3).
-        return leading + itemActions + menuActions
-    }
-
-    private static func railEntry(_ entry: MenuEntry) -> SouveraRailMenuEntry {
-        SouveraRailMenuEntry(
-            id: entry.id,
-            title: entry.title,
-            icon: entry.icon,
-            isChecked: entry.isChecked,
-            isDestructive: entry.isDestructive,
-            children: entry.children?.map { Self.railEntry($0) }
-        ) {
-            entry.handler()
-        }
-    }
 }
 
 /// Beobachtet die Brücke und baut die Bar-Items des Host-Controllers.

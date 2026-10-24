@@ -15,10 +15,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     let menuToolbar = UIToolbar()
 
     /// Run 24.10. (Duo-Außendisplay): Aktionen fuer die rechte Pille. Wird
-    /// von `collectionViewCommonTrailingItemGroups` befuellt, damit die
-    /// Pille exakt dieselben Aktionen wie die UIKit-Bar zeigt.
-    let actionRailSource = SouveraActionRailSource()
-
     /// Run 24.10.: Füllfläche zwischen Fensteroberkante und Navigationsbar.
     /// iOS 27.1 reserviert im Seitenband-Modus oben Platz fuer die
     /// Status-Kapsel - opake UIKit-Bars ruecken dann herunter und der
@@ -215,9 +211,9 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         }
     }
 
-    /// Run 24.10.: Gemeinsame Handler fuer Header-Bar UND rechte Pille.
+    /// Run 24.10.: Gemeinsame Handler - auch vom SwiftUI-Mehr-Header genutzt.
     @MainActor
-    private func presentAssistant() {
+    func presentAssistant() {
         let inputModel = NCAssistantInputModel()
         let assistant = NCAssistant(
             assistantModel: NCAssistantModel(controller: controller, inputModel: inputModel),
@@ -229,7 +225,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     }
 
     @MainActor
-    private func presentNotifications() {
+    func presentNotifications() {
         if let navigationController = UIStoryboard(name: "NCNotification", bundle: nil).instantiateInitialViewController() as? UINavigationController,
            let viewController = navigationController.topViewController as? NCNotification {
             viewController.modalPresentationStyle = .pageSheet
@@ -239,7 +235,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     }
 
     @MainActor
-    private func presentTransfers() {
+    func presentTransfers() {
         let rootView = TransfersView(session: session, onClose: { [weak self] in
             self?.dismiss(animated: true)
         })
@@ -314,7 +310,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
             )
 
             collectionViewCommon.navigationItem.trailingItemGroups = [group]
-            actionRailSource.actions = []
             return
         }
 
@@ -337,7 +332,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
             )
 
             trashViewController.navigationItem.trailingItemGroups = [group]
-            actionRailSource.actions = []
             return
         }
 
@@ -352,17 +346,8 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     @MainActor
     private func collectionViewCommonTrailingItemGroups() async {
         guard let topViewController else {
-            actionRailSource.actions = []
             return
         }
-
-        // Die Pille gilt fuer den ganzen Dateien-Tab (auch Unterordner) und
-        // fuer die Mehr-Root. Gepushte Detailseiten aus Mehr behalten ihre
-        // Header-Aktionen.
-        let isMoreRoot = self is NCMoreNavigationController
-            && topViewController === viewControllers.first
-        let sidebarEligible = (self is NCFilesNavigationController) || isMoreRoot
-        let sidebarMode = (controller?.isSidebarActionsActive ?? false) && sidebarEligible
 
         guard !(collectionViewCommon?.isEditMode ?? false),
               !(trashViewController?.isEditMode ?? false),
@@ -371,7 +356,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
               !(topViewController is NCViewerRichDocument),
               !(topViewController is NCViewerDirectEditing)
         else {
-            actionRailSource.actions = []
             return
         }
 
@@ -382,7 +366,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // ---------------------------------------------------------
 
         var desiredItems: [UIBarButtonItem] = []
-        var railActions: [SouveraRailAction] = []
 
         // Benachrichtigungen + Übertragungen bleiben erhalten - AUSSER im
         // Dateien-Modul (NCFilesNavigationController): dort führt nur das
@@ -390,44 +373,17 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         if !(self is NCFilesNavigationController) {
             if controller?.availableNotifications ?? false {
                 desiredItems.append(notificationsButtonItem)
-                railActions.append(SouveraRailAction(
-                    id: "notifications",
-                    icon: "bell.fill",
-                    accessibilityLabel: NSLocalizedString("_notifications_", comment: "")
-                ) { [weak self] in
-                    self?.presentNotifications()
-                })
             }
             desiredItems.append(transfersButtonItem)
-            railActions.append(SouveraRailAction(
-                id: "transfers",
-                icon: "arrow.left.arrow.right.circle.fill",
-                accessibilityLabel: NSLocalizedString("_transfers_", comment: "")
-            ) { [weak self] in
-                self?.presentTransfers()
-            })
         }
 
         if capabilities.assistantEnabled {
             desiredItems.append(assistantButtonItem)
-            railActions.append(SouveraRailAction(
-                id: "assistant",
-                icon: "sparkles",
-                accessibilityLabel: NSLocalizedString("_assistant_", comment: "")
-            ) { [weak self] in
-                self?.presentAssistant()
-            })
         }
 
         if let optionMenu = await createOptionMenu() {
             optionButtonItem.menu = optionMenu
             desiredItems.append(optionButtonItem)
-            railActions.append(SouveraRailAction(
-                id: "option",
-                icon: "ellipsis",
-                accessibilityLabel: NSLocalizedString("_more_", comment: ""),
-                uiMenu: optionMenu
-            ) {})
         }
 
         // ---------------------------------------------------------
@@ -438,19 +394,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // manage their own trailing items - keep the default
         // bell/assistant/transfers buttons off them.
         if topViewController is NCHostedScreen {
-            actionRailSource.actions = []
-            return
-        }
-
-        // Quelle immer aktuell halten, damit die Pille beim Drehen ins
-        // Hochformat sofort befuellt ist (dann laeuft kein willShow).
-        actionRailSource.actions = sidebarEligible ? railActions : []
-
-        if sidebarMode {
-            // Aktionen wandern in die rechte Pille; die Bar behaelt nur
-            // Leading/Titel.
-            topViewController.navigationItem.trailingItemGroups = []
-            topViewController.navigationItem.rightBarButtonItems = nil
             return
         }
 
@@ -470,15 +413,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         )
 
         topViewController.navigationItem.trailingItemGroups = [group]
-    }
-
-    /// Run 24.10.: Der Rail-Modus hat sich geaendert (z. B. Drehen zwischen
-    /// Außendisplay hoch/quer). Die UIKit-Bar muss ihre Trailing-Items neu
-    /// aufbauen bzw. wieder anzeigen.
-    func refreshHeaderItemsForSidebarMode() {
-        Task { @MainActor in
-            await collectionViewCommonTrailingItemGroups()
-        }
     }
 
     func createOptionMenu() async -> UIMenu? { return nil }
