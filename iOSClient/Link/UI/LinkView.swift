@@ -470,6 +470,8 @@ struct LinkView: View {
             return AnyView(
                 SouveraModuleHeader(
                     title: navigationTitle,
+                    extraTop: layout.headerExtraTop,
+                    extraTrailing: layout.headerExtraTrailing,
                     leading: {
                         if !landscapeLayout {
                             SouveraHeaderButton(icon: "chevron.backward") {
@@ -535,6 +537,8 @@ struct LinkView: View {
             return AnyView(
                 SouveraModuleHeader(
                     title: NSLocalizedString("_link_", comment: ""),
+                    extraTop: layout.headerExtraTop,
+                    extraTrailing: layout.headerExtraTrailing,
                     leading: {
                         SouveraHeaderButton(icon: "magnifyingglass") {
                             searchActive = true

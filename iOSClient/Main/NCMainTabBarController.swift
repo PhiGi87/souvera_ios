@@ -56,8 +56,13 @@ class NCMainTabBarController: UITabBarController {
         let apply = { [weak self] in
             guard let self else { return }
             let regular = self.traitCollection.horizontalSizeClass == .regular
-            self.sidebar.preferredPlacement = regular ? .sidebar : .automatic
-            SouveraLog.write("TabBar", "sidebar placement=\(regular ? "sidebar" : "automatic") width=\(Int(self.view.bounds.width))")
+            // Run 24.10. (Feedback: Sidebar UND untere Tab-Leiste gleichzeitig):
+            // Nicht mehr erzwingen - das System waehlt auf regular die
+            // Sidebar (rechts) und auf kompakt die Tabs.
+            if self.sidebar.preferredPlacement != .automatic {
+                self.sidebar.preferredPlacement = .automatic
+            }
+            SouveraLog.write("TabBar", "sidebar placement=automatic regular=\(regular) width=\(Int(self.view.bounds.width)) tabBarHidden=\(self.tabBar.isHidden) scene=\(self.view.window?.windowScene?.session.persistentIdentifier ?? "-")")
         }
         if immediately {
             apply()
@@ -85,11 +90,14 @@ class NCMainTabBarController: UITabBarController {
         // sofern das System es anbietet (iPad ab iOS 18, iPhone Duo innen
         // ab iOS 27.1). Auf kompakter Breite bleiben die bekannten Tabs.
         if #available(iOS 17.0, *) {
-            registerForTraitChanges([UITraitHorizontalSizeClass.self]) { (controller: Self, _) in
+            registerForTraitChanges([UITraitHorizontalSizeClass.self,
+                                     UITraitVerticalSizeClass.self]) { (controller: Self, _) in
                 controller.updateSidebarPlacement()
+                controller.updateHostedLayoutModes()
             }
         }
         updateSidebarPlacement(immediately: true)
+        updateHostedLayoutModes()
 
         NotificationCenter.default.addObserver(forName: NSNotification.Name(rawValue: self.global.notificationCenterChangeTheming), object: nil, queue: .main) { [weak self] notification in
             if let userInfo = notification.userInfo as? NSDictionary,
@@ -558,6 +566,15 @@ class NCMainTabBarController: UITabBarController {
         }.withRenderingMode(.alwaysOriginal)
     }
 
+    /// Run 24.10.: Haelt die Modi aller gehosteten Tabs mit dem
+    /// Tab-Controller synchron - Header und Sidebar duerfen nicht
+    /// auseinanderlaufen.
+    private func updateHostedLayoutModes() {
+        for controller in viewControllers ?? [] {
+            (controller as? SouveraHostedNavigationController)?.applyLayoutMode()
+        }
+    }
+
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
         let hostingController = UIHostingController(rootView: root)
         let navigationController = UINavigationController(rootViewController: hostingController)
@@ -585,6 +602,7 @@ class NCMainTabBarController: UITabBarController {
         /// aus dem EIGENEN traitCollection gespeist und bei Trait-Wechseln
         /// aktualisiert - nicht mehr aus der ersten aktiven Szene.
         let layoutMode: SouveraLayoutMode
+        private var lastLayoutLog: String?
 
         init(rootViewController: UIViewController, layoutMode: SouveraLayoutMode) {
             self.layoutMode = layoutMode
@@ -610,12 +628,36 @@ class NCMainTabBarController: UITabBarController {
         /// Setzt Bar-Sichtbarkeit und Appearance konsistent zum Modus.
         /// Wird bei Trait-Wechseln, Erscheinen und Layout aufgerufen.
         func applyLayoutMode() {
-            layoutMode.update(traitCollection: traitCollection)
+            // Run 24.10.: Der Trait des Fensters ist die Wahrheit (nicht der
+            // beim Bau gelesene Tab-Trait). Sonst bleibt der Kalender nach
+            // dem Oeffnen im falschen Modus (Glas statt Bridge).
+            let traits = resolvedTraitCollection()
+            layoutMode.update(traitCollection: traits)
+            layoutMode.updateHeaderFit(window: view.window)
             let bridge = layoutMode.usesBridgeHeader
-            super.setNavigationBarHidden(bridge ? false : true, animated: false)
+            let shouldHide = !bridge
+            if super.isNavigationBarHidden != shouldHide {
+                super.setNavigationBarHidden(shouldHide, animated: false)
+            }
             if bridge {
                 SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+                let extra = layoutMode.headerExtraTrailing
+                let target = 16 + (extra > 0.5 ? extra : 0)
+                if abs(navigationBar.directionalLayoutMargins.trailing - target) > 0.5 {
+                    navigationBar.directionalLayoutMargins.trailing = target
+                }
             }
+            let signature = "\(bridge)|\(layoutMode.isRegularWidth)|\(Int(layoutMode.headerExtraTop))|\(Int(layoutMode.headerExtraTrailing))|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
+            if signature != lastLayoutLog {
+                lastLayoutLog = signature
+                SouveraLog.write("Layout", "bridge=\(bridge) regular=\(layoutMode.isRegularWidth) extraTop=\(Int(layoutMode.headerExtraTop)) extraTrailing=\(Int(layoutMode.headerExtraTrailing)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))")
+            }
+        }
+
+        private func resolvedTraitCollection() -> UITraitCollection {
+            if let scene = view.window?.windowScene { return scene.traitCollection }
+            if let parent { return parent.traitCollection }
+            return traitCollection
         }
 
         override func setNavigationBarHidden(_ hidden: Bool, animated: Bool) {
@@ -640,10 +682,25 @@ class NCMainTabBarController: UITabBarController {
             applyLayoutMode()
         }
 
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            applyLayoutMode()
+        }
+
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
+            applyLayoutMode()
             guard layoutMode.usesBridgeHeader else { return }
             SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+        }
+    }
+
+    /// Run 24.10.: Haelt die Modi aller gehosteten Tabs mit dem
+    /// Tab-Controller synchron - Header und Sidebar duerfen nicht
+    /// auseinanderlaufen.
+    private func updateHostedLayoutModes() {
+        for controller in viewControllers ?? [] {
+            (controller as? SouveraHostedNavigationController)?.applyLayoutMode()
         }
     }
 

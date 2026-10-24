@@ -55,4 +55,13 @@ struct SouveraLayoutModeTests {
         mode.update(traitCollection: traits(size: .compact, idiom: .phone))
         #expect(mode.usesBridgeHeader == false)
     }
+
+    @Test("Header fit only adds the missing status bar overlap")
+    func headerFit() {
+        #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: nil, safeAreaTop: 0) == 0)
+        #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 24, safeAreaTop: 0) == 24)
+        #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 24, safeAreaTop: 24) == 0)
+        #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 59, safeAreaTop: 20) == 32)
+        #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 10, safeAreaTop: 24) == 0)
+    }
 }

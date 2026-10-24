@@ -66,6 +66,22 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
     // MARK: - View Life Cycle
 
+    /// Run 24.10. (Feedback: Suchfeld/Buttons unter der Statusleiste in
+    /// schmalen Fenstern): gemessener Trailing-Abstand. Auf normalen
+    /// Geraeten ist der Wert 0 (keine Aenderung).
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        applyStatusBarAwareMargins()
+    }
+
+    private func applyStatusBarAwareMargins() {
+        let extra = SouveraHeaderFit.extraTrailingInset(window: view.window)
+        let target: CGFloat = extra > 0.5 ? 16 + extra : 16
+        if abs(navigationBar.directionalLayoutMargins.trailing - target) > 0.5 {
+            navigationBar.directionalLayoutMargins.trailing = target
+        }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         self.delegate = self

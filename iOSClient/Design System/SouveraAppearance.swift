@@ -199,6 +199,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     var title: String = ""
     /// Titel links neben dem Leading-Block (Chat-Raum-Stil: "< Test Termin").
     var titleAfterLeading: Bool = false
+    /// Run 24.10.: Zusaetzlicher Abstand, wenn die Statusleiste den Header
+    /// ueberlappt (gemessen, nicht geraten).
+    var extraTop: CGFloat = 0
+    var extraTrailing: CGFloat = 0
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -225,8 +229,9 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
 
             HStack(spacing: 8) { trailing }
         }
-        .padding(.horizontal, 12)
-        .padding(.top, verticalSizeClass == .compact ? 12 : 0)
+        .padding(.leading, 12)
+        .padding(.trailing, 12 + extraTrailing)
+        .padding(.top, (verticalSizeClass == .compact ? 12 : 0) + extraTop)
         // Run 15.09.: Gradient läuft unter den Buttons weiter; Höhe an
         // die Mehr/Dateien-Bar angepasst (Feedback: "2-4pt fehlen unten"
         // — nur die Unterkante, Button-Position unverändert).
@@ -330,6 +335,15 @@ final class SouveraHeaderBridge: ObservableObject {
     struct Custom: Identifiable {
         let id: String
         let view: UIView
+        /// Run 24.10.: Optionaler Halter (z. B. UIHostingController), damit
+        /// interaktive SwiftUI-Pills im Balken nicht freigegeben werden.
+        let retained: AnyObject?
+
+        init(id: String, view: UIView, retained: AnyObject? = nil) {
+            self.id = id
+            self.view = view
+            self.retained = retained
+        }
     }
 
     @Published var leadingItems: [Item] = []
@@ -483,7 +497,15 @@ final class SouveraBarCoordinator {
         for item in items where !item.icon.isEmpty || !(item.text ?? "").isEmpty {
             let bar: UIBarButtonItem
             if let text = item.text, !text.isEmpty {
-                bar = UIBarButtonItem(title: text, primaryAction: UIAction(title: text) { _ in item.handler() })
+                // Run 24.10. (Feedback: Kalender-Header ohne Icons): Text-
+                // Items muessen ihr Icon behalten - sonst zeigt die Bridge
+                // nur "Heute"/"Monat", der Glas-Header aber Text+Icon.
+                let img = item.icon.isEmpty ? nil : UIImage(systemName: item.icon)
+                bar = UIBarButtonItem(
+                    title: text,
+                    image: img,
+                    primaryAction: UIAction(title: text, image: img) { _ in item.handler() }
+                )
             } else {
                 // Run 21.09. (Feedback iPadOS 17: Button sichtbar, Icon nicht):
                 // iOS 17 rendert den Inhalt der primaryAction - eine leere

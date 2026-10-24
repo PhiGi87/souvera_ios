@@ -84,6 +84,17 @@ class NCMoreNavigationController: NCMainNavigationController {
         layoutSouveraLogo()
     }
 
+    /// Run 24.10. (Feedback: Header in schmalen Fenstern abgeschnitten/
+    /// durchscheinend): iOS 27 setzt die Appearance beim Erscheinen und
+    /// Scrollen zurueck. Nach dem vollstaendigen Erscheinen erneut opak
+    /// setzen und das Logo neu positionieren.
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        applyBlueHeader()
+        layoutSouveraLogo()
+        SouveraLog.write("More", "[MoreHeader] appeared translucent=\(navigationBar.isTranslucent) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) safeTop=\(Int(navigationBar.safeAreaInsets.top))")
+    }
+
     /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus
     /// kleiner Korrektur), vertikal an der Höhe der rechten Buttons (6 pt
     /// über der Streifenmitte - Ausgleich der Wortmarken-Padding im PNG).
@@ -115,7 +126,7 @@ class NCMoreNavigationController: NCMainNavigationController {
         )
         if logo.frame != frame {
             logo.frame = frame
-            SouveraLog.write("More", "[MoreHeader] bar=\(Int(bar.bounds.width))x\(Int(bar.bounds.height)) safeTop=\(Int(bar.safeAreaInsets.top)) logoY=\(Int(y)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))")
+            SouveraLog.write("More", "[MoreHeader] bar=\(Int(bar.bounds.width))x\(Int(bar.bounds.height)) safeTop=\(Int(bar.safeAreaInsets.top)) logoY=\(Int(y)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0)) translucent=\(bar.isTranslucent)")
         }
     }
 
