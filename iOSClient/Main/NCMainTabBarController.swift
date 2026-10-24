@@ -682,25 +682,11 @@ class NCMainTabBarController: UITabBarController {
             applyLayoutMode()
         }
 
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            applyLayoutMode()
-        }
-
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
             applyLayoutMode()
             guard layoutMode.usesBridgeHeader else { return }
             SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
-        }
-    }
-
-    /// Run 24.10.: Haelt die Modi aller gehosteten Tabs mit dem
-    /// Tab-Controller synchron - Header und Sidebar duerfen nicht
-    /// auseinanderlaufen.
-    private func updateHostedLayoutModes() {
-        for controller in viewControllers ?? [] {
-            (controller as? SouveraHostedNavigationController)?.applyLayoutMode()
         }
     }
 
