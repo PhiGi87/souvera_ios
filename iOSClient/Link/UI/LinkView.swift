@@ -703,7 +703,10 @@ struct LinkView: View {
             return
         }
         let bounds: CGRect = viewWindowBounds ?? CGRect(origin: .zero, size: size)
+        // Run 24.10.: Auf dem schmalen Außendisplay (~678 pt) keine
+        // Raumliste/Chat-Spalte - erst ab 720 pt Inhaltsbreite.
         let isLandscape = bounds.width > bounds.height
+            && size.width >= SouveraLayoutMode.splitMinimumWidth
         guard isLandscape != landscapeLayout else { return }
         landscapeLayout = isLandscape
         SouveraLog.write("LinkUI", "layout landscape=\(isLandscape) window=\(Int(bounds.width))x\(Int(bounds.height)) content=\(Int(size.width))x\(Int(size.height))")

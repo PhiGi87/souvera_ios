@@ -62,10 +62,18 @@ final class SouveraLayoutMode: ObservableObject {
         if abs(top - headerExtraTop) > 0.5 {
             headerExtraTop = top
         }
-        let trailing = SouveraHeaderFit.extraTrailingInset(window: window)
-        if abs(trailing - headerExtraTrailing) > 0.5 {
-            headerExtraTrailing = trailing
-        }
+        // Run 24.10.: KEIN horizontaler Inset mehr. Die Statusleiste liegt
+        // oben; ein Trailing-Inset schob die Header-Buttons nur nach innen
+        // (Außendisplay: 120 pt). extraTrailing bleibt fuer Kompatibilitaet 0.
+    }
+
+    /// Run 24.10.: Split nur auf echten Breiten. Das Außendisplay ist im
+    /// Querformat (~678 pt) zu schmal fuer zwei Spalten.
+    static let splitMinimumWidth: CGFloat = 720
+
+    static func usesSplit(isRegularWidth: Bool, isLandscape: Bool, width: CGFloat) -> Bool {
+        if isRegularWidth { return true }
+        return isLandscape && width >= splitMinimumWidth
     }
 
     func update(traitCollection: UITraitCollection) {
@@ -109,20 +117,5 @@ enum SouveraHeaderFit {
         return inWindow.maxY
     }
 
-    /// Breite der Statusleiste, wenn sie den rechten Headerrand ueberlappt.
-    static func extraTrailingInset(window: UIWindow?) -> CGFloat {
-        guard let window,
-              window.safeAreaInsets.top < 1,
-              let scene = window.windowScene,
-              let manager = scene.statusBarManager else { return 0 }
-        let frame = manager.statusBarFrame
-        guard !frame.isEmpty else { return 0 }
-        let screen = window.screen
-        let inWindow = window.convert(frame, from: screen.coordinateSpace)
-        guard inWindow.intersects(window.bounds) else { return 0 }
-        // Nur wenn die Leiste im oberen Bereich liegt (Statusleiste), nicht
-        // bei einem beliebigen Systemelement.
-        guard inWindow.minY < 60 else { return 0 }
-        return min(120, max(0, inWindow.width) + 8)
-    }
+
 }

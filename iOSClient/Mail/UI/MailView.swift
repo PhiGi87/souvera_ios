@@ -313,10 +313,12 @@ struct MailView: View {
         return false
     }
 
-    /// Run 23.10.: Split bei regular width (Duo-Innendisplay auch hochkant)
-    /// oder klassischem Landscape. Nicht mehr vom Start-Zustand abhaengig.
+    /// Run 24.10.: Split nur bei regular width oder ausreichend breitem
+    /// Querformat (>= 720 pt). Das Außendisplay (~678 pt) bleibt einspaltig.
     private var isWideLayout: Bool {
-        layout.isRegularWidth || landscapeLayout
+        SouveraLayoutMode.usesSplit(isRegularWidth: layout.isRegularWidth,
+                                    isLandscape: landscapeLayout,
+                                    width: layoutWidth)
     }
 
     // MARK: - Landscape-Split (Ordnerspalte links + Liste rechts)
@@ -324,6 +326,7 @@ struct MailView: View {
     /// Split bei Breite > Höhe - auf iPhone, iPad UND Mac (Katalyst).
     /// Geometrie-basiert (siehe GeometryReader im body), live bei Rotation.
     @State private var landscapeLayout = false
+    @State private var layoutWidth: CGFloat = 0
 
     /// Fokus-Leser: nicht auf dem iPhone (dort bleibt das Detail als
     /// Overlay über der Listenspalte), sonst bei aktivem Account-Setting.
@@ -340,6 +343,7 @@ struct MailView: View {
         // daraus wurde faelschlich "Querformat" abgeleitet und der Header
         // mit der Landscape-Button-Gruppe aufgebaut. Nullgroessen ignorieren.
         guard size.width > 0, size.height > 0 else { return }
+        layoutWidth = size.width
         let isLandscape = size.width > size.height
         guard isLandscape != landscapeLayout else { return }
         landscapeLayout = isLandscape
@@ -381,11 +385,17 @@ struct MailView: View {
                         viewModel.back()
                     }
                     .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
-                } else if foldersCollapsed && isWideLayout {
+                } else if isWideLayout {
+                    // Run 24.10.: Einklappen wieder links im Header.
                     SouveraHeaderButton(icon: "sidebar.left") {
-                        foldersCollapsed = false
+                        foldersCollapsed.toggle()
                     }
                     .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
+                    if !(focusReaderActive && viewModel.route.isDetail) {
+                        AutoRefreshRingView(viewModel: viewModel)
+                            .frame(width: 44, height: 44)
+                            .modifier(SouveraHeaderGlass(shape: Circle()))
+                    }
                 } else if isFolders {
                     AutoRefreshRingView(viewModel: viewModel)
                         .frame(width: 44, height: 44)
@@ -569,17 +579,25 @@ struct MailView: View {
             ) { viewModel.startCompose(mode: .reply, message: message) })
             menus.append(detailMoreMenu(message))
         } else {
-            if foldersCollapsed && isWideLayout {
-                // Run 24.10.: Eingeklappt erscheint ein Ausklappen-Button;
-                // das Einklappen sitzt im Ordnerkopf der Spalte.
-                leading.append(SouveraHeaderBridge.Item(
-                    id: "foldersExpand", icon: "sidebar.left",
-                    accessibilityLabel: NSLocalizedString("_mail_folders_", comment: "")
-                ) { foldersCollapsed = false })
+            if isWideLayout {
+                // Run 24.10.: Einklappen wieder links im Header. Als Custom-
+                // View GANZ links (vor dem Ring), damit die Reihenfolge
+                // stimmt; die System-Gruppe liefert die Kapsel.
+                let toggleHost = UIHostingController(rootView:
+                    SouveraHeaderButton(icon: "sidebar.left", glass: false) {
+                        foldersCollapsed.toggle()
+                    }
+                    .frame(width: 44, height: 44)
+                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
+                )
+                toggleHost.view.backgroundColor = .clear
+                leadingCustoms.append(SouveraHeaderBridge.Custom(
+                    id: "foldersToggle",
+                    view: toggleHost.view,
+                    retained: toggleHost
+                ))
                 if let ringCustom { leadingCustoms.append(ringCustom) }
             } else if isFolders {
-                if let ringCustom { leadingCustoms.append(ringCustom) }
-            } else if isWideLayout {
                 if let ringCustom { leadingCustoms.append(ringCustom) }
             } else {
                 // Bridge-Bar auf kompakter Breite (z. B. iPad Split View):
@@ -760,12 +778,8 @@ struct MailView: View {
             let folderWidth = min(320, max(260, geo.size.width / 3))
             HStack(spacing: 0) {
                 if !foldersCollapsed {
-                    MailFolderListView(
-                        viewModel: viewModel,
-                        sidebarStyle: true,
-                        onCollapse: { foldersCollapsed = true }
-                    )
-                    .frame(width: folderWidth)
+                    MailFolderListView(viewModel: viewModel, sidebarStyle: true)
+                        .frame(width: folderWidth)
                     Divider()
                 }
                 ZStack {
@@ -880,8 +894,6 @@ private struct MailFolderListView: View {
     /// Landscape-Spalte: flacher "Dateien"-Sidebar-Stil statt
     /// insetGrouped-Karten (Look & Feel wie die iCloud-Drive-Sidebar).
     var sidebarStyle: Bool = false
-    /// Run 24.10.: Einklappen der Spalte ueber den Ordnerkopf.
-    var onCollapse: (() -> Void)? = nil
     @State private var showScrollTop = false
     @State private var renameTarget: Mailbox?
     @State private var renameText = ""
@@ -959,10 +971,8 @@ private struct MailFolderListView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2, pinnedViews: []) {
-                    let allGroups = groups(boxes)
-                    ForEach(allGroups) { group in
-                        sidebarSectionHeader(group,
-                                             showsCollapseToggle: group.id == allGroups.first?.id)
+                    ForEach(groups(boxes)) { group in
+                        sidebarSectionHeader(group)
                         if !viewModel.collapsedGroupIds.contains(group.id) {
                             ForEach(visibleRows(for: viewModel.mailboxTree(for: group.folders))) { row in
                                 sidebarRow(row)
@@ -1008,47 +1018,31 @@ private struct MailFolderListView: View {
         }
     }
 
-    private func sidebarSectionHeader(_ group: FolderGroup,
-                                      showsCollapseToggle: Bool = false) -> some View {
-        // Run 24.10.: Der Einklapp-Button liegt NEBEN dem Gruppen-Toggle,
-        // nicht darin (verschachtelte Buttons schlucken sich sonst).
-        HStack(spacing: 4) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) { toggleGroup(group.id) }
-            } label: {
-                HStack(spacing: 6) {
-                    Text(group.label)
-                        .font(.subheadline.weight(.semibold))
+    private func sidebarSectionHeader(_ group: FolderGroup) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.2)) { toggleGroup(group.id) }
+        } label: {
+            HStack(spacing: 6) {
+                Text(group.label)
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: viewModel.collapsedGroupIds.contains(group.id) ? "chevron.right" : "chevron.down")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                if group.totalUnread > 0 {
+                    Text("\(group.totalUnread)")
+                        .font(.subheadline)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                    Image(systemName: viewModel.collapsedGroupIds.contains(group.id) ? "chevron.right" : "chevron.down")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    if group.totalUnread > 0 {
-                        Text("\(group.totalUnread)")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
                 }
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
-            if showsCollapseToggle, let onCollapse {
-                Button(action: onCollapse) {
-                    Image(systemName: "sidebar.left")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 32, height: 32)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-            }
+            .padding(.horizontal, 10)
+            .padding(.top, 14)
+            .padding(.bottom, 4)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 10)
-        .padding(.top, 14)
-        .padding(.bottom, 4)
+        .buttonStyle(.plain)
     }
 
     private func sidebarRow(_ row: VisibleTreeRow) -> some View {
@@ -1292,6 +1286,8 @@ private struct MailboxTreeRowBase: View {
                         .font(.body)
                         .fontWeight(isActive ? .semibold : .regular)
                         .foregroundStyle(isActive ? Color.Souvera.brandPrimaryDeep : Color.primary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                     Spacer()
                     if showsUnread {
                         // Immer die EIGENEN Ungelesenen des Ordners zeigen -

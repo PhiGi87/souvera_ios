@@ -75,7 +75,7 @@ class NCMoreNavigationController: NCMainNavigationController {
     /// Layout neu erzwingen (iOS 26 setzt sie sonst asynchron zurueck).
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        applyBlueHeader()
+        ensureHeaderVisible()
     }
 
     override func viewDidLayoutSubviews() {
@@ -90,9 +90,33 @@ class NCMoreNavigationController: NCMainNavigationController {
     /// setzen und das Logo neu positionieren.
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        ensureHeaderVisible()
+        // Run 24.10.: Nach Drehen/Fensterwechsel war die Bar teils 0 pt
+        // hoch - im naechsten Run noch einmal erzwingen und layouten.
+        DispatchQueue.main.async { [weak self] in
+            self?.ensureHeaderVisible()
+        }
+    }
+
+    /// Erzwingt die sichtbare, opake Bar (nur fuer die Mehr-Root). iOS 27
+    /// blendet sie beim Uebergang/Drehen gelegentlich aus (bar=0) und
+    /// laesst sie ausgeblendet.
+    private func ensureHeaderVisible() {
+        guard let root = viewControllers.first, root === topViewController else { return }
+        if isNavigationBarHidden {
+            setNavigationBarHidden(false, animated: false)
+        }
+        if navigationBar.isHidden {
+            navigationBar.isHidden = false
+        }
         applyBlueHeader()
+        if navigationBar.bounds.height < 1 {
+            view.setNeedsLayout()
+            view.layoutIfNeeded()
+            applyBlueHeader()
+        }
         layoutSouveraLogo()
-        SouveraLog.write("More", "[MoreHeader] appeared translucent=\(navigationBar.isTranslucent) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) safeTop=\(Int(navigationBar.safeAreaInsets.top))")
+        SouveraLog.write("More", "[MoreHeader] ensure hidden=\(isNavigationBarHidden) barHidden=\(navigationBar.isHidden) translucent=\(navigationBar.isTranslucent) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) safeTop=\(Int(navigationBar.safeAreaInsets.top))")
     }
 
     /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus

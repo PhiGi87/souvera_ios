@@ -159,6 +159,9 @@ struct SouveraHeaderButton: View {
 /// die Kreise automatisch zu einer gemeinsamen Pill (wie die Doppel-Pills
 /// in Dateien/Mehr). Fallback < iOS 26: eine Material-Capsule.
 struct SouveraHeaderPill<Content: View>: View {
+    /// Run 24.10.: In der UIKit-Bridge traegt die System-Gruppe bereits
+    /// eine Glas-Kapsel - dann hier KEIN eigenes Glas (sonst Doppelring).
+    var glass: Bool = true
     @ViewBuilder var content: Content
 
     var body: some View {
@@ -166,7 +169,7 @@ struct SouveraHeaderPill<Content: View>: View {
         // sind reine Icons (keine verschachtelten Kreise).
         HStack(spacing: 2) { content }
             .padding(.horizontal, 4)
-            .modifier(SouveraHeaderGlass(shape: Capsule()))
+            .modifier(SouveraHeaderGlass(shape: Capsule(), active: glass))
     }
 }
 
@@ -191,10 +194,14 @@ struct SouveraHeaderGlass<S: Shape>: ViewModifier {
 /// Screens wird per safeAreaInset unter den Header gesetzt (opak, Inhalt
 /// läuft nicht dahinter durch - wie bei Mehr/Dateien).
 struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
-    /// Run 16.09. (Feedback Landscape): Im Landscape (compact vertical)
-    /// fehlt der Statusbar-Abstand - oben derselbe Abstand wie unten,
-    /// damit die Pills nicht am Display-Rand kleben.
-    @Environment(\.verticalSizeClass) private var verticalSizeClass
+    /// Run 24.10. (Feedback: Header-Hoehe je nach Tab/Lage verschieden):
+    /// Feste Inhaltshoehe wie die UIKit-Bar - auf iOS 26/27 58 pt, auf
+    /// aelteren Systemen das bisherige Mass (46 pt).
+    private var contentHeight: CGFloat {
+        if #available(iOS 26.0, *) { return 58 }
+        return 46
+    }
+
     /// Zentrierter Titel (leer = kein Titel, z. B. Kalender-Root).
     var title: String = ""
     /// Titel links neben dem Leading-Block (Chat-Raum-Stil: "< Test Termin").
@@ -209,6 +216,7 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     var body: some View {
         HStack(spacing: 10) {
             HStack(spacing: 8) { leading }
+                .fixedSize(horizontal: true, vertical: false)
 
             if titleAfterLeading, !title.isEmpty {
                 Text(title)
@@ -228,14 +236,12 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
             }
 
             HStack(spacing: 8) { trailing }
+                .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.leading, 12)
         .padding(.trailing, 12 + extraTrailing)
-        .padding(.top, (verticalSizeClass == .compact ? 12 : 0) + extraTop)
-        // Run 15.09.: Gradient läuft unter den Buttons weiter; Höhe an
-        // die Mehr/Dateien-Bar angepasst (Feedback: "2-4pt fehlen unten"
-        // — nur die Unterkante, Button-Position unverändert).
-        .padding(.bottom, 12)
+        .frame(height: contentHeight)
+        .padding(.top, extraTop)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(

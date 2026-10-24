@@ -64,4 +64,24 @@ struct SouveraLayoutModeTests {
         #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 59, safeAreaTop: 20) == 32)
         #expect(SouveraHeaderFit.extraTopPadding(statusBarBottom: 10, safeAreaTop: 24) == 0)
     }
+
+    @Test("Split only on regular width or a wide landscape")
+    func splitRule() {
+        #expect(SouveraLayoutMode.usesSplit(isRegularWidth: true,
+                                           isLandscape: false,
+                                           width: 669))
+        #expect(SouveraLayoutMode.usesSplit(isRegularWidth: false,
+                                           isLandscape: true,
+                                           width: 678) == false)
+        #expect(SouveraLayoutMode.usesSplit(isRegularWidth: false,
+                                           isLandscape: true,
+                                           width: 720))
+        #expect(SouveraLayoutMode.usesSplit(isRegularWidth: false,
+                                           isLandscape: true,
+                                           width: 852))
+        #expect(SouveraLayoutMode.usesSplit(isRegularWidth: false,
+                                           isLandscape: false,
+                                           width: 900) == false)
+    }
+
 }

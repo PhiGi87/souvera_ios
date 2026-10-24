@@ -91,7 +91,11 @@ struct SouveraCalendarView: View {
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
-                let isWide = geometry.size.width > geometry.size.height && !tentMode
+                // Run 24.10.: Kein Split auf schmalen Querformaten
+                // (Außendisplay ~678 pt).
+                let isWide = geometry.size.width > geometry.size.height
+                    && geometry.size.width >= SouveraLayoutMode.splitMinimumWidth
+                    && !tentMode
                 let bottomInset = max(geometry.safeAreaInsets.bottom, 48)
                 // (Offline-Banner haengt am Root-NavigationStack, siehe unten.)
                 VStack(spacing: 0) {
@@ -2325,14 +2329,14 @@ extension SouveraCalendarView {
         SouveraModuleHeader(
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
-            leading: { calendarTodayPill },
-            trailing: { calendarViewModePill }
+            leading: { calendarTodayPill(glass: true) },
+            trailing: { calendarViewModePill(glass: true) }
         )
     }
 
     /// "Heute"+Kalender — gemeinsame Pill fuer Glas-Header UND Bridge.
-    fileprivate var calendarTodayPill: some View {
-        SouveraHeaderPill {
+    fileprivate func calendarTodayPill(glass: Bool) -> some View {
+        SouveraHeaderPill(glass: glass) {
             Button {
                 selectedDay = Date()
                 viewModel.visibleMonth = Date()
@@ -2353,8 +2357,8 @@ extension SouveraCalendarView {
     }
 
     /// Ansichts-Menue + Plus — gemeinsame Pill fuer Glas-Header UND Bridge.
-    fileprivate var calendarViewModePill: some View {
-        SouveraHeaderPill {
+    fileprivate func calendarViewModePill(glass: Bool) -> some View {
+        SouveraHeaderPill(glass: glass) {
             Menu {
                 ForEach(CalendarViewMode.allCases) { mode in
                     Button {
@@ -2405,13 +2409,13 @@ extension SouveraCalendarView {
         bridge.leadingMenus = []
         bridge.trailingMenus = []
         bridge.leadingCustoms = [
-            headerPillCustom(id: "today", pill: calendarTodayPill)
+            headerPillCustom(id: "today", pill: calendarTodayPill(glass: false))
         ]
         bridge.trailingCustoms = [
             // Die ID enthaelt den Modus, damit der Coordinator den Balken
             // beim Wechsel neu baut (sonst bliebe der alte Titel stehen).
             headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
-                             pill: calendarViewModePill)
+                             pill: calendarViewModePill(glass: false))
         ]
     }
 

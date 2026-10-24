@@ -641,11 +641,6 @@ class NCMainTabBarController: UITabBarController {
             }
             if bridge {
                 SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
-                let extra = layoutMode.headerExtraTrailing
-                let target = 16 + (extra > 0.5 ? extra : 0)
-                if abs(navigationBar.directionalLayoutMargins.trailing - target) > 0.5 {
-                    navigationBar.directionalLayoutMargins.trailing = target
-                }
             }
             let signature = "\(bridge)|\(layoutMode.isRegularWidth)|\(Int(layoutMode.headerExtraTop))|\(Int(layoutMode.headerExtraTrailing))|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
             if signature != lastLayoutLog {
