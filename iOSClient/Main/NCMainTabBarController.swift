@@ -480,7 +480,8 @@ class NCMainTabBarController: UITabBarController {
     /// verschieben. Gilt überall, wo das System-Seitenband sichtbar ist
     /// (Außendisplay hoch/quer, Innendisplay quer).
     var isSidebarActionsActive: Bool {
-        guard #available(iOS 18.0, *) else { return false }
+        // `sidebar.isAvailable` ist ab iOS 27 verfuegbar.
+        guard #available(iOS 27.0, *) else { return false }
         return SouveraSidebarActions.isActive(
             sidebarAvailable: sidebar.isAvailable,
             sidebarHidden: sidebar.isHidden,
@@ -528,7 +529,7 @@ class NCMainTabBarController: UITabBarController {
     }
 
     private var sidebarAvailable: Bool {
-        if #available(iOS 18.0, *) {
+        if #available(iOS 27.0, *) {
             return sidebar.isAvailable && !sidebar.isHidden
         }
         return false
