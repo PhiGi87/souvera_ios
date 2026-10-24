@@ -156,18 +156,21 @@ struct NCMoreView: View {
                 // Run 24.10.: Die Aktionen der ehemaligen UIKit-Bar direkt
                 // im SwiftUI-Header (die Bar ist auf der Mehr-Root versteckt).
                 SouveraHeaderPill(glass: true) {
+                    // Run 24.10.: Buttons mit glass:false - die Pill traegt
+                    // DIE eine Glaskapsel (wie Mail/Link), sonst doppelte
+                    // ueberlappende Kapseln.
                     if model.availableNotifications {
-                        SouveraHeaderButton(icon: "bell.fill") {
+                        SouveraHeaderButton(icon: "bell.fill", glass: false) {
                             model.moreNavigationController?.presentNotifications()
                         }
                         .accessibilityLabel(NSLocalizedString("_notifications_", comment: ""))
                     }
-                    SouveraHeaderButton(icon: "arrow.left.arrow.right.circle.fill") {
+                    SouveraHeaderButton(icon: "arrow.left.arrow.right.circle.fill", glass: false) {
                         model.moreNavigationController?.presentTransfers()
                     }
                     .accessibilityLabel(NSLocalizedString("_transfers_", comment: ""))
                     if model.assistantEnabled {
-                        SouveraHeaderButton(icon: "sparkles") {
+                        SouveraHeaderButton(icon: "sparkles", glass: false) {
                             model.moreNavigationController?.presentAssistant()
                         }
                         .accessibilityLabel(NSLocalizedString("_assistant_", comment: ""))

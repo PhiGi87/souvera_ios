@@ -481,8 +481,17 @@ class NCMainTabBarController: UITabBarController {
         let hosted = (viewControllers ?? []).compactMap { $0 as? SouveraHostedNavigationController }
         let visible = hosted.first { $0 === selectedViewController && $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
             ?? hosted.first { $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
-        let height = visible.flatMap { navigationBar in
-            navigationBar.navigationBar.bounds.height > 1 ? navigationBar.navigationBar.bounds.height : nil
+        // Run 24.10.: SICHTBARE Hoehe messen - die Bar-Hintergrund-View
+        // zeichnet im Innendisplay quer ueber ihre Bounds hinaus
+        // (Layout 58 pt, sichtbar ~82 pt). Pixel-Messung IMG_1320.
+        let height = visible.flatMap { nav in
+            let bar = nav.navigationBar
+            var heights = [bar.bounds.height]
+            for sub in bar.subviews where sub.frame.height > 1 {
+                heights.append(sub.frame.height)
+            }
+            let maxH = heights.max() ?? 0
+            return maxH > 1 ? maxH : nil
         }
         if bridgeBarMetrics.barHeight != height {
             bridgeBarMetrics.barHeight = height
