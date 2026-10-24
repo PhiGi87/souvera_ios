@@ -2419,38 +2419,6 @@ extension SouveraCalendarView {
         ]
     }
 
-    /// Run 25.09.: Suchtreffer aus dem Overlay (Hauptansicht UND
-    /// Kalender-Übersicht) in die normale Ansicht überführen.
-    func openEventFromSearch(_ event: CalendarEventModel) {
-        selectedDay = event.start
-        viewModel.visibleMonth = event.start
-        viewMode = .day
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
-            detailEvent = event
-        }
-    }
-
-    fileprivate func populateHeaderBridge() {
-        guard let bridge = headerBridge else { return }
-        bridge.title = ""
-        // Run 24.10. (Feedback: Icons fehlten in der Bridge): Dieselben
-        // SwiftUI-Pills wie im Glas-Header rendern - Text+Icon bleiben so
-        // garantiert zusammen und sehen auf allen Groessen gleich aus.
-        bridge.leadingItems = []
-        bridge.trailingItems = []
-        bridge.leadingMenus = []
-        bridge.trailingMenus = []
-        bridge.leadingCustoms = [
-            headerPillCustom(id: "today", pill: calendarTodayPill(glass: false))
-        ]
-        bridge.trailingCustoms = [
-            // Die ID enthaelt den Modus, damit der Coordinator den Balken
-            // beim Wechsel neu baut (sonst bliebe der alte Titel stehen).
-            headerPillCustom(id: "viewmode-\(viewMode.rawValue)",
-                             pill: calendarViewModePill(glass: false))
-        ]
-    }
-
     private func headerPillCustom<V: View>(id: String, pill: V) -> SouveraHeaderBridge.Custom {
         let host = UIHostingController(rootView: pill.fixedSize())
         host.view.backgroundColor = .clear
