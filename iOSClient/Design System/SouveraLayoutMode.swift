@@ -78,6 +78,11 @@ final class SouveraLayoutMode: ObservableObject {
     /// Hoehe; quer ueberzeichnet der Hintergrund auf ~82 pt Sichtbarkeit.
     static let bridgeBarLayoutHeight: CGFloat = 58
 
+    /// Run 24.10.: Sichtbare Hoehe der Bridge-Bar im Innendisplay QUER
+    /// (Pixel-Messung: Hintergrund zeichnet 82 pt). Der Mehr-Header
+    /// uebernimmt sie, damit beide Header gleich hoch sind.
+    static let bridgeBarVisibleHeightLandscape: CGFloat = 82
+
     /// Run 24.10.: Reservierte Statuszone rechts oben im Innendisplay-
     /// Hochformat (Pixel-Messung Kalender-Bar: Trailing-Buttons enden
     /// bei ~413 pt, Statuskapsel ab ~463 pt bei 669 pt Breite).

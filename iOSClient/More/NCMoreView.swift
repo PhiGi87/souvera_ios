@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 
 import SwiftUI
+import UIKit
 import Combine
 import NextcloudKit
 
@@ -21,6 +22,9 @@ struct NCMoreView: View {
     /// Run 24.10.: Gemessene Systembar-Hoehe - der Mehr-Header ist damit
     /// exakt so hoch wie Mail/Kalender/Link im Innendisplay quer.
     @ObservedObject private var headerMetrics: SouveraBridgeBarMetrics
+    /// Run 24.10.: Breite-Klasse des Fensters - entscheidet ueber den
+    /// deterministischen Header (Innendisplay) statt Safe-Area-Placement.
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private let loadItemsOnAppear: Bool
 
     init(account: String,
@@ -47,6 +51,74 @@ struct NCMoreView: View {
     }
 
     var body: some View {
+        Group {
+            if usesDeterministicHeader {
+                // Run 24.10.: Innendisplay (Duo). Der Header wird NICHT per
+                // safeAreaInset platziert - die Safe-Area liefert dort 82 pt
+                // (hoch) bzw. 58 pt (quer). Dadurch wuchs der blaue Block auf
+                // 140 pt und die Buttons hingen unter der Statuskapsel.
+                // Stattdessen beginnt der Header fest bei y=0 (identisch zu
+                // den UIKit-Bars von Mail/Kalender) mit fester Hoehe.
+                GeometryReader { geo in
+                    let isLandscape = geo.size.width > geo.size.height
+                    let headerHeight = isLandscape
+                        ? SouveraLayoutMode.bridgeBarVisibleHeightLandscape
+                        : SouveraLayoutMode.bridgeBarLayoutHeight
+                    ZStack(alignment: .top) {
+                        listContent
+                            .safeAreaInset(edge: .top, spacing: 0) {
+                                Color.clear
+                                    .frame(height: headerHeight + 12)
+                            }
+                        moreHeader(
+                            height: headerHeight,
+                            trailingReserve: isLandscape ? 0 : SouveraLayoutMode.statusReservedWidth
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .ignoresSafeArea(edges: .top)
+                }
+            } else {
+                listContent
+                    .safeAreaInset(edge: .top, spacing: 12) {
+                        moreHeader(
+                            height: headerMetrics.barHeight,
+                            trailingReserve: headerMetrics.statusReservedWidth
+                        )
+                    }
+            }
+        }
+        .sheet(isPresented: $showAccountSettings) {
+            NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
+        }
+        .task {
+            guard loadItemsOnAppear else { return }
+            await model.loadItems()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterChangeUser))) { _ in
+            Task { await model.loadItems() }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterServerDidUpdate))) { _ in
+            Task { await model.loadItems() }
+        }
+        .onAppear {
+            updateAutoUploadCounter()
+        }
+        .onDisappear {
+            autoUploadCounter.stop()
+        }
+        .onChange(of: model.autoUploadStart) {
+            updateAutoUploadCounter()
+        }
+    }
+
+    /// Run 24.10.: Nur auf dem Duo-Innendisplay (regular, kein iPad) wird
+    /// der Header deterministisch platziert.
+    private var usesDeterministicHeader: Bool {
+        horizontalSizeClass == .regular && UIDevice.current.userInterfaceIdiom != .pad
+    }
+
+    private var listContent: some View {
         List {
             if maintenanceMonitor.isMaintenance {
                 Section {
@@ -98,31 +170,6 @@ struct NCMoreView: View {
         }
         .listStyle(.insetGrouped)
         .tint(Color.Souvera.brandPrimaryDeep)
-        .safeAreaInset(edge: .top, spacing: 12) {
-            moreHeader
-        }
-        .sheet(isPresented: $showAccountSettings) {
-            NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
-        }
-        .task {
-            guard loadItemsOnAppear else { return }
-            await model.loadItems()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterChangeUser))) { _ in
-            Task { await model.loadItems() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: Notification.Name(NCGlobal.shared.notificationCenterServerDidUpdate))) { _ in
-            Task { await model.loadItems() }
-        }
-        .onAppear {
-            updateAutoUploadCounter()
-        }
-        .onDisappear {
-            autoUploadCounter.stop()
-        }
-        .onChange(of: model.autoUploadStart) {
-            updateAutoUploadCounter()
-        }
     }
 
     private func updateAutoUploadCounter() {
@@ -138,15 +185,15 @@ struct NCMoreView: View {
     /// `SouveraModuleHeader` wie bei Mail/Kalender/Link, damit Hoehe,
     /// Verlauf und Padding exakt identisch sind. Die rechten Aktionen
     /// liegen im System-Seitenband.
-    private var moreHeader: some View {
+    private func moreHeader(height: CGFloat?, trailingReserve: CGFloat) -> some View {
         SouveraModuleHeader(
             // Run 24.10.: Innendisplay hochkant reserviert die rechte Zone
             // der iOS-Statuskapsel (wie die UIKit-Bars von Mail/Kalender) -
             // die Pills enden dann links neben der Statuskapsel.
-            extraTrailing: headerMetrics.statusReservedWidth,
-            // Run 24.10.: Gemessene Systembar-Hoehe uebernehmen (Innendisplay
-            // quer); ohne Messung gilt die Standard-Hoehe der Glas-Header.
-            heightOverride: headerMetrics.barHeight,
+            extraTrailing: trailingReserve,
+            // Run 24.10.: Feste Hoehe der UIKit-Bars (58 hoch / 82 quer);
+            // kompakt weiterhin die gemessene Hoehe.
+            heightOverride: height,
             leading: {
                 Image("souveraLogo")
                     .resizable()
