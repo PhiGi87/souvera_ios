@@ -2329,6 +2329,7 @@ extension SouveraCalendarView {
         SouveraModuleHeader(
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
+            showsTrailing: !layout.usesActionRail,
             leading: { calendarTodayPill(glass: true) },
             trailing: { calendarViewModePill(glass: true) }
         )
@@ -2401,6 +2402,30 @@ extension SouveraCalendarView {
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         bridge.title = ""
+        // Run 24.10. (Duo-Außendisplay): Die rechte UIKit-Pille ("Monat +")
+        // wird in der Aktions-Pille zu zwei Icon-Buttons.
+        bridge.railTrailingItems = [
+            .init(id: "newEvent", icon: "plus",
+                  accessibilityLabel: NSLocalizedString("_calendar_new_event_", comment: "")) {
+                editState = EditSheetState(draft: EventDraft(start: selectedDay, end: selectedDay.addingTimeInterval(1800)), existing: nil)
+            }
+        ]
+        bridge.railTrailingMenus = [
+            SouveraHeaderBridge.MenuGroup(
+                id: "viewmode-\(viewMode.rawValue)",
+                icon: "calendar",
+                overflowTitle: viewMode.title,
+                accessibilityLabel: NSLocalizedString("_settings_calendar_default_view_", comment: ""),
+                entries: CalendarViewMode.allCases.map { mode in
+                    SouveraHeaderBridge.MenuEntry(
+                        id: mode.rawValue,
+                        title: mode.title,
+                        isChecked: viewMode == mode) {
+                            viewMode = mode
+                        }
+                }
+            )
+        ]
         // Run 24.10. (Feedback: Icons fehlten in der Bridge): Dieselben
         // SwiftUI-Pills wie im Glas-Header rendern - Text+Icon bleiben so
         // garantiert zusammen und sehen auf allen Groessen gleich aus.

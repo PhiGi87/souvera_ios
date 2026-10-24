@@ -379,6 +379,7 @@ struct MailView: View {
             titleAfterLeading: !headerTitle.isEmpty,
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
+            showsTrailing: !layout.usesActionRail,
             leading: {
                 if isDetail {
                     SouveraHeaderButton(icon: "chevron.backward") {

@@ -210,6 +210,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// ueberlappt (gemessen, nicht geraten).
     var extraTop: CGFloat = 0
     var extraTrailing: CGFloat = 0
+    /// Run 24.10. (Duo-Außendisplay): Im Rail-Modus wandern die rechten
+    /// Aktionen in die separate Pille; der Header zeigt dann nur noch
+    /// Leading/Titel.
+    var showsTrailing: Bool = true
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -235,8 +239,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
                 Spacer(minLength: 0)
             }
 
-            HStack(spacing: 8) { trailing }
-                .fixedSize(horizontal: true, vertical: false)
+            if showsTrailing {
+                HStack(spacing: 8) { trailing }
+                    .fixedSize(horizontal: true, vertical: false)
+            }
         }
         .padding(.leading, 12)
         .padding(.trailing, 12 + extraTrailing)
@@ -358,7 +364,54 @@ final class SouveraHeaderBridge: ObservableObject {
     @Published var trailingItems: [Item] = []
     @Published var trailingMenus: [MenuGroup] = []
     @Published var trailingCustoms: [Custom] = []
+    /// Run 24.10. (Duo-Außendisplay): Eigene Beschreibung fuer die rechte
+    /// Aktions-Pille. Bleiben diese Felder leer, nutzt die Pille die
+    /// normalen Trailing-Felder (z. B. Mail). Kalender/Link befuellen sie,
+    /// weil ihre UIKit-Pills als einzelne Icon-Buttons erscheinen sollen.
+    @Published var railTrailingItems: [Item] = []
+    @Published var railTrailingMenus: [MenuGroup] = []
     @Published var title: String = ""
+
+    /// Aktionen fuer die rechte Pille (nur Trailing - Leading bleibt im
+    /// Header). Menues werden als SwiftUI-Menue abgebildet.
+    func railActions() -> [SouveraRailAction] {
+        let useRailFields = !railTrailingItems.isEmpty || !railTrailingMenus.isEmpty
+        let items = useRailFields ? railTrailingItems : trailingItems
+        let menus = useRailFields ? railTrailingMenus : trailingMenus
+
+        let itemActions = items.map { item in
+            SouveraRailAction(
+                id: item.id,
+                icon: item.icon,
+                tint: item.isGreen ? .green : (item.isDestructive ? .red : nil),
+                accessibilityLabel: item.accessibilityLabel
+            ) {
+                item.handler()
+            }
+        }
+        let menuActions = menus.map { menu in
+            SouveraRailAction(
+                id: menu.id,
+                icon: menu.icon,
+                accessibilityLabel: menu.accessibilityLabel,
+                menu: menu.entries.map { Self.railEntry($0) }
+            ) {}
+        }
+        return itemActions + menuActions
+    }
+
+    private static func railEntry(_ entry: MenuEntry) -> SouveraRailMenuEntry {
+        SouveraRailMenuEntry(
+            id: entry.id,
+            title: entry.title,
+            icon: entry.icon,
+            isChecked: entry.isChecked,
+            isDestructive: entry.isDestructive,
+            children: entry.children?.map { Self.railEntry($0) }
+        ) {
+            entry.handler()
+        }
+    }
 }
 
 /// Beobachtet die Brücke und baut die Bar-Items des Host-Controllers.

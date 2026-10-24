@@ -4,17 +4,55 @@
 
 import UIKit
 import SwiftUI
+import Combine
+
+/// Run 24.10.: Sicherheitsnetz fuer das Mehr-Menue, falls UIKit die
+/// Navigationsbar trotz erzwungenem Neuaufbau auf 0 pt laesst. Dann rendert
+/// `NCMoreView` einen schlanken blauen Header im Inhalt.
+final class SouveraMoreHeaderState: ObservableObject {
+    @Published var showsFallbackHeader = false
+}
 
 class NCMoreNavigationController: NCMainNavigationController {
     /// Logo als direkte Subview der NavigationBar (kein Bar-Item, keine
     /// titleView - deshalb keine Glaskapsel und exakt positionierbar).
     private weak var souveraLogoView: UIImageView?
+    /// Soll-Zustand des Logos (nur Mehr-Root). Die tatsaechliche Sichtbarkeit
+    /// haengt zusaetzlich davon ab, ob die Bar gerade 0 pt hoch ist.
+    private var logoVisible = false
+    /// Fallback-Header im Inhalt, wenn die Bar kollabiert bleibt.
+    var headerFallbackState: SouveraMoreHeaderState?
 
     override func viewDidLoad() {
         super.viewDidLoad()
         // Run 01.10.: neutraler Hintergrund der gemeinsamen Ebene (kein
         // Durchscheinen eines hellblauen Streifens am Rand).
         view.backgroundColor = .systemGroupedBackground
+
+        // Run 24.10.: Nach Drehen/Fensterwechsel bleibt die Bar sonst
+        // gelegentlich mit 0 pt stehen. Der Trait-Wechsel kommt vor dem
+        // finalen Layout - deshalb im naechsten Runloop erneut pruefen.
+        if #available(iOS 17.0, *) {
+            registerForTraitChanges([UITraitHorizontalSizeClass.self,
+                                     UITraitVerticalSizeClass.self]) { (controller: Self, _) in
+                controller.scheduleHeaderFit()
+            }
+        }
+    }
+
+    /// Run 24.10.: Erzwingt die Bar nach Rotation/Fensterwechsel neu.
+    override func viewWillTransition(to size: CGSize,
+                                     with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
+            self?.scheduleHeaderFit()
+        }
+    }
+
+    private func scheduleHeaderFit() {
+        DispatchQueue.main.async { [weak self] in
+            self?.ensureHeaderVisible()
+        }
     }
 
     override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
@@ -32,7 +70,7 @@ class NCMoreNavigationController: NCMainNavigationController {
                 if viewController === navigationController.topViewController {
                     applySouveraHeader(viewController)
                     showSouveraLogo(true)
-                    layoutSouveraLogo()
+                    ensureHeaderVisible()
                 }
             }
         } else {
@@ -111,12 +149,28 @@ class NCMoreNavigationController: NCMainNavigationController {
         }
         applyBlueHeader()
         if navigationBar.bounds.height < 1 {
+            // Run 24.10.: UIKit laesst die Bar nach einem offscreen-
+            // Einblenden/Wechsel gelegentlich auf 0 pt stehen, obwohl
+            // isNavigationBarHidden == false. Ein harter, nicht animierter
+            // Hide/Show-Zyklus installiert die Bar neu.
+            setNavigationBarHidden(true, animated: false)
+            setNavigationBarHidden(false, animated: false)
             view.setNeedsLayout()
             view.layoutIfNeeded()
             applyBlueHeader()
         }
         layoutSouveraLogo()
+        updateFallbackState()
         SouveraLog.write("More", "[MoreHeader] ensure hidden=\(isNavigationBarHidden) barHidden=\(navigationBar.isHidden) translucent=\(navigationBar.isTranslucent) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) safeTop=\(Int(navigationBar.safeAreaInsets.top))")
+    }
+
+    /// Meldet dem Inhalt, ob ein Ersatz-Header gerendert werden muss.
+    private func updateFallbackState() {
+        let isRoot = viewControllers.first === topViewController
+        let collapsed = isRoot && navigationBar.bounds.height < 1
+        if headerFallbackState?.showsFallbackHeader != collapsed {
+            headerFallbackState?.showsFallbackHeader = collapsed
+        }
     }
 
     /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus
@@ -126,7 +180,19 @@ class NCMoreNavigationController: NCMainNavigationController {
     /// showSouveraLogo aus willShow (nur auf der Mehr-Root sichtbar).
     private func layoutSouveraLogo() {
         guard let logo = souveraLogoView else { return }
-        guard let root = viewControllers.first, root === topViewController else { return }
+        guard let root = viewControllers.first, root === topViewController else {
+            logo.isHidden = true
+            updateFallbackState()
+            return
+        }
+        updateFallbackState()
+        // Run 24.10.: Bei kollabierter Bar (0 pt) nicht das Logo ueber den
+        // Inhalt legen - es erscheint wieder, sobald die Bar steht.
+        if navigationBar.bounds.height < 1 || !logoVisible {
+            logo.isHidden = true
+            return
+        }
+        logo.isHidden = false
         let bar = navigationBar
         let contentHeight: CGFloat = 44
         // Run 23.10. (Feedback: "Souvera" oben abgeschnitten, Screenshot
@@ -156,6 +222,7 @@ class NCMoreNavigationController: NCMainNavigationController {
 
     /// Zeigt/versteckt das Logo (nur auf der Mehr-Root sichtbar).
     private func showSouveraLogo(_ show: Bool) {
+        logoVisible = show
         guard let logo = souveraLogoView else { return }
         logo.isHidden = !show
         if show { layoutSouveraLogo() }

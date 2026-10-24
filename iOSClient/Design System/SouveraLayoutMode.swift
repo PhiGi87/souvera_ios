@@ -34,6 +34,11 @@ final class SouveraLayoutMode: ObservableObject {
     @Published private(set) var headerExtraTop: CGFloat = 0
     @Published private(set) var headerExtraTrailing: CGFloat = 0
 
+    /// Run 24.10. (Duo-Außendisplay): Nur im Außendisplay hochkant wandern
+    /// die rechten Header-Aktionen in die Pille oberhalb der Tab-Leiste.
+    /// Wird vom Tab-Controller gesetzt (er kennt die Tab-Leisten-Geometrie).
+    @Published private(set) var usesActionRail: Bool = false
+
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
         let regular = traitCollection.horizontalSizeClass == .regular
@@ -86,6 +91,15 @@ final class SouveraLayoutMode: ObservableObject {
         }
         if regular != isRegularWidth {
             isRegularWidth = regular
+        }
+    }
+
+    /// Setzt den Rail-Modus (nur Außendisplay hochkant). Der Tab-Controller
+    /// ist die einzige Quelle, damit Header und Pille nie auseinanderlaufen.
+    func updateActionRail(_ active: Bool) {
+        guard !isPushed else { return }
+        if active != usesActionRail {
+            usesActionRail = active
         }
     }
 }

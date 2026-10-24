@@ -84,4 +84,83 @@ struct SouveraLayoutModeTests {
                                            width: 900) == false)
     }
 
+    @Test("Action rail is only active on the outer display in portrait")
+    func actionRailActivation() {
+        let view = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let trailingRail = CGRect(x: 410, y: 360, width: 48, height: 280)
+        let bottomTabBar = CGRect(x: 0, y: 630, width: 466, height: 48)
+
+        #expect(SouveraActionRailLayout.isActive(
+            horizontalSizeClass: .compact,
+            idiom: .phone,
+            isPortrait: true,
+            tabBarFrame: trailingRail,
+            viewBounds: view,
+            tabBarHidden: false
+        ))
+
+        // Querformat: Buttons bleiben im Header.
+        #expect(SouveraActionRailLayout.isActive(
+            horizontalSizeClass: .compact,
+            idiom: .phone,
+            isPortrait: false,
+            tabBarFrame: trailingRail,
+            viewBounds: CGRect(x: 0, y: 0, width: 678, height: 466),
+            tabBarHidden: false
+        ) == false)
+
+        // Untere Tab-Leiste, Innendisplay regular, ausgeblendete Leiste.
+        #expect(SouveraActionRailLayout.isActive(
+            horizontalSizeClass: .compact,
+            idiom: .phone,
+            isPortrait: true,
+            tabBarFrame: bottomTabBar,
+            viewBounds: view,
+            tabBarHidden: false
+        ) == false)
+        #expect(SouveraActionRailLayout.isActive(
+            horizontalSizeClass: .regular,
+            idiom: .phone,
+            isPortrait: true,
+            tabBarFrame: trailingRail,
+            viewBounds: view,
+            tabBarHidden: false
+        ) == false)
+        #expect(SouveraActionRailLayout.isActive(
+            horizontalSizeClass: .compact,
+            idiom: .phone,
+            isPortrait: true,
+            tabBarFrame: trailingRail,
+            viewBounds: view,
+            tabBarHidden: true
+        ) == false)
+    }
+
+    @Test("Action rail sits right above the tab bar")
+    func actionRailFrame() {
+        let view = CGRect(x: 0, y: 0, width: 466, height: 678)
+        let tabBar = CGRect(x: 410, y: 420, width: 48, height: 240)
+        let frame = SouveraActionRailLayout.frame(
+            tabBarFrame: tabBar,
+            headerBottom: 100,
+            actionCount: 3,
+            viewBounds: view
+        )
+        #expect(frame.maxY <= tabBar.minY - 8 + 0.5)
+        #expect(frame.minY >= 100)
+        #expect(frame.maxX <= view.maxX)
+        #expect(frame.height == SouveraActionRailLayout.contentHeight(actionCount: 3))
+
+        // Sidebar meldet ihre volle Container-Hoehe: Die Pille weicht nach
+        // oben rechts aus, statt zu verschwinden.
+        let fallback = SouveraActionRailLayout.frame(
+            tabBarFrame: CGRect(x: 410, y: 0, width: 48, height: 678),
+            headerBottom: 100,
+            actionCount: 3,
+            viewBounds: view
+        )
+        #expect(fallback.minY >= 100)
+        #expect(fallback.height > 0)
+    }
+
 }

@@ -472,6 +472,7 @@ struct LinkView: View {
                     title: navigationTitle,
                     extraTop: layout.headerExtraTop,
                     extraTrailing: layout.headerExtraTrailing,
+                    showsTrailing: !layout.usesActionRail,
                     leading: {
                         if !landscapeLayout {
                             SouveraHeaderButton(icon: "chevron.backward") {
@@ -539,6 +540,7 @@ struct LinkView: View {
                     title: NSLocalizedString("_link_", comment: ""),
                     extraTop: layout.headerExtraTop,
                     extraTrailing: layout.headerExtraTrailing,
+                    showsTrailing: !layout.usesActionRail,
                     leading: {
                         SouveraHeaderButton(icon: "magnifyingglass") {
                             searchActive = true
@@ -564,6 +566,10 @@ struct LinkView: View {
 
     private func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
+        // Run 24.10.: Rail-Beschreibung immer neu aufbauen, damit beim
+        // Wechsel Home <-> Chat keine alten Aktionen stehen bleiben.
+        bridge.railTrailingItems = []
+        bridge.railTrailingMenus = []
         if case let .chat(token, title) = viewModel.route {
             let roomTitle = viewModel.currentRoom?.displayName ?? title
             var trailing: [SouveraHeaderBridge.Item] = []
@@ -631,6 +637,17 @@ struct LinkView: View {
             ]
             bridge.trailingItems = []
             bridge.trailingMenus = []
+            bridge.railTrailingItems = [
+                .init(id: "status", icon: "person.crop.circle",
+                      accessibilityLabel: NSLocalizedString("_set_user_status_", comment: "")) {
+                    showUserStatus = true
+                },
+                .init(id: "create", icon: "plus",
+                      accessibilityLabel: NSLocalizedString("_link_create_channel_", comment: "")) {
+                    channelName = ""
+                    showCreateChannel = true
+                }
+            ]
             bridge.leadingCustoms = []
             bridge.trailingCustoms = [SouveraHeaderBridge.Custom(
                 id: "status-plus", view: {

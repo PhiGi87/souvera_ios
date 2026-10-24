@@ -14,6 +14,11 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     let appDelegate = (UIApplication.shared.delegate as? AppDelegate)!
     let menuToolbar = UIToolbar()
 
+    /// Run 24.10. (Duo-Außendisplay): Aktionen fuer die rechte Pille. Wird
+    /// von `collectionViewCommonTrailingItemGroups` befuellt, damit die
+    /// Pille exakt dieselben Aktionen wie die UIKit-Bar zeigt.
+    let actionRailSource = SouveraActionRailSource()
+
     var controller: NCMainTabBarController? {
         self.tabBarController as? NCMainTabBarController
     }
@@ -71,7 +76,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         self.delegate = self
 
         setNavigationBarAppearance()
-        setNavigationBarHidden(false, animated: true)
+        setNavigationBarHidden(false, animated: false)
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")
@@ -252,6 +257,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
             )
 
             collectionViewCommon.navigationItem.trailingItemGroups = [group]
+            actionRailSource.actions = []
             return
         }
 
@@ -274,6 +280,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
             )
 
             trashViewController.navigationItem.trailingItemGroups = [group]
+            actionRailSource.actions = []
             return
         }
 
@@ -288,8 +295,17 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     @MainActor
     private func collectionViewCommonTrailingItemGroups() async {
         guard let topViewController else {
+            actionRailSource.actions = []
             return
         }
+
+        // Die Pille gilt fuer den ganzen Dateien-Tab (auch Unterordner) und
+        // fuer die Mehr-Root. Gepushte Detailseiten aus Mehr behalten ihre
+        // Header-Aktionen.
+        let isMoreRoot = self is NCMoreNavigationController
+            && topViewController === viewControllers.first
+        let railEligible = (self is NCFilesNavigationController) || isMoreRoot
+        let railMode = (controller?.isActionRailActive ?? false) && railEligible
 
         guard !(collectionViewCommon?.isEditMode ?? false),
               !(trashViewController?.isEditMode ?? false),
@@ -298,6 +314,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
               !(topViewController is NCViewerRichDocument),
               !(topViewController is NCViewerDirectEditing)
         else {
+            actionRailSource.actions = []
             return
         }
 
@@ -308,6 +325,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // ---------------------------------------------------------
 
         var desiredItems: [UIBarButtonItem] = []
+        var railActions: [SouveraRailAction] = []
 
         // Benachrichtigungen + Übertragungen bleiben erhalten - AUSSER im
         // Dateien-Modul (NCFilesNavigationController): dort führt nur das
@@ -315,17 +333,41 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         if !(self is NCFilesNavigationController) {
             if controller?.availableNotifications ?? false {
                 desiredItems.append(notificationsButtonItem)
+                railActions.append(railAction(
+                    id: "notifications",
+                    icon: "bell.fill",
+                    item: notificationsButtonItem,
+                    label: NSLocalizedString("_notifications_", comment: "")
+                ))
             }
             desiredItems.append(transfersButtonItem)
+            railActions.append(railAction(
+                id: "transfers",
+                icon: "arrow.left.arrow.right.circle.fill",
+                item: transfersButtonItem,
+                label: NSLocalizedString("_transfers_", comment: "")
+            ))
         }
 
         if capabilities.assistantEnabled {
             desiredItems.append(assistantButtonItem)
+            railActions.append(railAction(
+                id: "assistant",
+                icon: "sparkles",
+                item: assistantButtonItem,
+                label: NSLocalizedString("_assistant_", comment: "")
+            ))
         }
 
         if let optionMenu = await createOptionMenu() {
             optionButtonItem.menu = optionMenu
             desiredItems.append(optionButtonItem)
+            railActions.append(SouveraRailAction(
+                id: "option",
+                icon: "ellipsis",
+                accessibilityLabel: NSLocalizedString("_more_", comment: ""),
+                menu: SouveraRailMenuEntry.entries(from: optionMenu)
+            ) {})
         }
 
         // ---------------------------------------------------------
@@ -336,6 +378,19 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // manage their own trailing items - keep the default
         // bell/assistant/transfers buttons off them.
         if topViewController is NCHostedScreen {
+            actionRailSource.actions = []
+            return
+        }
+
+        // Quelle immer aktuell halten, damit die Pille beim Drehen ins
+        // Hochformat sofort befuellt ist (dann laeuft kein willShow).
+        actionRailSource.actions = railEligible ? railActions : []
+
+        if railMode {
+            // Aktionen wandern in die rechte Pille; die Bar behaelt nur
+            // Leading/Titel.
+            topViewController.navigationItem.trailingItemGroups = []
+            topViewController.navigationItem.rightBarButtonItems = nil
             return
         }
 
@@ -355,6 +410,29 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         )
 
         topViewController.navigationItem.trailingItemGroups = [group]
+    }
+
+    /// Baut eine Pille-Aktion aus einem bestehenden Bar-Item, damit Handler
+    /// und Menue exakt dieselben bleiben.
+    @MainActor
+    private func railAction(id: String,
+                            icon: String,
+                            item: UIBarButtonItem,
+                            label: String) -> SouveraRailAction {
+        SouveraRailAction(id: id, icon: icon, accessibilityLabel: label) {
+            if let action = item.primaryAction {
+                action.handler?(action)
+            }
+        }
+    }
+
+    /// Run 24.10.: Der Rail-Modus hat sich geaendert (z. B. Drehen zwischen
+    /// Außendisplay hoch/quer). Die UIKit-Bar muss ihre Trailing-Items neu
+    /// aufbauen bzw. wieder anzeigen.
+    func refreshHeaderItemsForRailMode() {
+        Task { @MainActor in
+            await collectionViewCommonTrailingItemGroups()
+        }
     }
 
     func createOptionMenu() async -> UIMenu? { return nil }

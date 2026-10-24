@@ -4,6 +4,7 @@
 
 import UIKit
 import SwiftUI
+import Combine
 import NextcloudKit
 
 struct NavigationCollectionViewCommon {
@@ -85,6 +86,8 @@ class NCMainTabBarController: UITabBarController {
 
         configureTabControllers()
         configureTabBarAppearance()
+        installActionRail()
+        observeActionRail(for: selectedViewController)
 
         // Run 07.10. (iPhone Duo/iPad): Sidebar-Tabs bei regular width,
         // sofern das System es anbietet (iPad ab iOS 18, iPhone Duo innen
@@ -448,6 +451,9 @@ class NCMainTabBarController: UITabBarController {
     /// reagieren dann nicht).
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        // Run 24.10.: Nur die Geometrie auffrischen; die Aktionen selbst
+        // kommen aus der Quelle des gewaehlten Tabs.
+        refreshActionRail()
         if let bannerView = callBannerHost?.view {
             view.bringSubviewToFront(bannerView)
         }
@@ -460,6 +466,135 @@ class NCMainTabBarController: UITabBarController {
     private weak var moreTabBarItem: UITabBarItem?
     /// Run 16.09.: Coordinator der Bridge-Bars (Mail/Kalender/Link).
     private var headerCoordinators: [SouveraBarCoordinator] = []
+
+    // MARK: - Action rail (Duo outer display, portrait)
+
+    /// Run 24.10.: Rechte Header-Aktionen als schwebende Pille oberhalb der
+    /// Tab-Leiste - nur auf dem Außendisplay im Hochformat.
+    private let actionRailModel = SouveraActionRailModel()
+    private var actionRailHost: UIHostingController<SouveraActionRailView>?
+    private var actionRailCancellables = Set<AnyCancellable>()
+    private var lastActionRailSignature = ""
+    private var lastActionRailLog = ""
+    private var lastActionRailActive: Bool?
+
+    /// Wird von den Tabs gelesen, um ihre Header-Aktionen in die Pille zu
+    /// verschieben.
+    var isActionRailActive: Bool {
+        SouveraActionRailLayout.isActive(
+            horizontalSizeClass: traitCollection.horizontalSizeClass,
+            idiom: traitCollection.userInterfaceIdiom,
+            isPortrait: view.bounds.height >= view.bounds.width,
+            tabBarFrame: tabBar.frame,
+            viewBounds: view.bounds,
+            tabBarHidden: tabBar.isHidden
+        )
+    }
+
+    private func installActionRail() {
+        let host = UIHostingController(rootView: SouveraActionRailView(model: actionRailModel))
+        host.view.backgroundColor = .clear
+        host.view.isHidden = true
+        host.view.isUserInteractionEnabled = true
+        view.addSubview(host.view)
+        actionRailHost = host
+    }
+
+    /// Baut die Pille aus dem aktuell gewaehlten Tab neu auf.
+    private func refreshActionRail() {
+        let active = isActionRailActive
+        updateHostedActionRailModes(active)
+
+        if lastActionRailActive != active {
+            lastActionRailActive = active
+            // UIKit-Tabs (Dateien/Mehr) muessen ihre Bar-Items neu setzen:
+            // im Rail-Modus raus, ausserhalb wieder rein. Ohne das bleibt
+            // der Header nach dem Drehen leer bzw. doppelt.
+            (selectedViewController as? NCMainNavigationController)?
+                .refreshHeaderItemsForRailMode()
+        }
+
+        let actions = active ? currentRailActions() : []
+        let signature = actions.map(\.signature).joined(separator: "|")
+        if signature != lastActionRailSignature {
+            lastActionRailSignature = signature
+            actionRailModel.actions = actions
+        }
+
+        let visible = active && !actions.isEmpty
+        if let hostView = actionRailHost?.view {
+            hostView.isHidden = !visible
+            if visible {
+                view.bringSubviewToFront(hostView)
+                layoutActionRailFrame()
+            }
+        }
+        let log = "active=\(active) actions=\(actions.count) tab=\(Int(tabBar.frame.width))x\(Int(tabBar.frame.height))@(\(Int(tabBar.frame.minX)),\(Int(tabBar.frame.minY))) visible=\(visible)"
+        if log != lastActionRailLog {
+            lastActionRailLog = log
+            SouveraLog.write("ActionRail", "[ActionRail] \(log)")
+        }
+        if visible, let bannerView = callBannerHost?.view {
+            // Call-Leiste bleibt ganz oben.
+            view.bringSubviewToFront(bannerView)
+        }
+    }
+
+    private func currentRailActions() -> [SouveraRailAction] {
+        guard let nav = selectedViewController else { return [] }
+        if let hosted = nav as? SouveraHostedNavigationController {
+            return hosted.headerBridge.railActions()
+        }
+        if let base = nav as? NCMainNavigationController {
+            return base.actionRailSource.actions
+        }
+        return []
+    }
+
+    private func updateHostedActionRailModes(_ active: Bool) {
+        for controller in viewControllers ?? [] {
+            (controller as? SouveraHostedNavigationController)?.layoutMode.updateActionRail(active)
+        }
+    }
+
+    private func layoutActionRailFrame() {
+        guard let hostView = actionRailHost?.view, !hostView.isHidden else { return }
+        let headerHeight: CGFloat = {
+            if #available(iOS 26.0, *) { return 58 }
+            return 46
+        }()
+        let headerBottom = view.safeAreaInsets.top + headerHeight
+        let frame = SouveraActionRailLayout.frame(
+            tabBarFrame: tabBar.frame,
+            headerBottom: headerBottom,
+            actionCount: actionRailModel.actions.count,
+            viewBounds: view.bounds
+        )
+        if hostView.frame != frame {
+            hostView.frame = frame
+        }
+    }
+
+    /// Beobachtet die Aktionsquelle des gewaehlten Tabs.
+    private func observeActionRail(for nav: UIViewController?) {
+        actionRailCancellables.removeAll()
+        guard let nav else {
+            refreshActionRail()
+            return
+        }
+        if let hosted = nav as? SouveraHostedNavigationController {
+            hosted.headerBridge.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.refreshActionRail() }
+                .store(in: &actionRailCancellables)
+        } else if let base = nav as? NCMainNavigationController {
+            base.actionRailSource.objectWillChange
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.refreshActionRail() }
+                .store(in: &actionRailCancellables)
+        }
+        refreshActionRail()
+    }
 
     /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
     /// deckend, korrekt in Portrait UND Landscape).
@@ -573,6 +708,7 @@ class NCMainTabBarController: UITabBarController {
         for controller in viewControllers ?? [] {
             (controller as? SouveraHostedNavigationController)?.applyLayoutMode()
         }
+        refreshActionRail()
     }
 
     private func makeHostedTab<Content: View>(root: Content, titleKey: String, imageName: String, tag: Int) -> UIViewController {
@@ -602,10 +738,16 @@ class NCMainTabBarController: UITabBarController {
         /// aus dem EIGENEN traitCollection gespeist und bei Trait-Wechseln
         /// aktualisiert - nicht mehr aus der ersten aktiven Szene.
         let layoutMode: SouveraLayoutMode
+        /// Run 24.10.: Die Bruecke liefert auch die Aktionen fuer die rechte
+        /// Pille, wenn der Tab auf dem Außendisplay hochkant laeuft.
+        let headerBridge: SouveraHeaderBridge
         private var lastLayoutLog: String?
 
-        init(rootViewController: UIViewController, layoutMode: SouveraLayoutMode) {
+        init(rootViewController: UIViewController,
+             layoutMode: SouveraLayoutMode,
+             headerBridge: SouveraHeaderBridge) {
             self.layoutMode = layoutMode
+            self.headerBridge = headerBridge
             super.init(rootViewController: rootViewController)
         }
 
@@ -693,7 +835,8 @@ class NCMainTabBarController: UITabBarController {
         let hostingController = UIHostingController(rootView: root.environmentObject(layoutMode))
         let navigationController = SouveraHostedNavigationController(
             rootViewController: hostingController,
-            layoutMode: layoutMode
+            layoutMode: layoutMode,
+            headerBridge: bridge
         )
         // Run 18.09. (Feedback: "iPad-Header komplett weg"): Die aeussere
         // UIKit-Bar ist im Bridge-Modus SICHTBAR - 1:1 wie Mehr/Dateien.
@@ -712,12 +855,18 @@ class NCMainTabBarController: UITabBarController {
     }
 
     private func makeMoreNavigationController() -> UIViewController {
-        let moreView = NCMoreView(account: account, controller: self)
+        let headerState = SouveraMoreHeaderState()
+        let moreView = NCMoreView(account: account, controller: self, headerFallbackState: headerState)
         let hostingController = UIHostingController(rootView: moreView)
 
         hostingController.navigationItem.title = NSLocalizedString("_more_", comment: "")
 
         let navigationController = NCMoreNavigationController(rootViewController: hostingController)
+        navigationController.headerFallbackState = headerState
+        // Run 24.10.: Wie die Storyboard-NavController von Dateien. Ohne
+        // diese Option kollabiert die Bar in manchen Fenster-Szenen auf
+        // 0 pt (Log: bar=951x0).
+        navigationController.extendedLayoutIncludesOpaqueBars = true
 
         navigationController.tabBarItem = UITabBarItem(
             title: NSLocalizedString("_more_", comment: ""),
@@ -770,6 +919,7 @@ class NCMainTabBarController: UITabBarController {
         } else {
             tabBar.isHidden = true
         }
+        refreshActionRail()
     }
 
     func show() {
@@ -778,6 +928,7 @@ class NCMainTabBarController: UITabBarController {
         } else {
             tabBar.isHidden = false
         }
+        refreshActionRail()
     }
 }
 
@@ -787,6 +938,7 @@ extension NCMainTabBarController: UITabBarControllerDelegate {
             scrollToTop(viewController: viewController)
         }
         previousIndex = tabBarController.selectedIndex
+        observeActionRail(for: viewController)
     }
 
     private func scrollToTop(viewController: UIViewController) {
