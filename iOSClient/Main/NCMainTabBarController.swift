@@ -495,7 +495,8 @@ class NCMainTabBarController: UITabBarController {
         // Breite (Innendisplay) gilt deshalb die feste Layout-Hoehe
         // (58 pt), identisch zu Mail/Kalender/Link.
         let isLandscape = view.bounds.width > view.bounds.height
-        let isRegularWidth = resolvedTraitCollection().horizontalSizeClass == .regular
+        let traits = view.window?.windowScene?.traitCollection ?? traitCollection
+        let isRegularWidth = traits.horizontalSizeClass == .regular
         let height = visible.flatMap { nav in
             let bar = nav.navigationBar
             if isLandscape {
