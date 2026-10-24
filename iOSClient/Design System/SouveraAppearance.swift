@@ -411,7 +411,7 @@ final class SouveraHeaderBridge: ObservableObject {
                 item.handler()
             }
         }
-        let menuActions = menus.map { menu in
+        let menuActions = railTrailingMenus.map { menu in
             SouveraRailAction(
                 id: menu.id,
                 icon: menu.icon,
