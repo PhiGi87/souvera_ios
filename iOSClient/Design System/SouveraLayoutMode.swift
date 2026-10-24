@@ -37,7 +37,7 @@ final class SouveraLayoutMode: ObservableObject {
     /// Run 24.10. (Duo-Außendisplay): Nur im Außendisplay hochkant wandern
     /// die rechten Header-Aktionen in die Pille oberhalb der Tab-Leiste.
     /// Wird vom Tab-Controller gesetzt (er kennt die Tab-Leisten-Geometrie).
-    @Published private(set) var usesActionRail: Bool = false
+    @Published private(set) var usesSidebarActions: Bool = false
 
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
@@ -96,10 +96,10 @@ final class SouveraLayoutMode: ObservableObject {
 
     /// Setzt den Rail-Modus (nur Außendisplay hochkant). Der Tab-Controller
     /// ist die einzige Quelle, damit Header und Pille nie auseinanderlaufen.
-    func updateActionRail(_ active: Bool) {
+    func updateSidebarActions(_ active: Bool) {
         guard !isPushed else { return }
-        if active != usesActionRail {
-            usesActionRail = active
+        if active != usesSidebarActions {
+            usesSidebarActions = active
         }
     }
 }

@@ -4264,6 +4264,12 @@ final class MailViewModel: ObservableObject {
 
     // MARK: - Navigation
 
+    /// Run 24.10.: Der Ordner-Toggle im Header muss in jeder Situation die
+    /// Ordnerliste erreichbar machen (auch aus der Detailansicht/kompakt).
+    func showFolders() {
+        route = .folders
+    }
+
     func back() {
         switch route {
         case .detail:

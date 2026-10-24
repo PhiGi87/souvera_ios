@@ -103,7 +103,7 @@ struct SouveraCalendarView: View {
                     // immer stehen, Ergebnisse zeigt das Overlay.
                     content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                 }
-                .padding(.top, layout.usesBridgeHeader ? 0 : 8)
+                .padding(.top, 12)
             }
             .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
@@ -2329,7 +2329,7 @@ extension SouveraCalendarView {
         SouveraModuleHeader(
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
-            showsTrailing: !layout.usesActionRail,
+            showsTrailing: !layout.usesSidebarActions,
             leading: { calendarTodayPill(glass: true) },
             trailing: { calendarViewModePill(glass: true) }
         )

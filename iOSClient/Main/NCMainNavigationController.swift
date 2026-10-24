@@ -323,8 +323,8 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // Header-Aktionen.
         let isMoreRoot = self is NCMoreNavigationController
             && topViewController === viewControllers.first
-        let railEligible = (self is NCFilesNavigationController) || isMoreRoot
-        let railMode = (controller?.isActionRailActive ?? false) && railEligible
+        let sidebarEligible = (self is NCFilesNavigationController) || isMoreRoot
+        let sidebarMode = (controller?.isSidebarActionsActive ?? false) && sidebarEligible
 
         guard !(collectionViewCommon?.isEditMode ?? false),
               !(trashViewController?.isEditMode ?? false),
@@ -406,9 +406,9 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         // Quelle immer aktuell halten, damit die Pille beim Drehen ins
         // Hochformat sofort befuellt ist (dann laeuft kein willShow).
-        actionRailSource.actions = railEligible ? railActions : []
+        actionRailSource.actions = sidebarEligible ? railActions : []
 
-        if railMode {
+        if sidebarMode {
             // Aktionen wandern in die rechte Pille; die Bar behaelt nur
             // Leading/Titel.
             topViewController.navigationItem.trailingItemGroups = []
@@ -437,7 +437,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     /// Run 24.10.: Der Rail-Modus hat sich geaendert (z. B. Drehen zwischen
     /// Außendisplay hoch/quer). Die UIKit-Bar muss ihre Trailing-Items neu
     /// aufbauen bzw. wieder anzeigen.
-    func refreshHeaderItemsForRailMode() {
+    func refreshHeaderItemsForSidebarMode() {
         Task { @MainActor in
             await collectionViewCommonTrailingItemGroups()
         }

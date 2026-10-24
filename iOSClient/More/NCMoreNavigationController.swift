@@ -4,249 +4,66 @@
 
 import UIKit
 import SwiftUI
-import Combine
-
-/// Run 24.10.: Sicherheitsnetz fuer das Mehr-Menue, falls UIKit die
-/// Navigationsbar trotz erzwungenem Neuaufbau auf 0 pt laesst. Dann rendert
-/// `NCMoreView` einen schlanken blauen Header im Inhalt.
-final class SouveraMoreHeaderState: ObservableObject {
-    @Published var showsFallbackHeader = false
-}
 
 class NCMoreNavigationController: NCMainNavigationController {
-    /// Logo als direkte Subview der NavigationBar (kein Bar-Item, keine
-    /// titleView - deshalb keine Glaskapsel und exakt positionierbar).
-    private weak var souveraLogoView: UIImageView?
-    /// Soll-Zustand des Logos (nur Mehr-Root). Die tatsaechliche Sichtbarkeit
-    /// haengt zusaetzlich davon ab, ob die Bar gerade 0 pt hoch ist.
-    private var logoVisible = false
-    /// Fallback-Header im Inhalt, wenn die Bar kollabiert bleibt.
-    var headerFallbackState: SouveraMoreHeaderState?
-
     override func viewDidLoad() {
         super.viewDidLoad()
-        // Run 01.10.: neutraler Hintergrund der gemeinsamen Ebene (kein
-        // Durchscheinen eines hellblauen Streifens am Rand).
         view.backgroundColor = .systemGroupedBackground
-
-        // Run 24.10.: Nach Drehen/Fensterwechsel bleibt die Bar sonst
-        // gelegentlich mit 0 pt stehen. Der Trait-Wechsel kommt vor dem
-        // finalen Layout - deshalb im naechsten Runloop erneut pruefen.
-        if #available(iOS 17.0, *) {
-            registerForTraitChanges([UITraitHorizontalSizeClass.self,
-                                     UITraitVerticalSizeClass.self]) { (controller: Self, _) in
-                controller.scheduleHeaderFit()
-            }
-        }
+        // Run 24.10.: Die Mehr-Root rendert ihren blauen Header in SwiftUI
+        // (NCMoreView). Die UIKit-Bar bleibt nur fuer gepushte Unterseiten
+        // sichtbar - dadurch gibt es keine kollabierende Bar und keine
+        // doppelte Header-Zeile mehr.
+        setNavigationBarHidden(true, animated: false)
     }
 
-    /// Run 24.10.: Erzwingt die Bar nach Rotation/Fensterwechsel neu.
-    override func viewWillTransition(to size: CGSize,
-                                     with coordinator: UIViewControllerTransitionCoordinator) {
-        super.viewWillTransition(to: size, with: coordinator)
-        coordinator.animate(alongsideTransition: nil) { [weak self] _ in
-            self?.scheduleHeaderFit()
-        }
-    }
-
-    private func scheduleHeaderFit() {
-        DispatchQueue.main.async { [weak self] in
-            self?.ensureHeaderVisible()
-        }
-    }
-
-    override func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
+    override func navigationController(_ navigationController: UINavigationController,
+                                       willShow viewController: UIViewController,
+                                       animated: Bool) {
         super.navigationController(navigationController, willShow: viewController, animated: animated)
 
-        if viewController === navigationController.viewControllers.first {
-            // Nur die Mehr-Root bekommt den blauen Souvera-Header mit Logo.
-            applySouveraHeader(viewController)
-            showSouveraLogo(true)
-            // Die Basisklasse setzt ihr Standard-Erscheinungsbild asynchron in
-            // einem Task NACH diesem Aufruf wieder zurück. Deshalb hier
-            // ebenfalls asynchron erneut anwenden - mein Task ist danach
-            // eingereiht und gewinnt.
-            Task { @MainActor in
-                if viewController === navigationController.topViewController {
-                    applySouveraHeader(viewController)
-                    showSouveraLogo(true)
-                    ensureHeaderVisible()
-                }
-            }
+        let isRoot = viewController === navigationController.viewControllers.first
+        if isRoot {
+            viewController.navigationItem.title = ""
+            viewController.navigationItem.leftBarButtonItem = nil
+            viewController.navigationItem.titleView = nil
+            setNavigationBarHidden(true, animated: false)
         } else {
-            // Gepushte Module: blauer Header wie die Root (Logo bleibt
-            // exklusiv auf der Root) - inkl. Async-Re-Apply gegen den
-            // asynchronen Reset der Basisklasse.
             applyBlueHeader()
             viewController.navigationItem.leftBarButtonItem = nil
-            showSouveraLogo(false)
-            // Run 01.10. (Feedback: hellblauer Streifen am linken Rand auf
-            // ALLEN Mehr-Unterseiten): die gemeinsame Ebene leuchtet durch,
-            // wenn die gepushte View transparent ist. Nav-Controller-View
-            // und klar/nil-Views der gepushten Controller auf den Standard-
-            // Hintergrund setzen (eigene Backgrounds der Screens bleiben
-            // unberuehrt).
+            // Run 01.10.: hellblauer Streifen am linken Rand auf gepushten
+            // Mehr-Seiten verhindern.
             view.backgroundColor = .systemGroupedBackground
             if viewController.view.backgroundColor == nil
                 || viewController.view.backgroundColor == .clear {
                 viewController.view.backgroundColor = .systemGroupedBackground
             }
+            setNavigationBarHidden(false, animated: false)
             Task { @MainActor in
                 if viewController === navigationController.topViewController {
                     applyBlueHeader()
-                    showSouveraLogo(false)
+                    setNavigationBarHidden(false, animated: false)
                 }
             }
-            if viewController is NCCollectionViewCommon || viewController is NCActivity || viewController is NCTrash {
-                return
-            }
         }
+        SouveraLog.write("More", "[MoreHeader] willShow root=\(isRoot) hidden=\(isNavigationBarHidden) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height))")
     }
 
-    /// Blauer Header ohne Logo (alle aus dem Mehr-Menü gepushten Screens).
-    private func applyBlueHeader() {
-        // Run 19.09.: gemeinsamer Helper (alle vier Slots, deckend, hell).
-        SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
-    }
-
-    /// Run 19.09. (Feedback iPad-Header): Appearance bei jedem Erscheinen/
-    /// Layout neu erzwingen (iOS 26 setzt sie sonst asynchron zurueck).
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        ensureHeaderVisible()
+        if topViewController === viewControllers.first {
+            setNavigationBarHidden(true, animated: false)
+        }
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        guard topViewController !== viewControllers.first else { return }
         applyBlueHeader()
-        layoutSouveraLogo()
     }
 
-    /// Run 24.10. (Feedback: Header in schmalen Fenstern abgeschnitten/
-    /// durchscheinend): iOS 27 setzt die Appearance beim Erscheinen und
-    /// Scrollen zurueck. Nach dem vollstaendigen Erscheinen erneut opak
-    /// setzen und das Logo neu positionieren.
-    override func viewDidAppear(_ animated: Bool) {
-        super.viewDidAppear(animated)
-        ensureHeaderVisible()
-        // Run 24.10.: Nach Drehen/Fensterwechsel war die Bar teils 0 pt
-        // hoch - im naechsten Run noch einmal erzwingen und layouten.
-        DispatchQueue.main.async { [weak self] in
-            self?.ensureHeaderVisible()
-        }
-    }
-
-    /// Erzwingt die sichtbare, opake Bar (nur fuer die Mehr-Root). iOS 27
-    /// blendet sie beim Uebergang/Drehen gelegentlich aus (bar=0) und
-    /// laesst sie ausgeblendet.
-    private func ensureHeaderVisible() {
-        guard let root = viewControllers.first, root === topViewController else { return }
-        if isNavigationBarHidden {
-            setNavigationBarHidden(false, animated: false)
-        }
-        if navigationBar.isHidden {
-            navigationBar.isHidden = false
-        }
-        applyBlueHeader()
-        if navigationBar.bounds.height < 1 {
-            // Run 24.10.: UIKit laesst die Bar nach einem offscreen-
-            // Einblenden/Wechsel gelegentlich auf 0 pt stehen, obwohl
-            // isNavigationBarHidden == false. Ein harter, nicht animierter
-            // Hide/Show-Zyklus installiert die Bar neu.
-            setNavigationBarHidden(true, animated: false)
-            setNavigationBarHidden(false, animated: false)
-            view.setNeedsLayout()
-            view.layoutIfNeeded()
-            applyBlueHeader()
-        }
-        layoutSouveraLogo()
-        updateFallbackState()
-        SouveraLog.write("More", "[MoreHeader] ensure hidden=\(isNavigationBarHidden) barHidden=\(navigationBar.isHidden) translucent=\(navigationBar.isTranslucent) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height)) safeTop=\(Int(navigationBar.safeAreaInsets.top))")
-    }
-
-    /// Meldet dem Inhalt, ob ein Ersatz-Header gerendert werden muss.
-    private func updateFallbackState() {
-        let isRoot = viewControllers.first === topViewController
-        let collapsed = isRoot && navigationBar.bounds.height < 1
-        if headerFallbackState?.showsFallbackHeader != collapsed {
-            headerFallbackState?.showsFallbackHeader = collapsed
-        }
-    }
-
-    /// Positioniert das Logo: 20 pt von links (Flucht mit der Menüliste plus
-    /// kleiner Korrektur), vertikal an der Höhe der rechten Buttons (6 pt
-    /// über der Streifenmitte - Ausgleich der Wortmarken-Padding im PNG).
-    /// Setzt bewusst KEIN isHidden - die Sichtbarkeit steuert allein
-    /// showSouveraLogo aus willShow (nur auf der Mehr-Root sichtbar).
-    private func layoutSouveraLogo() {
-        guard let logo = souveraLogoView else { return }
-        guard let root = viewControllers.first, root === topViewController else {
-            logo.isHidden = true
-            updateFallbackState()
-            return
-        }
-        updateFallbackState()
-        // Run 24.10.: Bei kollabierter Bar (0 pt) nicht das Logo ueber den
-        // Inhalt legen - es erscheint wieder, sobald die Bar steht.
-        if navigationBar.bounds.height < 1 || !logoVisible {
-            logo.isHidden = true
-            return
-        }
-        logo.isHidden = false
-        let bar = navigationBar
-        let contentHeight: CGFloat = 44
-        // Run 23.10. (Feedback: "Souvera" oben abgeschnitten, Screenshot
-        // nicht beschnitten): Die Ableitung aus der Bar-Hoehe konnte in
-        // Fenster-Szenen negativ werden und schob das Logo ueber die Kante.
-        // Jetzt echte Safe-Area verwenden und y nie unter 0 klemmen.
-        // Content-Bereich der Bar (unter der Status-/Fensterleiste). Nur
-        // nach unten klemmen - ein negativer Wert schob das Logo aus dem
-        // Bild.
-        let topInset = max(0, bar.bounds.height - contentHeight)
-        let logoHeight: CGFloat = 32
-        let image = logo.image
-        let ratio = (image?.size.height ?? logoHeight) > 0 ? (image?.size.width ?? 1) / (image?.size.height ?? 1) : 1
-        let width = min(logoHeight * ratio, max(0, bar.bounds.width - 32))
-        let y = max(0, topInset + (contentHeight - logoHeight) / 2 - 6)
-        let frame = CGRect(
-            x: 20,
-            y: y,
-            width: width,
-            height: logoHeight
-        )
-        if logo.frame != frame {
-            logo.frame = frame
-            SouveraLog.write("More", "[MoreHeader] bar=\(Int(bar.bounds.width))x\(Int(bar.bounds.height)) safeTop=\(Int(bar.safeAreaInsets.top)) logoY=\(Int(y)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0)) translucent=\(bar.isTranslucent)")
-        }
-    }
-
-    /// Zeigt/versteckt das Logo (nur auf der Mehr-Root sichtbar).
-    private func showSouveraLogo(_ show: Bool) {
-        logoVisible = show
-        guard let logo = souveraLogoView else { return }
-        logo.isHidden = !show
-        if show { layoutSouveraLogo() }
-    }
-
-    /// Blauer Gradient-Header mit Souvera-Logo links (hell/dunkel identisch,
-    /// deckend - kein Liquid-Glass-Effekt auf iOS 26). Nutzt die zentralen
-    /// Bausteine aus SouveraAppearance.
-    private func applySouveraHeader(_ viewController: UIViewController) {
-        applyBlueHeader()
-
-        viewController.navigationItem.title = ""
-        viewController.navigationItem.leftBarButtonItem = nil
-        viewController.navigationItem.titleView = nil
-
-        // Offizielles Souvera-Logo (weiße Wortmarke) frei auf dem blauen
-        // Header: als direkte Subview der Bar - keine Button-Kapsel, exakte
-        // Positionierung in viewDidLayoutSubviews.
-        if souveraLogoView == nil {
-            let logo = UIImageView(image: UIImage(named: "souveraLogo"))
-            logo.contentMode = .scaleAspectFit
-            navigationBar.addSubview(logo)
-            souveraLogoView = logo
-        }
+    /// Blauer Header ohne Logo (gepushte Mehr-Unterseiten).
+    private func applyBlueHeader() {
+        SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
     }
 
     // MARK: - Right

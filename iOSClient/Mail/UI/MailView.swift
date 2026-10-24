@@ -379,36 +379,32 @@ struct MailView: View {
             titleAfterLeading: !headerTitle.isEmpty,
             extraTop: layout.headerExtraTop,
             extraTrailing: layout.headerExtraTrailing,
-            showsTrailing: !layout.usesActionRail,
+            showsTrailing: !layout.usesSidebarActions,
             leading: {
                 if isDetail {
                     SouveraHeaderButton(icon: "chevron.backward") {
                         viewModel.back()
                     }
                     .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
-                } else if isWideLayout {
-                    // Run 24.10.: Einklappen wieder links im Header.
+                }
+                // Run 24.10.: Ordner-Toggle ist IMMER sichtbar - im Split
+                // klappt er die Ordnerspalte ein/aus, kompakt oeffnet er
+                // die Ordnerliste.
+                if isWideLayout {
                     SouveraHeaderButton(icon: "sidebar.left") {
                         foldersCollapsed.toggle()
                     }
                     .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                    if !(focusReaderActive && viewModel.route.isDetail) {
-                        AutoRefreshRingView(viewModel: viewModel)
-                            .frame(width: 44, height: 44)
-                            .modifier(SouveraHeaderGlass(shape: Circle()))
+                } else {
+                    SouveraHeaderButton(icon: "folder") {
+                        viewModel.showFolders()
                     }
-                } else if isFolders {
+                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
+                }
+                if !(focusReaderActive && viewModel.route.isDetail) {
                     AutoRefreshRingView(viewModel: viewModel)
                         .frame(width: 44, height: 44)
                         .modifier(SouveraHeaderGlass(shape: Circle()))
-                } else {
-                    // Run 23.10.: Hochkant muss der Ordnerweg immer erreichbar
-                    // sein - der Zurueck-Pfeil war hier je nach Start-Layout
-                    // nicht mehr vorhanden.
-                    SouveraHeaderButton(icon: "folder") {
-                        viewModel.back()
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
                 }
             },
             trailing: {
@@ -571,8 +567,22 @@ struct MailView: View {
             return SouveraHeaderBridge.Custom(id: "ring", view: ring)
         }()
 
+        // Run 24.10.: Ordner-Toggle IMMER im Leading-Bereich.
+        let folderToggle = SouveraHeaderBridge.Item(
+            id: "folders",
+            icon: isWideLayout ? "sidebar.left" : "folder",
+            accessibilityLabel: NSLocalizedString("_mail_folders_", comment: "")
+        ) {
+            if isWideLayout {
+                foldersCollapsed.toggle()
+            } else {
+                viewModel.showFolders()
+            }
+        }
+
         if case let .detail(message) = viewModel.route {
             leading.append(backItem)
+            leading.append(folderToggle)
             if let ringCustom { leadingCustoms.append(ringCustom) }
             trailing.append(SouveraHeaderBridge.Item(
                 id: "reply", icon: "arrowshape.turn.up.left",
@@ -580,34 +590,8 @@ struct MailView: View {
             ) { viewModel.startCompose(mode: .reply, message: message) })
             menus.append(detailMoreMenu(message))
         } else {
-            if isWideLayout {
-                // Run 24.10.: Einklappen wieder links im Header. Als Custom-
-                // View GANZ links (vor dem Ring), damit die Reihenfolge
-                // stimmt; die System-Gruppe liefert die Kapsel.
-                let toggleHost = UIHostingController(rootView:
-                    SouveraHeaderButton(icon: "sidebar.left", glass: false) {
-                        foldersCollapsed.toggle()
-                    }
-                    .frame(width: 44, height: 44)
-                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                )
-                toggleHost.view.backgroundColor = .clear
-                leadingCustoms.append(SouveraHeaderBridge.Custom(
-                    id: "foldersToggle",
-                    view: toggleHost.view,
-                    retained: toggleHost
-                ))
-                if let ringCustom { leadingCustoms.append(ringCustom) }
-            } else if isFolders {
-                if let ringCustom { leadingCustoms.append(ringCustom) }
-            } else {
-                // Bridge-Bar auf kompakter Breite (z. B. iPad Split View):
-                // Ordnerweg trotzdem anbieten.
-                leading.append(SouveraHeaderBridge.Item(
-                    id: "folders", icon: "folder",
-                    accessibilityLabel: NSLocalizedString("_mail_folders_", comment: "")
-                ) { viewModel.back() })
-            }
+            leading.append(folderToggle)
+            if let ringCustom { leadingCustoms.append(ringCustom) }
             trailing.append(SouveraHeaderBridge.Item(
                 id: "search", icon: "magnifyingglass",
                 accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")

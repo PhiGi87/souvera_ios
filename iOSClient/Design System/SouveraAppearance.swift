@@ -453,6 +453,11 @@ final class SouveraBarCoordinator {
         (navigationController as? SouveraLayoutModeProviding)?.layoutMode.usesBridgeHeader ?? false
     }
 
+    /// Rechte Aktionen liegen im System-Seitenband statt im Header.
+    private var usesSidebarActions: Bool {
+        (navigationController as? SouveraLayoutModeProviding)?.layoutMode.usesSidebarActions ?? false
+    }
+
     func rebuild() {
         // Run 25.09. (Feedback: doppelter Header auf iOS 17/18-iPhones):
         // Die Bridge gehoert NUR zur iPad-Bridge-Bar - auf dem iPhone
@@ -463,12 +468,16 @@ final class SouveraBarCoordinator {
         // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
         // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
         // Nur bei echter Inhaltsaenderung neu bauen/loggen.
-        let signature = Self.signature(bridge)
+        let sidebarActions = usesSidebarActions
+        let signature = "\(sidebarActions)|\(Self.signature(bridge))"
         if signature == lastSignature { return }
         lastSignature = signature
         item.title = bridge.title.isEmpty ? nil : bridge.title
         let leading = Self.bars(bridge.leadingItems, bridge.leadingMenus, bridge.leadingCustoms)
-        let trailing = Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
+        // Im Sidebar-Modus wandern die rechten Aktionen in das Systemband.
+        let trailing = sidebarActions
+            ? []
+            : Self.bars(bridge.trailingItems, bridge.trailingMenus, bridge.trailingCustoms)
         // Run 21.09. (Feedback iPadOS 17: Buttons fehlten): iPadOS 26
         // rendert left/rightBarButtonItems in der zentrierten Tab-Pill-Bar
         // NICHT (nur Item-Groups); iOS 17 rendert Plain-Image-Items in

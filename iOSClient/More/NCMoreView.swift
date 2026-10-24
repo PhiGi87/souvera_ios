@@ -18,25 +18,19 @@ struct NCMoreView: View {
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
     @ObservedObject private var badgeStore = SouveraBadgeStore.shared
-    /// Run 24.10.: Ersatz-Header, falls die UIKit-Bar kollabiert bleibt.
-    @ObservedObject private var headerFallbackState: SouveraMoreHeaderState
     private let loadItemsOnAppear: Bool
 
-    init(account: String,
-         controller: NCMainTabBarController?,
-         headerFallbackState: SouveraMoreHeaderState = SouveraMoreHeaderState()) {
+    init(account: String, controller: NCMainTabBarController?) {
         _model = StateObject(
             wrappedValue: NCMoreModel(
                 controller: controller
             )
         )
-        _headerFallbackState = ObservedObject(wrappedValue: headerFallbackState)
         loadItemsOnAppear = true
     }
 
     init(model: NCMoreModel) {
         _model = StateObject(wrappedValue: model)
-        _headerFallbackState = ObservedObject(wrappedValue: SouveraMoreHeaderState())
         loadItemsOnAppear = false
     }
 
@@ -98,9 +92,7 @@ struct NCMoreView: View {
         .listStyle(.insetGrouped)
         .tint(Color.Souvera.brandPrimaryDeep)
         .safeAreaInset(edge: .top, spacing: 0) {
-            if headerFallbackState.showsFallbackHeader {
-                fallbackHeader
-            }
+            moreHeader
         }
         .sheet(isPresented: $showAccountSettings) {
             NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
@@ -135,10 +127,10 @@ struct NCMoreView: View {
                                 autoUploadStart: model.autoUploadStart)
     }
 
-    /// Run 24.10.: Schlanker blauer Ersatz-Header, falls die UIKit-Bar in
-    /// einer Fenster-/Falt-Szene auf 0 pt kollabiert. Titel/Logo wie die
-    /// echte Bar, die Aktionen liegen dann in der rechten Pille.
-    private var fallbackHeader: some View {
+    /// Run 24.10.: Permanenter blauer Mehr-Header (Souvera-Logo). Die
+    /// UIKit-Bar ist auf der Mehr-Root ausgeblendet; die rechten Aktionen
+    /// liegen im System-Seitenband.
+    private var moreHeader: some View {
         HStack(spacing: 8) {
             Image("souveraLogo")
                 .resizable()

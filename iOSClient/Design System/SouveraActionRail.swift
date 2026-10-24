@@ -1,23 +1,21 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Run 24.10. (Duo-Außendisplay, Hochkant):
-// Die rechten Header-Aktionen wandern aus dem blauen Header in eine eigene
-// schwebende Glas-Pille im rechten Button-Bereich, direkt oberhalb der
-// System-Tab-Leiste. Nur in diesem einen Layout (kompakte Phone-Breite,
-// Hochformat, Tab-Leiste vertikal am rechten Rand). Alle anderen Layouts
-// behalten die Aktionen im Header.
+// Run 24.10. (Duo, System-Sidebar):
+// Die rechten Header-Aktionen wandern in das iOS-Seitenband
+// (`UITabBarController.sidebar.bottomBarView`) - also dorthin, wo auch die
+// Tab-Leiste liegt. Keine eigene schwebende Pille mehr: Das System verwaltet
+// Breite/Höhe und die Position innerhalb des Bands.
 //
-// Die System-Tab-Leiste selbst lässt sich nicht um eigene Buttons erweitern;
-// deshalb die separate Pille. Sie wird aus derselben Brücke gespeist, die
-// auch die UIKit-/Bridge-Header befüllt.
+// Die Aktionen kommen aus denselben Quellen wie zuvor:
+// - Mail/Kalender/Link ueber die SouveraHeaderBridge
+// - Dateien/Mehr ueber SouveraActionRailSource
 
 import SwiftUI
 import UIKit
 import Combine
 
-/// Menüeintrag der Aktions-Pille (UIMenus und Bridge-Menüs werden auf diesen
-/// neutralen Typ abgebildet).
+/// Menueeintrag fuer UIKit-Menues (Bridge-Beschreibungen).
 struct SouveraRailMenuEntry: Identifiable {
     let id: String
     let title: String
@@ -43,7 +41,7 @@ struct SouveraRailMenuEntry: Identifiable {
         self.handler = handler
     }
 
-    /// Stabiler Vergleichswert fuer den Rail-Host (erkennt echte Aenderungen).
+    /// Stabiler Vergleichswert fuer den Sidebar-Host.
     var signature: String {
         let kids = (children ?? []).map(\.signature).joined(separator: ",")
         return "\(id):\(title):\(icon ?? ""):\(isChecked):\(isDestructive):[\(kids)]"
@@ -51,7 +49,7 @@ struct SouveraRailMenuEntry: Identifiable {
 }
 
 extension SouveraRailMenuEntry {
-    /// Menue-Signatur fuer den Rail-Host (erkennt echte Aenderungen).
+    /// Menue-Signatur fuer ein bestehendes `UIMenu` (erkennt Aenderungen).
     static func signature(of menu: UIMenu) -> String {
         menu.children.map { element in
             if let action = element as? UIAction {
@@ -65,7 +63,7 @@ extension SouveraRailMenuEntry {
     }
 }
 
-/// Einzelne Aktion der rechten Pille.
+/// Einzelne Aktion im Seitenband.
 struct SouveraRailAction: Identifiable {
     let id: String
     let icon: String
@@ -73,9 +71,7 @@ struct SouveraRailAction: Identifiable {
     var tint: Color?
     var accessibilityLabel: String
     var menu: [SouveraRailMenuEntry]?
-    /// UIKit-Menue (z. B. das "... "-Menue von Dateien). Wird ueber einen
-    /// UIButton mit `showsMenuAsPrimaryAction` gerendert, weil UIActions
-    /// ihre Handler nicht oeffentlich preisgeben.
+    /// UIKit-Menue (z. B. das "... "-Menue von Dateien).
     var uiMenu: UIMenu?
     let handler: () -> Void
 
@@ -97,7 +93,7 @@ struct SouveraRailAction: Identifiable {
         self.handler = handler
     }
 
-    /// Stabiler Vergleichswert fuer den Rail-Host (erkennt echte Aenderungen).
+    /// Stabiler Vergleichswert fuer den Sidebar-Host.
     var signature: String {
         let menus = (menu ?? []).map(\.signature).joined(separator: ";")
         let uikitMenu = uiMenu.map { SouveraRailMenuEntry.signature(of: $0) } ?? ""
@@ -105,175 +101,137 @@ struct SouveraRailAction: Identifiable {
     }
 }
 
-/// Beobachtbares Modell der aktuell sichtbaren Pille. Der Tab-Controller
-/// befuellt es aus der Bruecke bzw. den Trailing-Items des gewaehlten Tabs.
-final class SouveraActionRailModel: ObservableObject {
-    @Published var actions: [SouveraRailAction] = []
-}
-
 /// Aktionsquelle fuer UIKit-basierte Tabs (Dateien/Mehr).
 final class SouveraActionRailSource: ObservableObject {
     @Published var actions: [SouveraRailAction] = []
 }
 
-/// Reine, unit-testbare Layoutregeln fuer die Pille.
-enum SouveraActionRailLayout {
-    /// Nur Außendisplay hochkant: kompakte Phone-Breite und die Tab-Leiste
-    /// schwebt vertikal am rechten Rand. Querformat, Innendisplay, iPad und
-    /// die normale untere Tab-Leiste bleiben unveraendert.
-    static func isActive(horizontalSizeClass: UIUserInterfaceSizeClass,
-                         idiom: UIUserInterfaceIdiom,
-                         isPortrait: Bool,
+/// Reine Aktivierungsregel: Das System-Seitenband ist sichtbar und liegt
+/// vertikal am rechten Rand. Dann gehoeren die rechten Header-Aktionen in
+/// `sidebar.bottomBarView` - unabhaengig davon, ob außen/innen oder
+/// hoch/quer. Bei der unteren Tab-Leiste (Innendisplay hochkant) bleibt der
+/// Header zustaendig.
+enum SouveraSidebarActions {
+    static func isActive(sidebarAvailable: Bool,
+                         sidebarHidden: Bool,
                          tabBarFrame: CGRect,
                          viewBounds: CGRect,
                          tabBarHidden: Bool) -> Bool {
-        guard !tabBarHidden else { return false }
-        guard horizontalSizeClass == .compact, idiom == .phone else { return false }
-        guard isPortrait else { return false }
+        guard sidebarAvailable, !sidebarHidden, !tabBarHidden else { return false }
         guard tabBarFrame.width > 0, tabBarFrame.height > 0 else { return false }
-        // Nicht sichtbar / aus dem Fenster geschoben.
         guard tabBarFrame.intersects(viewBounds) else { return false }
-        // Vertikale Leiste (Sidebar) statt unterer Tab-Leiste.
         guard tabBarFrame.height > tabBarFrame.width else { return false }
-        // Am rechten Rand.
         guard tabBarFrame.midX > viewBounds.midX else { return false }
         return true
     }
-
-    static func contentHeight(actionCount: Int,
-                              button: CGFloat = 44,
-                              spacing: CGFloat = 2,
-                              padding: CGFloat = 8) -> CGFloat {
-        guard actionCount > 0 else { return 0 }
-        return CGFloat(actionCount) * button
-            + CGFloat(actionCount - 1) * spacing
-            + padding
-    }
-
-    /// Rechtsbuendig oberhalb der Tab-Leiste. Reicht die Hoehe nicht (z. B.
-    /// weil eine Sidebar ihre volle Container-Hoehe meldet), wird die Pille
-    /// oben rechts unter dem Header platziert - weiterhin im rechten
-    /// Button-Bereich und oberhalb der Tab-Leiste.
-    static func frame(tabBarFrame: CGRect,
-                      headerBottom: CGFloat,
-                      actionCount: Int,
-                      viewBounds: CGRect,
-                      gap: CGFloat = 8,
-                      width: CGFloat = 52) -> CGRect {
-        guard actionCount > 0 else { return .zero }
-        let desiredHeight = contentHeight(actionCount: actionCount)
-        let maxBottom = tabBarFrame.minY - gap
-        let maxTop = headerBottom + gap
-        let trailing = min(tabBarFrame.maxX, viewBounds.maxX - gap)
-        let x = trailing - width
-
-        if maxBottom - maxTop >= min(desiredHeight, 44) {
-            let height = max(0, min(desiredHeight, maxBottom - maxTop))
-            let y = maxBottom - height
-            return CGRect(x: x, y: y, width: width, height: height)
-        }
-
-        let height = max(0, min(desiredHeight, viewBounds.maxY - maxTop - gap))
-        return CGRect(x: x, y: maxTop, width: width, height: height)
-    }
 }
 
-/// Die schwebende Glas-Pille. Wird vom Tab-Controller als Overlay gehalten;
-/// die Position kommt aus `SouveraActionRailLayout`.
-struct SouveraActionRailView: View {
-    @ObservedObject var model: SouveraActionRailModel
+/// Vertikale System-Toolbar fuer die rechte Sidebar. Wird als
+/// `sidebar.bottomBarView` gesetzt; das System verwaltet Breite und Höhe.
+final class SouveraSidebarActionBar: UIView {
+    private let stack = UIStackView()
+    private(set) var actions: [SouveraRailAction] = []
 
-    var body: some View {
-        VStack(spacing: 2) {
-            ForEach(model.actions) { action in
-                actionButton(action)
-            }
+    private let buttonSide: CGFloat = 44
+    private let spacing: CGFloat = 2
+    private let verticalPadding: CGFloat = 4
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        backgroundColor = .clear
+        stack.axis = .vertical
+        stack.alignment = .center
+        stack.spacing = spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: verticalPadding),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -verticalPadding),
+            stack.centerXAnchor.constraint(equalTo: centerXAnchor),
+            stack.widthAnchor.constraint(equalToConstant: buttonSide)
+        ])
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    func update(actions: [SouveraRailAction]) {
+        guard actions.map(\.signature) != self.actions.map(\.signature) else { return }
+        self.actions = actions
+        for view in stack.arrangedSubviews {
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
         }
-        .padding(4)
-        .modifier(SouveraHeaderGlass(shape: Capsule()))
-        .environment(\.colorScheme, .light)
-        .accessibilityElement(children: .contain)
-    }
-
-    @ViewBuilder
-    private func actionButton(_ action: SouveraRailAction) -> some View {
-        if let uiMenu = action.uiMenu {
-            SouveraRailMenuButton(menu: uiMenu, icon: action.icon)
-                .frame(width: 44, height: 44)
-                .accessibilityLabel(Text(action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel))
-        } else if let entries = action.menu {
-            Menu {
-                ForEach(entries) { entry in
-                    menuEntry(entry)
-                }
-            } label: {
-                actionIcon(action)
-            }
-            .menuIndicator(.hidden)
-            .accessibilityLabel(Text(action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel))
-        } else {
-            Button(action: action.handler) {
-                actionIcon(action)
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel))
+        for action in actions {
+            let button = makeButton(for: action)
+            stack.addArrangedSubview(button)
+            NSLayoutConstraint.activate([
+                button.widthAnchor.constraint(equalToConstant: buttonSide),
+                button.heightAnchor.constraint(equalToConstant: buttonSide)
+            ])
         }
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
     }
 
-    private func actionIcon(_ action: SouveraRailAction) -> some View {
-        Image(systemName: action.icon)
-            .font(.system(size: 18, weight: .medium))
-            .foregroundStyle(action.tint ?? Color(red: 0.1, green: 0.1, blue: 0.1))
-            .frame(width: 44, height: 44)
-            .contentShape(Circle())
+    override var intrinsicContentSize: CGSize {
+        CGSize(width: buttonSide, height: contentHeight)
     }
 
-    /// Rekursive Menues koennen keinen opaken Rueckgabetyp ableiten -
-    /// deshalb hier bewusst `AnyView`.
-    private func menuEntry(_ entry: SouveraRailMenuEntry) -> AnyView {
-        if let children = entry.children, !children.isEmpty {
-            return AnyView(
-                Menu {
-                    ForEach(children) { child in
-                        menuEntry(child)
-                    }
-                } label: {
-                    Label(entry.title, systemImage: entry.icon ?? "chevron.right")
-                }
-            )
-        }
-        return AnyView(
-            Button(role: entry.isDestructive ? .destructive : nil) {
-                entry.handler()
-            } label: {
-                if entry.isChecked {
-                    Label(entry.title, systemImage: "checkmark")
-                } else if let icon = entry.icon {
-                    Label(entry.title, systemImage: icon)
-                } else {
-                    Text(entry.title)
-                }
-            }
-        )
+    override func sizeThatFits(_ size: CGSize) -> CGSize {
+        CGSize(width: max(buttonSide, size.width), height: contentHeight)
     }
-}
 
-/// Icon-Button, der ein bestehendes `UIMenu` ueber UIKit praesentiert.
-private struct SouveraRailMenuButton: UIViewRepresentable {
-    let menu: UIMenu
-    let icon: String
+    private var contentHeight: CGFloat {
+        guard !actions.isEmpty else { return 0 }
+        return CGFloat(actions.count) * buttonSide
+            + CGFloat(actions.count - 1) * spacing
+            + 2 * verticalPadding
+    }
 
-    func makeUIView(context: Context) -> UIButton {
+    private func makeButton(for action: SouveraRailAction) -> UIButton {
         let button = UIButton(type: .system)
-        button.showsMenuAsPrimaryAction = true
-        button.contentHorizontalAlignment = .center
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+        button.setImage(iconImage(action.icon), for: .normal)
+        button.accessibilityLabel = action.accessibilityLabel.isEmpty ? action.id : action.accessibilityLabel
+
+        if let uiMenu = action.uiMenu {
+            button.menu = uiMenu
+            button.showsMenuAsPrimaryAction = true
+        } else if let entries = action.menu {
+            button.menu = makeMenu(from: entries)
+            button.showsMenuAsPrimaryAction = true
+        } else {
+            button.addAction(UIAction { _ in action.handler() }, for: .touchUpInside)
+        }
         return button
     }
 
-    func updateUIView(_ button: UIButton, context: Context) {
-        button.menu = menu
-        button.tintColor = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+    private func iconImage(_ name: String) -> UIImage? {
         let configuration = UIImage.SymbolConfiguration(pointSize: 18, weight: .medium)
-        button.setImage(UIImage(systemName: icon, withConfiguration: configuration), for: .normal)
+        return UIImage(systemName: name, withConfiguration: configuration)
+    }
+
+    private func makeMenu(from entries: [SouveraRailMenuEntry]) -> UIMenu {
+        UIMenu(title: "", children: entries.map { entry in
+            if let children = entry.children, !children.isEmpty {
+                return makeMenu(from: children, title: entry.title)
+            }
+            return UIAction(
+                title: entry.title,
+                image: entry.icon.flatMap { iconImage($0) },
+                attributes: entry.isDestructive ? .destructive : [],
+                state: entry.isChecked ? .on : .off
+            ) { _ in
+                entry.handler()
+            }
+        })
+    }
+
+    private func makeMenu(from entries: [SouveraRailMenuEntry], title: String) -> UIMenu {
+        UIMenu(title: title, children: makeMenu(from: entries).children)
     }
 }
