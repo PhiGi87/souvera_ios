@@ -37,7 +37,11 @@ struct MailView: View {
     @State private var showInvitationDetail: SouveraMailInvitation?
     @ObservedObject private var invitationCenter = SouveraInvitationCenter.shared
 
-    var body: some View {
+    /// Run 25.10.: Eigene Teil-Expression. Seit der Entfernung des
+    /// NavigationStack-Wrappers war die gesamte body-Kette eine einzige
+    /// Expression - der Swift-Typchecker brach dort mit "unable to
+    /// type-check this expression in reasonable time" ab (CI).
+    private var contentLayer: some View {
         // Landscape-Erkennung über Geometrie (Breite > Höhe): funktioniert
         // auf iPhone, iPad und Mac - Size-Classes sind unzuverlässig
         // (iPad ist vertikal IMMER .regular; iPhone landscape sogar
@@ -92,6 +96,10 @@ struct MailView: View {
                     .transition(.opacity)
                 }
             }
+    }
+
+    var body: some View {
+        contentLayer
         .confirmationDialog(
             NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
             isPresented: Binding(

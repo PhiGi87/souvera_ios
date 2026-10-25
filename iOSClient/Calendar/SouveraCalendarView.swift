@@ -87,7 +87,10 @@ struct SouveraCalendarView: View {
         }
     }
 
-    var body: some View {
+    /// Run 25.10.: Eigene Teil-Expression gegen Typchecker-Timeout
+    /// nach dem Entfall des NavigationStack-Wrappers.
+    private var contentLayer: some View {
+
         // Run 25.10. (Header-Standard): Header kommt ausschliesslich von
         // der System-Bar des Hosting-NavigationControllers.
         GeometryReader { geometry in
@@ -106,6 +109,10 @@ struct SouveraCalendarView: View {
                 .padding(.top, 12)
             }
             .souveraOfflineBanner()
+    }
+
+    var body: some View {
+        contentLayer
         .onAppear {
             selectedDay = Date()
             scrollToNowTrigger += 1

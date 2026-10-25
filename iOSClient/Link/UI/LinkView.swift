@@ -69,7 +69,10 @@ struct LinkView: View {
         var id: String { "\(token)|\(withVideo)|\(silent)" }
     }
 
-        var body: some View {
+        /// Run 25.10.: Eigene Teil-Expression gegen Typchecker-Timeout
+    /// nach dem Entfall des NavigationStack-Wrappers.
+    private var contentLayer: some View {
+
         // Run 25.10. (Header-Standard): Header kommt ausschliesslich von
         // der System-Bar des Hosting-NavigationControllers.
         // Landscape-Erkennung über Geometrie (Breite > Höhe) - wie in
@@ -85,6 +88,10 @@ struct LinkView: View {
                     updateLandscapeLayout(newSize)
                 }
         }
+    }
+
+    var body: some View {
+        contentLayer
         .onChange(of: scenePhase) { _, phase in
             // Foreground (Run 15.09.): Status + Presence automatisch
             // auffrischen - NICHT erst nach Klick auf den Status-Button.
