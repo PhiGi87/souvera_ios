@@ -222,10 +222,12 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// Leading/Titel.
     /// Run 24.10.: Optionale Hohe (z. B. gemessene Systembar-Hoehe), damit
     /// der Mehr-Header exakt so hoch wie die Bridge-Bars ist.
-    /// Run 25.10. (4b): Der Default ist IMMER die zentrale Regel
-    /// (SouveraHeaderGeometry) - eine Aufrufstelle, die den Override
-    /// vergisst, weicht nicht mehr vom App-Standard ab.
-    var heightOverride: CGFloat? = SouveraHeaderGeometry.currentSpec().height
+    /// Run 25.10. (4b): Bewusst KEIN Default aus SouveraHeaderGeometry -
+    /// diese Datei wird auch in den Extension-Targets (Share u. a.)
+    /// kompiliert, wo das Haupt-App-Target-File nicht existiert (CI-Fix:
+    /// "cannot find SouveraHeaderGeometry in scope"). Jede Aufrufstelle im
+    /// Haupt-App-Target uebergibt heightOverride explizit aus currentSpec().
+    var heightOverride: CGFloat? = nil
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
