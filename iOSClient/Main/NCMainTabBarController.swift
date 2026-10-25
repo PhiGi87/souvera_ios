@@ -626,7 +626,12 @@ class NCMainTabBarController: UITabBarController {
 
         override func viewDidLoad() {
             super.viewDidLoad()
-            view.insertSubview(headerBackdrop, at: 0)
+            // Run 25.10.: Unter der Bar, ueber der Inhalts-View.
+            if navigationBar.superview === view {
+                view.insertSubview(headerBackdrop, belowSubview: navigationBar)
+            } else {
+                view.addSubview(headerBackdrop)
+            }
             if #available(iOS 17.0, *) {
                 registerForTraitChanges([UITraitHorizontalSizeClass.self,
                                          UITraitUserInterfaceIdiom.self]) { (controller: Self, _) in

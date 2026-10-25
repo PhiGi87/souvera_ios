@@ -169,7 +169,6 @@ struct SouveraCalendarView: View {
     }
 
     var body: some View {
-        contentLayer
         presentationLayer
         .onReceive(NotificationCenter.default.publisher(for: SouveraPushDeepLink.opened)) { notification in
             guard let target = notification.object as? SouveraPushDeepLink.Target else { return }

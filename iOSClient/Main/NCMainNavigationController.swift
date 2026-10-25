@@ -84,7 +84,13 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         setNavigationBarAppearance()
         setNavigationBarHidden(false, animated: false)
-        view.insertSubview(headerBackdrop, at: 0)
+        // Run 25.10.: UNTER der Bar, aber UEBER der Inhalts-View -
+        // sonst deckt der weisse Listen-Hintergrund den Streifen ab.
+        if navigationBar.superview === view {
+            view.insertSubview(headerBackdrop, belowSubview: navigationBar)
+        } else {
+            view.addSubview(headerBackdrop)
+        }
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")

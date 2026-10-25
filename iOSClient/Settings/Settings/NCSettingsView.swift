@@ -454,11 +454,12 @@ struct NCSettingsView: View {
         .sheet(isPresented: $showChangePasscode) {
             SetupPasscodeView(isLockActive: $model.isLockActive, controller: model.controller, changePasscode: true)
         }
-        .navigationBarTitle(NSLocalizedString("_settings_", comment: ""))
+        // Run 25.10. (Header-Standard): Inline-Titel wie alle anderen
+        // Seiten; KEIN per-Screen-Toolbar-Background mehr - der wuerde die
+        // gemeinsame blaue Bar-Appearance mit einem Material ueberschreiben
+        // (hellblauer Streifen, Large-Title).
+        .navigationBarTitle(NSLocalizedString("_settings_", comment: ""), displayMode: .inline)
         .defaultViewModifier(model)
-        // Run 25.10.: Header bleibt beim Scrollen sichtbar (iOS 26 blendet
-        // die System-Toolbar sonst nahezu aus) - Header-Standard Run 25.10.
-        .toolbarBackground(.visible, for: .navigationBar)
         .alert(NSLocalizedString("_settings_language_", comment: ""), isPresented: $showLanguageRestart) {
             Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
         } message: {

@@ -646,6 +646,9 @@ final class NCMoreModel: ObservableObject {
             rootView: view.environmentObject(SouveraLayoutMode.pushed())
         )
         hosting.title = title
+        // Run 25.10.: Alle gepushten Seiten mit Inline-Titel - identische
+        // Bar-Hoehe/Position wie Dateien und die Module.
+        hosting.navigationItem.largeTitleDisplayMode = .never
         hosting.navigationItem.rightBarButtonItems = trailing ?? []
         navigationController.pushViewController(hosting, animated: true)
     }
@@ -808,6 +811,7 @@ final class NCMoreModel: ObservableObject {
 
         let settingsController = UIHostingController(rootView: settingsView)
         settingsController.title = NSLocalizedString("_settings_", comment: "")
+        settingsController.navigationItem.largeTitleDisplayMode = .never
 
         navigationController.pushViewController(settingsController, animated: true)
     }
