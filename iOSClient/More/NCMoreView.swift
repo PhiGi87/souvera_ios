@@ -81,12 +81,15 @@ struct NCMoreView: View {
             Image("souveraLogo")
                 .resizable()
                 .scaledToFit()
-                .frame(height: 24)
+                .frame(height: 44)
                 .accessibilityHidden(true)
             Spacer()
         }
         .padding(.top, SouveraTokens.Spacing.sm)
         .padding(.bottom, SouveraTokens.Spacing.sm)
+        // Run 25.10.: Gleicher Grund wie die Liste darunter - sonst weisser
+        // Streifen zwischen Bar und Account-Feld.
+        .background(Color(.systemGroupedBackground))
     }
 
     private var listContent: some View {
@@ -140,6 +143,13 @@ struct NCMoreView: View {
             }
         }
         .listStyle(.insetGrouped)
+        // Run 25.10. (Fix "mehr Abstand in Innen hoch"): Die Liste rechnete
+        // ihren automatischen Top-Inset gegen die Container-Safe-Area - im
+        // Regular-Height (Innen hoch, safeTop ~82) entstand dadurch ein
+        // zweiter Abstand unter dem Logo. Top-Margin auf 0; der Abstand
+        // kommt ausschliesslich aus dem Band (12 pt). Unten bleibt die
+        // Tab-Bar-Safe-Area unberuehrt.
+        .contentMargins(.top, 0, for: .scrollContent)
         .tint(Color.Souvera.brandPrimaryDeep)
     }
 
