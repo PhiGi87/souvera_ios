@@ -1113,6 +1113,8 @@
 		AA22C3D4E5F60718293A0538 /* SouveraLayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */; };
 		AA22C3D4E5F60718293A0551 /* SouveraHeaderGeometry.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0550 /* SouveraHeaderGeometry.swift */; };
 		AA22C3D4E5F60718293A0553 /* SouveraHeaderGeometryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0552 /* SouveraHeaderGeometryTests.swift */; };
+		AA22C3D4E5F60718293A0561 /* SouveraHeaderSpecRefresh.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0560 /* SouveraHeaderSpecRefresh.swift */; };
+		AA22C3D4E5F60718293A0563 /* SouveraFoldSupportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0562 /* SouveraFoldSupportTests.swift */; };
 		AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */; };
 		AA22C3D4E5F60718293A053D /* SouveraLayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */; };
 		AA22C3D4E5F60718293A053C /* SouveraLayoutModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */; };
@@ -2190,6 +2192,8 @@
 		AA22C3D4E5F60718293A0532 /* SouveraHinge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHinge.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraLayoutMode.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0550 /* SouveraHeaderGeometry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHeaderGeometry.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0560 /* SouveraHeaderSpecRefresh.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHeaderSpecRefresh.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0562 /* SouveraFoldSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraFoldSupportTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0552 /* SouveraHeaderGeometryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraHeaderGeometryTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraFoldSupport.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraLayoutModeTests.swift; sourceTree = "<group>"; };
@@ -2543,6 +2547,7 @@
 				AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */,
 				AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */,
 				AA22C3D4E5F60718293A0552 /* SouveraHeaderGeometryTests.swift */,
+				AA22C3D4E5F60718293A0562 /* SouveraFoldSupportTests.swift */,
 				AA22C3D4E5F60718293A0510 /* SouveraDeepLinkDeliveryTests.swift */,
 				AA22C3D4E5F60718293A0512 /* SouveraMailMutationTests.swift */,
 				AA52EB452D42AC5A0089C348 /* Placeholder.swift */,
@@ -3441,6 +3446,7 @@
 				AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */,
 				AA22C3D4E5F60718293A0550 /* SouveraHeaderGeometry.swift */,
 				AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */,
+				AA22C3D4E5F60718293A0560 /* SouveraHeaderSpecRefresh.swift */,
 				AA22C3D4E5F60718293A0316 /* LinkRingingWatcher.swift */,
 				AA22C3D4E5F60718293A031A /* SouveraMailFromAddresses.swift */,
 				AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */,
@@ -4874,6 +4880,7 @@
 				AA22C3D4E5F60718293A0535 /* SouveraFormFactorTests.swift in Sources */,
 				AA22C3D4E5F60718293A053C /* SouveraLayoutModeTests.swift in Sources */,
 				AA22C3D4E5F60718293A0553 /* SouveraHeaderGeometryTests.swift in Sources */,
+				AA22C3D4E5F60718293A0563 /* SouveraFoldSupportTests.swift in Sources */,
 				AA22C3D4E5F60718293A0511 /* SouveraDeepLinkDeliveryTests.swift in Sources */,
 				AA22C3D4E5F60718293A0513 /* SouveraMailMutationTests.swift in Sources */,
 				F372087D2BAB4C0F006B5430 /* TestConstants.swift in Sources */,
@@ -5237,6 +5244,7 @@
 				AA22C3D4E5F60718293A0538 /* SouveraLayoutMode.swift in Sources */,
 				AA22C3D4E5F60718293A0551 /* SouveraHeaderGeometry.swift in Sources */,
 				AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */,
+				AA22C3D4E5F60718293A0561 /* SouveraHeaderSpecRefresh.swift in Sources */,
 				AA22C3D4E5F60718293A0317 /* LinkRingingWatcher.swift in Sources */,
 				AA22C3D4E5F60718293A031B /* SouveraMailFromAddresses.swift in Sources */,
 				AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */,
