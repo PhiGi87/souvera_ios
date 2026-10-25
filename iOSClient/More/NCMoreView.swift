@@ -42,8 +42,10 @@ struct NCMoreView: View {
 
     var body: some View {
         // Run 25.10. (Header-Standard): Titel und Aktionen liefert die
-        // System-Bar des NCMoreNavigationController.
-        GeometryReader { _ in
+        // System-Bar des NCMoreNavigationController. Das Marken-Wordmark
+        // sitzt als eigene Zeile zwischen Bar und Account-Feld.
+        VStack(spacing: 0) {
+            brandBand
             listContent
         }
         .sheet(isPresented: $showAccountSettings) {
@@ -68,6 +70,23 @@ struct NCMoreView: View {
         .onChange(of: model.autoUploadStart) {
             updateAutoUploadCounter()
         }
+    }
+
+    /// Run 25.10.: Marken-Wordmark zentriert unter der System-Bar.
+    /// Bestehendes Asset 1:1 (transparent), fix (scrollt nicht mit) und
+    /// mit 12 pt Abstand zur Bar sowie 12 pt zum Account-Feld.
+    private var brandBand: some View {
+        HStack {
+            Spacer()
+            Image("souveraLogo")
+                .resizable()
+                .scaledToFit()
+                .frame(height: 24)
+                .accessibilityHidden(true)
+            Spacer()
+        }
+        .padding(.top, SouveraTokens.Spacing.sm)
+        .padding(.bottom, SouveraTokens.Spacing.sm)
     }
 
     private var listContent: some View {
