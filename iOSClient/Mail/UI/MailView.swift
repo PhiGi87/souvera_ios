@@ -47,17 +47,26 @@ struct MailView: View {
             GeometryReader { geo in
                 content
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .onAppear { updateLandscapeLayout(geo.size) }
+                    .onAppear {
+                        updateLandscapeLayout(geo.size)
+                        refreshHeaderSpec()
+                    }
                     .onChange(of: geo.size) { _, newSize in
                         updateLandscapeLayout(newSize)
+                        refreshHeaderSpec()
                     }
             }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
-                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
-                if !layout.usesBridgeHeader && !layout.isPushed {
+                // Run 25.10.: SwiftUI-Header ist der EINZIGE Header in allen
+                // Lagen - Hoehe/Position ausschliesslich aus der zentralen
+                // Regel (SouveraHeaderGeometry). Auf dem Duo sitzt das Band
+                // auf der Status-Symbol-Zeile (Padding gleicht die Safe-Area
+                // aus), Inhalt beginnt Band-Unterkante + 12.
+                if !layout.isPushed {
                     moduleHeader
+                        .padding(.top, headerSpec.bandTop - headerSafeTop)
+                        .padding(.bottom, headerSpec.contentGap)
                 }
             }
             .onChange(of: searchQuery) { _, newValue in
@@ -327,6 +336,17 @@ struct MailView: View {
     /// Geometrie-basiert (siehe GeometryReader im body), live bei Rotation.
     @State private var landscapeLayout = false
     @State private var layoutWidth: CGFloat = 0
+    /// Run 25.10.: Header-Geometrie aus der zentralen Regel (einzige Quelle
+    /// fuer Hoehe/Position - siehe SouveraHeaderGeometry).
+    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
+    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
+
+    private func refreshHeaderSpec() {
+        let spec = SouveraHeaderGeometry.currentSpec()
+        if spec != headerSpec { headerSpec = spec }
+        let top = SouveraHeaderGeometry.currentSafeAreaTop
+        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
+    }
 
     /// Fokus-Leser: nicht auf dem iPhone (dort bleibt das Detail als
     /// Overlay über der Listenspalte), sonst bei aktivem Account-Setting.
@@ -377,8 +397,8 @@ struct MailView: View {
         return SouveraModuleHeader(
             title: headerTitle,
             titleAfterLeading: !headerTitle.isEmpty,
-            extraTop: layout.headerExtraTop,
-            extraTrailing: layout.headerExtraTrailing,
+            extraTrailing: headerSpec.trailingReserve,
+            heightOverride: headerSpec.height,
             leading: {
                 if isDetail {
                     SouveraHeaderButton(icon: "chevron.backward") {

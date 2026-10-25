@@ -18,6 +18,16 @@ struct LinkView: View {
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
+    /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
+    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
+    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
+
+    private func refreshHeaderSpec() {
+        let spec = SouveraHeaderGeometry.currentSpec()
+        if spec != headerSpec { headerSpec = spec }
+        let top = SouveraHeaderGeometry.currentSafeAreaTop
+        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
+    }
     /// Run 16.09.: UIKit-Header-Bridge (Landscape/iPad, 1:1 Files/Mehr).
     var headerBridge: SouveraHeaderBridge? = nil
     @State private var callContext: CallContext?
@@ -77,9 +87,13 @@ struct LinkView: View {
                 content
                     .souveraOfflineBanner()
                     .frame(width: geo.size.width, height: geo.size.height)
-                    .onAppear { updateLandscapeLayout(geo.size) }
+                    .onAppear {
+                        updateLandscapeLayout(geo.size)
+                        refreshHeaderSpec()
+                    }
                     .onChange(of: geo.size) { _, newSize in
                         updateLandscapeLayout(newSize)
+                        refreshHeaderSpec()
                     }
             }
             // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
@@ -88,10 +102,12 @@ struct LinkView: View {
             // mit dunklen Icons); System-Navigationbar komplett versteckt.
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {
-                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
-                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
-                if !layout.usesBridgeHeader && !layout.isPushed {
+                // Run 25.10.: Einziger Header in allen Lagen - Hoehe/Position
+                // ausschliesslich aus SouveraHeaderGeometry.
+                if !layout.isPushed {
                     moduleHeader
+                        .padding(.top, headerSpec.bandTop - headerSafeTop)
+                        .padding(.bottom, headerSpec.contentGap)
                 }
             }
         }
@@ -470,8 +486,8 @@ struct LinkView: View {
             return AnyView(
                 SouveraModuleHeader(
                     title: navigationTitle,
-                    extraTop: layout.headerExtraTop,
-                    extraTrailing: layout.headerExtraTrailing,
+                    extraTrailing: headerSpec.trailingReserve,
+                    heightOverride: headerSpec.height,
                     leading: {
                         if !landscapeLayout {
                             SouveraHeaderButton(icon: "chevron.backward") {
@@ -537,8 +553,8 @@ struct LinkView: View {
             return AnyView(
                 SouveraModuleHeader(
                     title: NSLocalizedString("_link_", comment: ""),
-                    extraTop: layout.headerExtraTop,
-                    extraTrailing: layout.headerExtraTrailing,
+                    extraTrailing: headerSpec.trailingReserve,
+                    heightOverride: headerSpec.height,
                     leading: {
                         SouveraHeaderButton(icon: "magnifyingglass") {
                             searchActive = true

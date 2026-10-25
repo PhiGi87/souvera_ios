@@ -19,29 +19,19 @@ struct NCMoreView: View {
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
     @ObservedObject private var badgeStore = SouveraBadgeStore.shared
-    /// Run 24.10.: Gemessene Systembar-Hoehe - der Mehr-Header ist damit
-    /// exakt so hoch wie Mail/Kalender/Link im Innendisplay quer.
-    @ObservedObject private var headerMetrics: SouveraBridgeBarMetrics
-    /// Run 24.10.: Breite-Klasse des Fensters - entscheidet ueber den
-    /// deterministischen Header (Innendisplay) statt Safe-Area-Placement.
-    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     private let loadItemsOnAppear: Bool
 
-    init(account: String,
-         controller: NCMainTabBarController?,
-         headerMetrics: SouveraBridgeBarMetrics = SouveraBridgeBarMetrics()) {
+    init(account: String, controller: NCMainTabBarController?) {
         _model = StateObject(
             wrappedValue: NCMoreModel(
                 controller: controller
             )
         )
-        _headerMetrics = ObservedObject(wrappedValue: headerMetrics)
         loadItemsOnAppear = true
     }
 
     init(model: NCMoreModel) {
         _model = StateObject(wrappedValue: model)
-        _headerMetrics = ObservedObject(wrappedValue: SouveraBridgeBarMetrics())
         loadItemsOnAppear = false
     }
 
@@ -51,42 +41,18 @@ struct NCMoreView: View {
     }
 
     var body: some View {
-        Group {
-            if usesDeterministicHeader {
-                // Run 24.10.: Innendisplay (Duo). Der Header wird NICHT per
-                // safeAreaInset platziert - die Safe-Area liefert dort 82 pt
-                // (hoch) bzw. 58 pt (quer). Dadurch wuchs der blaue Block auf
-                // 140 pt und die Buttons hingen unter der Statuskapsel.
-                // Stattdessen beginnt der Header fest bei y=0 (identisch zu
-                // den UIKit-Bars von Mail/Kalender) mit fester Hoehe.
-                GeometryReader { geo in
-                    let isLandscape = geo.size.width > geo.size.height
-                    let headerHeight = isLandscape
-                        ? SouveraLayoutMode.bridgeBarVisibleHeightLandscape
-                        : SouveraLayoutMode.bridgeBarLayoutHeight
-                    ZStack(alignment: .top) {
-                        listContent
-                            .safeAreaInset(edge: .top, spacing: 0) {
-                                Color.clear
-                                    .frame(height: headerHeight + 12)
-                            }
-                        moreHeader(
-                            height: headerHeight,
-                            trailingReserve: isLandscape ? 0 : SouveraLayoutMode.statusReservedWidth
-                        )
-                        .frame(maxWidth: .infinity)
-                    }
-                    .ignoresSafeArea(edges: .top)
+        GeometryReader { geo in
+            listContent
+                // Run 25.10.: Einziger Header in allen Lagen - Hoehe/Position
+                // ausschliesslich aus SouveraHeaderGeometry (gieich zu Mail/
+                // Kalender/Link/Dateien).
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    moreHeader
+                        .padding(.top, headerSpec.bandTop - headerSafeTop)
+                        .padding(.bottom, headerSpec.contentGap)
                 }
-            } else {
-                listContent
-                    .safeAreaInset(edge: .top, spacing: 12) {
-                        moreHeader(
-                            height: headerMetrics.barHeight,
-                            trailingReserve: headerMetrics.statusReservedWidth
-                        )
-                    }
-            }
+                .onAppear { refreshHeaderSpec() }
+                .onChange(of: geo.size) { _, _ in refreshHeaderSpec() }
         }
         .sheet(isPresented: $showAccountSettings) {
             NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
@@ -112,10 +78,15 @@ struct NCMoreView: View {
         }
     }
 
-    /// Run 24.10.: Nur auf dem Duo-Innendisplay (regular, kein iPad) wird
-    /// der Header deterministisch platziert.
-    private var usesDeterministicHeader: Bool {
-        horizontalSizeClass == .regular && UIDevice.current.userInterfaceIdiom != .pad
+    /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
+    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
+    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
+
+    private func refreshHeaderSpec() {
+        let spec = SouveraHeaderGeometry.currentSpec()
+        if spec != headerSpec { headerSpec = spec }
+        let top = SouveraHeaderGeometry.currentSafeAreaTop
+        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
     }
 
     private var listContent: some View {
@@ -185,15 +156,11 @@ struct NCMoreView: View {
     /// `SouveraModuleHeader` wie bei Mail/Kalender/Link, damit Hoehe,
     /// Verlauf und Padding exakt identisch sind. Die rechten Aktionen
     /// liegen im System-Seitenband.
-    private func moreHeader(height: CGFloat?, trailingReserve: CGFloat) -> some View {
+    private var moreHeader: some View {
         SouveraModuleHeader(
-            // Run 24.10.: Innendisplay hochkant reserviert die rechte Zone
-            // der iOS-Statuskapsel (wie die UIKit-Bars von Mail/Kalender) -
-            // die Pills enden dann links neben der Statuskapsel.
-            extraTrailing: trailingReserve,
-            // Run 24.10.: Feste Hoehe der UIKit-Bars (58 hoch / 82 quer);
-            // kompakt weiterhin die gemessene Hoehe.
-            heightOverride: height,
+            // Run 25.10.: Zentrale Regel - Hoehe und Status-Reserve.
+            extraTrailing: headerSpec.trailingReserve,
+            heightOverride: headerSpec.height,
             leading: {
                 Image("souveraLogo")
                     .resizable()

@@ -246,7 +246,42 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        applyHeaderGeometry()
         layoutHeaderFiller()
+    }
+
+    private var lastHeaderGeometryLog: String?
+
+    /// Run 25.10.: Erzwingt die zentrale Header-Regel (SouveraHeaderGeometry)
+    /// fuer ALLE UIKit-Bars: Dateien, Medien, Favoriten, Aktivitaeten und
+    /// alle Mehr-Unterseiten (z. B. Einstellungen). Die Systemhoehe wird
+    /// dabei bewusst ueberschrieben - sie liefert auf dem Duo je nach
+    /// Zustand 0/24/46/58/82/140 pt.
+    func applyHeaderGeometry() {
+        guard !isNavigationBarHidden, !navigationBar.isHidden else { return }
+        let window = view.window
+        let bounds = window?.bounds.size ?? view.bounds.size
+        let traits = window?.traitCollection ?? traitCollection
+        let spec = SouveraHeaderGeometry.spec(
+            windowSize: bounds,
+            horizontalSizeClass: traits.horizontalSizeClass,
+            idiom: traits.userInterfaceIdiom,
+            safeAreaTop: window?.safeAreaInsets.top ?? 0
+        )
+        var frame = navigationBar.frame
+        guard abs(frame.minY - spec.bandTop) > 0.5
+            || abs(frame.height - spec.height) > 0.5 else { return }
+        frame.origin.y = spec.bandTop
+        frame.size.height = spec.height
+        navigationBar.frame = frame
+        // Inhalt (Titel/Buttons) im neuen Band neu zentrieren.
+        navigationBar.layoutIfNeeded()
+        let stamp = "\(Int(spec.bandTop))x\(Int(spec.height))"
+        if stamp != lastHeaderGeometryLog {
+            lastHeaderGeometryLog = stamp
+            SouveraLog.write("SidebarActions",
+                             "[SidebarActions] navBarSpec y=\(Int(spec.bandTop)) h=\(Int(spec.height))")
+        }
     }
 
     /// Run 24.10.: Fuellt den Streifen oberhalb der Navigationsbar, falls

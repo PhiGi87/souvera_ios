@@ -456,6 +456,9 @@ struct NCSettingsView: View {
         }
         .navigationBarTitle(NSLocalizedString("_settings_", comment: ""))
         .defaultViewModifier(model)
+        // Run 25.10.: Header bleibt beim Scrollen sichtbar (iOS 26 blendet
+        // die System-Toolbar sonst nahezu aus) - siehe SouveraHeaderGeometry.
+        .toolbarBackground(.visible, for: .navigationBar)
         .alert(NSLocalizedString("_settings_language_", comment: ""), isPresented: $showLanguageRestart) {
             Button(NSLocalizedString("_ok_", comment: ""), role: .cancel) {}
         } message: {

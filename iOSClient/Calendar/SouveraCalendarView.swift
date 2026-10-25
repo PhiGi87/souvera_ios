@@ -88,6 +88,17 @@ struct SouveraCalendarView: View {
         }
     }
 
+    /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
+    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
+    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
+
+    private func refreshHeaderSpec() {
+        let spec = SouveraHeaderGeometry.currentSpec()
+        if spec != headerSpec { headerSpec = spec }
+        let top = SouveraHeaderGeometry.currentSafeAreaTop
+        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
+    }
+
     var body: some View {
         NavigationStack {
             GeometryReader { geometry in
@@ -104,14 +115,18 @@ struct SouveraCalendarView: View {
                     content(isWide: isWide, width: geometry.size.width, height: geometry.size.height, bottomInset: bottomInset)
                 }
                 .padding(.top, 12)
+                .onAppear { refreshHeaderSpec() }
+                .onChange(of: geometry.size) { _, _ in refreshHeaderSpec() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()
             .safeAreaInset(edge: .top, spacing: 0) {
-                // Run 16.09.: Glas-Header nur auf dem iPhone; das iPad
-                // nutzt die blaue UIKit-Bar (1:1 Dateien/Mehr).
-                if !layout.usesBridgeHeader && !layout.isPushed {
+                // Run 25.10.: Einziger Header in allen Lagen - Hoehe/Position
+                // ausschliesslich aus SouveraHeaderGeometry.
+                if !layout.isPushed {
                     calendarHeader
+                        .padding(.top, headerSpec.bandTop - headerSafeTop)
+                        .padding(.bottom, headerSpec.contentGap)
                 }
             }
         }
@@ -2327,8 +2342,8 @@ extension SouveraCalendarView {
     /// rendert stattdessen die blaue UIKit-Bar via populateHeaderBridge().
     fileprivate var calendarHeader: some View {
         SouveraModuleHeader(
-            extraTop: layout.headerExtraTop,
-            extraTrailing: layout.headerExtraTrailing,
+            extraTrailing: headerSpec.trailingReserve,
+            heightOverride: headerSpec.height,
             leading: { calendarTodayPill(glass: true) },
             trailing: { calendarViewModePill(glass: true) }
         )

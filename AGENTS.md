@@ -67,6 +67,35 @@ The following details are important when working on the iOS client.
 
 - When writing code in Swift, respect strict concurrency rules and Swift 6 compatibility.
 
+### Header Rule (binding, permanent)
+
+Header height and header-button position MUST be identical everywhere in the app
+(Mail, Calendar, Link, Files, More and every More sub-page, including Settings)
+for the same device class and orientation. The only source of truth is
+`SouveraHeaderGeometry` (`iOSClient/Design System/SouveraHeaderGeometry.swift`).
+
+| Device class | Portrait | Landscape | Band top | Status reserve |
+|---|---|---|---|---|
+| iPhone compact (incl. landscape) | 58 | 58 | status bar / 0 | 0 |
+| Duo outer display (466x678) | 58 | 58 | 18 / 0 | 206 |
+| Duo inner display (669x951) | 58 | 82 | 18 / 0 | 206 (portrait only) |
+| iPad regular | 58 | 82 | status bar | 0 |
+| iPad split/slide over (compact) | 58 | 58 | status bar / 0 | 0 |
+| iOS < 26 | 46 | 70 | as above | as above |
+
+Rules:
+
+- Never derive header height or position from system measurements (safe area,
+  `navigationBar.bounds`, status bar frame) — only from `SouveraHeaderGeometry`.
+- Buttons are vertically centered in the band; 12 pt leading inset, 12 pt
+  trailing inset plus the status reserve. The header background always extends
+  to y = 0. Content starts at band bottom + 12 pt.
+- SwiftUI module headers (Mail, Calendar, Link, More) use the spec through
+  `SouveraHeaderGeometry.currentSpec()`.
+- UIKit navigation bars (Files, Media, Favorites, Activities, More sub-pages)
+  are forced to the same spec in `NCMainNavigationController.viewDidLayoutSubviews()`.
+- Do not add a second header implementation; extend `SouveraHeaderGeometry`.
+
 ### Tests
 
 - When implementing new test suites, prefer Swift Testing over XCTest for implementation.

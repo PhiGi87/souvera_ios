@@ -13,21 +13,6 @@ struct NavigationCollectionViewCommon {
     var viewController: NCCollectionViewCommon
 }
 
-/// Run 24.10.: Gemessene Hoehe der sichtbaren UIKit-Bridge-Bar
-/// (Mail/Kalender/Link im Innendisplay quer). Der Mehr-Header uebernimmt
-/// sie, damit alle Header gleich hoch sind. Updates erfolgen vom
-/// Main-Thread (Tab-Controller); bewusst nicht @MainActor, damit die
-/// SwiftUI-Inits sie ohne Isolation anlegen koennen (wie SouveraHeaderBridge).
-final class SouveraBridgeBarMetrics: ObservableObject {
-    @Published var barHeight: CGFloat?
-    /// Run 24.10.: Reservierte Zone der iOS-Statuskapsel rechts oben
-    /// (Innendisplay hochkant). Die UIKit-Bars halten sie automatisch
-    /// frei (Trailing-Buttons enden links daneben, Pixel-Messung
-    /// Kalender-Bar: Statuszone ab ~463 pt bei 669 pt Breite). Der
-    /// SwiftUI-More-Header reserviert sie ueber diesen Wert.
-    @Published var statusReservedWidth: CGFloat = 0
-}
-
 class NCMainTabBarController: UITabBarController {
     var sceneIdentifier: String = UUID().uuidString
     var account: String = "" {
@@ -464,8 +449,6 @@ class NCMainTabBarController: UITabBarController {
     /// reagieren dann nicht).
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        // Run 24.10.: Gemessene Bridge-Bar-Hoehe fuer den Mehr-Header.
-        updateBridgeBarHeight()
         if let bannerView = callBannerHost?.view {
             view.bringSubviewToFront(bannerView)
         }
@@ -478,48 +461,6 @@ class NCMainTabBarController: UITabBarController {
     private weak var moreTabBarItem: UITabBarItem?
     /// Run 16.09.: Coordinator der Bridge-Bars (Mail/Kalender/Link).
     private var headerCoordinators: [SouveraBarCoordinator] = []
-
-    // MARK: - System sidebar actions
-
-    let bridgeBarMetrics = SouveraBridgeBarMetrics()
-
-    private func updateBridgeBarHeight() {
-        let hosted = (viewControllers ?? []).compactMap { $0 as? SouveraHostedNavigationController }
-        let visible = hosted.first { $0 === selectedViewController && $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
-            ?? hosted.first { $0.layoutMode.usesBridgeHeader && !$0.isNavigationBarHidden }
-        // Run 24.10.: SICHTBARE Hoehe messen - die Bar-Hintergrund-View
-        // zeichnet im Innendisplay QUER ueber ihre Bounds hinaus
-        // (Layout 58 pt, sichtbar ~82 pt; Pixel-Messung IMG_1320). Im
-        // HOCHFORMAT ist die Messung unbrauchbar (24/82/140/136 im Log,
-        // Build 202610241928 lieferte dauerhaft 140) - bei regulaer
-        // Breite (Innendisplay) gilt deshalb die feste Layout-Hoehe
-        // (58 pt), identisch zu Mail/Kalender/Link.
-        let isLandscape = view.bounds.width > view.bounds.height
-        let traits = view.window?.windowScene?.traitCollection ?? traitCollection
-        let isRegularWidth = traits.horizontalSizeClass == .regular
-        let height = visible.flatMap { nav in
-            let bar = nav.navigationBar
-            if isLandscape {
-                var heights = [bar.bounds.height]
-                for sub in bar.subviews where sub.frame.height > 1 {
-                    heights.append(sub.frame.height)
-                }
-                let maxH = heights.max() ?? 0
-                return maxH > 1 ? maxH : nil
-            }
-            if isRegularWidth { return SouveraLayoutMode.bridgeBarLayoutHeight }
-            return bar.bounds.height > 1 ? bar.bounds.height : nil
-        }
-        if bridgeBarMetrics.barHeight != height {
-            bridgeBarMetrics.barHeight = height
-            SouveraLog.write("SidebarActions", "[SidebarActions] bridgeBarHeight=\(height.map { Int($0) } ?? -1)")
-        }
-        let reserved = (!isLandscape && isRegularWidth) ? SouveraLayoutMode.statusReservedWidth : 0
-        if bridgeBarMetrics.statusReservedWidth != reserved {
-            bridgeBarMetrics.statusReservedWidth = reserved
-            SouveraLog.write("SidebarActions", "[SidebarActions] statusReservedWidth=\(Int(reserved))")
-        }
-    }
 
     /// Mail-Badge als System-Badge - identisch zum Link-Badge (einheitlich,
     /// deckend, korrekt in Portrait UND Landscape).
@@ -672,11 +613,7 @@ class NCMainTabBarController: UITabBarController {
              headerBridge: SouveraHeaderBridge) {
             self.layoutMode = layoutMode
             self.headerBridge = headerBridge
-            // Run 24.10.: Eigene Bar-Klasse mit fixierter Layout-Hoehe -
-            // kollabiert die Systembar sonst auf ~24 pt (Einzel-Mail,
-            // Innendisplay quer), siehe SouveraBridgeNavigationBar.
-            super.init(navigationBarClass: SouveraBridgeNavigationBar.self, toolbarClass: nil)
-            viewControllers = [rootViewController]
+            super.init(rootViewController: rootViewController)
         }
 
         @available(*, unavailable)
@@ -704,18 +641,17 @@ class NCMainTabBarController: UITabBarController {
             let traits = resolvedTraitCollection()
             layoutMode.update(traitCollection: traits)
             layoutMode.updateHeaderFit(window: view.window)
-            let bridge = layoutMode.usesBridgeHeader
-            let shouldHide = !bridge
-            if super.isNavigationBarHidden != shouldHide {
-                super.setNavigationBarHidden(shouldHide, animated: false)
+            // Run 25.10.: Der SwiftUI-Modul-Header ist der EINZIGE Header
+            // der gehosteten Tabs (Mail/Kalender/Link) - in allen Lagen.
+            // Die UIKit-Bar bleibt dauerhaft versteckt; ihre Hoehe/Position
+            // war auf dem Duo nicht stabil (24/46/58/82/140 pt).
+            if !super.isNavigationBarHidden {
+                super.setNavigationBarHidden(true, animated: false)
             }
-            if bridge {
-                SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
-            }
-            let signature = "\(bridge)|\(layoutMode.isRegularWidth)|\(Int(layoutMode.headerExtraTop))|\(Int(layoutMode.headerExtraTrailing))|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
+            let signature = "\(layoutMode.isRegularWidth)|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
             if signature != lastLayoutLog {
                 lastLayoutLog = signature
-                SouveraLog.write("Layout", "bridge=\(bridge) regular=\(layoutMode.isRegularWidth) extraTop=\(Int(layoutMode.headerExtraTop)) extraTrailing=\(Int(layoutMode.headerExtraTrailing)) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))")
+                SouveraLog.write("Layout", "regular=\(layoutMode.isRegularWidth) window=\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))")
             }
         }
 
@@ -726,16 +662,14 @@ class NCMainTabBarController: UITabBarController {
         }
 
         override func setNavigationBarHidden(_ hidden: Bool, animated: Bool) {
-            // Nur im Bridge-Modus bleibt die Bar sichtbar; kompakt gewinnt
-            // der SwiftUI-Glas-Header. So kann nie ein doppelter Header
-            // entstehen, egal wer zuerst aufruft.
-            super.setNavigationBarHidden(layoutMode.usesBridgeHeader ? false : hidden,
-                                         animated: animated)
+            // Run 25.10.: Immer versteckt - der Header kommt ausschliesslich
+            // aus dem SwiftUI-Modul (SouveraHeaderGeometry).
+            super.setNavigationBarHidden(true, animated: animated)
         }
 
         override var isNavigationBarHidden: Bool {
-            get { layoutMode.usesBridgeHeader ? false : super.isNavigationBarHidden }
-            set { super.isNavigationBarHidden = newValue }
+            get { true }
+            set { super.isNavigationBarHidden = true }
         }
 
         /// Run 19.09. (Feedback iPad-Header): Die blaue Appearance auf
@@ -750,8 +684,7 @@ class NCMainTabBarController: UITabBarController {
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
             applyLayoutMode()
-            guard layoutMode.usesBridgeHeader else { return }
-            SouveraAppearance.applyBlueNavigationBar(to: navigationBar)
+            // Kein UIKit-Header mehr (siehe applyLayoutMode).
         }
     }
 
@@ -783,7 +716,7 @@ class NCMainTabBarController: UITabBarController {
     }
 
     private func makeMoreNavigationController() -> UIViewController {
-        let moreView = NCMoreView(account: account, controller: self, headerMetrics: bridgeBarMetrics)
+        let moreView = NCMoreView(account: account, controller: self)
         let hostingController = UIHostingController(rootView: moreView)
 
         hostingController.navigationItem.title = NSLocalizedString("_more_", comment: "")
