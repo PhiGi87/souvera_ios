@@ -607,6 +607,9 @@ class NCMainTabBarController: UITabBarController {
         /// Pille, wenn der Tab auf dem Außendisplay hochkant laeuft.
         let headerBridge: SouveraHeaderBridge
         private var lastLayoutLog: String?
+        /// Run 25.10.: Fuellt den Streifen oberhalb der System-Bar
+        /// (Duo-Aussendisplay hochkant) mit der Verlaufsfarbe.
+        private let headerBackdrop = SouveraHeaderBackdropView(frame: .zero)
 
         init(rootViewController: UIViewController,
              layoutMode: SouveraLayoutMode,
@@ -623,6 +626,7 @@ class NCMainTabBarController: UITabBarController {
 
         override func viewDidLoad() {
             super.viewDidLoad()
+            view.insertSubview(headerBackdrop, at: 0)
             if #available(iOS 17.0, *) {
                 registerForTraitChanges([UITraitHorizontalSizeClass.self,
                                          UITraitUserInterfaceIdiom.self]) { (controller: Self, _) in
@@ -665,6 +669,8 @@ class NCMainTabBarController: UITabBarController {
 
         override func viewDidLayoutSubviews() {
             super.viewDidLayoutSubviews()
+            headerBackdrop.update(barMinY: navigationBar.frame.minY,
+                                  width: view.bounds.width)
             applyLayoutMode()
             // Kein UIKit-Header mehr (siehe applyLayoutMode).
         }

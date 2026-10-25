@@ -124,6 +124,11 @@ struct SouveraCalendarView: View {
         .onChange(of: viewMode) { _, _ in
             populateHeaderBridge()
         }
+        // Run 25.10.: Der Bar-Titel zeigt Monat + Jahr - beim Blaettern
+        // mitziehen.
+        .onChange(of: viewModel.visibleMonth) { _, _ in
+            populateHeaderBridge()
+        }
         .onChange(of: searchActive) { _, _ in
             populateHeaderBridge()
         }
@@ -2339,7 +2344,10 @@ extension SouveraCalendarView {
     /// der System-NavigationBar (keine SwiftUI-Pills mehr).
     fileprivate func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
-        bridge.title = ""
+        // Run 25.10. (Fix: Header verschwand in Innen-quer): Die Bar braucht
+        // immer einen Titel, sonst kollabiert sie, wenn das System die Items
+        // vertikal in die Seitenleiste legt.
+        bridge.title = viewModel.visibleMonth.formatted(.dateTime.month(.wide).year())
         bridge.leadingMenus = []
         bridge.trailingMenus = []
         bridge.leadingItems = [

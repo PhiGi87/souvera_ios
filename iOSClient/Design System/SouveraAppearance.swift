@@ -374,22 +374,28 @@ final class SouveraBarCoordinator {
         // nicht zur Bar). Gruen (Telefon) / rot (destruktiv) bleiben.
         let itemTint = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
         for item in items where !item.icon.isEmpty || !(item.text ?? "").isEmpty {
+            // Run 25.10. (Fix "…"-Menue ohne Namen): Apple verlangt Icon UND
+            // Titel an jedem Item - die Bar zeigt bevorzugt das Icon, der
+            // Overflow Icon + Titel. Ohne Titel blieben dort nur Icons.
+            let displayTitle = (item.text?.isEmpty == false ? item.text! : item.accessibilityLabel)
+            let img = item.icon.isEmpty ? nil : UIImage(systemName: item.icon)
+            let action = UIAction(title: displayTitle, image: img) { _ in item.handler() }
             let bar: UIBarButtonItem
             if let text = item.text, !text.isEmpty {
-                // Text-Items behalten ihr Icon (Apple: Icon UND Titel).
-                let img = item.icon.isEmpty ? nil : UIImage(systemName: item.icon)
-                bar = UIBarButtonItem(
-                    title: text,
-                    image: img,
-                    primaryAction: UIAction(title: text, image: img) { _ in item.handler() }
-                )
+                // Explizite Text-Items behalten Text + Icon in der Bar.
+                bar = UIBarButtonItem(title: text, image: img, primaryAction: action)
             } else {
-                let img = UIImage(systemName: item.icon)
-                bar = UIBarButtonItem(image: img, primaryAction: UIAction(image: img) { _ in item.handler() })
+                bar = UIBarButtonItem(image: img, primaryAction: action)
             }
             bar.tintColor = item.isGreen ? .systemGreen : (item.isDestructive ? .systemRed : itemTint)
             bar.accessibilityLabel = item.accessibilityLabel
-            bars.append(BarEntry(bar: bar, representative: nil, isPinned: item.isPinned))
+            // Run 25.10.: Das Repraesentativ-Item traegt IMMER den Namen -
+            // im Overflow (kollabierte Gruppe) erscheint damit Text statt
+            // eines nackten Icons, waehrend die Bar selbst icon-only bleibt.
+            let representative = displayTitle.isEmpty
+                ? nil
+                : UIBarButtonItem(title: displayTitle, image: img, primaryAction: nil)
+            bars.append(BarEntry(bar: bar, representative: representative, isPinned: item.isPinned))
         }
         for menu in menus where !menu.icon.isEmpty || !(menu.title ?? "").isEmpty {
             let displayTitle = menu.overflowTitle?.isEmpty == false

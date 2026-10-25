@@ -14,6 +14,11 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     let appDelegate = (UIApplication.shared.delegate as? AppDelegate)!
     let menuToolbar = UIToolbar()
 
+    /// Run 25.10.: Hintergrund des Streifens OBERHALB der System-Bar
+    /// (Duo-Aussendisplay hochkant: Bar auf y = 24, darueber Fenster-
+    /// hintergrund -> weisser Streifen). Rein dekorativ, keine Geometrie.
+    private let headerBackdrop = SouveraHeaderBackdropView(frame: .zero)
+
     /// Run 24.10. (Duo-Außendisplay): Aktionen fuer die rechte Pille. Wird
     var controller: NCMainTabBarController? {
         self.tabBarController as? NCMainTabBarController
@@ -65,6 +70,12 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         return item
     }()
 
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        headerBackdrop.update(barMinY: navigationBar.frame.minY,
+                              width: view.bounds.width)
+    }
+
     // MARK: - View Life Cycle
 
     override func viewDidLoad() {
@@ -73,6 +84,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
         setNavigationBarAppearance()
         setNavigationBarHidden(false, animated: false)
+        view.insertSubview(headerBackdrop, at: 0)
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")

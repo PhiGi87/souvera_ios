@@ -459,7 +459,12 @@ struct MailView: View {
             switch viewModel.route {
             case .folders: return NSLocalizedString("_mail_", comment: "")
             case .messages(let mailbox): return mailbox.displayName
-            default: return ""
+            // Run 25.10. (Fix: Detail quer ohne Header): Nie einen leeren
+            // Titel veroeffentlichen - in Innen-quer wandern die Items in
+            // die Seitenleiste, eine leere Bar kollabiert dann zum Streifen.
+            case .detail: return viewModel.currentMailbox?.displayName
+                ?? NSLocalizedString("_mail_", comment: "")
+            default: return NSLocalizedString("_mail_", comment: "")
             }
         }()
         let backItem = SouveraHeaderBridge.Item(
