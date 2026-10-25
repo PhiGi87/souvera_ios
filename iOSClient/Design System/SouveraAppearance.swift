@@ -107,6 +107,21 @@ enum SouveraAppearance {
     }
 }
 
+// MARK: - Header-Standard (Run 25.10.)
+
+extension UINavigationItem {
+    /// Die System-Bar minimiert NICHT beim Scrollen (iOS 27:
+    /// Liquid-Glass-Minimierung, Default `.automatic` - die Bar schrumpfte
+    /// zu einem Streifen und die Items wanderten in die Seitenleiste).
+    /// Wird an allen Haupt-Navigation-Controllern angewendet; gepushte
+    /// Seiten erben es ueber willShow.
+    func souveraApplyHeaderStandard() {
+        if #available(iOS 27.0, *) {
+            navigationBarMinimization.minimizationBehavior = .never
+        }
+    }
+}
+
 /// Liquid-Glass-Effekt mit Fallback fuer iOS 17/18 (Inhalts-Bausteine,
 /// z. B. SouveraInvitationFAB). Header verwenden ihn nicht mehr - dort
 /// rendert die System-Bar.
@@ -261,6 +276,8 @@ final class SouveraBarCoordinator {
         // Run 25.10. (Header-Standard): Es gibt nur noch die System-Bar -
         // die Bridge befuellt sie auf JEDEM Geraet und in jeder Lage.
         guard let nav = navigationController, let item = nav.topViewController?.navigationItem else { return }
+        // Run 25.10.: Bar minimiert nicht beim Scrollen (Header-Standard).
+        item.souveraApplyHeaderStandard()
         // Run 19.09. (Feedback: Header-Rebuild-Sturm): Die Bridge published
         // sieben Einzelwerte -> siebenmal objectWillChange pro Befüllung.
         // Nur bei echter Inhaltsaenderung neu bauen/loggen.
@@ -369,10 +386,18 @@ final class SouveraBarCoordinator {
     private static func bars(_ items: [SouveraHeaderBridge.Item],
                              _ menus: [SouveraHeaderBridge.MenuGroup]) -> [BarEntry] {
         var bars: [BarEntry] = []
-        // Run 19.09. (Feedback iPad-Header): DUNKLE Icons - 1:1 mit dem
-        // iPhone-Glas-Header und dem Mehr-Menue (die hellen Icons passten
-        // nicht zur Bar). Gruen (Telefon) / rot (destruktiv) bleiben.
-        let itemTint = UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+        // Run 19.09. (Feedback iPad-Header): DUNKLE Icons im hellen Modus -
+        // 1:1 mit dem iPhone-Glas-Header und dem Mehr-Menue.
+        // Run 25.10. (Fix: Rail-Icons im Dunkel-Modus unsichtbar): Die
+        // vertikale Rail rendert dunkles Glas und folgt NICHT dem erzwungen
+        // hellen Stil der horizontalen Bar - der Tint ist deshalb adaptiv:
+        // dunkel im Hell-Modus, WEISS im Dunkel-Modus.
+        // Gruen (Telefon) / rot (destruktiv) bleiben.
+        let itemTint = UIColor { trait in
+            trait.userInterfaceStyle == .dark
+                ? .white
+                : UIColor(red: 0.1, green: 0.1, blue: 0.1, alpha: 1)
+        }
         for item in items where !item.icon.isEmpty || !(item.text ?? "").isEmpty {
             // Run 25.10. (Fix "…"-Menue ohne Namen): Das Repraesentativ-Item
             // benennt nur KOLLABIERTE GRUPPEN in der Bar (Apple-Doku). Im

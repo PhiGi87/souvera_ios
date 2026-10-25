@@ -245,6 +245,10 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {
+        // Run 25.10.: Header-Standard auf JEDER Seite (Dateien, Media,
+        // Favoriten, Aktivitaeten, Mehr-Root und alle gepushten
+        // Unterseiten wie Einstellungen): Bar minimiert nicht.
+        viewController.navigationItem.souveraApplyHeaderStandard()
         Task { @MainActor in
             // PLUS BUTTON ONLY IN FILES
             if viewController is NCFiles {

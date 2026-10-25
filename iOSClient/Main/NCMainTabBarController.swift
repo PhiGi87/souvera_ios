@@ -649,6 +649,9 @@ class NCMainTabBarController: UITabBarController {
             // beim Bau gelesene Tab-Trait).
             let traits = resolvedTraitCollection()
             layoutMode.update(traitCollection: traits)
+            // Run 25.10.: Sicherheitsnetz - Bar minimiert nicht (auch nach
+            // Trait-/Groessenaenderungen).
+            topViewController?.navigationItem.souveraApplyHeaderStandard()
             SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
             let signature = "\(layoutMode.isRegularWidth)|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
             if signature != lastLayoutLog {
