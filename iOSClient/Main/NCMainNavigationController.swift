@@ -15,23 +15,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     let menuToolbar = UIToolbar()
 
     /// Run 24.10. (Duo-Außendisplay): Aktionen fuer die rechte Pille. Wird
-    /// Run 24.10.: Füllfläche zwischen Fensteroberkante und Navigationsbar.
-    /// iOS 27.1 reserviert im Seitenband-Modus oben Platz fuer die
-    /// Status-Kapsel - opake UIKit-Bars ruecken dann herunter und der
-    /// weisse View-Hintergrund blitzt auf. Die Fläche fuellt diese Lücke
-    /// mit der oberen Verlaufsfarbe (nahtlos zur Bar).
-    private lazy var headerFillerView: UIView = {
-        let view = UIView()
-        view.backgroundColor = SouveraAppearance.gradientTopColor
-        view.isHidden = true
-        return view
-    }()
-
-    /// Hoehe des Füllers oberhalb der Bar (fuer Diagnose in Subclasses).
-    var headerFillerHeight: CGFloat {
-        headerFillerView.isHidden ? -1 : headerFillerView.frame.height
-    }
-
     var controller: NCMainTabBarController? {
         self.tabBarController as? NCMainTabBarController
     }
@@ -84,29 +67,12 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
     // MARK: - View Life Cycle
 
-    /// Run 25.10.: Liest die Occlusion-Regionen nach Apples Muster in
-    /// updateConstraints (UIKit trackt die Lesung und ruft bei
-    /// Regionswechseln erneut auf) und stoesst die Header-Geometrie an.
-    private lazy var headerRegionObserver: SouveraReservedRegionObserver = {
-        let observer = SouveraReservedRegionObserver(frame: .zero)
-        observer.onOcclusionsChanged = { [weak self] occlusions in
-            guard let self else { return }
-            (self as? SouveraLayoutModeProviding)?.layoutMode
-                .updateHeaderRegions(occlusions.map(\.frame),
-                                     windowWidth: self.view.bounds.width)
-            self.applyHeaderGeometry(occlusions: occlusions)
-        }
-        return observer
-    }()
-
     override func viewDidLoad() {
         super.viewDidLoad()
         self.delegate = self
 
         setNavigationBarAppearance()
         setNavigationBarHidden(false, animated: false)
-        view.insertSubview(headerFillerView, belowSubview: navigationBar)
-        headerRegionObserver.install(in: view)
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")
@@ -258,79 +224,6 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         let hosting = UIHostingController(rootView: rootView)
         hosting.modalPresentationStyle = .pageSheet
         present(hosting, animated: true)
-    }
-
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        applyHeaderGeometry()
-        layoutHeaderFiller()
-    }
-
-    private var lastHeaderGeometryLog: String?
-
-    /// Run 25.10.: Erzwingt die zentrale Header-Regel (SouveraHeaderGeometry)
-    /// fuer ALLE UIKit-Bars: Dateien, Medien, Favoriten, Aktivitaeten und
-    /// alle Mehr-Unterseiten (z. B. Einstellungen). Die Systemhoehe wird
-    /// dabei bewusst ueberschrieben - sie liefert auf dem Duo je nach
-    /// Zustand 0/24/46/58/82/140 pt.
-    func applyHeaderGeometry(occlusions: [SouveraHeaderGeometry.Occlusion]? = nil) {
-        guard !isNavigationBarHidden, !navigationBar.isHidden else { return }
-        let window = view.window
-        let bounds = window?.bounds.size ?? view.bounds.size
-        let traits = window?.traitCollection ?? traitCollection
-        // Run 25.10. (Apple-konform): Regionen kommen vom positionierenden
-        // View (Observer, Lesung in updateConstraints) - niemals global.
-        let regions = occlusions ?? headerRegionObserver.readOcclusions()
-        (self as? SouveraLayoutModeProviding)?.layoutMode
-            .updateHeaderRegions(regions.map(\.frame), windowWidth: bounds.width)
-        let spec = SouveraHeaderGeometry.spec(
-            windowSize: bounds,
-            horizontalSizeClass: traits.horizontalSizeClass,
-            idiom: traits.userInterfaceIdiom,
-            safeAreaInsets: window?.safeAreaInsets ?? .zero,
-            occlusions: regions
-        )
-        var frame = navigationBar.frame
-        // Run 25.10. (1b): Die SwiftUI-Modul-Header halten rechts Platz
-        // fuer die Kapsel frei (extraTrailing) - die UIKit-Bar gleiches
-        // Recht ueber die Layout-Margins der Bar (die Bar-Items liegen
-        // innerhalb der Margins).
-        let frameChanged = abs(frame.minY - spec.bandTop) > 0.5
-            || abs(frame.height - spec.height) > 0.5
-        let marginsChanged = abs(navigationBar.directionalLayoutMargins.trailing - spec.trailingReserve) > 0.5
-        guard frameChanged || marginsChanged else { return }
-        if frameChanged {
-            frame.origin.y = spec.bandTop
-            frame.size.height = spec.height
-            navigationBar.frame = frame
-        }
-        if marginsChanged {
-            navigationBar.directionalLayoutMargins = NSDirectionalEdgeInsets(
-                top: 0, leading: 0, bottom: 0, trailing: spec.trailingReserve)
-        }
-        // Inhalt (Titel/Buttons) im neuen Band neu zentrieren.
-        navigationBar.layoutIfNeeded()
-        let stamp = "\(Int(spec.bandTop))x\(Int(spec.height))r\(Int(spec.trailingReserve))"
-        if stamp != lastHeaderGeometryLog {
-            lastHeaderGeometryLog = stamp
-            SouveraLog.write("SidebarActions",
-                             "[SidebarActions] navBarSpec y=\(Int(spec.bandTop)) h=\(Int(spec.height)) reserve=\(Int(spec.trailingReserve))")
-        }
-    }
-
-    /// Run 24.10.: Fuellt den Streifen oberhalb der Navigationsbar, falls
-    /// das System ihn herunterrueckt (Safe-Area der Status-Kapsel).
-    func layoutHeaderFiller() {
-        guard !isNavigationBarHidden, !navigationBar.isHidden else {
-            if !headerFillerView.isHidden { headerFillerView.isHidden = true }
-            return
-        }
-        let height = max(0, min(navigationBar.frame.minY, view.bounds.height))
-        let frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: height)
-        headerFillerView.isHidden = height <= 0.5
-        if headerFillerView.frame != frame {
-            headerFillerView.frame = frame
-        }
     }
 
     func navigationController(_ navigationController: UINavigationController, willShow viewController: UIViewController, animated: Bool) {

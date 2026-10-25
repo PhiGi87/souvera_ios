@@ -38,40 +38,25 @@ struct MailView: View {
     @ObservedObject private var invitationCenter = SouveraInvitationCenter.shared
 
     var body: some View {
-        NavigationStack {
-            // Landscape-Erkennung über Geometrie (Breite > Höhe): funktioniert
-            // auf iPhone, iPad und Mac - Size-Classes sind unzuverlässig
-            // (iPad ist vertikal IMMER .regular; iPhone landscape sogar
-            // horizontal .compact). Bewusst GeometryReader statt
-            // onGeometryChange, damit auch iOS 17 abgedeckt ist.
-            GeometryReader { geo in
-                content
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .onAppear {
-                        updateLandscapeLayout(geo.size)
-                        refreshHeaderSpec()
-                    }
-                    .onChange(of: geo.size) { _, newSize in
-                        updateLandscapeLayout(newSize)
-                        refreshHeaderSpec()
-                    }
-                    // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
-                    // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
-                    .souveraHeaderSpecRefresh { refreshHeaderSpec() }
-            }
-            .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                // Run 25.10.: SwiftUI-Header ist der EINZIGE Header in allen
-                // Lagen - Hoehe/Position ausschliesslich aus der zentralen
-                // Regel (SouveraHeaderGeometry). Auf dem Duo sitzt das Band
-                // auf der Status-Symbol-Zeile (Padding gleicht die Safe-Area
-                // aus), Inhalt beginnt Band-Unterkante + 12.
-                if !layout.isPushed {
-                    moduleHeader
-                        .padding(.bottom, headerSpec.contentGap)
+        // Landscape-Erkennung über Geometrie (Breite > Höhe): funktioniert
+        // auf iPhone, iPad und Mac - Size-Classes sind unzuverlässig
+        // (iPad ist vertikal IMMER .regular; iPhone landscape sogar
+        // horizontal .compact). Bewusst GeometryReader statt
+        // onGeometryChange, damit auch iOS 17 abgedeckt ist.
+        // Run 25.10. (Header-Standard): Kein eigener Header mehr - die
+        // System-Bar des Hosting-NavigationControllers liefert Hoehe,
+        // Position und Items in jeder Lage.
+        GeometryReader { geo in
+            content
+                .frame(width: geo.size.width, height: geo.size.height)
+                .onAppear {
+                    updateLandscapeLayout(geo.size)
                 }
-            }
-            .onChange(of: searchQuery) { _, newValue in
+                .onChange(of: geo.size) { _, newSize in
+                    updateLandscapeLayout(newSize)
+                }
+        }
+        .onChange(of: searchQuery) { _, newValue in
                 scheduleSearch(newValue)
             }
             .onChange(of: viewModel.route) { _, newRoute in
@@ -107,8 +92,6 @@ struct MailView: View {
                     .transition(.opacity)
                 }
             }
-
-        }
         .confirmationDialog(
             NSLocalizedString("_mail_blacklist_confirm_title_", comment: ""),
             isPresented: Binding(
@@ -148,17 +131,6 @@ struct MailView: View {
         }
         .onChange(of: viewModel.route) { _, _ in
             populateHeaderBridge()
-        }
-        // Run 23.10.: Header NUR aus dem Layout-Modus aufbauen - damit
-        // liefert Start hochkant, Start quer, Drehen und Fensterwechsel
-        // denselben Button-Satz.
-        .onChange(of: layout.usesBridgeHeader) { _, _ in
-            populateHeaderBridge()
-        }
-        // Run 25.10.: Regions-/Trait-Wechsel des Hosts ziehen den Spec nach
-        // (horizontale Reserve identisch zur UIKit-Bar).
-        .onChange(of: layout.headerOcclusionFrames) { _, _ in
-            refreshHeaderSpec()
         }
         .onChange(of: landscapeLayout) { _, _ in
             populateHeaderBridge()
@@ -343,25 +315,10 @@ struct MailView: View {
     /// Geometrie-basiert (siehe GeometryReader im body), live bei Rotation.
     @State private var landscapeLayout = false
     @State private var layoutWidth: CGFloat = 0
-    /// Run 25.10.: Header-Geometrie aus der zentralen Regel (einzige Quelle
-    /// fuer Hoehe/Position - siehe SouveraHeaderGeometry).
-    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
-
-    private func refreshHeaderSpec() {
-        // Run 25.10.: Regionen kommen vom Hosting-NavigationController
-        // (SouveraReservedRegionObserver) via EnvironmentObject - die
-        // horizontale Reserve ist damit identisch zur UIKit-Bar.
-        let spec = SouveraHeaderGeometry.currentSpec(
-            windowWidth: layout.headerWindowWidth,
-            occlusionFrames: layout.headerOcclusionFrames)
-        if spec != headerSpec { headerSpec = spec }
-    }
-
     /// Fokus-Leser: nicht auf dem iPhone (dort bleibt das Detail als
     /// Overlay über der Listenspalte), sonst bei aktivem Account-Setting.
     private var focusReaderActive: Bool {
         isWideLayout
-            && layout.usesBridgeHeader
             && SouveraMailDisplaySettings.focusReaderEnabled(
                 account: viewModel.accountKey
             )
@@ -376,7 +333,7 @@ struct MailView: View {
         let isLandscape = size.width > size.height
         guard isLandscape != landscapeLayout else { return }
         landscapeLayout = isLandscape
-        SouveraLog.write("MailUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height)) bridge=\(layout.usesBridgeHeader) focusReader=\(focusReaderActive)")
+        SouveraLog.write("MailUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height)) regular=\(layout.isRegularWidth) focusReader=\(focusReaderActive)")
     }
 
     private func blacklistMessage(for messages: [MailMessage]) -> String {
@@ -394,82 +351,6 @@ struct MailView: View {
     /// rechts genau drei Aktionen (Suche, Verfassen, "..."). Der frueher
     /// getrennte Ordner-Plus-Button und der Sortier-Button sind ins
     /// "... "-Menue gewandert.
-    private var moduleHeader: some View {
-        let headerTitle: String = {
-            switch viewModel.route {
-            case .folders: return NSLocalizedString("_mail_", comment: "")
-            case .messages(let mailbox): return mailbox.displayName
-            default: return ""
-            }
-        }()
-        let isDetail = viewModel.route.isDetail
-        return SouveraModuleHeader(
-            title: headerTitle,
-            titleAfterLeading: !headerTitle.isEmpty,
-            extraTrailing: headerSpec.trailingReserve,
-            bandTop: headerSpec.bandTop,
-            heightOverride: headerSpec.height,
-            leading: {
-                if isDetail {
-                    SouveraHeaderButton(icon: "chevron.backward") {
-                        viewModel.back()
-                    }
-                    .accessibilityLabel(NSLocalizedString("_back_", comment: ""))
-                } else if isWideLayout {
-                    // Run 24.10.: Ordner-Toggle im Split bleibt immer
-                    // sichtbar und klappt die Ordnerspalte ein/aus.
-                    SouveraHeaderButton(icon: "sidebar.left") {
-                        foldersCollapsed.toggle()
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                } else if !isFolders {
-                    SouveraHeaderButton(icon: "folder") {
-                        viewModel.showFolders()
-                    }
-                    .accessibilityLabel(NSLocalizedString("_mail_folders_", comment: ""))
-                }
-            },
-            trailing: {
-                SouveraHeaderPill {
-                    if case let .detail(message) = viewModel.route {
-                        SouveraHeaderButton(icon: "arrowshape.turn.up.left", glass: false) {
-                            viewModel.startCompose(mode: .reply, message: message)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_reply_", comment: ""))
-                        Menu {
-                            detailMoreMenuContent(message)
-                        } label: {
-                            moreMenuIcon
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
-                    } else {
-                        SouveraHeaderButton(icon: "magnifyingglass", glass: false) {
-                            searchActive = true
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                        SouveraHeaderButton(icon: "square.and.pencil", glass: false) {
-                            viewModel.startCompose(mode: .new)
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_compose_", comment: ""))
-                        Menu {
-                            listMoreMenuContent
-                        } label: {
-                            moreMenuIcon
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_more_", comment: ""))
-                    }
-                }
-            }
-        )
-    }
-
-    private var moreMenuIcon: some View {
-        Image(systemName: "ellipsis.circle")
-            .font(.system(size: 18, weight: .medium))
-            .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-            .frame(width: 44, height: 44)
-    }
-
     /// Inhalt des "... "-Menues in der Liste (Text, damit es nicht nur
     /// Symbole sind).
     @ViewBuilder
@@ -563,7 +444,6 @@ struct MailView: View {
         guard let bridge = headerBridge else { return }
 
         var leading: [SouveraHeaderBridge.Item] = []
-        var leadingCustoms: [SouveraHeaderBridge.Custom] = []
         var trailing: [SouveraHeaderBridge.Item] = []
         var menus: [SouveraHeaderBridge.MenuGroup] = []
 
@@ -596,6 +476,7 @@ struct MailView: View {
             leading.append(backItem)
             trailing.append(SouveraHeaderBridge.Item(
                 id: "reply", icon: "arrowshape.turn.up.left",
+                text: NSLocalizedString("_mail_reply_", comment: ""),
                 accessibilityLabel: NSLocalizedString("_mail_reply_", comment: "")
             ) { viewModel.startCompose(mode: .reply, message: message) })
             menus.append(detailMoreMenu(message))
@@ -605,9 +486,12 @@ struct MailView: View {
                 id: "search", icon: "magnifyingglass",
                 accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")
             ) { searchActive = true })
+            // Run 25.10.: Hauptaktion immer sichtbar (pinnedTrailingGroup).
             trailing.append(SouveraHeaderBridge.Item(
                 id: "compose", icon: "square.and.pencil",
-                accessibilityLabel: NSLocalizedString("_mail_compose_", comment: "")
+                text: NSLocalizedString("_mail_compose_", comment: ""),
+                accessibilityLabel: NSLocalizedString("_mail_compose_", comment: ""),
+                isPinned: true
             ) { viewModel.startCompose(mode: .new) })
             menus.append(listMoreMenu())
         }
@@ -615,10 +499,8 @@ struct MailView: View {
         bridge.title = mailboxTitle
         bridge.leadingItems = leading
         bridge.leadingMenus = []
-        bridge.leadingCustoms = leadingCustoms
         bridge.trailingItems = trailing
         bridge.trailingMenus = menus
-        bridge.trailingCustoms = []
     }
 
     /// "... "-Menue der Liste: Bearbeiten, Neuer Ordner, Sortierung,

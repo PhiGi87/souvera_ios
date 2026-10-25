@@ -17,43 +17,32 @@ struct SouveraLayoutModeTests {
         ])
     }
 
-    @Test("Compact phone keeps the glass header")
+    @Test("Compact phone is not regular width")
     func compactPhone() {
         let mode = SouveraLayoutMode(traitCollection: traits(size: .compact, idiom: .phone))
-        #expect(mode.usesBridgeHeader == false)
         #expect(mode.isRegularWidth == false)
     }
 
-    @Test("Regular phone (Duo inner) uses the bridge header")
+    @Test("Regular phone (Duo inner) is regular width")
     func regularPhone() {
         let mode = SouveraLayoutMode(traitCollection: traits(size: .regular, idiom: .phone))
-        #expect(mode.usesBridgeHeader)
         #expect(mode.isRegularWidth)
     }
 
-    @Test("iPad always uses the bridge header, even in compact width")
-    func padCompactWidth() {
-        let mode = SouveraLayoutMode(traitCollection: traits(size: .compact, idiom: .pad))
-        #expect(mode.usesBridgeHeader)
-        #expect(mode.isRegularWidth == false)
-    }
-
-    @Test("Pushed modules never render the bridge header")
+    @Test("Pushed modules start compact")
     func pushed() {
         let mode = SouveraLayoutMode.pushed()
-        #expect(mode.usesBridgeHeader == false)
         #expect(mode.isRegularWidth == false)
         #expect(mode.isPushed)
     }
 
-    @Test("Trait updates switch the mode for the same scene")
+    @Test("Trait updates switch the width class for the same scene")
     func traitUpdate() {
         let mode = SouveraLayoutMode(traitCollection: traits(size: .compact, idiom: .phone))
         mode.update(traitCollection: traits(size: .regular, idiom: .phone))
-        #expect(mode.usesBridgeHeader)
         #expect(mode.isRegularWidth)
         mode.update(traitCollection: traits(size: .compact, idiom: .phone))
-        #expect(mode.usesBridgeHeader == false)
+        #expect(mode.isRegularWidth == false)
     }
 
     @Test("Split only on regular width or a wide landscape")

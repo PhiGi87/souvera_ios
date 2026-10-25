@@ -69,49 +69,29 @@ The following details are important when working on the iOS client.
 
 ### Header Rule (binding, permanent)
 
-Header height and header-button position MUST be identical everywhere in the app
-(Mail, Calendar, Link, Files, More and every More sub-page, including Settings)
-for the same device class and orientation. The only source of truth is
-`SouveraHeaderGeometry` (`iOSClient/Design System/SouveraHeaderGeometry.swift`).
+There is exactly ONE header implementation for the whole app: the system
+`UINavigationBar` of the containing navigation controller. This applies to
+Mail, Calendar, Link, Files, Media, Favorites, Activities, More, every More
+sub-page (including Settings) and every pushed screen.
 
-| Device class | Portrait | Landscape | Band top | Status reserve |
-|---|---|---|---|---|
-| iPhone compact (incl. landscape) | 58 | 58 | status bar / 0 | 0 |
-| Duo outer display (466x678)¹ | 58 | 58 | 18 / 0 | 206 |
-| Duo inner display (669x951)¹ | 58 | 82 | 18 / 0 | 206 (portrait only) |
-| iPad regular | 58 | 82 | status bar | 0 |
-| iPad split/slide over (compact) | 58 | 58 | status bar / 0 | 0 |
-| iOS < 26 | 46 | 70 | as above | as above |
-
-¹ On iOS 27.1+ the Duo values are FALLBACK ONLY: the status reserve is
-derived from the active occlusion regions the system reports (read by the
-positioning view — `SouveraReservedRegionObserver` for UIKit bars, the
-hosting controller's `SouveraLayoutMode` for SwiftUI modules). `bandTop`
-NEVER follows a region: the band background lies behind the status capsule
-(horizontal avoidance), only the interactive button row is shifted by the
-reserve. Device dimensions must never be used to detect a device class
-(HIG: derive layout from size classes and regions, not device type).
-
-Rules:
-
-- Never derive header height or position from system measurements (safe area,
-  `navigationBar.bounds`, status bar frame) — only from `SouveraHeaderGeometry`.
-  Exception: active occlusion/division regions (iOS 27.1+), which drive the
-  HORIZONTAL reserve exclusively and are read only in the view that positions
-  the content — UIKit: inside `updateConstraints()` (Apple tracks the read and
-  re-runs it on region changes), SwiftUI: via the hosting controller's
-  `SouveraLayoutMode.headerOcclusions`. Never read regions from a global
-  key-window lookup.
-- Buttons are vertically centered in the band; 12 pt leading inset, 12 pt
-  trailing inset plus the status reserve. The header background always extends
-  to y = 0. Content starts at band bottom + 12 pt.
-- SwiftUI module headers (Mail, Calendar, Link, More) use the spec through
-  `SouveraHeaderGeometry.currentSpec()` and refresh it through
-  `souveraHeaderSpecRefresh(_:)` on size-class changes.
-- UIKit navigation bars (Files, Media, Favorites, Activities, More sub-pages)
-  are forced to the same spec in `NCMainNavigationController.viewDidLayoutSubviews()`,
-  including the status reserve applied as additional safe area inset on the bar.
-- Do not add a second header implementation; extend `SouveraHeaderGeometry`.
+- Never build a custom header (no `SouveraModuleHeader`, no custom
+  `UINavigationBar`/`UIToolbar`/`UITabBar`, no header `safeAreaInset`).
+  Custom bars are not presented vertically by the system on iPhone Duo and
+  cannot adapt to reserved regions.
+- Appearance comes exclusively from `SouveraAppearance.applyBlueNavigationBar`
+  (gradient, opaque, light). Do not set per-screen bar appearances.
+- Items come exclusively from standard `UIBarButtonItem`s built by
+  `SouveraHeaderBridge` / `SouveraBarCoordinator`: image and/or title, real
+  `UIMenu`s, `isPinned` for the module's primary action
+  (`UINavigationItem.pinnedTrailingGroup`), never custom views in bars.
+- Do not force bar geometry: no frame overrides, no additional safe-area
+  insets, no reserved-region math, no manual header paddings in content.
+  Height, position, orientation (vertical bars on the Duo outer display) and
+  safe-area handling are owned by UIKit.
+- Content relies on safe areas only; the single source for split/navigation
+  decisions is `SouveraLayoutMode` (`isRegularWidth`).
+- Content/title may differ per screen (that is content, not layout); the
+  foundation must stay identical.
 
 ### CI / Release
 

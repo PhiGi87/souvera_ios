@@ -18,18 +18,6 @@ struct LinkView: View {
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
-    /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
-    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
-
-    private func refreshHeaderSpec() {
-        // Run 25.10.: Regionen kommen vom Hosting-NavigationController
-        // (SouveraReservedRegionObserver) via EnvironmentObject - die
-        // horizontale Reserve ist damit identisch zur UIKit-Bar.
-        let spec = SouveraHeaderGeometry.currentSpec(
-            windowWidth: layout.headerWindowWidth,
-            occlusionFrames: layout.headerOcclusionFrames)
-        if spec != headerSpec { headerSpec = spec }
-    }
     /// Run 16.09.: UIKit-Header-Bridge (Landscape/iPad, 1:1 Files/Mehr).
     var headerBridge: SouveraHeaderBridge? = nil
     @State private var callContext: CallContext?
@@ -82,38 +70,20 @@ struct LinkView: View {
     }
 
         var body: some View {
-        NavigationStack {
-            // Landscape-Erkennung über Geometrie (Breite > Höhe) - wie in
-            // MailView; Size-Classes sind auf iPad/iPhone unzuverlässig.
-            GeometryReader { geo in
-                content
-                    .souveraOfflineBanner()
-                    .frame(width: geo.size.width, height: geo.size.height)
-                    .onAppear {
-                        updateLandscapeLayout(geo.size)
-                        refreshHeaderSpec()
-                    }
-                    .onChange(of: geo.size) { _, newSize in
-                        updateLandscapeLayout(newSize)
-                        refreshHeaderSpec()
-                    }
-                    // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
-                    // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
-                    .souveraHeaderSpecRefresh { refreshHeaderSpec() }
-            }
-            // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
-            // "Liquid Glass" flattet toolbarBackground-Verlaeufe und tintet
-            // Buttons. Header 1:1 wie Mehr/Dateien (Verlauf + weisse Pills
-            // mit dunklen Icons); System-Navigationbar komplett versteckt.
-            .toolbar(.hidden, for: .navigationBar)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                // Run 25.10.: Einziger Header in allen Lagen - Hoehe/Position
-                // ausschliesslich aus SouveraHeaderGeometry.
-                if !layout.isPushed {
-                    moduleHeader
-                        .padding(.bottom, headerSpec.contentGap)
+        // Run 25.10. (Header-Standard): Header kommt ausschliesslich von
+        // der System-Bar des Hosting-NavigationControllers.
+        // Landscape-Erkennung über Geometrie (Breite > Höhe) - wie in
+        // MailView; Size-Classes sind auf iPad/iPhone unzuverlässig.
+        GeometryReader { geo in
+            content
+                .souveraOfflineBanner()
+                .frame(width: geo.size.width, height: geo.size.height)
+                .onAppear {
+                    updateLandscapeLayout(geo.size)
                 }
-            }
+                .onChange(of: geo.size) { _, newSize in
+                    updateLandscapeLayout(newSize)
+                }
         }
         .onChange(of: scenePhase) { _, phase in
             // Foreground (Run 15.09.): Status + Presence automatisch
@@ -127,16 +97,6 @@ struct LinkView: View {
         }
         .onChange(of: viewModel.route) { _, _ in
             populateHeaderBridge()
-        }
-        // Run 23.10.: Header/Spalten bei Layout- oder Fensterwechsel neu
-        // aufbauen - sonst bleiben Start-Buttons stehen.
-        .onChange(of: layout.usesBridgeHeader) { _, _ in
-            populateHeaderBridge()
-        }
-        // Run 25.10.: Regions-/Trait-Wechsel des Hosts ziehen den Spec nach
-        // (horizontale Reserve identisch zur UIKit-Bar).
-        .onChange(of: layout.headerOcclusionFrames) { _, _ in
-            refreshHeaderSpec()
         }
         .onChange(of: landscapeLayout) { _, _ in
             populateHeaderBridge()
@@ -480,115 +440,11 @@ struct LinkView: View {
         }
         .padding(.horizontal, 10)
         .padding(.top, 4)
-        // Run 25.09. (Feedback: ueberlappte den Header noch): 60 pt =
-        // 44-pt-Buttons + 12 pt Header-Padding + 4 pt Abstand.
-        .padding(.top, layout.usesBridgeHeader ? 0 : 60)
     }
 
     /// Run 16.09.: Header-Aktionen als Bridge-Items — die hosting
     /// UIKit-Bar rendert sie (1:1 wie Mehr/Dateien, inkl. Flanking auf
     /// dem iPad). Route-abhängig: Home oder Chat-Raum.
-    /// Klassischer Glas-Header (iPhone, Portrait + Landscape); das iPad
-    /// rendert stattdessen die blaue UIKit-Bar via populateHeaderBridge().
-    private var moduleHeader: some View {
-        if case let .chat(token, title) = viewModel.route {
-            return AnyView(
-                SouveraModuleHeader(
-                    title: navigationTitle,
-                    extraTrailing: headerSpec.trailingReserve,
-                    bandTop: headerSpec.bandTop,
-                    heightOverride: headerSpec.height,
-                    leading: {
-                        if !landscapeLayout {
-                            SouveraHeaderButton(icon: "chevron.backward") {
-                                viewModel.back()
-                            }
-                        }
-                    },
-                    trailing: {
-                        SouveraHeaderPill {
-                            Menu {
-                                Button {
-                                    viewModel.loadParticipants()
-                                    showParticipants = true
-                                } label: {
-                                    Label(NSLocalizedString("_link_participants_", comment: ""), systemImage: "person.2")
-                                }
-                                if viewModel.currentRoom?.canManage == true {
-                                    Button {
-                                        settingsRoom = viewModel.currentRoom
-                                    } label: {
-                                        Label(NSLocalizedString("_link_room_settings_", comment: ""), systemImage: "gearshape")
-                                    }
-                                }
-                            } label: {
-                                Image(systemName: "gearshape")
-                                    .font(.system(size: 18, weight: .medium))
-                                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                                    .frame(width: 44, height: 44)
-                            }
-                            .accessibilityLabel(NSLocalizedString("_link_room_settings_", comment: ""))
-                            if viewModel.currentRoom?.canManage == true,
-                               viewModel.currentRoom?.lobbyState == 1 {
-                                SouveraHeaderButton(icon: "clock.arrow.circlepath", glass: false,
-                                                    accessibilityLabel: NSLocalizedString("_link_lobby_toggle_", comment: "")) {
-                                    lobbyManagementRoom = viewModel.currentRoom
-                                }
-                            }
-                            if viewModel.currentRoom?.hasCall == true {
-                                Button {
-                                    callContext = CallContext(token: token, title: title, withVideo: false, silent: false)
-                                } label: {
-                                    Image(systemName: "phone.fill")
-                                        .font(.system(size: 18, weight: .medium))
-                                        .foregroundStyle(Color.green)
-                                        .symbolEffect(.pulse, options: .repeating, isActive: !reduceMotion)
-                                        .frame(width: 44, height: 44)
-                                        .contentShape(Circle())
-                                }
-                                .buttonStyle(.plain)
-                                .accessibilityLabel(NSLocalizedString("_link_join_call_", comment: ""))
-                            } else {
-                                SouveraHeaderButton(icon: "phone.fill",
-                                                    iconColor: .green, glass: false,
-                                                    accessibilityLabel: NSLocalizedString("_link_join_call_", comment: "")) {
-                                    startCallRequest = CallStartRequest(token: token, title: title, withVideo: false)
-                                }
-                            }
-                        }
-                    }
-                )
-            )
-        } else {
-            return AnyView(
-                SouveraModuleHeader(
-                    title: NSLocalizedString("_link_", comment: ""),
-                    extraTrailing: headerSpec.trailingReserve,
-                    bandTop: headerSpec.bandTop,
-                    heightOverride: headerSpec.height,
-                    leading: {
-                        SouveraHeaderButton(icon: "magnifyingglass") {
-                            searchActive = true
-                        }
-                        .accessibilityLabel(NSLocalizedString("_mail_search_", comment: ""))
-                    },
-                    trailing: {
-                        SouveraHeaderPill {
-                            LinkOnlineStatusButton(status: viewModel.ownStatus) {
-                                showUserStatus = true
-                            }
-                            SouveraHeaderButton(icon: "plus", glass: false) {
-                                channelName = ""
-                                showCreateChannel = true
-                            }
-                            .accessibilityLabel(NSLocalizedString("_link_create_channel_", comment: ""))
-                        }
-                    }
-                )
-            )
-        }
-    }
-
     private func populateHeaderBridge() {
         guard let bridge = headerBridge else { return }
         if case let .chat(token, title) = viewModel.route {
@@ -621,16 +477,20 @@ struct LinkView: View {
             if viewModel.currentRoom?.hasCall == true {
                 trailing.append(SouveraHeaderBridge.Item(
                     id: "call", icon: "phone.fill",
+                    text: NSLocalizedString("_link_join_call_", comment: ""),
                     accessibilityLabel: NSLocalizedString("_link_join_call_", comment: ""),
-                    isGreen: true
+                    isGreen: true,
+                    isPinned: true
                 ) {
                     callContext = CallContext(token: token, title: roomTitle, withVideo: false, silent: false)
                 })
             } else {
                 trailing.append(SouveraHeaderBridge.Item(
                     id: "call", icon: "phone.fill",
+                    text: NSLocalizedString("_link_start_call_", comment: ""),
                     accessibilityLabel: NSLocalizedString("_link_start_call_", comment: ""),
-                    isGreen: true
+                    isGreen: true,
+                    isPinned: true
                 ) {
                     startCallRequest = CallStartRequest(token: token, title: roomTitle, withVideo: false)
                 })
@@ -645,8 +505,6 @@ struct LinkView: View {
             ]
             bridge.trailingItems = trailing
             bridge.trailingMenus = trailingMenus
-            bridge.leadingCustoms = []
-            bridge.trailingCustoms = []
         } else {
             // Home: Suche links, Status + "+" rechts.
             bridge.title = NSLocalizedString("_link_", comment: "")
@@ -656,28 +514,21 @@ struct LinkView: View {
                     searchActive = true
                 }
             ]
-            bridge.trailingItems = []
+            bridge.trailingItems = [
+                .init(id: "status", icon: "circle.dotted",
+                      text: NSLocalizedString("_set_user_status_", comment: ""),
+                      accessibilityLabel: NSLocalizedString("_set_user_status_", comment: "")) {
+                    showUserStatus = true
+                },
+                .init(id: "create-channel", icon: "plus",
+                      text: NSLocalizedString("_link_create_channel_", comment: ""),
+                      accessibilityLabel: NSLocalizedString("_link_create_channel_", comment: ""),
+                      isPinned: true) {
+                    channelName = ""
+                    showCreateChannel = true
+                }
+            ]
             bridge.trailingMenus = []
-            bridge.leadingCustoms = []
-            bridge.trailingCustoms = [SouveraHeaderBridge.Custom(
-                id: "status-plus", view: {
-                    // Run 25.09. (Feedback iPad: Status-Pill eingefroren):
-                    // Der SwiftUI-Inhalt muss das ViewModel BEOBACHTEN -
-                    // der frühere Snapshot zeigte den Status vom Zeitpunkt
-                    // der Bridge-Erzeugung und aktualisierte nie.
-                    let host = UIHostingController(rootView:
-                        LinkBridgeStatusView(viewModel: viewModel) {
-                            showUserStatus = true
-                        } onCreateChannel: {
-                            channelName = ""
-                            showCreateChannel = true
-                        }
-                        .padding(.trailing, 4)
-                    )
-                    host.view.backgroundColor = .clear
-                    return host.view
-                }()
-            )]
         }
     }
 
@@ -723,7 +574,7 @@ struct LinkView: View {
         // Run 25.09. (Feedback iPad): Auf dem iPad IMMER die 2-Spalten-
         // Darstellung (Raeume links, Chat rechts) - auch im Hochformat;
         // die Einschspalte verschwendet dort nur Platz.
-        if layout.usesBridgeHeader {
+        if layout.isRegularWidth {
             guard landscapeLayout != true else { return }
             landscapeLayout = true
             SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split)")
@@ -3648,25 +3499,3 @@ enum SouveraLinkSearchItem: Identifiable {
 /// Run 25.09.: Status + "+" im iPad-Bridge-Header - mit @ObservedObject,
 /// damit die Status-Pill auf ownStatus-Aenderungen live reagiert (der
 /// Custom-View wird nur EINMAL erzeugt und vom Bar-Coordinator gecacht).
-private struct LinkBridgeStatusView: View {
-    @ObservedObject var viewModel: LinkViewModel
-    var onStatusTap: () -> Void
-    var onCreateChannel: () -> Void
-
-    var body: some View {
-        HStack(spacing: 2) {
-            LinkOnlineStatusButton(status: viewModel.ownStatus) {
-                onStatusTap()
-            }
-            Button {
-                onCreateChannel()
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundStyle(Color(red: 0.1, green: 0.1, blue: 0.1))
-                    .frame(width: 36, height: 36)
-            }
-            .buttonStyle(.plain)
-        }
-    }
-}

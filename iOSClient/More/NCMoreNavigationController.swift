@@ -9,11 +9,9 @@ class NCMoreNavigationController: NCMainNavigationController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .systemGroupedBackground
-        // Run 24.10.: Die Mehr-Root rendert ihren blauen Header in SwiftUI
-        // (NCMoreView). Die UIKit-Bar bleibt nur fuer gepushte Unterseiten
-        // sichtbar - dadurch gibt es keine kollabierende Bar und keine
-        // doppelte Header-Zeile mehr.
-        setNavigationBarHidden(true, animated: false)
+        // Run 25.10. (Header-Standard): Auch die Mehr-Root nutzt die
+        // System-Bar - gleiche Appearance wie Dateien und alle Module.
+        SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
     }
 
     override func navigationController(_ navigationController: UINavigationController,
@@ -23,12 +21,9 @@ class NCMoreNavigationController: NCMainNavigationController {
 
         let isRoot = viewController === navigationController.viewControllers.first
         if isRoot {
-            viewController.navigationItem.title = ""
             viewController.navigationItem.leftBarButtonItem = nil
             viewController.navigationItem.titleView = nil
-            setNavigationBarHidden(true, animated: false)
         } else {
-            applyBlueHeader()
             viewController.navigationItem.leftBarButtonItem = nil
             // Run 01.10.: hellblauer Streifen am linken Rand auf gepushten
             // Mehr-Seiten verhindern.
@@ -37,27 +32,23 @@ class NCMoreNavigationController: NCMainNavigationController {
                 || viewController.view.backgroundColor == .clear {
                 viewController.view.backgroundColor = .systemGroupedBackground
             }
-            setNavigationBarHidden(false, animated: false)
-            Task { @MainActor in
-                if viewController === navigationController.topViewController {
-                    applyBlueHeader()
-                    setNavigationBarHidden(false, animated: false)
-                }
+        }
+        applyBlueHeader()
+        Task { @MainActor in
+            if viewController === navigationController.topViewController {
+                self.applyBlueHeader()
             }
         }
-        SouveraLog.write("More", "[MoreHeader] willShow root=\(isRoot) hidden=\(isNavigationBarHidden) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height))")
+        SouveraLog.write("More", "[MoreHeader] willShow root=\(isRoot) bar=\(Int(navigationBar.bounds.width))x\(Int(navigationBar.bounds.height))")
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        if topViewController === viewControllers.first {
-            setNavigationBarHidden(true, animated: false)
-        }
+        applyBlueHeader()
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        guard topViewController !== viewControllers.first else { return }
         applyBlueHeader()
     }
 

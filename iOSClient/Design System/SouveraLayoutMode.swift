@@ -1,53 +1,31 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Run 23.10. (Feedback: Header je nach Start-Orientierung/Fenster anders):
-// EINE Layout-Wahrheit pro Szene. Frueher entschied die UIKit-Bar einmalig
-// beim Aufbau (makeHostedTab) und die SwiftUI-Module bei jedem Body erneut
-// ueber UITraitCollection.current bzw. die erste aktive Szene - bei zwei
-// Fenstern und beim Wechsel von Hoch-/Querformat kamen dadurch Glas-Header
-// UND Bridge-Bar gleichzeitig (oder unterschiedliche Buttons).
+// Run 25.10.: EINE Layout-Wahrheit pro Szene/Tab. Trägt nur noch die
+// Inhalts-Entscheidungen (Split ja/nein) - die Header kommen seit dem
+// Header-Standard ausschließlich von der System-UINavigationBar.
 //
-// Der Modus wird jetzt vom Hosting-NavigationController aus SEINEM
+// Der Modus wird vom Hosting-/Tab-NavigationController aus SEINEM
 // traitCollection gespeist und per EnvironmentObject an die Module gereicht.
 
 import SwiftUI
 import UIKit
 import Combine
 
-/// Traegt den Layout-Modus eines Tabs/Fensters. Wird vom Hosting-
-/// NavigationController aktualisiert (Trait-Wechsel) und von den
-/// SwiftUI-Modulen beobachtet.
+/// Traegt den Layout-Modus eines Tabs/Fensters.
 final class SouveraLayoutMode: ObservableObject {
-    /// Sichtbare blaue UIKit-Bar + Bridge-Items (iPad, Duo-Innendisplay).
-    @Published private(set) var usesBridgeHeader: Bool
-    /// Regular width - Grundlage fuer Split-Layouts.
+    /// Regular width - Grundlage fuer Split-Layouts (iPad, Duo-Innendisplay).
     @Published private(set) var isRegularWidth: Bool
     /// In einen bestehenden NavigationController gepusht (Mehr-Menue):
-    /// die aeussere Bar liefert Titel/Zurueck, das Modul rendert keinen
-    /// eigenen Header.
+    /// die aeussere Bar liefert Titel/Zurueck.
     let isPushed: Bool
-
-    /// Run 25.10.: Aktive Occlusion-Regionen (iOS 27.1+) des Fensters, in
-    /// dem dieser Tab gehostet wird, plus dessen Breite. Gespeist vom
-    /// SouveraReservedRegionObserver des Hosting-NavigationControllers
-    /// (Apple-Lesemuster: Lesung in updateConstraints) - die SwiftUI-
-    /// Module leiten daraus dieselbe horizontale Reserve ab wie die
-    /// UIKit-Bars. Bewusst [CGRect] statt SouveraHeaderGeometry.Occlusion:
-    /// diese Datei wird auch in den Extension-Targets kompiliert, wo das
-    /// Haupt-App-Target-File nicht existiert.
-    @Published private(set) var headerOcclusionFrames: [CGRect] = []
-    @Published private(set) var headerWindowWidth: CGFloat = 0
 
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
-        let regular = traitCollection.horizontalSizeClass == .regular
-        let pad = traitCollection.userInterfaceIdiom == .pad
-        self.isRegularWidth = regular
-        self.usesBridgeHeader = !isPushed && (pad || regular)
+        self.isRegularWidth = traitCollection.horizontalSizeClass == .regular
     }
 
-    /// Gepushte Module (Mehr-Menue): kein eigener Header, kein Split.
+    /// Gepushte Module (Mehr-Menue): kein Split.
     static func pushed() -> SouveraLayoutMode {
         SouveraLayoutMode(
             traitCollection: UITraitCollection(traitsFrom: [
@@ -70,28 +48,10 @@ final class SouveraLayoutMode: ObservableObject {
     func update(traitCollection: UITraitCollection) {
         guard !isPushed else { return }
         let regular = traitCollection.horizontalSizeClass == .regular
-        let pad = traitCollection.userInterfaceIdiom == .pad
-        let bridge = pad || regular
-        if bridge != usesBridgeHeader {
-            usesBridgeHeader = bridge
-        }
         if regular != isRegularWidth {
             isRegularWidth = regular
         }
     }
-
-    /// Aktualisiert Regionen/Fensterbreite nur bei tatsaechlicher
-    /// Aenderung (verhindert Publish-Stuerm durch updateConstraints).
-    func updateHeaderRegions(_ occlusionFrames: [CGRect],
-                             windowWidth: CGFloat) {
-        if occlusionFrames != headerOcclusionFrames {
-            headerOcclusionFrames = occlusionFrames
-        }
-        if abs(windowWidth - headerWindowWidth) > 0.5 {
-            headerWindowWidth = windowWidth
-        }
-    }
-
 }
 
 /// Zugriff fuer UIKit-Klassen (Bar-Coordinator), ohne den konkreten

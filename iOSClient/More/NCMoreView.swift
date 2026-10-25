@@ -15,10 +15,6 @@ import NextcloudKit
 /// `NCMoreNavigationController`.
 struct NCMoreView: View {
     @StateObject private var model: NCMoreModel
-    /// Run 25.10.: Layout-Modus + Occlusion-Regionen des Hosts
-    /// (NCMainTabBarController reicht das EnvironmentObject an alle
-    /// Tab-Roots) - Quelle fuer die zentrale Header-Geometrie.
-    @EnvironmentObject private var layout: SouveraLayoutMode
     @State private var autoUploadCounter = NCAutoUploadCounter()
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
@@ -45,23 +41,10 @@ struct NCMoreView: View {
     }
 
     var body: some View {
-        GeometryReader { geo in
+        // Run 25.10. (Header-Standard): Titel und Aktionen liefert die
+        // System-Bar des NCMoreNavigationController.
+        GeometryReader { _ in
             listContent
-                // Run 25.10.: Einziger Header in allen Lagen - Hoehe/Position
-                // ausschliesslich aus SouveraHeaderGeometry (gieich zu Mail/
-                // Kalender/Link/Dateien).
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    moreHeader
-                        .padding(.bottom, headerSpec.contentGap)
-                }
-                .onAppear { refreshHeaderSpec() }
-                .onChange(of: geo.size) { _, _ in refreshHeaderSpec() }
-                // Run 25.10.: Regions-/Trait-Wechsel des Hosts ziehen den
-                // Spec nach (horizontale Reserve identisch zur UIKit-Bar).
-                .onChange(of: layout.headerOcclusionFrames) { _, _ in refreshHeaderSpec() }
-                // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
-                // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
-                .souveraHeaderSpecRefresh { refreshHeaderSpec() }
         }
         .sheet(isPresented: $showAccountSettings) {
             NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))
@@ -85,19 +68,6 @@ struct NCMoreView: View {
         .onChange(of: model.autoUploadStart) {
             updateAutoUploadCounter()
         }
-    }
-
-    /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
-    @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
-
-    private func refreshHeaderSpec() {
-        // Run 25.10.: Regionen kommen vom Hosting-NavigationController
-        // (SouveraReservedRegionObserver) via EnvironmentObject - die
-        // horizontale Reserve ist damit identisch zur UIKit-Bar.
-        let spec = SouveraHeaderGeometry.currentSpec(
-            windowWidth: layout.headerWindowWidth,
-            occlusionFrames: layout.headerOcclusionFrames)
-        if spec != headerSpec { headerSpec = spec }
     }
 
     private var listContent: some View {
@@ -161,54 +131,6 @@ struct NCMoreView: View {
                                 urlBase: session.urlBase,
                                 userId: session.userId,
                                 autoUploadStart: model.autoUploadStart)
-    }
-
-    /// Run 24.10.: Permanenter blauer Mehr-Header - bewusst derselbe
-    /// `SouveraModuleHeader` wie bei Mail/Kalender/Link, damit Hoehe,
-    /// Verlauf und Padding exakt identisch sind. Die rechten Aktionen
-    /// liegen im System-Seitenband.
-    private var moreHeader: some View {
-        SouveraModuleHeader(
-            // Run 25.10.: Zentrale Regel - Hoehe, Band-Top und Status-Reserve.
-            extraTrailing: headerSpec.trailingReserve,
-            bandTop: headerSpec.bandTop,
-            heightOverride: headerSpec.height,
-            leading: {
-                Image("souveraLogo")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(height: 32)
-                    // Module-Leading liegt bei 12 pt - das Logo sass bisher
-                    // bei 20 pt (Flucht mit der Menueliste).
-                    .padding(.leading, 8)
-            },
-            trailing: {
-                // Run 24.10.: Die Aktionen der ehemaligen UIKit-Bar direkt
-                // im SwiftUI-Header (die Bar ist auf der Mehr-Root versteckt).
-                SouveraHeaderPill(glass: true) {
-                    // Run 24.10.: Buttons mit glass:false - die Pill traegt
-                    // DIE eine Glaskapsel (wie Mail/Link), sonst doppelte
-                    // ueberlappende Kapseln.
-                    if model.availableNotifications {
-                        SouveraHeaderButton(icon: "bell.fill", glass: false) {
-                            model.moreNavigationController?.presentNotifications()
-                        }
-                        .accessibilityLabel(NSLocalizedString("_notifications_", comment: ""))
-                    }
-                    SouveraHeaderButton(icon: "arrow.left.arrow.right.circle.fill", glass: false) {
-                        model.moreNavigationController?.presentTransfers()
-                    }
-                    .accessibilityLabel(NSLocalizedString("_transfers_", comment: ""))
-                    if model.assistantEnabled {
-                        SouveraHeaderButton(icon: "sparkles", glass: false) {
-                            model.moreNavigationController?.presentAssistant()
-                        }
-                        .accessibilityLabel(NSLocalizedString("_assistant_", comment: ""))
-                    }
-                }
-            }
-        )
-        .accessibilityHidden(true)
     }
 
     // MARK: - Account header
@@ -508,5 +430,4 @@ extension NCMoreModel {
     NavigationStack {
         NCMoreView(model: .preview)
     }
-    .environmentObject(SouveraLayoutMode(traitCollection: UITraitCollection(userInterfaceIdiom: .phone)))
 }

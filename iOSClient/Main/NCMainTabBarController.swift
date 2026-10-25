@@ -629,41 +629,18 @@ class NCMainTabBarController: UITabBarController {
                     controller.applyLayoutMode()
                 }
             }
-            headerRegionObserver.install(in: view)
             applyLayoutMode()
         }
 
-        /// Run 25.10.: Occlusion-Regionen nach Apples Muster lesen (in
-        /// updateConstraints) und an den Layout-Modus reichen - die
-        /// SwiftUI-Module leiten daraus dieselbe horizontale Reserve ab
-        /// wie die UIKit-Bars (SouveraHeaderGeometry-Regel).
-        private lazy var headerRegionObserver: SouveraReservedRegionObserver = {
-            let observer = SouveraReservedRegionObserver(frame: .zero)
-            observer.onOcclusionsChanged = { [weak self] occlusions in
-                guard let self else { return }
-                self.layoutMode.updateHeaderRegions(occlusions.map(\.frame),
-                                                    windowWidth: self.view.bounds.width)
-            }
-            return observer
-        }()
-
-        /// Setzt Bar-Sichtbarkeit und Appearance konsistent zum Modus.
-        /// Wird bei Trait-Wechseln, Erscheinen und Layout aufgerufen.
+        /// Setzt die gemeinsame Header-Appearance und den Inhalts-Modus.
+        /// Die Sichtbarkeit/Hoehe/Lage der Bar bestimmt ausschliesslich
+        /// das System (Header-Standard, Run 25.10.).
         func applyLayoutMode() {
             // Run 24.10.: Der Trait des Fensters ist die Wahrheit (nicht der
-            // beim Bau gelesene Tab-Trait). Sonst bleibt der Kalender nach
-            // dem Oeffnen im falschen Modus (Glas statt Bridge).
+            // beim Bau gelesene Tab-Trait).
             let traits = resolvedTraitCollection()
             layoutMode.update(traitCollection: traits)
-            layoutMode.updateHeaderRegions(headerRegionObserver.readOcclusions().map(\.frame),
-                                           windowWidth: view.bounds.width)
-            // Run 25.10.: Der SwiftUI-Modul-Header ist der EINZIGE Header
-            // der gehosteten Tabs (Mail/Kalender/Link) - in allen Lagen.
-            // Die UIKit-Bar bleibt dauerhaft versteckt; ihre Hoehe/Position
-            // war auf dem Duo nicht stabil (24/46/58/82/140 pt).
-            if !super.isNavigationBarHidden {
-                super.setNavigationBarHidden(true, animated: false)
-            }
+            SouveraAppearance.applyBlueNavigationBar(to: navigationBar, tint: .white)
             let signature = "\(layoutMode.isRegularWidth)|\(Int(view.window?.bounds.width ?? 0))x\(Int(view.window?.bounds.height ?? 0))"
             if signature != lastLayoutLog {
                 lastLayoutLog = signature
@@ -675,17 +652,6 @@ class NCMainTabBarController: UITabBarController {
             if let scene = view.window?.windowScene { return scene.traitCollection }
             if let parent { return parent.traitCollection }
             return traitCollection
-        }
-
-        override func setNavigationBarHidden(_ hidden: Bool, animated: Bool) {
-            // Run 25.10.: Immer versteckt - der Header kommt ausschliesslich
-            // aus dem SwiftUI-Modul (SouveraHeaderGeometry).
-            super.setNavigationBarHidden(true, animated: animated)
-        }
-
-        override var isNavigationBarHidden: Bool {
-            get { true }
-            set { super.isNavigationBarHidden = true }
         }
 
         /// Run 19.09. (Feedback iPad-Header): Die blaue Appearance auf
