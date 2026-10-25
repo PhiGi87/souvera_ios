@@ -111,7 +111,8 @@ struct SouveraCalendarView: View {
             .souveraOfflineBanner()
     }
 
-    var body: some View {
+    /// Run 25.10.: Zweite Teil-Expression (Typchecker-Timeout).
+    private var presentationLayer: some View {
         contentLayer
         .onAppear {
             selectedDay = Date()
@@ -160,6 +161,11 @@ struct SouveraCalendarView: View {
                 .transition(.opacity)
             }
         }
+    }
+
+    var body: some View {
+        contentLayer
+        presentationLayer
         .onReceive(NotificationCenter.default.publisher(for: SouveraPushDeepLink.opened)) { notification in
             guard let target = notification.object as? SouveraPushDeepLink.Target else { return }
             handleDeepLink(target)
@@ -2315,6 +2321,17 @@ extension SouveraCalendarView {
         case "tentative": return NSLocalizedString("_invitations_tentative_", comment: "")
         case "declined": return NSLocalizedString("_invitations_decline_", comment: "")
         default: return partstat
+        }
+    }
+
+    /// Run 25.09.: Suchtreffer aus dem Overlay (Hauptansicht UND
+    /// Kalender-Übersicht) in die normale Ansicht überführen.
+    func openEventFromSearch(_ event: CalendarEventModel) {
+        selectedDay = event.start
+        viewModel.visibleMonth = event.start
+        viewMode = .day
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            detailEvent = event
         }
     }
 
