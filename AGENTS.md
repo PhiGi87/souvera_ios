@@ -77,23 +77,33 @@ for the same device class and orientation. The only source of truth is
 | Device class | Portrait | Landscape | Band top | Status reserve |
 |---|---|---|---|---|
 | iPhone compact (incl. landscape) | 58 | 58 | status bar / 0 | 0 |
-| Duo outer display (466x678) | 58 | 58 | 18 / 0 | 206 |
-| Duo inner display (669x951) | 58 | 82 | 18 / 0 | 206 (portrait only) |
+| Duo outer display (466x678)¹ | 58 | 58 | 18 / 0 | 206 |
+| Duo inner display (669x951)¹ | 58 | 82 | 18 / 0 | 206 (portrait only) |
 | iPad regular | 58 | 82 | status bar | 0 |
 | iPad split/slide over (compact) | 58 | 58 | status bar / 0 | 0 |
 | iOS < 26 | 46 | 70 | as above | as above |
+
+¹ On iOS 27.1+ the Duo values are FALLBACK ONLY: band top and status
+reserve are derived from the active occlusion regions the system reports
+for the key window (`SouveraHeaderGeometry.currentOcclusions(in:)`). Device
+dimensions must never be used to detect a device class (HIG: derive layout
+from size classes and regions, not device type).
 
 Rules:
 
 - Never derive header height or position from system measurements (safe area,
   `navigationBar.bounds`, status bar frame) — only from `SouveraHeaderGeometry`.
+  Exception: active occlusion/division regions (iOS 27.1+), which are read
+  exclusively inside `SouveraHeaderGeometry`.
 - Buttons are vertically centered in the band; 12 pt leading inset, 12 pt
   trailing inset plus the status reserve. The header background always extends
   to y = 0. Content starts at band bottom + 12 pt.
 - SwiftUI module headers (Mail, Calendar, Link, More) use the spec through
-  `SouveraHeaderGeometry.currentSpec()`.
+  `SouveraHeaderGeometry.currentSpec()` and refresh it through
+  `souveraHeaderSpecRefresh(_:)` on size-class changes.
 - UIKit navigation bars (Files, Media, Favorites, Activities, More sub-pages)
-  are forced to the same spec in `NCMainNavigationController.viewDidLayoutSubviews()`.
+  are forced to the same spec in `NCMainNavigationController.viewDidLayoutSubviews()`,
+  including the status reserve applied as additional safe area inset on the bar.
 - Do not add a second header implementation; extend `SouveraHeaderGeometry`.
 
 ### Tests

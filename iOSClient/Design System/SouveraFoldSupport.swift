@@ -8,8 +8,11 @@
 //   nutzt die App ArrangementView, das die Aufteilung um die Falz herum
 //   übernimmt.
 //
-// Alles ist availability-gated: auf älteren Systemen bleibt der bisherige
-// Aufbau unverändert.
+// Run 25.10. (Apple-konform): Die Region-Auswahl prüft `isActive` explizit,
+// die Richtung der Falz wird wie von Apple empfohlen über den Vergleich
+// frame.width/frame.height bestimmt, und die Constraint-Rechnung liegt als
+// reine Funktion vor (unit-testbar). Alles bleibt availability-gated: auf
+// älteren Systemen bleibt der bisherige Aufbau unverändert.
 
 import SwiftUI
 
@@ -23,8 +26,11 @@ struct SouveraDuoSplit<Fallback: View>: View {
     var body: some View {
         if #available(iOS 27.1, *) {
             GeometryReader { proxy in
-                let division = proxy.reservedRegions(kind: .division).first
-                if let division, division.frame.height > division.frame.width {
+                // Default-Query liefert nur aktive Regionen; die Falz ist
+                // ausschließlich bei teilgefaltetem Gerät aktiv.
+                let division = proxy.reservedRegions(kind: .division)
+                    .first(where: { $0.isActive })
+                if let division, SouveraDivisionConstraints.isVerticalFold(division.frame) {
                     ArrangementView {
                         primary
                     } secondary: {
@@ -52,27 +58,40 @@ struct SouveraDivisionConstraints: Equatable {
 
     static let none = SouveraDivisionConstraints()
 
-    /// Liest die erste aktive Division-Region aus dem Proxy.
-    @available(iOS 27.1, *)
-    static func read(_ proxy: GeometryProxy) -> SouveraDivisionConstraints {
-        guard let division = proxy.reservedRegions(kind: .division).first else {
-            return .none
-        }
-        let frame = division.frame
-        if frame.height > frame.width {
+    /// Buch-Falte (vertikal) statt Tent-Falte (horizontal) - Apples
+    /// Empfehlung: Richtung über den Vergleich der Frame-Seiten bestimmen.
+    static func isVerticalFold(_ divisionFrame: CGRect) -> Bool {
+        divisionFrame.height > divisionFrame.width
+    }
+
+    /// Reine Rechnung (unit-testbar): Overlay auf die Seite der Falz.
+    static func constraints(divisionFrame: CGRect,
+                            viewSize: CGSize) -> SouveraDivisionConstraints {
+        if isVerticalFold(divisionFrame) {
             // Vertikale Falz (Buch): Overlay in die hintere Hälfte.
             return SouveraDivisionConstraints(
-                maxWidth: max(0, proxy.size.width - frame.maxX - 32),
+                maxWidth: max(0, viewSize.width - divisionFrame.maxX - 32),
                 maxHeight: nil,
-                offsetX: frame.maxX / 2
+                offsetX: divisionFrame.maxX / 2
             )
         } else {
             // Horizontale Falz (Tent): Overlay in der oberen Hälfte halten.
             return SouveraDivisionConstraints(
                 maxWidth: nil,
-                maxHeight: max(0, frame.minY - 8),
+                maxHeight: max(0, divisionFrame.minY - 8),
                 offsetX: 0
             )
         }
+    }
+
+    /// Liest die erste aktive Division-Region aus dem Proxy.
+    @available(iOS 27.1, *)
+    static func read(_ proxy: GeometryProxy) -> SouveraDivisionConstraints {
+        guard let division = proxy.reservedRegions(kind: .division)
+            .first(where: { $0.isActive })
+        else {
+            return .none
+        }
+        return constraints(divisionFrame: division.frame, viewSize: proxy.size)
     }
 }

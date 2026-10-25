@@ -53,6 +53,9 @@ struct NCMoreView: View {
                 }
                 .onAppear { refreshHeaderSpec() }
                 .onChange(of: geo.size) { _, _ in refreshHeaderSpec() }
+                // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
+                // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
+                .souveraHeaderSpecRefresh { refreshHeaderSpec() }
         }
         .sheet(isPresented: $showAccountSettings) {
             NCAccountSettingsView(model: NCAccountSettingsModel(controller: model.tabBarController, delegate: nil))

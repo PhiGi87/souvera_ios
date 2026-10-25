@@ -55,6 +55,9 @@ struct MailView: View {
                         updateLandscapeLayout(newSize)
                         refreshHeaderSpec()
                     }
+                    // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
+                    // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
+                    .souveraHeaderSpecRefresh { refreshHeaderSpec() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .safeAreaInset(edge: .top, spacing: 0) {

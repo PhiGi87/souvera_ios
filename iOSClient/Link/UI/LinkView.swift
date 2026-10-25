@@ -95,6 +95,9 @@ struct LinkView: View {
                         updateLandscapeLayout(newSize)
                         refreshHeaderSpec()
                     }
+                    // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
+                    // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
+                    .souveraHeaderSpecRefresh { refreshHeaderSpec() }
             }
             // Souvera-Modul-Header (Run 15.09.): eigene Navbar - iOS 26
             // "Liquid Glass" flattet toolbarBackground-Verlaeufe und tintet

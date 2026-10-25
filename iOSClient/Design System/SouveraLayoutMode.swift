@@ -28,13 +28,6 @@ final class SouveraLayoutMode: ObservableObject {
     /// eigenen Header.
     let isPushed: Bool
 
-    /// Run 24.10.: Zusaetzlicher Abstand, wenn die Statusleiste den
-    /// Header ueberlappt (Fenster ohne Safe-Area-Top). Wird gemessen,
-    /// nicht geraten.
-    @Published private(set) var headerExtraTop: CGFloat = 0
-    @Published private(set) var headerExtraTrailing: CGFloat = 0
-
-
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
         let regular = traitCollection.horizontalSizeClass == .regular
@@ -52,20 +45,6 @@ final class SouveraLayoutMode: ObservableObject {
             ]),
             isPushed: true
         )
-    }
-
-    /// Aktualisiert den Header-Zusatzabstand aus dem echten Fenster.
-    func updateHeaderFit(window: UIWindow?) {
-        let safeTop = window?.safeAreaInsets.top ?? 0
-        let statusBottom = SouveraHeaderFit.statusBarBottom(in: window)
-        let top = SouveraHeaderFit.extraTopPadding(statusBarBottom: statusBottom,
-                                                  safeAreaTop: safeTop)
-        if abs(top - headerExtraTop) > 0.5 {
-            headerExtraTop = top
-        }
-        // Run 24.10.: KEIN horizontaler Inset mehr. Die Statusleiste liegt
-        // oben; ein Trailing-Inset schob die Header-Buttons nur nach innen
-        // (Außendisplay: 120 pt). extraTrailing bleibt fuer Kompatibilitaet 0.
     }
 
     /// Run 24.10.: Split nur auf echten Breiten. Das Außendisplay ist im
@@ -96,28 +75,4 @@ final class SouveraLayoutMode: ObservableObject {
 /// NavigationController-Typ zu kennen.
 protocol SouveraLayoutModeProviding: AnyObject {
     var layoutMode: SouveraLayoutMode { get }
-}
-
-/// Run 24.10.: Messwerte fuer den Header (Statusleiste vs. Safe Area).
-enum SouveraHeaderFit {
-    /// Reine Rechnung (unit-testbar): fehlender Abstand nach oben.
-    static func extraTopPadding(statusBarBottom: CGFloat?, safeAreaTop: CGFloat) -> CGFloat {
-        guard let bottom = statusBarBottom else { return 0 }
-        return min(32, max(0, bottom - safeAreaTop))
-    }
-
-    /// Unterkante der Statusleiste in Fensterkoordinaten (nil, wenn keine).
-    static func statusBarBottom(in window: UIWindow?) -> CGFloat? {
-        guard let window,
-              let scene = window.windowScene,
-              let manager = scene.statusBarManager else { return nil }
-        let frame = manager.statusBarFrame
-        guard !frame.isEmpty else { return nil }
-        let screen = window.screen
-        let inWindow = window.convert(frame, from: screen.coordinateSpace)
-        guard inWindow.intersects(window.bounds), inWindow.maxY > 0 else { return nil }
-        return inWindow.maxY
-    }
-
-
 }

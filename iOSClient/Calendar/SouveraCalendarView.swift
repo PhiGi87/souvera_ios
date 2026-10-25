@@ -117,6 +117,9 @@ struct SouveraCalendarView: View {
                 .padding(.top, 12)
                 .onAppear { refreshHeaderSpec() }
                 .onChange(of: geometry.size) { _, _ in refreshHeaderSpec() }
+                // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
+                // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
+                .souveraHeaderSpecRefresh { refreshHeaderSpec() }
             }
             .toolbar(.hidden, for: .navigationBar)
             .souveraOfflineBanner()

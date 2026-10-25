@@ -216,16 +216,16 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     var title: String = ""
     /// Titel links neben dem Leading-Block (Chat-Raum-Stil: "< Test Termin").
     var titleAfterLeading: Bool = false
-    /// Run 24.10.: Zusaetzlicher Abstand, wenn die Statusleiste den Header
-    /// ueberlappt (gemessen, nicht geraten).
-    var extraTop: CGFloat = 0
     var extraTrailing: CGFloat = 0
     /// Run 24.10. (Duo-Außendisplay): Im Rail-Modus wandern die rechten
     /// Aktionen in die separate Pille; der Header zeigt dann nur noch
     /// Leading/Titel.
     /// Run 24.10.: Optionale Hohe (z. B. gemessene Systembar-Hoehe), damit
     /// der Mehr-Header exakt so hoch wie die Bridge-Bars ist.
-    var heightOverride: CGFloat? = nil
+    /// Run 25.10. (4b): Der Default ist IMMER die zentrale Regel
+    /// (SouveraHeaderGeometry) - eine Aufrufstelle, die den Override
+    /// vergisst, weicht nicht mehr vom App-Standard ab.
+    var heightOverride: CGFloat? = SouveraHeaderGeometry.currentSpec().height
     @ViewBuilder var leading: Leading
     @ViewBuilder var trailing: Trailing
 
@@ -257,7 +257,6 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         .padding(.leading, 12)
         .padding(.trailing, 12 + extraTrailing)
         .frame(height: contentHeight)
-        .padding(.top, extraTop)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(

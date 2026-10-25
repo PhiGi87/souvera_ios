@@ -42,6 +42,8 @@ enum SouveraFormFactor {
     /// Fenster-Bounds der aktiven Szene (statt UIScreen.main, das auf
     /// Zwei-Display-Geräten ambig ist). In App-Extensions liefert der
     /// Aufruf den Bildschirm, weil `view.window` dort bereits vorliegt.
+    /// Ohne Szene/Window gibt es keine verlaessliche Groesse - bewusst
+    /// .zero statt Bildschirmraten (Run 25.10., Apple-konform).
     static var currentWindowBounds: CGRect {
         if let app = sharedApplication {
             let scenes = app.connectedScenes.compactMap { $0 as? UIWindowScene }
@@ -49,7 +51,7 @@ enum SouveraFormFactor {
             let window = scene?.windows.first(where: { $0.isKeyWindow }) ?? scene?.windows.first
             if let bounds = window?.bounds { return bounds }
         }
-        return UIScreen.main.bounds
+        return .zero
     }
 
     /// `UIApplication.shared` ist in App-Extensions als nicht verfügbar

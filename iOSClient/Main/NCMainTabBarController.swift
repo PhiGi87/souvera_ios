@@ -640,7 +640,6 @@ class NCMainTabBarController: UITabBarController {
             // dem Oeffnen im falschen Modus (Glas statt Bridge).
             let traits = resolvedTraitCollection()
             layoutMode.update(traitCollection: traits)
-            layoutMode.updateHeaderFit(window: view.window)
             // Run 25.10.: Der SwiftUI-Modul-Header ist der EINZIGE Header
             // der gehosteten Tabs (Mail/Kalender/Link) - in allen Lagen.
             // Die UIKit-Bar bleibt dauerhaft versteckt; ihre Hoehe/Position

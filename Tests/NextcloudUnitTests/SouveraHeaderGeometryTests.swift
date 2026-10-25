@@ -43,20 +43,23 @@ struct SouveraHeaderGeometryTests {
         #expect(s.trailingReserve == 0)
     }
 
-    @Test("Duo outer display portrait: 58 pt, status reserve")
+    @Test("Duo outer display WITHOUT region data: safe compact fallback")
     func duoOuterPortrait() {
+        // Run 25.10. (Apple-konform): Ohne Occlusion-Regionen ist der
+        // Aussendisplay nicht mehr ueber Pixelmasse erkennbar - bewusst
+        // der abgesicherte Kompakt-Fallback statt geratener Werte.
         let s = spec(466, 678, .compact, .phone, safeTop: 0)
         #expect(s.height == 58)
-        #expect(s.bandTop == 18)
-        #expect(s.trailingReserve == 206)
+        #expect(s.bandTop == 0)
+        #expect(s.trailingReserve == 0)
     }
 
-    @Test("Duo outer display landscape: 58 pt, status reserve")
+    @Test("Duo outer display landscape WITHOUT region data: safe fallback")
     func duoOuterLandscape() {
         let s = spec(678, 466, .compact, .phone, safeTop: 0)
         #expect(s.height == 58)
         #expect(s.bandTop == 0)
-        #expect(s.trailingReserve == 206)
+        #expect(s.trailingReserve == 0)
     }
 
     @Test("iPhone portrait: band below status bar")
@@ -97,5 +100,120 @@ struct SouveraHeaderGeometryTests {
         #expect(s.height == 58)
         #expect(s.bandTop == 24)
         #expect(s.trailingReserve == 0)
+    }
+
+    // MARK: - iOS 27.1: Occlusion-Regionen statt Pixelmasse (Run 25.10.)
+
+    /// Duo-Aussendisplay WIRD NICHT MEHR ueber Pixelmassse erkannt:
+    /// kompakt + Safe Area rundum 0 + aktive Kapsel-Occlusion.
+    private func specWithRegions(_ width: CGFloat, _ height: CGFloat,
+                                 _ sizeClass: UIUserInterfaceSizeClass,
+                                 _ idiom: UIUserInterfaceIdiom,
+                                 insets: UIEdgeInsets = .zero,
+                                 occlusions: [CGRect]) -> SouveraHeaderGeometry.Spec {
+        SouveraHeaderGeometry.spec(windowSize: CGSize(width: width, height: height),
+                                   horizontalSizeClass: sizeClass,
+                                   idiom: idiom,
+                                   safeAreaInsets: insets,
+                                   occlusions: occlusions.map { SouveraHeaderGeometry.Occlusion(frame: $0) })
+    }
+
+    @Test("Duo outer display detected via occlusion region, band below capsule")
+    func duoOuterViaRegion() {
+        // Status-Kapsel: x=130..336, y=8..40 (margins inklusive)
+        let s = specWithRegions(466, 678, .compact, .phone,
+                                occlusions: [CGRect(x: 130, y: 8, width: 206, height: 32)])
+        #expect(s.height == 58)
+        #expect(s.bandTop == 40) // Band rueckt unter die Kapsel
+        #expect(s.trailingReserve == 206) // Fallback, kein Region-Konflikt mehr
+    }
+
+    @Test("Occlusion still inside the band reserves trailing space")
+    func occlusionInsideBandReservesTrailing() {
+        // Kapsel 50..80 ragt in die Fallback-Zone (18..76): Band rueckt auf
+        // 80, die Region endet genau dort -> kein Region-Konflikt mehr.
+        let s = specWithRegions(466, 678, .compact, .phone,
+                                occlusions: [CGRect(x: 200, y: 50, width: 200, height: 30)])
+        #expect(s.bandTop == 80)
+        #expect(s.trailingReserve == 206)
+    }
+
+    @Test("Region in the band of the pushed band reserves space")
+    func regionInsideBandAfterPush() {
+        // Kapsel 8..80: Band rueckt auf 80; die Region endet genau dort.
+        let s = specWithRegions(466, 678, .compact, .phone,
+                                occlusions: [CGRect(x: 100, y: 8, width: 260, height: 72)])
+        #expect(s.bandTop == 80)
+        #expect(s.trailingReserve == 206)
+    }
+
+    @Test("Region intersecting the un-pushed band derives the reserve")
+    func regionInsideFallbackBandDerivesReserve() {
+        // Region beginnt bei 60 - unterhalb der Push-Schwelle (18+40) -
+        // und ragt ins Band (18..76): die Reserve wird ABGELEITET.
+        let s = specWithRegions(466, 678, .compact, .phone,
+                                occlusions: [CGRect(x: 150, y: 60, width: 200, height: 40)])
+        #expect(s.bandTop == 18)
+        #expect(s.trailingReserve == 316) // 466 - 150
+    }
+
+    @Test("Landscape iPhone with Dynamic Island is NOT the Duo outer display")
+    func landscapeiPhoneIsNotOuterDisplay() {
+        // Querformat: seitliche Safe-Area-Insets (~59 pt) schliessen den
+        // Duo-Aussendisplay aus - trotz aktiver Occlusion (Dynamic Island).
+        let insets = UIEdgeInsets(top: 0, left: 59, bottom: 21, right: 59)
+        let s = specWithRegions(852, 393, .compact, .phone,
+                                insets: insets,
+                                occlusions: [CGRect(x: 376, y: 11, width: 100, height: 30)])
+        #expect(s.height == 58)
+        #expect(s.bandTop == 0)
+        #expect(s.trailingReserve == 0)
+    }
+
+    @Test("Portrait iPhone with occlusion keeps the status-bar band")
+    func portraitiPhoneWithOcclusion() {
+        let insets = UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0)
+        let s = specWithRegions(393, 852, .compact, .phone,
+                                insets: insets,
+                                occlusions: [CGRect(x: 120, y: 11, width: 150, height: 37)])
+        #expect(s.height == 58)
+        #expect(s.bandTop == 59)
+        #expect(s.trailingReserve == 0)
+    }
+
+    @Test("Compact phone WITHOUT occlusion data falls back to the safe table")
+    func compactWithoutRegionsFallsBack() {
+        // Die abgesicherte Regel: ohne Regionsdaten kein Duo-Außendisplay.
+        let s = specWithRegions(466, 678, .compact, .phone, occlusions: [])
+        #expect(s.height == 58)
+        #expect(s.bandTop == 0)
+        #expect(s.trailingReserve == 0)
+    }
+
+    @Test("AGENTS.md table holds for every consumer input (SwiftUI == UIKit)")
+    func identicalGeometryForAllSurfaces() {
+        // Beide Konsumenten (SwiftUI-Modul-Header via currentSpec(),
+        // UIKit-Bars via applyHeaderGeometry()) rufen DIESELBE spec()-
+        // Funktion: identische Eingaben muessen die Tabellen-Werte der
+        // verbindlichen Header-Regel liefern.
+        let cases: [(String, CGSize, UIUserInterfaceSizeClass, UIUserInterfaceIdiom, UIEdgeInsets, CGFloat, CGFloat, CGFloat)] = [
+            ("iPhone portrait", CGSize(width: 393, height: 852), .compact, .phone, UIEdgeInsets(top: 59, left: 0, bottom: 34, right: 0), 58, 59, 0),
+            ("iPhone landscape", CGSize(width: 852, height: 393), .compact, .phone, .zero, 58, 0, 0),
+            ("Duo inner portrait", CGSize(width: 669, height: 951), .regular, .phone, .zero, 58, 18, 206),
+            ("Duo inner landscape", CGSize(width: 951, height: 669), .regular, .phone, .zero, wideHeight, 0, 0),
+            ("iPad portrait", CGSize(width: 1024, height: 1366), .regular, .pad, UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0), 58, 24, 0),
+            ("iPad landscape", CGSize(width: 1366, height: 1024), .regular, .pad, UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0), wideHeight, 24, 0),
+            ("iPad split (compact)", CGSize(width: 678, height: 1024), .compact, .pad, UIEdgeInsets(top: 24, left: 0, bottom: 20, right: 0), 58, 24, 0)
+        ]
+        for (name, size, sizeClass, idiom, insets, expectedHeight, expectedBandTop, expectedReserve) in cases {
+            let s = SouveraHeaderGeometry.spec(windowSize: size,
+                                               horizontalSizeClass: sizeClass,
+                                               idiom: idiom,
+                                               safeAreaInsets: insets,
+                                               occlusions: [])
+            #expect(s.height == expectedHeight, "\(name): height")
+            #expect(s.bandTop == expectedBandTop, "\(name): bandTop")
+            #expect(s.trailingReserve == expectedReserve, "\(name): trailingReserve")
+        }
     }
 }

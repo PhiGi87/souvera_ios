@@ -262,25 +262,38 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         let window = view.window
         let bounds = window?.bounds.size ?? view.bounds.size
         let traits = window?.traitCollection ?? traitCollection
+        // Run 25.10. (Apple-konform): Band-Position/Reserve kommen auf
+        // iOS 27.1+ aus den aktiven Occlusion-Regionen des Fensters,
+        // nicht mehr aus Hartcodierten Duo-Massen.
         let spec = SouveraHeaderGeometry.spec(
             windowSize: bounds,
             horizontalSizeClass: traits.horizontalSizeClass,
             idiom: traits.userInterfaceIdiom,
-            safeAreaTop: window?.safeAreaInsets.top ?? 0
+            safeAreaInsets: window?.safeAreaInsets ?? .zero,
+            occlusions: SouveraHeaderGeometry.currentOcclusions(in: window)
         )
         var frame = navigationBar.frame
+        // Run 25.10. (1b): Die SwiftUI-Modul-Header halten rechts Platz
+        // fuer die Kapsel frei (extraTrailing) - die UIKit-Bar gleiches
+        // Recht ueber zusaetzliche Safe-Area-Insets an der Bar.
+        let barSafeArea = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: spec.trailingReserve)
+        let safeAreaChanged = navigationBar.additionalSafeAreaInsets != barSafeArea
         guard abs(frame.minY - spec.bandTop) > 0.5
-            || abs(frame.height - spec.height) > 0.5 else { return }
+            || abs(frame.height - spec.height) > 0.5
+            || safeAreaChanged else { return }
         frame.origin.y = spec.bandTop
         frame.size.height = spec.height
         navigationBar.frame = frame
+        if safeAreaChanged {
+            navigationBar.additionalSafeAreaInsets = barSafeArea
+        }
         // Inhalt (Titel/Buttons) im neuen Band neu zentrieren.
         navigationBar.layoutIfNeeded()
-        let stamp = "\(Int(spec.bandTop))x\(Int(spec.height))"
+        let stamp = "\(Int(spec.bandTop))x\(Int(spec.height))r\(Int(spec.trailingReserve))"
         if stamp != lastHeaderGeometryLog {
             lastHeaderGeometryLog = stamp
             SouveraLog.write("SidebarActions",
-                             "[SidebarActions] navBarSpec y=\(Int(spec.bandTop)) h=\(Int(spec.height))")
+                             "[SidebarActions] navBarSpec y=\(Int(spec.bandTop)) h=\(Int(spec.height)) reserve=\(Int(spec.trailingReserve))")
         }
     }
 
