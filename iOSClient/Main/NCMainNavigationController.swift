@@ -275,17 +275,20 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         var frame = navigationBar.frame
         // Run 25.10. (1b): Die SwiftUI-Modul-Header halten rechts Platz
         // fuer die Kapsel frei (extraTrailing) - die UIKit-Bar gleiches
-        // Recht ueber zusaetzliche Safe-Area-Insets an der Bar.
-        let barSafeArea = UIEdgeInsets(top: 0, left: 0, bottom: 0, right: spec.trailingReserve)
-        let safeAreaChanged = navigationBar.additionalSafeAreaInsets != barSafeArea
-        guard abs(frame.minY - spec.bandTop) > 0.5
+        // Recht ueber die Layout-Margins der Bar (die Bar-Items liegen
+        // innerhalb der Margins).
+        let frameChanged = abs(frame.minY - spec.bandTop) > 0.5
             || abs(frame.height - spec.height) > 0.5
-            || safeAreaChanged else { return }
-        frame.origin.y = spec.bandTop
-        frame.size.height = spec.height
-        navigationBar.frame = frame
-        if safeAreaChanged {
-            navigationBar.additionalSafeAreaInsets = barSafeArea
+        let marginsChanged = abs(navigationBar.directionalLayoutMargins.trailing - spec.trailingReserve) > 0.5
+        guard frameChanged || marginsChanged else { return }
+        if frameChanged {
+            frame.origin.y = spec.bandTop
+            frame.size.height = spec.height
+            navigationBar.frame = frame
+        }
+        if marginsChanged {
+            navigationBar.directionalLayoutMargins = NSDirectionalEdgeInsets(
+                top: 0, leading: 0, bottom: 0, trailing: spec.trailingReserve)
         }
         // Inhalt (Titel/Buttons) im neuen Band neu zentrieren.
         navigationBar.layoutIfNeeded()
