@@ -217,6 +217,12 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
     /// Titel links neben dem Leading-Block (Chat-Raum-Stil: "< Test Termin").
     var titleAfterLeading: Bool = false
     var extraTrailing: CGFloat = 0
+    /// Run 25.10. (Fix "Gradient bis y=0"): Band-Oberkante INNERHALB des
+    /// Headers - der blaue Verlauf deckt die ganze Flaeche inkl. Band-Top
+    /// und blutet per ignoresSafeArea bis y=0. Externes Top-Padding vor
+    /// dem Header startete den Verlauf erst am Band (weisser Streifen,
+    /// sobald bandTop > safeTop - Duo-Regression von heute frueh).
+    var bandTop: CGFloat = 0
     /// Run 24.10. (Duo-Außendisplay): Im Rail-Modus wandern die rechten
     /// Aktionen in die separate Pille; der Header zeigt dann nur noch
     /// Leading/Titel.
@@ -259,6 +265,10 @@ struct SouveraModuleHeader<Leading: View, Trailing: View>: View {
         .padding(.leading, 12)
         .padding(.trailing, 12 + extraTrailing)
         .frame(height: contentHeight)
+        // Run 25.10.: Band-Inhalt sitzt unterhalb der Band-Oberkante
+        // (Kapsel-Zone) - INNERHALB des Headers, nicht als externes
+        // Padding, damit der Verlauf die Zone abdeckt.
+        .padding(.top, bandTop)
         .frame(maxWidth: .infinity)
         .environment(\.colorScheme, .light)
         .background(

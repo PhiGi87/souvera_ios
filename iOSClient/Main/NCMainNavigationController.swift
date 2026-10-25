@@ -84,6 +84,21 @@ class NCMainNavigationController: UINavigationController, UINavigationController
 
     // MARK: - View Life Cycle
 
+    /// Run 25.10.: Liest die Occlusion-Regionen nach Apples Muster in
+    /// updateConstraints (UIKit trackt die Lesung und ruft bei
+    /// Regionswechseln erneut auf) und stoesst die Header-Geometrie an.
+    private lazy var headerRegionObserver: SouveraReservedRegionObserver = {
+        let observer = SouveraReservedRegionObserver(frame: .zero)
+        observer.onOcclusionsChanged = { [weak self] occlusions in
+            guard let self else { return }
+            (self as? SouveraLayoutModeProviding)?.layoutMode
+                .updateHeaderRegions(occlusions.map(\.frame),
+                                     windowWidth: self.view.bounds.width)
+            self.applyHeaderGeometry(occlusions: occlusions)
+        }
+        return observer
+    }()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         self.delegate = self
@@ -91,6 +106,7 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         setNavigationBarAppearance()
         setNavigationBarHidden(false, animated: false)
         view.insertSubview(headerFillerView, belowSubview: navigationBar)
+        headerRegionObserver.install(in: view)
 
         Task {
             optionButtonItem.image = UIImage(systemName: "ellipsis")
@@ -257,20 +273,22 @@ class NCMainNavigationController: UINavigationController, UINavigationController
     /// alle Mehr-Unterseiten (z. B. Einstellungen). Die Systemhoehe wird
     /// dabei bewusst ueberschrieben - sie liefert auf dem Duo je nach
     /// Zustand 0/24/46/58/82/140 pt.
-    func applyHeaderGeometry() {
+    func applyHeaderGeometry(occlusions: [SouveraHeaderGeometry.Occlusion]? = nil) {
         guard !isNavigationBarHidden, !navigationBar.isHidden else { return }
         let window = view.window
         let bounds = window?.bounds.size ?? view.bounds.size
         let traits = window?.traitCollection ?? traitCollection
-        // Run 25.10. (Apple-konform): Band-Position/Reserve kommen auf
-        // iOS 27.1+ aus den aktiven Occlusion-Regionen des Fensters,
-        // nicht mehr aus Hartcodierten Duo-Massen.
+        // Run 25.10. (Apple-konform): Regionen kommen vom positionierenden
+        // View (Observer, Lesung in updateConstraints) - niemals global.
+        let regions = occlusions ?? headerRegionObserver.readOcclusions()
+        (self as? SouveraLayoutModeProviding)?.layoutMode
+            .updateHeaderRegions(regions.map(\.frame), windowWidth: bounds.width)
         let spec = SouveraHeaderGeometry.spec(
             windowSize: bounds,
             horizontalSizeClass: traits.horizontalSizeClass,
             idiom: traits.userInterfaceIdiom,
             safeAreaInsets: window?.safeAreaInsets ?? .zero,
-            occlusions: SouveraHeaderGeometry.currentOcclusions(in: window)
+            occlusions: regions
         )
         var frame = navigationBar.frame
         // Run 25.10. (1b): Die SwiftUI-Modul-Header halten rechts Platz

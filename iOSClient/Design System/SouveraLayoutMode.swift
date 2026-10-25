@@ -28,6 +28,17 @@ final class SouveraLayoutMode: ObservableObject {
     /// eigenen Header.
     let isPushed: Bool
 
+    /// Run 25.10.: Aktive Occlusion-Regionen (iOS 27.1+) des Fensters, in
+    /// dem dieser Tab gehostet wird, plus dessen Breite. Gespeist vom
+    /// SouveraReservedRegionObserver des Hosting-NavigationControllers
+    /// (Apple-Lesemuster: Lesung in updateConstraints) - die SwiftUI-
+    /// Module leiten daraus dieselbe horizontale Reserve ab wie die
+    /// UIKit-Bars. Bewusst [CGRect] statt SouveraHeaderGeometry.Occlusion:
+    /// diese Datei wird auch in den Extension-Targets kompiliert, wo das
+    /// Haupt-App-Target-File nicht existiert.
+    @Published private(set) var headerOcclusionFrames: [CGRect] = []
+    @Published private(set) var headerWindowWidth: CGFloat = 0
+
     init(traitCollection: UITraitCollection, isPushed: Bool = false) {
         self.isPushed = isPushed
         let regular = traitCollection.horizontalSizeClass == .regular
@@ -66,6 +77,18 @@ final class SouveraLayoutMode: ObservableObject {
         }
         if regular != isRegularWidth {
             isRegularWidth = regular
+        }
+    }
+
+    /// Aktualisiert Regionen/Fensterbreite nur bei tatsaechlicher
+    /// Aenderung (verhindert Publish-Stuerm durch updateConstraints).
+    func updateHeaderRegions(_ occlusionFrames: [CGRect],
+                             windowWidth: CGFloat) {
+        if occlusionFrames != headerOcclusionFrames {
+            headerOcclusionFrames = occlusionFrames
+        }
+        if abs(windowWidth - headerWindowWidth) > 0.5 {
+            headerWindowWidth = windowWidth
         }
     }
 

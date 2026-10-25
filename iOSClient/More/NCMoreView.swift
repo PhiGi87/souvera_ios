@@ -15,6 +15,10 @@ import NextcloudKit
 /// `NCMoreNavigationController`.
 struct NCMoreView: View {
     @StateObject private var model: NCMoreModel
+    /// Run 25.10.: Layout-Modus + Occlusion-Regionen des Hosts
+    /// (NCMainTabBarController reicht das EnvironmentObject an alle
+    /// Tab-Roots) - Quelle fuer die zentrale Header-Geometrie.
+    @EnvironmentObject private var layout: SouveraLayoutMode
     @State private var autoUploadCounter = NCAutoUploadCounter()
     @State private var showAccountSettings = false
     @ObservedObject private var maintenanceMonitor = SouveraMaintenanceMonitor.shared
@@ -48,11 +52,13 @@ struct NCMoreView: View {
                 // Kalender/Link/Dateien).
                 .safeAreaInset(edge: .top, spacing: 0) {
                     moreHeader
-                        .padding(.top, headerSpec.bandTop - headerSafeTop)
                         .padding(.bottom, headerSpec.contentGap)
                 }
                 .onAppear { refreshHeaderSpec() }
                 .onChange(of: geo.size) { _, _ in refreshHeaderSpec() }
+                // Run 25.10.: Regions-/Trait-Wechsel des Hosts ziehen den
+                // Spec nach (horizontale Reserve identisch zur UIKit-Bar).
+                .onChange(of: layout.headerOcclusionFrames) { _, _ in refreshHeaderSpec() }
                 // Run 25.10. (4b): Zentraler Refresh fuer Kontextwechsel
                 // ohne Groessenaenderung (Duo faltbar, Split/Slide Over).
                 .souveraHeaderSpecRefresh { refreshHeaderSpec() }
@@ -83,13 +89,15 @@ struct NCMoreView: View {
 
     /// Run 25.10.: Zentrale Header-Geometrie (einzige Quelle).
     @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
-    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
 
     private func refreshHeaderSpec() {
-        let spec = SouveraHeaderGeometry.currentSpec()
+        // Run 25.10.: Regionen kommen vom Hosting-NavigationController
+        // (SouveraReservedRegionObserver) via EnvironmentObject - die
+        // horizontale Reserve ist damit identisch zur UIKit-Bar.
+        let spec = SouveraHeaderGeometry.currentSpec(
+            windowWidth: layout.headerWindowWidth,
+            occlusionFrames: layout.headerOcclusionFrames)
         if spec != headerSpec { headerSpec = spec }
-        let top = SouveraHeaderGeometry.currentSafeAreaTop
-        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
     }
 
     private var listContent: some View {
@@ -161,8 +169,9 @@ struct NCMoreView: View {
     /// liegen im System-Seitenband.
     private var moreHeader: some View {
         SouveraModuleHeader(
-            // Run 25.10.: Zentrale Regel - Hoehe und Status-Reserve.
+            // Run 25.10.: Zentrale Regel - Hoehe, Band-Top und Status-Reserve.
             extraTrailing: headerSpec.trailingReserve,
+            bandTop: headerSpec.bandTop,
             heightOverride: headerSpec.height,
             leading: {
                 Image("souveraLogo")
@@ -499,4 +508,5 @@ extension NCMoreModel {
     NavigationStack {
         NCMoreView(model: .preview)
     }
+    .environmentObject(SouveraLayoutMode(traitCollection: UITraitCollection(userInterfaceIdiom: .phone)))
 }

@@ -68,7 +68,6 @@ struct MailView: View {
                 // aus), Inhalt beginnt Band-Unterkante + 12.
                 if !layout.isPushed {
                     moduleHeader
-                        .padding(.top, headerSpec.bandTop - headerSafeTop)
                         .padding(.bottom, headerSpec.contentGap)
                 }
             }
@@ -155,6 +154,11 @@ struct MailView: View {
         // denselben Button-Satz.
         .onChange(of: layout.usesBridgeHeader) { _, _ in
             populateHeaderBridge()
+        }
+        // Run 25.10.: Regions-/Trait-Wechsel des Hosts ziehen den Spec nach
+        // (horizontale Reserve identisch zur UIKit-Bar).
+        .onChange(of: layout.headerOcclusionFrames) { _, _ in
+            refreshHeaderSpec()
         }
         .onChange(of: landscapeLayout) { _, _ in
             populateHeaderBridge()
@@ -342,13 +346,15 @@ struct MailView: View {
     /// Run 25.10.: Header-Geometrie aus der zentralen Regel (einzige Quelle
     /// fuer Hoehe/Position - siehe SouveraHeaderGeometry).
     @State private var headerSpec = SouveraHeaderGeometry.currentSpec()
-    @State private var headerSafeTop = SouveraHeaderGeometry.currentSafeAreaTop
 
     private func refreshHeaderSpec() {
-        let spec = SouveraHeaderGeometry.currentSpec()
+        // Run 25.10.: Regionen kommen vom Hosting-NavigationController
+        // (SouveraReservedRegionObserver) via EnvironmentObject - die
+        // horizontale Reserve ist damit identisch zur UIKit-Bar.
+        let spec = SouveraHeaderGeometry.currentSpec(
+            windowWidth: layout.headerWindowWidth,
+            occlusionFrames: layout.headerOcclusionFrames)
         if spec != headerSpec { headerSpec = spec }
-        let top = SouveraHeaderGeometry.currentSafeAreaTop
-        if abs(top - headerSafeTop) > 0.5 { headerSafeTop = top }
     }
 
     /// Fokus-Leser: nicht auf dem iPhone (dort bleibt das Detail als
@@ -401,6 +407,7 @@ struct MailView: View {
             title: headerTitle,
             titleAfterLeading: !headerTitle.isEmpty,
             extraTrailing: headerSpec.trailingReserve,
+            bandTop: headerSpec.bandTop,
             heightOverride: headerSpec.height,
             leading: {
                 if isDetail {

@@ -83,18 +83,25 @@ for the same device class and orientation. The only source of truth is
 | iPad split/slide over (compact) | 58 | 58 | status bar / 0 | 0 |
 | iOS < 26 | 46 | 70 | as above | as above |
 
-¹ On iOS 27.1+ the Duo values are FALLBACK ONLY: band top and status
-reserve are derived from the active occlusion regions the system reports
-for the key window (`SouveraHeaderGeometry.currentOcclusions(in:)`). Device
-dimensions must never be used to detect a device class (HIG: derive layout
-from size classes and regions, not device type).
+¹ On iOS 27.1+ the Duo values are FALLBACK ONLY: the status reserve is
+derived from the active occlusion regions the system reports (read by the
+positioning view — `SouveraReservedRegionObserver` for UIKit bars, the
+hosting controller's `SouveraLayoutMode` for SwiftUI modules). `bandTop`
+NEVER follows a region: the band background lies behind the status capsule
+(horizontal avoidance), only the interactive button row is shifted by the
+reserve. Device dimensions must never be used to detect a device class
+(HIG: derive layout from size classes and regions, not device type).
 
 Rules:
 
 - Never derive header height or position from system measurements (safe area,
   `navigationBar.bounds`, status bar frame) — only from `SouveraHeaderGeometry`.
-  Exception: active occlusion/division regions (iOS 27.1+), which are read
-  exclusively inside `SouveraHeaderGeometry`.
+  Exception: active occlusion/division regions (iOS 27.1+), which drive the
+  HORIZONTAL reserve exclusively and are read only in the view that positions
+  the content — UIKit: inside `updateConstraints()` (Apple tracks the read and
+  re-runs it on region changes), SwiftUI: via the hosting controller's
+  `SouveraLayoutMode.headerOcclusions`. Never read regions from a global
+  key-window lookup.
 - Buttons are vertically centered in the band; 12 pt leading inset, 12 pt
   trailing inset plus the status reserve. The header background always extends
   to y = 0. Content starts at band bottom + 12 pt.

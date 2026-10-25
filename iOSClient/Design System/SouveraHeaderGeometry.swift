@@ -11,11 +11,13 @@
 // Tabelle unten; keine Komponente darf Hoehe oder Position selbst ableiten.
 //
 // Run 25.10. (Apple-konform, iOS 27.1): Die Duo-Werte sind jetzt NUR noch
-// Fallback. Auf iOS 27.1+ leitet die Spec Band-Position und Reserve aus den
-// vom System gemeldeten Occlusion-Regionen (Kamera/Status-Kapsel) ab -
-// nicht mehr aus Hartcodierten Pixelmassen (HIG: Layout aus Size Classes
-// und Regionen ableiten, nicht aus Geraetedimensionen). Ohne Regionsdaten
-// (iOS < 27.1, Simulator, Extensions) greift die Tabelle unverändert.
+// Fallback. Auf iOS 27.1+ wird die horizontale Reserve aus den vom System
+// gemeldeten Occlusion-Regionen (Kamera/Status-Kapsel) abgeleitet - nicht
+// mehr aus Hartcodierten Pixelmassen (HIG: Layout aus Size Classes und
+// Regionen ableiten, nicht aus Geraetedimensionen). bandTop folgt NIE einer
+// Region (Tabelle/Safe Area - der Band-Grund liegt hinter der Kapsel);
+// nur die Button-Reihe weicht horizontal aus. Ohne Regionsdaten
+// (iOS < 27.1, Simulator, Extensions) greift die Tabelle unveraendert.
 //
 // | Geraeteklasse                  | hoch | quer | Band oben | Reserve |
 // |--------------------------------|------|------|-----------|---------|
@@ -80,6 +82,14 @@ enum SouveraHeaderGeometry {
 
     /// Reine, unit-testbare Ableitung. `occlusions` sind aktive
     /// Occlusion-Regionen in Fensterkoordinaten (leer = Fallback-Tabelle).
+    ///
+    /// Run 25.10. (Apple-konform, horizontale Ausweichrichtung): Occlusion-
+    /// Regionen steuern AUSSCHLIESSLICH die horizontale Reserve der Button-
+    /// Reihe ("place CONTENT outside this area" - der Band-Grund liegt als
+    /// Hintergrund hinter der Status-Kapsel). bandTop folgt nie einer
+    /// Region, sondern der Tabelle bzw. der Safe Area - das vollstaendige
+    /// Runterdruecken des Bands war der Regressionsfehler von heute früh
+    /// (Band bei 82/124 pt, Reserve quer 0 statt 206).
     static func spec(windowSize: CGSize,
                      horizontalSizeClass: UIUserInterfaceSizeClass,
                      idiom: UIUserInterfaceIdiom,
@@ -101,30 +111,21 @@ enum SouveraHeaderGeometry {
             && safeAreaInsets.right < 10
             && !occlusions.isEmpty
 
-        if isInnerDisplay {
+        if isInnerDisplay || isOuterDisplay {
+            let height = isInnerDisplay
+                ? baseHeight(isLandscape: isLandscape, regularWidth: true)
+                : baseHeight(isLandscape: false, regularWidth: false)
             let fallbackTop: CGFloat = isLandscape ? 0 : duoFallbackBandTop
-            let fallbackReserve: CGFloat = isLandscape ? 0 : duoFallbackReserve
-            let top = bandTop(occlusions: occlusions, fallback: fallbackTop)
+            let fallbackReserve: CGFloat = (isOuterDisplay || !isLandscape) ? duoFallbackReserve : 0
+            let top = max(safeAreaTop, fallbackTop)
             return Spec(
-                height: baseHeight(isLandscape: isLandscape, regularWidth: true),
+                height: height,
                 bandTop: top,
                 trailingReserve: trailingReserve(bandTop: top,
-                                                 bandHeight: baseHeight(isLandscape: isLandscape, regularWidth: true),
+                                                 bandHeight: height,
                                                  windowWidth: windowSize.width,
                                                  occlusions: occlusions,
                                                  fallback: fallbackReserve)
-            )
-        }
-        if isOuterDisplay {
-            let top = bandTop(occlusions: occlusions, fallback: isLandscape ? 0 : duoFallbackBandTop)
-            return Spec(
-                height: baseHeight(isLandscape: false, regularWidth: false),
-                bandTop: top,
-                trailingReserve: trailingReserve(bandTop: top,
-                                                 bandHeight: baseHeight(isLandscape: false, regularWidth: false),
-                                                 windowWidth: windowSize.width,
-                                                 occlusions: occlusions,
-                                                 fallback: duoFallbackReserve)
             )
         }
         // iPhone / iPad: Band beginnt unter der System-Statusleiste.
@@ -136,31 +137,19 @@ enum SouveraHeaderGeometry {
         )
     }
 
-    /// Band-Oberkante: meldet das System Occlusionen, die in die
-    /// Fallback-Bandzone hineinragen, rueckt das Band unter deren
-    /// Unterkante - sonst gilt der Fallback.
-    private static func bandTop(occlusions: [Occlusion],
-                                fallback: CGFloat) -> CGFloat {
-        let topMaxY = occlusions
-            .filter { $0.frame.minY <= fallback + 40 }
-            .map(\.frame.maxY)
-            .max()
-        return max(fallback, topMaxY ?? fallback)
-    }
-
-    /// Reserve rechts: Occlusionen, die trotz der Band-Verschiebung noch
-    /// DEUTLICH ins Band ragen, verdraengen die Button-Reihe (Breite von
-    /// deren Vorderkante bis zum rechten Rand). Kante-an-Kante-Beruehrung
-    /// gilt bewusst nicht als Konflikt (0.5 pt Toleranz wie beim
-    /// Geometrie-Guard); ohne solche Regionen gilt der Fallback.
+    /// Reserve rechts: Occlusionen, die das Band DEUTLICH vertikal
+    /// schneiden, verdraengen die Button-Reihe horizontal (Breite von der
+    /// Vorderkante der Region bis zum rechten Rand). Kante-an-Kante gilt
+    /// bewusst nicht als Konflikt (0.5 pt Toleranz wie beim Geometrie-
+    /// Guard); ohne treffende Region gilt der Fallback der Tabelle.
     private static func trailingReserve(bandTop: CGFloat,
                                         bandHeight: CGFloat,
                                         windowWidth: CGFloat,
                                         occlusions: [Occlusion],
                                         fallback: CGFloat) -> CGFloat {
-        let band = CGRect(x: 0, y: bandTop, width: windowWidth, height: bandHeight)
+        let bandMaxY = bandTop + bandHeight
         let reserve = occlusions
-            .filter { $0.frame.minY < band.maxY - 0.5 && $0.frame.maxY > band.minY + 0.5 }
+            .filter { $0.frame.maxY > bandTop + 0.5 && $0.frame.minY < bandMaxY - 0.5 }
             .map { windowWidth - $0.frame.minX }
             .max()
         guard let reserve else { return fallback }
@@ -183,23 +172,12 @@ enum SouveraHeaderGeometry {
         currentWindow?.safeAreaInsets.top ?? 0
     }
 
-    /// Aktive Occlusion-Regionen des Key-Windows (iOS 27.1+). Aeltere
-    /// Systeme melden keine Regionen - die Spec faellt auf die Tabelle
-    /// zurueck. Die Default-Query liefert nur AKTIVE Regionen (z. B. ist
-    /// die Innenkamera nur bei Nutzung aktiv, die Aussenkamera immer).
-    static func currentOcclusions(in window: UIWindow?) -> [Occlusion] {
-        guard let window else { return [] }
-        if #available(iOS 27.1, *) {
-            // reservedRegions ist MainActor-isoliert; der Aufruf erfolgt
-            // aus UI-Kontext (viewDidLayoutSubviews / SwiftUI body).
-            return MainActor.assumeIsolated {
-                window.reservedRegions(kind: .occlusion)
-            }
-            .map { Occlusion(frame: $0.frame) }
-        }
-        return []
-    }
-
+    /// Spec der aktuellen Umgebung OHNE Regionsdaten (Tabellen-Fallback).
+    /// Run 25.10. (Apple-konform): Regionen werden nie global vom ersten
+    /// Key-Window gelesen ("check in the view that positions the content"),
+    /// sondern vom positionierenden View bereitgestellt (UIKit:
+    /// SouveraReservedRegionObserver, SwiftUI: SouveraLayoutMode des
+    /// Hosting-NavigationControllers) und hier uebergeben.
     static func currentSpec() -> Spec {
         let window = currentWindow
         let traits = window?.traitCollection
@@ -207,6 +185,24 @@ enum SouveraHeaderGeometry {
                     horizontalSizeClass: traits?.horizontalSizeClass ?? .compact,
                     idiom: traits?.userInterfaceIdiom ?? .phone,
                     safeAreaInsets: window?.safeAreaInsets ?? .zero,
-                    occlusions: currentOcclusions(in: window))
+                    occlusions: [])
+    }
+
+    /// currentSpec() mit region-abgeleiteter horizontaler Reserve.
+    /// `occlusionFrames` kommen vom positionierenden Kontext (Observer
+    /// bzw. Modul-Layout, Fensterkoordinaten); ohne Regionen bleibt die
+    /// Tabellen-Reserve. Bewusst [CGRect] - der Aufrufer (SouveraLayoutMode)
+    /// wird auch in Extension-Targets kompiliert.
+    static func currentSpec(windowWidth: CGFloat,
+                            occlusionFrames: [CGRect]) -> Spec {
+        let base = currentSpec()
+        guard !occlusionFrames.isEmpty else { return base }
+        let width = windowWidth > 0 ? windowWidth : (currentWindow?.bounds.width ?? 0)
+        let reserve = trailingReserve(bandTop: base.bandTop,
+                                      bandHeight: base.height,
+                                      windowWidth: width,
+                                      occlusions: occlusionFrames.map { Occlusion(frame: $0) },
+                                      fallback: base.trailingReserve)
+        return Spec(height: base.height, bandTop: base.bandTop, trailingReserve: reserve)
     }
 }

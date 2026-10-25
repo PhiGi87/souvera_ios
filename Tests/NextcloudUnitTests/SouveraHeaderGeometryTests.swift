@@ -118,43 +118,70 @@ struct SouveraHeaderGeometryTests {
                                    occlusions: occlusions.map { SouveraHeaderGeometry.Occlusion(frame: $0) })
     }
 
-    @Test("Duo outer display detected via occlusion region, band below capsule")
+    @Test("Duo outer display detected via occlusion region, horizontal reserve")
     func duoOuterViaRegion() {
-        // Status-Kapsel: x=130..336, y=8..40 (margins inklusive)
+        // Status-Kapsel: x=130..336, y=8..40 (margins inklusive).
+        // Run 25.10. (Fix): bandTop bleibt 18 (Tabelle) - das Band liegt
+        // ALS HINTERGRUND hinter der Kapsel; nur die Button-Reihe weicht
+        // HORIZONTAL aus (Reserve = Breite bis zur Region-Vorderkante).
         let s = specWithRegions(466, 678, .compact, .phone,
                                 occlusions: [CGRect(x: 130, y: 8, width: 206, height: 32)])
         #expect(s.height == 58)
-        #expect(s.bandTop == 40) // Band rueckt unter die Kapsel
-        #expect(s.trailingReserve == 206) // Fallback, kein Region-Konflikt mehr
+        #expect(s.bandTop == 18)
+        #expect(s.trailingReserve == 336) // 466 - 130
     }
 
-    @Test("Occlusion still inside the band reserves trailing space")
+    @Test("Region intersecting the band derives the trailing reserve")
     func occlusionInsideBandReservesTrailing() {
-        // Kapsel 50..80 ragt in die Fallback-Zone (18..76): Band rueckt auf
-        // 80, die Region endet genau dort -> kein Region-Konflikt mehr.
+        // Kapsel 50..80 schneidet das Band (18..76) -> Reserve abgeleitet.
         let s = specWithRegions(466, 678, .compact, .phone,
                                 occlusions: [CGRect(x: 200, y: 50, width: 200, height: 30)])
-        #expect(s.bandTop == 80)
-        #expect(s.trailingReserve == 206)
+        #expect(s.bandTop == 18)
+        #expect(s.trailingReserve == 266) // 466 - 200
     }
 
-    @Test("Region in the band of the pushed band reserves space")
-    func regionInsideBandAfterPush() {
-        // Kapsel 8..80: Band rueckt auf 80; die Region endet genau dort.
+    @Test("Tall capsule overlapping the band reserves trailing space")
+    func tallCapsuleReservesTrailing() {
         let s = specWithRegions(466, 678, .compact, .phone,
                                 occlusions: [CGRect(x: 100, y: 8, width: 260, height: 72)])
-        #expect(s.bandTop == 80)
-        #expect(s.trailingReserve == 206)
+        #expect(s.bandTop == 18)
+        #expect(s.trailingReserve == 366) // 466 - 100
     }
 
-    @Test("Region intersecting the un-pushed band derives the reserve")
+    @Test("Region intersecting the band derives the reserve")
     func regionInsideFallbackBandDerivesReserve() {
-        // Region beginnt bei 60 - unterhalb der Push-Schwelle (18+40) -
-        // und ragt ins Band (18..76): die Reserve wird ABGELEITET.
         let s = specWithRegions(466, 678, .compact, .phone,
                                 occlusions: [CGRect(x: 150, y: 60, width: 200, height: 40)])
         #expect(s.bandTop == 18)
         #expect(s.trailingReserve == 316) // 466 - 150
+    }
+
+    @Test("Region above the band keeps the table fallback reserve")
+    func regionAboveBandKeepsFallback() {
+        // Region endet bei 18 (Kante am Band) -> kein Konflikt, Fallback 206.
+        let s = specWithRegions(466, 678, .compact, .phone,
+                                occlusions: [CGRect(x: 130, y: 0, width: 206, height: 18)])
+        #expect(s.bandTop == 18)
+        #expect(s.trailingReserve == 206)
+    }
+
+    @Test("Real inner-display frames from the field log keep table band top")
+    func realSystemFramesKeepBandTop() {
+        // Reale System-Frames (Log Build 202610251129): Innen hoch meldet
+        // die Kapsel-Region mit maxY 82, in quer mit maxY 124 - die alte
+        // Ableitung drueckte das Band darauf (82/124 pt, Reserve quer 0).
+        // Korrekt: bandTop bleibt 18/0, Reserve wird horizontal abgeleitet.
+        let portrait = specWithRegions(669, 951, .regular, .phone,
+                                       occlusions: [CGRect(x: 263, y: 0, width: 206, height: 82)])
+        #expect(portrait.height == 58)
+        #expect(portrait.bandTop == 18)
+        #expect(portrait.trailingReserve == 406) // 669 - 263
+
+        let landscape = specWithRegions(951, 669, .regular, .phone,
+                                        occlusions: [CGRect(x: 500, y: 0, width: 340, height: 124)])
+        #expect(landscape.height == wideHeight)
+        #expect(landscape.bandTop == 0)
+        #expect(landscape.trailingReserve == 451) // 951 - 500
     }
 
     @Test("Landscape iPhone with Dynamic Island is NOT the Duo outer display")
