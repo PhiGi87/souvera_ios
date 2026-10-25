@@ -78,7 +78,10 @@ struct NCMoreView: View {
     private var brandBand: some View {
         HStack {
             Spacer()
-            Image("souveraLogo")
+            // Run 25.10.: Abgeleitetes Asset - Schriftzug in
+            // brandPrimaryDeep, S-Kachel byte-identisch zum Original
+            // (Light-Mode). Dark-Mode behaelt den weissen Schriftzug.
+            Image("souveraLogoOnLight")
                 .resizable()
                 .scaledToFit()
                 .frame(height: 44)
