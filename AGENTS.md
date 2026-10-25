@@ -106,6 +106,10 @@ Rules:
   including the status reserve applied as additional safe area inset on the bar.
 - Do not add a second header implementation; extend `SouveraHeaderGeometry`.
 
+### CI / Release
+
+- ALWAYS monitor GitHub Actions runs (builds, tests, TestFlight uploads) until they reach a terminal state. If a run fails, read the failure logs, fix the problem, and re-run until everything is green and the upload succeeded.
+
 ### Tests
 
 - When implementing new test suites, prefer Swift Testing over XCTest for implementation.
