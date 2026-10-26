@@ -496,7 +496,8 @@ struct SouveraCalendarView: View {
                 partstatFor: { viewModel.displayPartstat(for: $0) },
                 onCreate: createEventInSlot,
                 bottomPadding: isWide ? 12 : 40,
-                scrollTrigger: scrollTrigger
+                scrollTrigger: scrollTrigger,
+                onMoveEvent: moveEvent
             )
             .refreshable {
                 await viewModel.load()
@@ -611,7 +612,8 @@ struct SouveraCalendarView: View {
                 compact: isWide,
                 onPrev: { shiftSelectedDay(by: -3) },
                 onNext: { shiftSelectedDay(by: 3) },
-                scrollTrigger: scrollTrigger
+                scrollTrigger: scrollTrigger,
+                onMoveEvent: moveEvent
             )
         }
         .offset(x: swipeOffset)
@@ -789,9 +791,15 @@ private struct TimelineDayView: View {
     /// Zählt bei jedem Erscheinen des Kalenders hoch (Tab-Wechsel) ->
     /// Scroll zur Jetzt-Linie.
     var scrollTrigger: Int = 0
+    /// Run 25.10. (Drag-and-Drop): Termin-Verschiebung per Long-Press +
+    /// Ziehen. allowsDayShift = Tag-Wechsel in der 3-Tage-Ansicht.
+    var allowsDayShift: Bool = false
+    var onMoveEvent: ((CalendarEventModel, Int, Int) -> Void)? = nil
 
     private let hours = Array(0..<24)
     @State private var slotActive = false
+    @State private var liftedEventId: String?
+    @State private var moveDrag: CGSize = .zero
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -801,7 +809,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 })
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 }, onMoveEvent: onMoveEvent)
                     }
                 }
                 .padding(.bottom, bottomPadding)
@@ -938,7 +946,9 @@ private struct TimelineColumn: View {
                         .frame(height: max(height - 4, 20), alignment: .top)
                 }
                 ForEach(timedEvents) { event in
-                    eventBlock(event, containerWidth: geometry.size.width)
+                    eventBlock(event,
+                               containerWidth: geometry.size.width,
+                               dragTranslation: liftedEventId == event.id ? moveDrag : nil)
                 }
                 if showsNowLine {
                     // Jetzt-Linie bewusst ZULETZT zeichnen - immer sichtbar,
@@ -1052,6 +1062,12 @@ private struct TimelineColumn: View {
         let status = partstatFor(event).lowercased()
         let isDeclined = status == "declined"
         let isTentative = status == "tentative"
+        // Run 25.10. (Drag-and-Drop): Abgelehnte Einladungen sind nicht
+        // verschiebbar (kein Lift) - wie Apple Kalender.
+        let isDraggable = !isDeclined
+        let dayShift = dragTranslation.map { Int(($0.width / containerWidth).rounded()) } ?? 0
+        let minuteShift = dragTranslation.map { Int((($0.height / hourHeight * 60) / 15).rounded() * 15) } ?? 0
+        let isLifted = liftedEventId == event.id
 
         Button {
             onSelect(event)
@@ -1089,12 +1105,48 @@ private struct TimelineColumn: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Run 25.10. (Drag-and-Drop): Long-Press hebt den Termin ab (wie
+        // Apple Kalender), der Drag verschiebt ihn (15-min-Raster, Dauer
+        // erhalten, Tag-Wechsel in der 3-Tage-Ansicht). Der Tap (Selektion)
+        // bleibt unberuehrt (tap != long-press).
+        .onLongPressGesture(minimumDuration: 0.45, maximumDistance: 14) {
+            guard isDraggable, liftedEventId != event.id else { return }
+            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+            liftedEventId = event.id
+            moveDrag = .zero
+            onSlotActive?(true)
+        }
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onChanged { value in
+                    guard liftedEventId == event.id else { return }
+                    moveDrag = value.translation
+                }
+                .onEnded { value in
+                    guard liftedEventId == event.id else { return }
+                    liftedEventId = nil
+                    onSlotActive?(false)
+                    let dayShift = allowsDayShift ? Int((value.translation.width / containerWidth).rounded()) : 0
+                    let minuteShift = Int(((value.translation.height / hourHeight * 60) / 15).rounded() * 15)
+                    guard dayShift != 0 || minuteShift != 0 else { return }
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                    onMoveEvent?(event, dayShift, minuteShift)
+                }
+        )
         // ERST die volle Blockgröße (Dauer des Termins) setzen, DANN den
         // Hintergrund darüberlegen und ZULETZT positionieren - so deckt die
         // farbige Fläche die exakte Termindauer ab, statt nur die Höhe des
         // Textinhalts (das war der Anzeigefehler: 1h-Termin wirkte wie
         // ~30-45 Minuten).
         .frame(width: max(width - 3, 0), height: height, alignment: .top)
+        // Run 25.10.: Der gezogene Block folgt dem Finger (15-min-Raster,
+        // Spaltenwechsel in der 3-Tage-Ansicht) und hebt sich optisch ab.
+        .offset(x: x + CGFloat(dayShift) * containerWidth,
+                y: offsetY + 2 + CGFloat(minuteShift) / 60.0 * hourHeight)
+        .opacity(isLifted ? 0.85 : 1)
+        .scaleEffect(isLifted ? 1.03 : 1)
+        .shadow(color: isLifted ? .black.opacity(0.35) : .clear, radius: 8, y: 4)
+        .zIndex(isLifted ? 10 : 1)
         .background {
             let shape = RoundedRectangle(cornerRadius: 6)
             if isDeclined {
@@ -1111,8 +1163,6 @@ private struct TimelineColumn: View {
                 shape.fill(colorFor(event).opacity(0.22))
             }
         }
-        .offset(x: x, y: offsetY + 2)
-        .zIndex(1)
     }
 
     /// Terminanlage: Long-Press (~0,45 s) und dann Ziehen wählt den
@@ -1193,6 +1243,8 @@ private struct ThreeDayTimelineView: View {
     /// Zählt bei jedem Erscheinen des Kalenders hoch (Tab-Wechsel) ->
     /// Scroll zur Jetzt-Linie.
     var scrollTrigger: Int = 0
+    /// Run 25.10. (Drag-and-Drop): Tag-Wechsel per Drag moeglich.
+    var onMoveEvent: ((CalendarEventModel, Int, Int) -> Void)? = nil
 
     private let hours = Array(0..<24)
     private var hourHeight: CGFloat { compact ? 40 : 44 }
@@ -1260,7 +1312,9 @@ private struct ThreeDayTimelineView: View {
                                 partstatFor: partstatFor,
                                 onCreate: onCreate,
                                 showTrailingBorder: true,
-                                onSlotActive: { slotActive = $0 }
+                                onSlotActive: { slotActive = $0 },
+                                allowsDayShift: true,
+                                onMoveEvent: onMoveEvent
                             )
                             .frame(maxWidth: .infinity)
                         }

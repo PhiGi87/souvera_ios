@@ -971,6 +971,19 @@ final class CalendarViewModel: ObservableObject {
             ?? writableCalendars.first
     }
 
+    /// Run 25.10. (Drag-and-Drop): Verschiebt einen Termin auf den
+    /// Ziel-Startzeitpunkt (Dauer erhalten) - über die bestehende
+    /// saveEvent-Pipeline (optimistische CalDAV-Writes, offline-tauglich).
+    /// Gibt false zurück, wenn der Schreibvorgang scheitert (z. B.
+    /// schreibgeschützter Kalender) - der Aufrufer setzt die UI zurück.
+    func reschedule(_ event: CalendarEventModel, dayShift: Int, minuteShift: Int) async -> Bool {
+        let offset = TimeInterval(dayShift * 86_400 + minuteShift * 60)
+        var draft = draft(from: event)
+        draft.start = event.start.addingTimeInterval(offset)
+        draft.end = event.end.addingTimeInterval(offset)
+        return await saveEvent(draft, existing: event)
+    }
+
     func draft(from event: CalendarEventModel) -> EventDraft {
         var draft = EventDraft()
         draft.uid = event.uid
