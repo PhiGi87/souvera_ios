@@ -1471,6 +1471,11 @@ private struct MailMessageListView: View {
                 }
             }
             .listStyle(.plain)
+            // Run 25.10. (Fix "leere Fläche oben, Duo innen hoch"): Die Liste
+            // addierte ihren automatischen Top-Inset aus der Container-Safe-
+            // Area (Regular-Height: safeTop ~82) ZUSÄTZLICH zum Bar-Inset des
+            // Hosting-Controllers. Apple-API: contentMargins(_:for:).
+            .contentMargins(.top, 0, for: .scrollContent)
             // Die Liste bleibt beim Öffnen einer Mail gemountet (ZStack in
             // content) - die Scrollposition bleibt dadurch automatisch
             // erhalten, ohne Anchor-Restore.
