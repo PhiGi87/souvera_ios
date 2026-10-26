@@ -1096,9 +1096,20 @@ private struct TimelineColumn: View {
         // Run 25.10. (Drag-and-Drop): Abgelehnte Einladungen sind nicht
         // verschiebbar (kein Lift) - wie Apple Kalender.
         let isDraggable = !isDeclined
-        let shiftUnit = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
-        let dayShift = dragTranslation.map { Int(($0.width / shiftUnit).rounded()) } ?? 0
-        let minuteShift = dragTranslation.map { Int((($0.height / hourHeight * 60) / 15).rounded() * 15) } ?? 0
+        let shiftUnit: CGFloat = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
+        // Run 26.10.: Explizit aufgeloest (kein map mit gemischter
+        // CGFloat/Int-Arithmetik) - der Type-Checker brauchte sonst zu
+        // lang fuer den Ausdruck.
+        let dayShift: Int
+        let minuteShift: Int
+        if let drag = dragTranslation {
+            dayShift = Int((drag.width / shiftUnit).rounded())
+            let quarterMinutes = (drag.height / hourHeight * 60) / 15
+            minuteShift = Int(quarterMinutes.rounded()) * 15
+        } else {
+            dayShift = 0
+            minuteShift = 0
+        }
         let isLifted = liftedEventId == event.id
 
         Button {
