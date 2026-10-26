@@ -697,14 +697,18 @@ struct MailView: View {
                 detailColumn
                     .padding(.leading, foldersCollapsed ? 0 : 10)
             }
+            // Run 25.10. (Fix "weisser Rand unten" + "graue Streifen neben
+            // der Trennlinie"): Der graue Grund liegt NUR hinter der
+            // Ordnerspalte (in der unteren Safe Area gezogen - Home-
+            // Indicator-Zone) - vorher färbte der flächige Hintergrund die
+            // Detailspalten-Ränder grau. Die Nachrichtenliste bleibt weiss.
+            .background(alignment: .topLeading) {
+                Color(.systemGroupedBackground)
+                    .frame(width: foldersCollapsed ? 0 : folderWidth)
+                    .ignoresSafeArea(edges: .bottom)
+                    .opacity(foldersCollapsed ? 0 : 1)
+            }
         }
-        // Run 25.10. (Fix "weisser Rand unten in der Ordnerleiste"): Die
-        // Safe-Area-Grenz (Home-Indicator) zeigte den weissen Fenster-
-        // hintergrund, weil die Ordnerspalte dort nicht hinreicht. Der
-        // graue Hintergrund wird hinter beide Spalten gelegt und in die
-        // untere Safe Area gezogen; die Nachrichtenliste ueberdeckt ihn
-        // mit ihrer eigenen (weissen) Flaeche.
-        .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .bottom))
         .overlay {
             // Fokus-Leser: Abdunklung ueber die GESAMTE Display-Breite
             // (auch ueber die Ordnerspalte), Karte zentriert.

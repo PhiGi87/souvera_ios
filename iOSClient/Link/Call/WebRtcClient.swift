@@ -186,11 +186,22 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     /// aktiven Szene (Apple-Duo-Vorgabe: keine UIDevice-Orientierung),
     /// Gilt fuer offen, geknickt (Tent), hoch und quer.
     func updateRotation() {
-        let orientation: UIInterfaceOrientation = MainActor.assumeIsolated {
-            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-            let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-            return scene?.interfaceOrientation ?? .portrait
-        }
+        // Run 25.10. (Fix "App-Crash beim Call-Start"): startVideoCapture
+        // laeuft auf dem WebRTC-Queue - MainActor.assumeIsolated dort war
+        // ein fataler Trap. Thread-sichere Variante: auf dem Main-Thread
+        // direkt lesen, sonst per main.sync-Hop (Deadlock-frei: der
+        // Main-Thread wartet nirgendwo auf den WebRTC-Queue).
+        let orientation: UIInterfaceOrientation = {
+            let read = { () -> UIInterfaceOrientation in
+                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+                let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+                return scene?.interfaceOrientation ?? .portrait
+            }
+            if Thread.isMainThread {
+                return MainActor.assumeIsolated { read() }
+            }
+            return DispatchQueue.main.sync { MainActor.assumeIsolated { read() } }
+        }()
         // Dokumentierte Aequivalente zu AVCaptureVideoOrientation:
         // .portrait = 90, .portraitUpsideDown = 270,
         // .landscapeLeft = 0, .landscapeRight = 180.
@@ -202,10 +213,10 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         default: angle = 90
         }
         captureRotationAngle = angle
-        MainActor.assumeIsolated {
-            applyCaptureRotation()
-            CallDebugLog.log("CameraRotation", "angle=\(angle) orientation=\(orientation.rawValue)")
-        }
+        // AVCaptureConnection ist thread-safe fuer Rotationsaenderungen
+        // (auch vom WebRTC-Queue aus).
+        applyCaptureRotation()
+        CallDebugLog.log("CameraRotation", "angle=\(Int(angle)) orientation=\(orientation.rawValue)")
     }
 
     func startCapture() {
