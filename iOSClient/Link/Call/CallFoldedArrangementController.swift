@@ -58,7 +58,7 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
 
     enum Pose { case portraitFolded, bookFolded }
 
-    private(set) var currentPose: Pose?
+    private(set) var currentPose: FoldedCallPose?
 
     private let tilesContentView: UIView
     private let chromeContentView: UIView
