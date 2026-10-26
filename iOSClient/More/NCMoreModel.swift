@@ -642,8 +642,11 @@ final class NCMoreModel: ObservableObject {
         // Run 23.10.: Gepushte Module bekommen einen eigenen Layout-Modus
         // (kein eigener Header, kein Split) - die aeussere Bar liefert
         // Titel und Zurueck.
+        // Run 25.10.: SwiftUI-Seite der Minimierungs-Abschaltung - zentral
+        // fuer ALLE gepushten Seiten (Einstellungen, Kontakte, ...).
         let hosting = NCHostedController(
-            rootView: view.environmentObject(SouveraLayoutMode.pushed())
+            rootView: view.souveraFixedNavigationBar()
+                .environmentObject(SouveraLayoutMode.pushed())
         )
         hosting.title = title
         // Run 25.10.: Alle gepushten Seiten mit Inline-Titel - identische
@@ -809,7 +812,8 @@ final class NCMoreModel: ObservableObject {
             model: NCSettingsModel(controller: controller)
         )
 
-        let settingsController = UIHostingController(rootView: settingsView)
+        // Run 25.10.: SwiftUI-Seite der Minimierungs-Abschaltung.
+        let settingsController = UIHostingController(rootView: settingsView.souveraFixedNavigationBar())
         settingsController.title = NSLocalizedString("_settings_", comment: "")
         settingsController.navigationItem.largeTitleDisplayMode = .never
 

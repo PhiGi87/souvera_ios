@@ -698,7 +698,9 @@ class NCMainTabBarController: UITabBarController {
         // injizieren. Startwerte kommen vom Tab-Controller; der Hosting-
         // Controller aktualisiert sie bei Trait-Wechseln (Fenster/Display).
         let layoutMode = SouveraLayoutMode(traitCollection: traitCollection)
-        let hostingController = UIHostingController(rootView: root.environmentObject(layoutMode))
+        // Run 25.10.: SwiftUI-Seite der Minimierungs-Abschaltung (alle Tabs).
+        let hostingController = UIHostingController(
+            rootView: root.souveraFixedNavigationBar().environmentObject(layoutMode))
         let navigationController = SouveraHostedNavigationController(
             rootViewController: hostingController,
             layoutMode: layoutMode,
@@ -722,7 +724,8 @@ class NCMainTabBarController: UITabBarController {
 
     private func makeMoreNavigationController() -> UIViewController {
         let moreView = NCMoreView(account: account, controller: self)
-        let hostingController = UIHostingController(rootView: moreView)
+        // Run 25.10.: SwiftUI-Seite der Minimierungs-Abschaltung.
+        let hostingController = UIHostingController(rootView: moreView.souveraFixedNavigationBar())
 
         hostingController.navigationItem.title = NSLocalizedString("_more_", comment: "")
 
