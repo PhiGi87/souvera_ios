@@ -1159,14 +1159,13 @@ private struct TimelineColumn: View {
         // Textinhalts (das war der Anzeigefehler: 1h-Termin wirkte wie
         // ~30-45 Minuten).
         .frame(width: max(width - 3, 0), height: height, alignment: .top)
-        // Run 25.10.: Der gezogene Block folgt dem Finger (15-min-Raster,
-        // Spaltenwechsel in der 3-Tage-Ansicht) und hebt sich optisch ab.
-        .offset(x: x + CGFloat(dayShift) * containerWidth,
-                y: offsetY + 2 + CGFloat(minuteShift) / 60.0 * hourHeight)
-        .opacity(isLifted ? 0.85 : 1)
-        .scaleEffect(isLifted ? 1.03 : 1)
-        .shadow(color: isLifted ? .black.opacity(0.35) : .clear, radius: 8, y: 4)
-        .zIndex(isLifted ? 10 : 1)
+        // Run 26.10. (Fix "Termin ohne farbige Flaeche"): Die Reihenfolge
+        // ist bindend - ERST die Blockgroesse, DANN der Hintergrund, und
+        // .offset ZULETZT. .offset verschiebt nur das Rendering des
+        // Inhalts; ein dahinter liegendes .background bliebe an der
+        // unverschobenen Position (oben in der Spalte) und waere damit
+        // unsichtbar. Lift-Effekte nach dem Hintergrund, damit sie
+        // Inhalt UND Flaeche zusammen treffen.
         .background {
             let shape = RoundedRectangle(cornerRadius: 6)
             if isDeclined {
@@ -1183,6 +1182,14 @@ private struct TimelineColumn: View {
                 shape.fill(colorFor(event).opacity(0.22))
             }
         }
+        .opacity(isLifted ? 0.85 : 1)
+        .scaleEffect(isLifted ? 1.03 : 1)
+        .shadow(color: isLifted ? .black.opacity(0.35) : .clear, radius: 8, y: 4)
+        // Der gezogene Block folgt dem Finger (15-min-Raster,
+        // Spaltenwechsel in der 3-Tage-Ansicht).
+        .offset(x: x + CGFloat(dayShift) * containerWidth,
+                y: offsetY + 2 + CGFloat(minuteShift) / 60.0 * hourHeight)
+        .zIndex(isLifted ? 10 : 1)
     }
 
     /// Terminanlage: Long-Press (~0,45 s) und dann Ziehen wählt den
