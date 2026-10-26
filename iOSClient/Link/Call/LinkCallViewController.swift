@@ -663,11 +663,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Geknickt hoch: die Eigenansicht lebt in der Control-Haelfte.
     private var isFoldedPortrait: Bool {
         guard isFoldedLayoutActive, #available(iOS 27.1, *) else { return false }
-        return (foldedArrangement as? CallFoldedArranging)?.currentPose == .portraitFolded
+        return (foldedArrangement as? CallFoldedArranging)?.currentPose == FoldedCallPose.portraitFolded
     }
 
     /// Posen-Erkennung: aktive Falz (Division-Region) + Interface-Orientierung.
-    private func detectFoldedPose() -> CallFoldedArrangementController.Pose? {
+    private func detectFoldedPose() -> FoldedCallPose? {
         let divisions = view.reservedRegions(kind: .division)
         guard !divisions.isEmpty else { return nil }
         let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait

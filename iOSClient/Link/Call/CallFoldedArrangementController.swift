@@ -40,10 +40,17 @@ final class CallPartHostViewController: UIViewController {
 
 /// Verwaltet die geknickte Anordnung: Secondary/Primary-Belegung je Pose.
 /// Abstraktion fuer die type-eliminierte Referenz im Call-VC.
+/// Posen des geknickten Call-Erlebnisses (dateibweit, damit Referenzen
+/// ohne Availability-Erboundsicht moeglich sind).
+enum FoldedCallPose {
+    case portraitFolded
+    case bookFolded
+}
+
 @available(iOS 27.1, *)
 protocol CallFoldedArranging: AnyObject {
-    func apply(pose: Pose)
-    var currentPose: Pose? { get }
+    func apply(pose: FoldedCallPose)
+    var currentPose: FoldedCallPose? { get }
 }
 
 @available(iOS 27.1, *)
@@ -104,7 +111,7 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     }
 
     /// Wendet die Platzierung fuer die Pose an (animierter Wechsel).
-    func apply(pose: Pose) {
+    func apply(pose: FoldedCallPose) {
         currentPose = pose
         // Container-Verdrahtung je Pose:
         switch pose {
