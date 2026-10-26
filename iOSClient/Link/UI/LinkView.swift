@@ -1224,6 +1224,9 @@ struct LinkChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
+                // Run 25.10.: "Fertig"-Knopf - die Tastatur ist jederzeit
+                // manuell ausblendbar (Menues/Buttons darunter erreichbar).
+                .souveraKeyboardDoneButton()
                 // Offenen Raum app-weit melden: Push-Banner für DIESEN Raum
                 // werden unterdrückt (nur Ton), Run 12.09.
                 .onAppear { SouveraOpenChatState.shared.token = token }

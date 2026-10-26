@@ -1115,6 +1115,7 @@
 		AA22C3D4E5F60718293A0573 /* SouveraHeaderStandardTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0572 /* SouveraHeaderStandardTests.swift */; };
 		AA22C3D4E5F60718293A0571 /* SouveraHeaderBackdropView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0570 /* SouveraHeaderBackdropView.swift */; };
 		AA22C3D4E5F60718293A0575 /* SouveraHeaderStandard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0574 /* SouveraHeaderStandard.swift */; };
+		AA22C3D4E5F60718293A0577 /* SouveraKeyboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0576 /* SouveraKeyboard.swift */; };
 		AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */; };
 		AA22C3D4E5F60718293A053D /* SouveraLayoutMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A0537 /* SouveraLayoutMode.swift */; };
 		AA22C3D4E5F60718293A053C /* SouveraLayoutModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */; };
@@ -2195,6 +2196,7 @@
 		AA22C3D4E5F60718293A0572 /* SouveraHeaderStandardTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraHeaderStandardTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0570 /* SouveraHeaderBackdropView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHeaderBackdropView.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0574 /* SouveraHeaderStandard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraHeaderStandard.swift"; sourceTree = SOURCE_ROOT; };
+		AA22C3D4E5F60718293A0576 /* SouveraKeyboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraKeyboard.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraFoldSupport.swift"; sourceTree = SOURCE_ROOT; };
 		AA22C3D4E5F60718293A053B /* SouveraLayoutModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraLayoutModeTests.swift; sourceTree = "<group>"; };
 		AA22C3D4E5F60718293A0534 /* SouveraFormFactorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SouveraFormFactorTests.swift; sourceTree = "<group>"; };
@@ -3447,6 +3449,7 @@
 				AA22C3D4E5F60718293A0539 /* SouveraFoldSupport.swift */,
 				AA22C3D4E5F60718293A0570 /* SouveraHeaderBackdropView.swift */,
 				AA22C3D4E5F60718293A0574 /* SouveraHeaderStandard.swift */,
+				AA22C3D4E5F60718293A0576 /* SouveraKeyboard.swift */,
 				AA22C3D4E5F60718293A0316 /* LinkRingingWatcher.swift */,
 				AA22C3D4E5F60718293A031A /* SouveraMailFromAddresses.swift */,
 				AA22C3D4E5F60718293A0312 /* SouveraJmapMailSearch.swift */,
@@ -5245,6 +5248,7 @@
 				AA22C3D4E5F60718293A053A /* SouveraFoldSupport.swift in Sources */,
 				AA22C3D4E5F60718293A0571 /* SouveraHeaderBackdropView.swift in Sources */,
 				AA22C3D4E5F60718293A0575 /* SouveraHeaderStandard.swift in Sources */,
+				AA22C3D4E5F60718293A0577 /* SouveraKeyboard.swift in Sources */,
 				AA22C3D4E5F60718293A0317 /* LinkRingingWatcher.swift in Sources */,
 				AA22C3D4E5F60718293A031B /* SouveraMailFromAddresses.swift in Sources */,
 				AA22C3D4E5F60718293A0313 /* SouveraJmapMailSearch.swift in Sources */,
