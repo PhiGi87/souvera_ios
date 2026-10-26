@@ -703,13 +703,21 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 tilesContentView: tilesContentView,
                 chromeContentView: chromeContentView,
                 chatContentView: chatHost.view,
-                chatRetain: chatHost
-            ) { [weak self] in
-                // Self-View-Kachel in die Control-Haifte (Nutzer-Entscheidung).
-                guard let self else { return }
-                localContainer.removeFromSuperview()
-                chromeContentView.addSubview(localContainer)
-            }
+                chatRetain: chatHost,
+                onSelfViewToChrome: { [weak self] in
+                    // Self-View-Kachel in die Control-Haelfte (Nutzer-Entscheidung).
+                    guard let self else { return }
+                    localContainer.removeFromSuperview()
+                    chromeContentView.addSubview(localContainer)
+                },
+                onSelfViewToTiles: { [weak self] in
+                    // Rueckweg (Buch-Modus): Eigenansicht zurueck zur Video-Seite.
+                    guard let self else { return }
+                    localContainer.removeFromSuperview()
+                    tilesContentView.addSubview(localContainer)
+                    layoutTiles()
+                }
+            )
             foldedArrangement = arrangement
             addChild(arrangement)
             view.addSubview(arrangement.view)
@@ -722,10 +730,16 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         if let pose, #available(iOS 27.1, *), let arrangement = foldedArrangement as? CallFoldedArranging {
             arrangement.apply(pose: pose)
             if case .portraitFolded = pose {
-                // Self-View in der Control-Haelfte positionieren.
-                localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
-                localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
-                                                y: max(0, chromeContentView.bounds.midY - 40))
+                // Self-View in der Control-Haelfte positionieren. Run 26.10.:
+                // ASYNC nach dem Layout-Lauf - die Bounds des Chrome-Containers
+                // sind erst nach dem Arrangement-Durchlauf final (beim Falten
+                // schrumpft der Primary-Slot auf die untere Haelfte).
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
+                    localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
+                                                    y: max(0, chromeContentView.bounds.midY - 40))
+                }
             }
             return
         }
@@ -739,6 +753,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             isFoldedLayoutActive = false
             tilesContentView.translatesAutoresizingMaskIntoConstraints = true
             chromeContentView.translatesAutoresizingMaskIntoConstraints = true
+            // Run 26.10.: Container zurueck in die eigene View - sie lagen
+            // zuletzt im Arrangement, dessen Host-VCs beim Abbau wegfallen
+            // (ohne Re-Add bliebe der Call schwarz).
+            view.addSubview(tilesContentView)
+            view.addSubview(chromeContentView)
             // Self-View zurueck in die Video-Seite.
             if localContainer.superview !== tilesContentView {
                 localContainer.removeFromSuperview()
@@ -979,7 +998,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         chromeContentView.addSubview(stack)
         NSLayoutConstraint.activate([
             stack.centerXAnchor.constraint(equalTo: chromeContentView.centerXAnchor),
-            stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
+            // Run 26.10.: Am CHROME verankert, nicht an view.safeAreaLayout-
+            // Guide - im geknickten Modus wird chromeContentView in den
+            // Arrangement-Controller umgehaengt; ein Constraint zur View des
+            // Call-VCs wuerde verwaisen (Controls falsch positioniert).
+            stack.bottomAnchor.constraint(equalTo: chromeContentView.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
 
         muteButton = controlButton(systemName: "mic.fill", action: #selector(toggleMute))

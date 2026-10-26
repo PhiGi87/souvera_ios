@@ -74,21 +74,29 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     /// Self-View-Container wird im geknickten Hochformat von der Control-
     /// Hälfte gehalten (Nutzer-Entscheidung) - der Call-Owner benachrichtigt.
     var onSelfViewToChrome: () -> Void = {}
+    /// Run 26.10.: Rueckweg - im Buch-Modus gehoert die Eigenansicht zur
+    /// Video-Seite (Composite links). Der Call-Owner benachrichtigt.
+    var onSelfViewToTiles: () -> Void = {}
 
     init(tilesContentView: UIView,
          chromeContentView: UIView,
          chatContentView: UIView,
          chatRetain: UIViewController,
-         onSelfViewToChrome: @escaping () -> Void) {
+         onSelfViewToChrome: @escaping () -> Void,
+         onSelfViewToTiles: @escaping () -> Void) {
         self.tilesContentView = tilesContentView
         self.chromeContentView = chromeContentView
         self.chatContentView = chatContentView
         self.chatRetain = chatRetain
         self.onSelfViewToChrome = onSelfViewToChrome
+        self.onSelfViewToTiles = onSelfViewToTiles
         self.tilesHost = CallPartHostViewController(contentView: tilesContentView)
         self.chromeHost = CallPartHostViewController(contentView: chromeContentView)
         self.compositeHost = CallPartHostViewController(contentView: UIView())
-        self.chatHost = UIViewController()
+        // Run 26.10. (Fix "Buch-Modus ohne Chat"): Der Chatraum wurde an
+        // einen LEEREN UIViewController uebergeben - chatContentView wurde
+        // nie platziert. Der Host nimmt die Chat-View direkt auf.
+        self.chatHost = CallPartHostViewController(contentView: chatContentView)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -113,6 +121,14 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     /// Wendet die Platzierung fuer die Pose an (animierter Wechsel).
     func apply(pose: FoldedCallPose) {
         currentPose = pose
+        // Run 26.10. (Fix "Abort beim Falten hochkant"): Das Arrangement
+        // unterordnet die Placement-VCs per addChild - der UIKit-Hierarchie-
+        // Check verweigert einen Child, dessen View noch in einer FREMDEN
+        // VC-Hierarchie liegt. Die Container liegen im flachen Modus in der
+        // View des Call-VCs -> VOR der Uebergabe ausklinken (der Check
+        // greift VOR dem impliziten Re-Parenting).
+        tilesContentView.removeFromSuperview()
+        chromeContentView.removeFromSuperview()
         // Container-Verdrahtung je Pose:
         switch pose {
         case .portraitFolded:
@@ -124,6 +140,7 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
             arrangement.setViewController(chromeHost, for: .primary, animated: true)
         case .bookFolded:
             // Composite links (Call-View mit Controls), Chatraum rechts.
+            onSelfViewToTiles()
             compositeHost.setContent(makeComposite())
             arrangement.setViewController(compositeHost, for: .secondary, animated: true)
             arrangement.setViewController(chatHost, for: .primary, animated: true)
