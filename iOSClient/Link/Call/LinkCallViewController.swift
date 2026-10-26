@@ -5,6 +5,7 @@
 // controls. Driven by CallSession. Mirrors android link/call/CallActivity.
 
 import UIKit
+import SwiftUI
 import AVFoundation
 import WebRTC
 
@@ -365,7 +366,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Container fuer Info-Zeile + Control-Leiste (+ Self im geknickten
     /// Hochformat).
     private let chromeContentView = UIView()
-    private var foldedArrangement: CallFoldedArrangementController?
+    private var foldedArrangement: UIViewController?
     private var chatHostController: UIHostingController<LinkChatView>?
     private var isFoldedLayoutActive = false
 
@@ -659,9 +660,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var tileLayoutSafeBottom: CGFloat {
         isFoldedLayoutActive ? tilesContentView.safeAreaInsets.bottom : view.safeAreaInsets.bottom
     }
-    /// Geknickt hoch: die Eigenansicht lebt in der Control-Haeifte.
+    /// Geknickt hoch: die Eigenansicht lebt in der Control-Haelfte.
     private var isFoldedPortrait: Bool {
-        isFoldedLayoutActive && foldedArrangement?.currentPose == .portraitFolded
+        guard isFoldedLayoutActive, #available(iOS 27.1, *) else { return false }
+        return (foldedArrangement as? CallFoldedArranging)?.currentPose == .portraitFolded
     }
 
     /// Posen-Erkennung: aktive Falz (Division-Region) + Interface-Orientierung.
@@ -678,7 +680,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let pose = detectFoldedPose()
         guard pose != nil || isFoldedLayoutActive else { return }
 
-        if let pose, foldedArrangement == nil {
+        if let pose, foldedArrangement == nil, #available(iOS 27.1, *) {
             let chatView = LinkChatView(viewModel: viewModel, token: token, title: title_)
             let chatHost = UIHostingController(rootView: chatView)
             chatHostController = chatHost
@@ -688,7 +690,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 chatContentView: chatHost.view,
                 chatRetain: chatHost
             ) { [weak self] in
-                // Self-View-Kachel in die Control-Haeifte (Nutzer-Entscheidung).
+                // Self-View-Kachel in die Control-Haifte (Nutzer-Entscheidung).
                 guard let self else { return }
                 localContainer.removeFromSuperview()
                 chromeContentView.addSubview(localContainer)
@@ -702,8 +704,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             chromeContentView.translatesAutoresizingMaskIntoConstraints = false
         }
 
-        if let pose, let arrangement = foldedArrangement {
-            arrangement.apply(pose: pose, animate: true)
+        if let pose, #available(iOS 27.1, *), let arrangement = foldedArrangement as? CallFoldedArranging {
+            arrangement.apply(pose: pose)
             if case .portraitFolded = pose {
                 // Self-View in der Control-Haelfte positionieren.
                 localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
