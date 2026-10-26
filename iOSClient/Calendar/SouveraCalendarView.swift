@@ -574,6 +574,18 @@ struct SouveraCalendarView: View {
             }
     }
 
+    /// Run 25.10. (Drag-and-Drop): Verschiebt einen Termin auf den
+    /// Ziel-Slot (Dauer erhalten) - über die bestehende saveEvent-Pipeline
+    /// (optimistische CalDAV-Writes, offline-tauglich).
+    private func moveEvent(_ event: CalendarEventModel, dayShift: Int, minuteShift: Int) {
+        Task {
+            let ok = await viewModel.reschedule(event, dayShift: dayShift, minuteShift: minuteShift)
+            if !ok {
+                UINotificationFeedbackGenerator().notificationOccurred(.error)
+            }
+        }
+    }
+
     /// Öffnet den Erstell-Dialog mit dem getroffenen Zeitslot.
     private func createEventInSlot(start: Date, end: Date) {
         editState = EditSheetState(
@@ -917,8 +929,14 @@ private struct TimelineColumn: View {
     /// Meldet nach oben, ob gerade ein Terminslot gezeichnet wird - dann
     /// sperrt die übergeordnete ScrollView das Scrollen.
     var onSlotActive: ((Bool) -> Void)? = nil
+    /// Run 25.10. (Drag-and-Drop): Tag-Wechsel (nur 3-Tage-Ansicht) und
+    /// Verschiebe-Callback.
+    var allowsDayShift: Bool = false
+    var onMoveEvent: ((CalendarEventModel, Int, Int) -> Void)? = nil
 
     private let hours = Array(0..<24)
+    @State private var liftedEventId: String?
+    @State private var moveDrag: CGSize = .zero
 
     var body: some View {
         GeometryReader { geometry in
