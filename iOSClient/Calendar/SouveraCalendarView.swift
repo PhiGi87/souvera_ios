@@ -1160,7 +1160,7 @@ private struct TimelineColumn: View {
         .gesture(
             LongPressGesture(minimumDuration: 0.45, maximumDistance: 14)
                 .sequenced(before: DragGesture(minimumDistance: 0))
-                .onChanged { value in
+                .onChanged { (value: SequenceGesture<LongPressGesture, DragGesture>.Value) in
                     switch value {
                     case .second:
                         guard isDraggable, liftedEventId != event.id else { return }
@@ -1176,14 +1176,24 @@ private struct TimelineColumn: View {
                         break
                     }
                 }
-                .onEnded { value in
+                .onEnded { (value: SequenceGesture<LongPressGesture, DragGesture>.Value) in
                     guard liftedEventId == event.id else { return }
                     liftedEventId = nil
                     onSlotActive?(false)
                     guard case .third(let pressed, let drag) = value, let drag else { return }
                     _ = pressed
-                    let dayShift = allowsDayShift ? Int((drag.translation.width / shiftUnit).rounded()) : 0
-                    let quarterMinutes = (drag.translation.height / hourHeight * 60) / 15
+                    // Run 26.10.: Arithmetik einzeln aufgeloest - gemischte
+                    // CGFloat/Int-Ketten type-checkt der Compiler sonst nur
+                    // mit deutlichem Zeitaufwand.
+                    let translation = drag.translation
+                    let dayShift: Int
+                    if allowsDayShift {
+                        let dayRatio = translation.width / shiftUnit
+                        dayShift = Int(dayRatio.rounded())
+                    } else {
+                        dayShift = 0
+                    }
+                    let quarterMinutes = (translation.height / hourHeight * 60) / 15
                     let minuteShift = Int(quarterMinutes.rounded()) * 15
                     guard dayShift != 0 || minuteShift != 0 else { return }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
