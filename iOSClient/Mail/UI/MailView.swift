@@ -615,7 +615,7 @@ struct MailView: View {
     @ViewBuilder
     private var content: some View {
         if isWideLayout {
-            landscapeSplitContent
+            splitContent
         } else {
             switch viewModel.route {
             case .folders:
@@ -654,60 +654,64 @@ struct MailView: View {
         }
     }
 
-    /// Landscape (iPhone/iPad/Mac): Ordnerspalte (~1/3) links, Nachrichtenliste (~2/3)
-    /// rechts. Die Ordnerauswahl aktualisiert die Liste in place (kein Push),
-    /// die Detailansicht liegt als Overlay über der Liste - bzw. als
-    /// Fokus-Leser-Karte über der GESAMTEN Breite.
-    @ViewBuilder
-    private var landscapeSplitContent: some View {
-        GeometryReader { geo in
-            // ~1/3 für die Ordnerspalte: Minimum 260, auf dem schmaleren
-            // iPhone-Landscape maximal 320, damit die Liste nicht verdrängt
-            // wird.
-            let folderWidth = min(320, max(260, geo.size.width / 3))
-            HStack(spacing: 0) {
-                if !foldersCollapsed {
-                    MailFolderListView(viewModel: viewModel, sidebarStyle: true)
-                        .frame(width: folderWidth)
-                    Divider()
-                }
-                ZStack {
-                    if case .folders = viewModel.route {
-                        // Noch kein Ordner geöffnet: dezenter Platzhalter.
-                        VStack(spacing: 10) {
-                            Image(systemName: "mail.stack")
-                                .font(.largeTitle)
-                                .foregroundStyle(.secondary)
-                            Text(NSLocalizedString("_mail_select_folder_", comment: ""))
-                                .foregroundStyle(.secondary)
-                        }
-                    } else {
-                        // M2: gleiche Toolbar-Regel wie Portrait - "..."-Menü
-                        // + Verfassen sichtbar, solange kein Detail offen ist.
-                        MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail,
-                                            editing: $listEditing, selected: $listSelected,
-                                            moveTarget: $listMoveTarget, blacklistTarget: $listBlacklistTarget,
-                                            showEmptyTrashConfirm: $listShowEmptyTrashConfirm)
-                        if !focusReaderActive, let message = viewModel.route.detailMessage {
-                            MailDetailView(viewModel: viewModel, message: message)
-                        }
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                // Run 24.10.: sichtbarer Zwischenraum zwischen Ordner-
-                // spalte und Nachrichtenliste.
-                .padding(.leading, foldersCollapsed ? 0 : 10)
-            }
+    /// Run 25.10. (Apple Conformance): System-Split per NavigationSplitView -
+    /// Apple-Doku: "Prefer system-provided layouts and containers, such as
+    /// split views ... automatically adjusting for the outer display, fully
+    /// open or folded inner display, and camera occlusions." Das System
+    /// animiert das Ein-/Ausblenden der Ordnerspalte selbst (Apple-Mail-
+    /// Verhalten) und behandelt Duo-Falz/Kapselung automatisch.
+    ///
+    /// Bewusst NUR im Regular/Wide-Fall: Im Compact behaelt Mail die
+    /// bewaehrte Route-Logik (Ordner vollflaechig, Liste+Detail-Overlay in
+    /// EINER Listen-Instanz - P62b Scrollposition). navigationDestination
+    /// wuerde dort eine neue Listen-Instanz erzeugen und die Scrollposition
+    /// verlieren.
+    private var splitContent: some View {
+        NavigationSplitView(columnVisibility: columnVisibilityBinding) {
+            MailFolderListView(viewModel: viewModel, sidebarStyle: true)
+                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 320)
+        } detail: {
+            detailColumn
         }
         .overlay {
-            // Fokus-Leser: Abdunklung über die GESAMTE Display-Breite
-            // (auch über die Ordnerspalte), Karte zentriert.
+            // Fokus-Leser: Abdunklung ueber die GESAMTE Display-Breite
+            // (auch ueber die Ordnerspalte), Karte zentriert.
             if focusReaderActive, let message = viewModel.route.detailMessage {
                 focusReaderCard(message)
                     .transition(.opacity)
             }
         }
         .animation(.easeInOut(duration: 0.2), value: viewModel.route.detailMessage?.id)
+    }
+
+    /// Detail-/Listenspalte des Splits - identischer Aufbau wie der
+    /// Compact-Zweig (eine Listen-Instanz, Detail als Overlay).
+    private var detailColumn: some View {
+        ZStack {
+            MailMessageListView(viewModel: viewModel, toolbarActive: !viewModel.route.isDetail,
+                                editing: $listEditing, selected: $listSelected,
+                                moveTarget: $listMoveTarget, blacklistTarget: $listBlacklistTarget,
+                                showEmptyTrashConfirm: $listShowEmptyTrashConfirm)
+            if let message = viewModel.route.detailMessage {
+                MailDetailView(viewModel: viewModel, message: message)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// `foldersCollapsed` (persistiert) wird auf die System-Visibility
+    /// abgebildet. Der Setter nimmt auch System-Korrekturen (z. B. nach
+    /// Rotation) entgegen und spiegelt sie in den persistierten Zustand.
+    private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { foldersCollapsed ? .detailOnly : .all },
+            set: { newValue in
+                let collapsed = (newValue != .all)
+                if collapsed != foldersCollapsed {
+                    foldersCollapsed = collapsed
+                }
+            }
+        )
     }
 
     /// Karte im Stil des Web-"Fokus-Leser": zentriertes Karten-Element über
