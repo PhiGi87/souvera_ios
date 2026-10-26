@@ -125,7 +125,10 @@ struct MailView: View {
         }
         .onAppear {
             viewModel.start()
-            foldersCollapsed = SouveraMailDisplaySettings.foldersCollapsed(account: viewModel.accountKey)
+            // Run 25.10.: Der Ordnerbereich richtet sich beim App-Start nach
+            // der Orientierung (quer = sichtbar, sonst ausgeblendet) - das
+            // setzt updateLandscapeLayout einmalig, sobald die Geometrie
+            // bekannt ist. Kein Persistieren mehr.
             // P62g: JEDER Modul-Eintritt zieht die offene Mailbox nach -
             // neue Mails erscheinen sofort statt erst mit dem Auto-Refresh.
             viewModel.refreshOnEntry()
@@ -143,8 +146,7 @@ struct MailView: View {
         .onChange(of: landscapeLayout) { _, _ in
             populateHeaderBridge()
         }
-        .onChange(of: foldersCollapsed) { _, collapsed in
-            SouveraMailDisplaySettings.setFoldersCollapsed(collapsed, account: viewModel.accountKey)
+        .onChange(of: foldersCollapsed) { _, _ in
             populateHeaderBridge()
         }
         // Run 23.10.: Aktionen im Mehr-Bar, wenn die Mail aus dem
@@ -332,6 +334,10 @@ struct MailView: View {
             )
     }
 
+    /// Run 25.10.: Der Startzustand des Ordnerbereichs wurde bereits aus
+    /// der Orientierung abgeleitet (einmalig) - danach toggle nur der Nutzer.
+    @State private var didApplyInitialFolders = false
+
     private func updateLandscapeLayout(_ size: CGSize) {
         // Run 23.10.: Beim Start meldet die GeometryReader kurz 206x0 -
         // daraus wurde faelschlich "Querformat" abgeleitet und der Header
@@ -339,6 +345,13 @@ struct MailView: View {
         guard size.width > 0, size.height > 0 else { return }
         layoutWidth = size.width
         let isLandscape = size.width > size.height
+        // Run 25.10.: App-Start - Ordnerbereich nur im Querformat sichtbar.
+        // Einmalig aus der Geometrie abgeleitet; danach entscheidet allein
+        // der Nutzer (Rotation schaltet nicht automatisch um).
+        if !didApplyInitialFolders {
+            didApplyInitialFolders = true
+            foldersCollapsed = !isLandscape
+        }
         guard isLandscape != landscapeLayout else { return }
         landscapeLayout = isLandscape
         SouveraLog.write("MailUI", "layout landscape=\(isLandscape) size=\(Int(size.width))x\(Int(size.height)) regular=\(layout.isRegularWidth) focusReader=\(focusReaderActive)")
@@ -669,6 +682,10 @@ struct MailView: View {
     private var splitContent: some View {
         NavigationSplitView(columnVisibility: columnVisibilityBinding) {
             MailFolderListView(viewModel: viewModel, sidebarStyle: true)
+                // Run 25.10.: Der automatische System-Sidebar-Toggle wird
+                // entfernt (Apple-API) - einziger Toggle bleibt der Button
+                // im Header (SouveraHeaderBridge).
+                .toolbar(removing: .sidebarToggle)
                 .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 320)
         } detail: {
             detailColumn
