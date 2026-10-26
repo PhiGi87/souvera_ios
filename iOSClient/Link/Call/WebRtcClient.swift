@@ -95,7 +95,8 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     private let captureQueue = DispatchQueue(label: "souvera.camera.capture")
     private var usingFrontCamera = true
     private var currentInput: AVCaptureDeviceInput?
-    private var videoRotation: RTCVideoRotation = ._0
+    /// Zuletzt berechneter AVFoundation-Rotationswinkel (Grad).
+    private var captureRotationAngle: Int = 90
 
     init(delegate: RTCVideoSource) {
         self.delegate = delegate
@@ -114,7 +115,7 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         if session.canAddOutput(output) {
             session.addOutput(output)
         }
-        output.connections.first?.videoOrientation = .portrait
+        applyCaptureRotation()
         installCameraInput()
     }
 
@@ -149,10 +150,8 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         }
         session.commitConfiguration()
         // Beim Input-Tausch (Front ↔ Rück) wird die AVCaptureConnection neu
-        // erzeugt und verliert die Porträt-Ausrichtung - die Frames landen
-        // quer und das Eigen-/Remote-Bild steht 90° gedreht. Hier erneut
-        // auf Portrait fixieren (Basis für die updateRotation()-Mappings).
-        output.connections.first?.videoOrientation = .portrait
+        // erzeugt und verliert die Rotations-Einstellung - erneut anwenden.
+        applyCaptureRotation()
         updateRotation()
     }
 
@@ -160,29 +159,52 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         updateRotation()
     }
 
-    /// Run 25.10. (Fix "Kamera dreht auf dem Duo nicht mit"): Die
-    /// Orientierungsquelle ist die DISPLAY-Orientierung der aktiven Szene
-    /// (UIWindowScene.interfaceOrientation) - NICHT UIDevice.orientation.
-    /// Auf dem faltbaren iPhone stimmt die physische Geraeteorientierung
-    /// beim Hochkant-Halten/Geknickt-Aufstellen nicht mit dem Display
-    /// ueberein, weshalb die Frames in Querformat stecken blieben.
-    /// Apple-Duo-Vorgabe: keine UIDevice-Orientierung fuer Layout/Render-
-    /// Entscheidungen. Gilt fuer offen, geknickt (Tent), hoch und quer.
+    /// Run 25.10.: Public-Hook fuer viewWillTransition (Main-Thread).
+    func updateOrientation() {
+        updateRotation()
+    }
+
+    /// Wendet den zuletzt berechneten Rotationswinkel auf die
+    /// AVCaptureConnection an (auch nach Input-Tausch/Konfiguration).
+    private func applyCaptureRotation() {
+        if let connection = output.connections.first,
+           connection.isVideoRotationAngleSupported(captureRotationAngle) {
+            connection.videoRotationAngle = captureRotationAngle
+        }
+    }
+
+    /// Run 25.10. (Fix "Kamera genau 90 Grad falsch auf dem Duo, offen und
+    /// geknickt"): Die Rotation uebernimmt AVFOUNDATION selbst - Apple-API
+    /// AVCaptureConnection.videoRotationAngle (iOS 17+, Nachfolger des
+    /// deprecated videoOrientation). AVFoundation kennt die Sensor-
+    /// Montage des jeweiligen Geraets (beim Duo weicht die innere Kamera
+    /// von der iPhone-Annahme ab - daher war die RTC-Mapping-Tabelle
+    /// systematisch 90 Grad daneben) und dreht die Buffer auf die
+    /// angeforderte Display-Orientierung. Die WebRTC-Frames werden immer
+    /// mit Rotation ._0 gesendet (Buffer kommen fertig gedreht an).
+    /// Quelle der Orientierung: UIWindowScene.interfaceOrientation der
+    /// aktiven Szene (Apple-Duo-Vorgabe: keine UIDevice-Orientierung),
+    /// Gilt fuer offen, geknickt (Tent), hoch und quer.
     func updateRotation() {
         let orientation: UIInterfaceOrientation = MainActor.assumeIsolated {
             let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
             let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
             return scene?.interfaceOrientation ?? .portrait
         }
-        // talk-iOS-Mapping (Front-Kamera, Frames in Porträt-Ausrichtung).
-        if orientation == .portrait {
-            videoRotation = ._0
-        } else if orientation == .portraitUpsideDown {
-            videoRotation = ._180
-        } else if orientation == .landscapeRight {
-            videoRotation = usingFrontCamera ? ._270 : ._90
-        } else if orientation == .landscapeLeft {
-            videoRotation = usingFrontCamera ? ._90 : ._270
+        // Dokumentierte Aequivalente zu AVCaptureVideoOrientation:
+        // .portrait = 90, .portraitUpsideDown = 270,
+        // .landscapeLeft = 0, .landscapeRight = 180.
+        let angle: Int
+        switch orientation {
+        case .portraitUpsideDown: angle = 270
+        case .landscapeLeft: angle = 0
+        case .landscapeRight: angle = 180
+        default: angle = 90
+        }
+        captureRotationAngle = angle
+        MainActor.assumeIsolated {
+            applyCaptureRotation()
+            CallDebugLog.log("CameraRotation", "angle=\(angle) orientation=\(orientation.rawValue)")
         }
     }
 
@@ -226,7 +248,9 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         // talk-iOS-Muster: der Frame erwartet einen RTCVideoFrameBuffer -
         // das CVPixelBuffer wird in ein RTCCVPixelBuffer gewrappt.
         let rtcBuffer = RTCCVPixelBuffer(pixelBuffer: pixelBuffer)
-        let frame = RTCVideoFrame(buffer: rtcBuffer, rotation: videoRotation, timeStampNs: Int64(timeStampNs))
+        // Buffer kommen von AVFoundation fertig gedreht (videoRotationAngle)
+        // - die WebRTC-Frames tragen daher immer ._0.
+        let frame = RTCVideoFrame(buffer: rtcBuffer, rotation: ._0, timeStampNs: Int64(timeStampNs))
         delegate.capturer(capturer, didCapture: frame)
     }
 

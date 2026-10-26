@@ -113,6 +113,13 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// ausbleibenden Encoder-Callback gewesen.
     nonisolated static let webRtcQueue = DispatchQueue(label: "souvera.webrtc", qos: .userInitiated)
 
+    /// Run 25.10.: Rotations-Update bei Orientierungs-/Faltwechseln
+    /// (Main-Thread - der Capturer liest die Scene-Orientierung).
+    @MainActor
+    func updateVideoOrientation() {
+        webRtc.updateOrientation()
+    }
+
     /// Safety-Net: Wird die Session ohne explizites hangup() freigegeben
     /// (UI weg, App beendet, Crash-Pfade), bleibt sonst eine Geister-
     /// Session ("Gelöschter Benutzer") im Raum zurück.

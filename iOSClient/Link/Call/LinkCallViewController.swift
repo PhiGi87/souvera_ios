@@ -934,6 +934,14 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         CallDebugLog.log("CallVC", "video \(isVideoOn ? "on" : "off")")
     }
 
+    override func viewWillTransition(to size: CGSize, with coordinator: UIViewControllerTransitionCoordinator) {
+        super.viewWillTransition(to: size, with: coordinator)
+        // Run 25.10.: Kamera-Rotation folgt der Display-Orientierung -
+        // feuert verlaesslich nach Rotation UND Faltwechseln auf dem Duo
+        // (das UIDevice-Notification-Race ist damit entschärft).
+        session?.updateVideoOrientation()
+    }
+
     @objc private func switchCamera() {
         session?.switchCamera()
         CallDebugLog.log("CallVC", "switch camera")
