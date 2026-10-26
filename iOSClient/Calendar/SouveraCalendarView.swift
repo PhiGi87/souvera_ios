@@ -497,6 +497,8 @@ struct SouveraCalendarView: View {
                 onCreate: createEventInSlot,
                 bottomPadding: isWide ? 12 : 40,
                 scrollTrigger: scrollTrigger,
+                allowsDayShift: true,
+                dayShiftFraction: 0.45,
                 onMoveEvent: moveEvent
             )
             .refreshable {
@@ -804,8 +806,10 @@ private struct TimelineDayView: View {
     /// Scroll zur Jetzt-Linie.
     var scrollTrigger: Int = 0
     /// Run 25.10. (Drag-and-Drop): Termin-Verschiebung per Long-Press +
-    /// Ziehen. allowsDayShift = Tag-Wechsel in der 3-Tage-Ansicht.
+    /// Ziehen. allowsDayShift = Tag-Wechsel (Run 26.10.: auch in der
+    /// Tag-Ansicht, als Nachbar-tag-Sprung per 45-%-Schwelle).
     var allowsDayShift: Bool = false
+    var dayShiftFraction: CGFloat = 1.0
     var onMoveEvent: ((CalendarEventModel, Int, Int) -> Void)? = nil
 
     private let hours = Array(0..<24)
@@ -821,7 +825,7 @@ private struct TimelineDayView: View {
                     allDaySection
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
-                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 }, onMoveEvent: onMoveEvent)
+                        TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 }, allowsDayShift: allowsDayShift, dayShiftFraction: dayShiftFraction, onMoveEvent: onMoveEvent)
                     }
                 }
                 .padding(.bottom, bottomPadding)
@@ -932,6 +936,11 @@ private struct TimelineColumn: View {
     /// Run 25.10. (Drag-and-Drop): Tag-Wechsel (nur 3-Tage-Ansicht) und
     /// Verschiebe-Callback.
     var allowsDayShift: Bool = false
+    /// Run 26.10.: Horizontaler Weg fuer EINEN Tag-Wechsel, als Anteil der
+    /// Spaltenbreite. 3-Tage-Ansicht: volle Spaltenbreite (Zielspalte ist
+    /// sichtbar). Tag-Ansicht (eine Spalte): 45 % - der Termin springt
+    /// zum Nachbar-tag, bevor die halbe Bildschirmbreite erreicht ist.
+    var dayShiftFraction: CGFloat = 1.0
     var onMoveEvent: ((CalendarEventModel, Int, Int) -> Void)? = nil
 
     private let hours = Array(0..<24)
@@ -966,6 +975,7 @@ private struct TimelineColumn: View {
                 ForEach(timedEvents) { event in
                     eventBlock(event,
                                containerWidth: geometry.size.width,
+                               dayShiftUnit: geometry.size.width * dayShiftFraction,
                                dragTranslation: liftedEventId == event.id ? moveDrag : nil)
                 }
                 if showsNowLine {
@@ -1058,6 +1068,7 @@ private struct TimelineColumn: View {
     @ViewBuilder
     private func eventBlock(_ event: CalendarEventModel,
                             containerWidth: CGFloat,
+                            dayShiftUnit: CGFloat = 0,
                             dragTranslation: CGSize? = nil) -> some View {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: day)
@@ -1085,9 +1096,10 @@ private struct TimelineColumn: View {
         // Run 25.10. (Drag-and-Drop): Abgelehnte Einladungen sind nicht
         // verschiebbar (kein Lift) - wie Apple Kalender.
         let isDraggable = !isDeclined
-        let dayShift = dragTranslation.map { Int(($0.width / containerWidth).rounded()) } ?? 0
+        let dayShift = dragTranslation.map { Int(($0.width / shiftUnit).rounded()) } ?? 0
         let minuteShift = dragTranslation.map { Int((($0.height / hourHeight * 60) / 15).rounded() * 15) } ?? 0
         let isLifted = liftedEventId == event.id
+        let shiftUnit = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
 
         Button {
             onSelect(event)
@@ -1127,27 +1139,38 @@ private struct TimelineColumn: View {
         .buttonStyle(.plain)
         // Run 25.10. (Drag-and-Drop): Long-Press hebt den Termin ab (wie
         // Apple Kalender), der Drag verschiebt ihn (15-min-Raster, Dauer
-        // erhalten, Tag-Wechsel in der 3-Tage-Ansicht). Der Tap (Selektion)
-        // bleibt unberuehrt (tap != long-press).
-        .onLongPressGesture(minimumDuration: 0.45, maximumDistance: 14) {
-            guard isDraggable, liftedEventId != event.id else { return }
-            UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-            liftedEventId = event.id
-            moveDrag = .zero
-            onSlotActive?(true)
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
+        // erhalten, Tag-Wechsel). Der Tap (Selektion) bleibt unberuehrt.
+        // Run 26.10. (Fix "DnD funktioniert nicht"): onLongPressGesture +
+        // separater simultaner DragGesture greifen NICHT zusammen - nach
+        // erfolgreichem Long-Press haelt der Recognizer den Touch, eine
+        // eigenstaendige Drag-Gesture beginnt nie. Korrektes SwiftUI-Muster
+        // ist die SEQUENZIERTE Geste: der Drag laeuft auf dem SELBEN Touch
+        // direkt nach dem Long-Press weiter.
+        .gesture(
+            LongPressGesture(minimumDuration: 0.45, maximumDistance: 14)
+                .sequenced(before: DragGesture(minimumDistance: 0))
                 .onChanged { value in
-                    guard liftedEventId == event.id else { return }
-                    moveDrag = value.translation
+                    switch value {
+                    case .second:
+                        guard isDraggable, liftedEventId != event.id else { return }
+                        UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                        liftedEventId = event.id
+                        moveDrag = .zero
+                        onSlotActive?(true)
+                    case .third(_, let drag?):
+                        guard liftedEventId == event.id else { return }
+                        moveDrag = drag.translation
+                    default:
+                        break
+                    }
                 }
                 .onEnded { value in
                     guard liftedEventId == event.id else { return }
                     liftedEventId = nil
                     onSlotActive?(false)
-                    let dayShift = allowsDayShift ? Int((value.translation.width / containerWidth).rounded()) : 0
-                    let minuteShift = Int(((value.translation.height / hourHeight * 60) / 15).rounded() * 15)
+                    guard case .third(_, let drag?) = value else { return }
+                    let dayShift = allowsDayShift ? Int((drag.translation.width / shiftUnit).rounded()) : 0
+                    let minuteShift = Int(((drag.translation.height / hourHeight * 60) / 15).rounded() * 15)
                     guard dayShift != 0 || minuteShift != 0 else { return }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     onMoveEvent?(event, dayShift, minuteShift)
