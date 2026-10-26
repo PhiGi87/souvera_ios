@@ -1168,8 +1168,9 @@ private struct TimelineColumn: View {
                         liftedEventId = event.id
                         moveDrag = .zero
                         onSlotActive?(true)
-                    case .third(_, let drag?):
-                        guard liftedEventId == event.id else { return }
+                    case .third(let pressed, let drag):
+                        guard liftedEventId == event.id, let drag else { return }
+                        _ = pressed
                         moveDrag = drag.translation
                     default:
                         break
@@ -1179,9 +1180,11 @@ private struct TimelineColumn: View {
                     guard liftedEventId == event.id else { return }
                     liftedEventId = nil
                     onSlotActive?(false)
-                    guard case .third(_, let drag?) = value else { return }
+                    guard case .third(let pressed, let drag) = value, let drag else { return }
+                    _ = pressed
                     let dayShift = allowsDayShift ? Int((drag.translation.width / shiftUnit).rounded()) : 0
-                    let minuteShift = Int(((drag.translation.height / hourHeight * 60) / 15).rounded() * 15)
+                    let quarterMinutes = (drag.translation.height / hourHeight * 60) / 15
+                    let minuteShift = Int(quarterMinutes.rounded()) * 15
                     guard dayShift != 0 || minuteShift != 0 else { return }
                     UINotificationFeedbackGenerator().notificationOccurred(.success)
                     onMoveEvent?(event, dayShift, minuteShift)
