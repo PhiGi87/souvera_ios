@@ -18,6 +18,11 @@ struct LinkView: View {
     /// Landscape-Split (Raumliste links, Chat rechts) - Geometrie-basiert,
     /// gilt für iPhone, iPad und Mac (siehe GeometryReader im body).
     @State private var landscapeLayout = false
+    /// Run 25.10.: Raumliste einklappbar (identisch zur Mail-Ordnerspalte):
+    /// Startzustand aus der Orientierung (nur quer sichtbar), danach
+    /// toggle nur der Header-Button. Keine Persistierung.
+    @State private var roomsCollapsed = false
+    @State private var didApplyInitialRooms = false
     /// Run 16.09.: UIKit-Header-Bridge (Landscape/iPad, 1:1 Files/Mehr).
     var headerBridge: SouveraHeaderBridge? = nil
     @State private var callContext: CallContext?
@@ -106,6 +111,9 @@ struct LinkView: View {
             populateHeaderBridge()
         }
         .onChange(of: landscapeLayout) { _, _ in
+            populateHeaderBridge()
+        }
+        .onChange(of: roomsCollapsed) { _, _ in
             populateHeaderBridge()
         }
         .onChange(of: viewModel.currentRoom?.hasCall) { _, _ in
@@ -504,7 +512,10 @@ struct LinkView: View {
             }
 
             bridge.title = roomTitle
-            bridge.leadingItems = landscapeLayout ? [SouveraHeaderBridge.Item]() : [
+            // Run 25.10.: Zurueck IMMER (Mail-identisch) - auch bei
+            // sichtbarer Raumliste, sonst ist der Chat eine Sackgasse,
+            // wenn die Raumliste eingeklappt ist.
+            bridge.leadingItems = [
                 .init(id: "back", icon: "chevron.backward",
                       accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
                     viewModel.back()
@@ -513,15 +524,28 @@ struct LinkView: View {
             bridge.trailingItems = trailing
             bridge.trailingMenus = trailingMenus
         } else {
-            // Home: Suche links, Status + "+" rechts.
+            // Run 25.10. (Mail-identisch): Leading = Raumlisten-Toggle
+            // (nur im Split), Suche zu Trailing vor Status/"+".
             bridge.title = NSLocalizedString("_link_", comment: "")
-            bridge.leadingItems = [
+            bridge.leadingItems = landscapeLayout ? [
+                .init(id: "rooms", icon: "sidebar.left",
+                      accessibilityLabel: NSLocalizedString("_link_select_room_", comment: "")) {
+                    withAnimation(.snappy(duration: 0.3)) {
+                        roomsCollapsed.toggle()
+                    }
+                }
+            ] : []
+            bridge.trailingItems = [
                 .init(id: "search", icon: "magnifyingglass",
                       accessibilityLabel: NSLocalizedString("_mail_search_", comment: "")) {
+                    // Bei eingeklappter Raumliste zuerst wieder aufklappen.
+                    if landscapeLayout && roomsCollapsed {
+                        withAnimation(.snappy(duration: 0.3)) {
+                            roomsCollapsed = false
+                        }
+                    }
                     searchActive = true
-                }
-            ]
-            bridge.trailingItems = [
+                },
                 .init(id: "status", icon: "circle.dotted",
                       text: NSLocalizedString("_set_user_status_", comment: ""),
                       accessibilityLabel: NSLocalizedString("_set_user_status_", comment: "")) {
@@ -578,6 +602,14 @@ struct LinkView: View {
     /// Landscape-Flag kippen. Dadurch wurde die ganze Chat-View (inkl.
     /// Composer-Fokus) neu erzeugt und die Tastatur schloss sich.
     private func updateLandscapeLayout(_ size: CGSize) {
+        // Run 25.10.: Startzustand der Raumliste - wie Mail nur im
+        // Querformat sichtbar (einmalig aus der Fenster-Orientierung
+        // abgeleitet; danach toggle nur der Header-Button).
+        let bounds: CGRect = viewWindowBounds ?? CGRect(origin: .zero, size: size)
+        if !didApplyInitialRooms {
+            didApplyInitialRooms = true
+            roomsCollapsed = !(bounds.width > bounds.height)
+        }
         // Run 25.09. (Feedback iPad): Auf dem iPad IMMER die 2-Spalten-
         // Darstellung (Raeume links, Chat rechts) - auch im Hochformat;
         // die Einschspalte verschwendet dort nur Platz.
@@ -587,7 +619,6 @@ struct LinkView: View {
             SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split)")
             return
         }
-        let bounds: CGRect = viewWindowBounds ?? CGRect(origin: .zero, size: size)
         // Run 24.10.: Auf dem schmalen Außendisplay (~678 pt) keine
         // Raumliste/Chat-Spalte - erst ab 720 pt Inhaltsbreite.
         let isLandscape = bounds.width > bounds.height
@@ -618,6 +649,12 @@ struct LinkView: View {
     /// iPhone), der gewählte Chat rechts. KEIN Fokus-Leser bei Link - die
     /// rechte Spalte ist immer die klassische Chat-Ansicht (volle Höhe für
     /// Eingabezeile/Tastatur).
+    /// Run 25.10.: Raumliste identisch zur Mail-Ordnerspalte - animiert
+    /// ein-/ausblendbar (withAnimation + frame/clipped), Startzustand aus
+    /// der Orientierung (nur quer sichtbar). Bewusst KEIN NavigationSplitView:
+    /// unter der UIKit-Bar-Hosting-Architektur erzeugt der System-Container
+    /// eingebettete Spalten-Bars, einen zusaetzlichen System-Toggle und
+    /// reserviert Sidebar-Raum (dokumentierte Mail-Abweichung).
     private var landscapeSplitContent: some View {
         GeometryReader { geo in
             let roomWidth = min(320, max(260, geo.size.width / 3))
@@ -629,8 +666,13 @@ struct LinkView: View {
                 ) { room in
                     callContext = CallContext(token: room.token, title: room.displayName, withVideo: false, silent: false)
                 }
-                .frame(width: roomWidth)
+                .frame(width: roomsCollapsed ? 0 : roomWidth)
+                .clipped()
+                .opacity(roomsCollapsed ? 0 : 1)
+                .allowsHitTesting(!roomsCollapsed)
+                .accessibilityHidden(roomsCollapsed)
                 Divider()
+                    .opacity(roomsCollapsed ? 0 : 1)
                 ZStack {
                     if case let .chat(token, title) = viewModel.route {
                         LinkChatView(viewModel: viewModel, token: token, title: title)
@@ -645,6 +687,7 @@ struct LinkView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding(.leading, roomsCollapsed ? 0 : 10)
             }
         }
     }
