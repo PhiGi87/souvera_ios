@@ -243,7 +243,8 @@ struct LinkView: View {
                     token: context.token,
                     title: context.title,
                     withVideo: context.withVideo,
-                    silent: context.silent
+                    silent: context.silent,
+                    viewModel: viewModel
                 )
                 .ignoresSafeArea()
             }
@@ -257,7 +258,8 @@ struct LinkView: View {
                     token: info.token,
                     title: info.title,
                     withVideo: info.withVideo,
-                    session: session
+                    session: session,
+                    viewModel: viewModel
                 )
                 .ignoresSafeArea()
             }
@@ -711,9 +713,12 @@ struct LinkCallViewControllerWrapper: UIViewControllerRepresentable {
     let withVideo: Bool
     var silent: Bool = false
     var session: CallSession? = nil
+    /// Run 25.10.: geteiltes ViewModel fuer den interaktiven Chatraum im
+    /// geknickten Buch-Modus (dieselbe Instanz wie der Link-Tab).
+    var viewModel: LinkViewModel? = nil
 
     func makeUIViewController(context: Context) -> LinkCallViewController {
-        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo, silent: silent, session: session)
+        LinkCallViewController(account: account, token: token, title: title, withVideo: withVideo, silent: silent, session: session, chatViewModel: viewModel)
     }
 
     func updateUIViewController(_ uiViewController: LinkCallViewController, context: Context) {}

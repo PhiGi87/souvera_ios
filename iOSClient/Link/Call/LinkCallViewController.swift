@@ -211,14 +211,18 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var attachedSession: CallSession?
     private var isSpeakerOn = false
     private let silent: Bool
+    /// Run 25.10.: geteiltes Link-ViewModel fuer den interaktiven Chatraum
+    /// im geknickten Buch-Modus (nil = ohne Chatpanel).
+    private let chatViewModel: LinkViewModel?
 
-    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true, silent: Bool = false, session: CallSession? = nil) {
+    init(account: LinkAccount, token: String, title: String, withVideo: Bool = true, silent: Bool = false, session: CallSession? = nil, chatViewModel: LinkViewModel? = nil) {
         self.account = account
         self.token = token
         self.title_ = title
         self.isVideoOn = withVideo
         self.silent = silent
         self.attachedSession = session
+        self.chatViewModel = chatViewModel
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .fullScreen
     }
@@ -682,7 +686,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         guard pose != nil || isFoldedLayoutActive else { return }
 
         if let pose, foldedArrangement == nil, #available(iOS 27.1, *) {
-            let chatView = LinkChatView(viewModel: viewModel, token: token, title: title_)
+            guard let chatViewModel else { return }
+            let chatView = LinkChatView(viewModel: chatViewModel, token: token, title: title_)
             let chatHost = UIHostingController(rootView: chatView)
             chatHostController = chatHost
             let arrangement = CallFoldedArrangementController(
@@ -717,9 +722,6 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
 
         // Zurueck zu flach: Container zurueck in die eigene View.
-        if !pose.isPortrait, let arrangement = foldedArrangement, isFoldedLayoutActive {
-            // Buch-Modus verlassen: kein Chat mehr sichtbar.
-        }
         if pose == nil, let arrangement = foldedArrangement {
             arrangement.willMove(toParent: nil)
             arrangement.view.removeFromSuperview()
