@@ -96,7 +96,6 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     private var usingFrontCamera = true
     private var currentInput: AVCaptureDeviceInput?
     private var videoRotation: RTCVideoRotation = ._0
-    private var deviceOrientation: UIDeviceOrientation = .portrait
 
     init(delegate: RTCVideoSource) {
         self.delegate = delegate
@@ -158,19 +157,31 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     }
 
     @objc private func orientationChanged() {
-        deviceOrientation = UIDevice.current.orientation
         updateRotation()
     }
 
-    private func updateRotation() {
+    /// Run 25.10. (Fix "Kamera dreht auf dem Duo nicht mit"): Die
+    /// Orientierungsquelle ist die DISPLAY-Orientierung der aktiven Szene
+    /// (UIWindowScene.interfaceOrientation) - NICHT UIDevice.orientation.
+    /// Auf dem faltbaren iPhone stimmt die physische Geraeteorientierung
+    /// beim Hochkant-Halten/Geknickt-Aufstellen nicht mit dem Display
+    /// ueberein, weshalb die Frames in Querformat stecken blieben.
+    /// Apple-Duo-Vorgabe: keine UIDevice-Orientierung fuer Layout/Render-
+    /// Entscheidungen. Gilt fuer offen, geknickt (Tent), hoch und quer.
+    func updateRotation() {
+        let orientation: UIInterfaceOrientation = MainActor.assumeIsolated {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
+            return scene?.interfaceOrientation ?? .portrait
+        }
         // talk-iOS-Mapping (Front-Kamera, Frames in Porträt-Ausrichtung).
-        if deviceOrientation == .portrait {
+        if orientation == .portrait {
             videoRotation = ._0
-        } else if deviceOrientation == .portraitUpsideDown {
+        } else if orientation == .portraitUpsideDown {
             videoRotation = ._180
-        } else if deviceOrientation == .landscapeRight {
+        } else if orientation == .landscapeRight {
             videoRotation = usingFrontCamera ? ._270 : ._90
-        } else if deviceOrientation == .landscapeLeft {
+        } else if orientation == .landscapeLeft {
             videoRotation = usingFrontCamera ? ._90 : ._270
         }
     }
