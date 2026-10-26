@@ -1922,10 +1922,9 @@ private struct CalendarEventEditSheet: View {
                              ? NSLocalizedString("_calendar_new_event_", comment: "")
                              : NSLocalizedString("_contact_edit_", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
-            // Run 25.10.: "Fertig"-Knopf - Tastatur jederzeit manuell
-            // ausblendbar (Titel/Notizen-Felder). Apple-API:
-            // ToolbarItemGroup(placement: .keyboard).
-            .souveraKeyboardDoneButton()
+            // Run 25.10.: Tastatur per Ziehen interaktiv ausblendbar
+            // (Apple-API scrollDismissesKeyboard) - kein schwebender Knopf.
+            .scrollDismissesKeyboard(.interactively)
             .onAppear {
                 // Default-Zielkalender für neue Termine: persönlicher.
                 if existing == nil, draft.calendarHref.isEmpty {

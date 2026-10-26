@@ -1234,9 +1234,6 @@ struct LinkChatView: View {
     var body: some View {
         VStack(spacing: 0) {
             messageList
-                // Run 25.10.: "Fertig"-Knopf - die Tastatur ist jederzeit
-                // manuell ausblendbar (Menues/Buttons darunter erreichbar).
-                .souveraKeyboardDoneButton()
                 // Offenen Raum app-weit melden: Push-Banner für DIESEN Raum
                 // werden unterdrückt (nur Ton), Run 12.09.
                 .onAppear { SouveraOpenChatState.shared.token = token }
@@ -1966,9 +1963,30 @@ struct LinkChatView: View {
                         .textFieldStyle(.plain)
                         .focused($composerFocused)
                         .lineLimit(1...5)
-                    // Reservierter Platz für den späteren Mikrofon-Button.
-                    Color.clear.frame(width: 30, height: 30)
+                    // Run 25.10. (Feedback "Fertig unguenstig platziert"):
+                    // Tastatur-Ausblenden als kleines X IN der Composer-Pille
+                    // (Apple-Symbol keyboard.chevron.compact.down), sichtbar
+                    // nur bei Fokus - das schwebende Keyboard-Toolbar-Item
+                    // hing ungluecklich ueber dem Composer.
+                    if composerFocused {
+                        Button {
+                            composerFocused = false
+                            SouveraKeyboard.dismiss()
+                        } label: {
+                            Image(systemName: "keyboard.chevron.compact.down")
+                                .font(.system(size: 20))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(NSLocalizedString("_done_", comment: ""))
+                        .transition(.opacity)
+                    } else {
+                        // Reservierter Platz für den späteren Mikrofon-Button.
+                        Color.clear.frame(width: 30, height: 30)
+                    }
                 }
+                .animation(.easeInOut(duration: 0.15), value: composerFocused)
                 .padding(.leading, 14)
                 .padding(.trailing, 10)
                 .padding(.vertical, 5)

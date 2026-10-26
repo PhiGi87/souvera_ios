@@ -2474,9 +2474,6 @@ struct MailComposeView: View {
                     }
                 }
             }
-            // Run 25.10.: "Fertig"-Knopf - Tastatur jederzeit manuell
-            // ausblendbar (Empfaenger/Betreff/Textfelder).
-            .souveraKeyboardDoneButton()
         }
         // Run 06.10. (Feedback): mittiger Hinweis bei langsamem Versand
         // (schlechter Empfang) - erscheint nach 6 s einmalig fuer 3 s.
