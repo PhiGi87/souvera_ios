@@ -348,15 +348,26 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         infoLabel.font = UIFont.preferredFont(forTextStyle: .caption1)
         infoLabel.numberOfLines = 0
         infoLabel.textAlignment = .center
-        view.addSubview(infoLabel)
+        chromeContentView.addSubview(infoLabel)
         NSLayoutConstraint.activate([
-            infoLabel.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            infoLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            infoLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16)
+            infoLabel.topAnchor.constraint(equalTo: chromeContentView.safeAreaLayoutGuide.topAnchor, constant: 8),
+            infoLabel.leadingAnchor.constraint(equalTo: chromeContentView.leadingAnchor, constant: 16),
+            infoLabel.trailingAnchor.constraint(equalTo: chromeContentView.trailingAnchor, constant: -16)
         ])
     }
 
     private var participantRefreshTimer: Timer?
+
+    // MARK: - Geknicktes Call-Erlebnis (Run 25.10.)
+    /// Container fuer Video-Kacheln + Self-View (flach/Buch) bzw. nur
+    /// Video (geknickt hoch: Self wandert in die Control-Haelfte).
+    private let tilesContentView = UIView()
+    /// Container fuer Info-Zeile + Control-Leiste (+ Self im geknickten
+    /// Hochformat).
+    private let chromeContentView = UIView()
+    private var foldedArrangement: CallFoldedArrangementController?
+    private var chatHostController: UIHostingController<LinkChatView>?
+    private var isFoldedLayoutActive = false
 
     private func loadParticipants() {
         Task {
@@ -561,7 +572,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         localView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         localView.frame = localContainer.bounds
         localContainer.addSubview(localView)
-        view.addSubview(localContainer)
+        tilesContentView.addSubview(localContainer)
 
         // Kamera-Wechsel als kleiner Overlay-Button IN der Eigenansicht
         // (unten rechts) - die untere Leiste bleibt für Mute/Video/Speaker/
@@ -627,7 +638,100 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
+        applyFoldedStateIfNeeded()
+        if !isFoldedLayoutActive {
+            tilesContentView.frame = view.bounds
+            chromeContentView.frame = view.bounds
+        }
         layoutTiles()
+    }
+
+    // MARK: - Geknicktes Call-Erlebnis (UIArrangementViewController)
+
+    /// Im geknickten Zustand leben die Kacheln im oberen Arrangement-Slot -
+    /// die Layout-Mathematik rechnet mit dessen Bounds (nicht view.bounds).
+    private var tileLayoutBounds: CGRect {
+        isFoldedLayoutActive ? tilesContentView.bounds : view.bounds
+    }
+    private var tileLayoutSafeTop: CGFloat {
+        isFoldedLayoutActive ? tilesContentView.safeAreaInsets.top : view.safeAreaInsets.top
+    }
+    private var tileLayoutSafeBottom: CGFloat {
+        isFoldedLayoutActive ? tilesContentView.safeAreaInsets.bottom : view.safeAreaInsets.bottom
+    }
+    /// Geknickt hoch: die Eigenansicht lebt in der Control-Haeifte.
+    private var isFoldedPortrait: Bool {
+        isFoldedLayoutActive && foldedArrangement?.currentPose == .portraitFolded
+    }
+
+    /// Posen-Erkennung: aktive Falz (Division-Region) + Interface-Orientierung.
+    private func detectFoldedPose() -> CallFoldedArrangementController.Pose? {
+        let divisions = view.reservedRegions(kind: .division)
+        guard !divisions.isEmpty else { return nil }
+        let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
+        return orientation.isPortrait ? .portraitFolded : .bookFolded
+    }
+
+    /// Schaltet zwischen flacher Darstellung (wie heute) und der geknickten
+    /// Anordnung um. Apple-API: UIArrangementViewController (iOS 27.1).
+    private func applyFoldedStateIfNeeded() {
+        let pose = detectFoldedPose()
+        guard pose != nil || isFoldedLayoutActive else { return }
+
+        if let pose, foldedArrangement == nil {
+            let chatView = LinkChatView(viewModel: viewModel, token: token, title: title_)
+            let chatHost = UIHostingController(rootView: chatView)
+            chatHostController = chatHost
+            let arrangement = CallFoldedArrangementController(
+                tilesContentView: tilesContentView,
+                chromeContentView: chromeContentView,
+                chatContentView: chatHost.view,
+                chatRetain: chatHost
+            ) { [weak self] in
+                // Self-View-Kachel in die Control-Haeifte (Nutzer-Entscheidung).
+                guard let self else { return }
+                localContainer.removeFromSuperview()
+                chromeContentView.addSubview(localContainer)
+            }
+            foldedArrangement = arrangement
+            addChild(arrangement)
+            view.addSubview(arrangement.view)
+            arrangement.didMove(toParent: self)
+            isFoldedLayoutActive = true
+            tilesContentView.translatesAutoresizingMaskIntoConstraints = false
+            chromeContentView.translatesAutoresizingMaskIntoConstraints = false
+        }
+
+        if let pose, let arrangement = foldedArrangement {
+            arrangement.apply(pose: pose, animate: true)
+            if case .portraitFolded = pose {
+                // Self-View in der Control-Haelfte positionieren.
+                localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
+                localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
+                                                y: max(0, chromeContentView.bounds.midY - 40))
+            }
+            return
+        }
+
+        // Zurueck zu flach: Container zurueck in die eigene View.
+        if !pose.isPortrait, let arrangement = foldedArrangement, isFoldedLayoutActive {
+            // Buch-Modus verlassen: kein Chat mehr sichtbar.
+        }
+        if pose == nil, let arrangement = foldedArrangement {
+            arrangement.willMove(toParent: nil)
+            arrangement.view.removeFromSuperview()
+            arrangement.removeFromParent()
+            foldedArrangement = nil
+            isFoldedLayoutActive = false
+            tilesContentView.translatesAutoresizingMaskIntoConstraints = true
+            chromeContentView.translatesAutoresizingMaskIntoConstraints = true
+            // Self-View zurueck in die Video-Seite.
+            if localContainer.superview !== tilesContentView {
+                localContainer.removeFromSuperview()
+                tilesContentView.addSubview(localContainer)
+            }
+            layoutTiles()
+        }
     }
 
     /// Fullscreen-Call rotiert mit der Display-Orientierung (Hochkant/
@@ -659,15 +763,16 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Layout-Dispatcher: Raster (Standard) oder Fokus/Speaker.
     private func layoutTiles() {
-        // Eigenansicht ausblenden, solange das Video nicht aktiv ist.
-        localContainer.isHidden = !shouldShowLocalView
+        // Eigenansicht ausblenden, solange das Video nicht aktiv ist -
+        // im geknickten Hochformat lebt sie in der Control-Haelfte.
+        localContainer.isHidden = !shouldShowLocalView || isFoldedPortrait
         // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
         if let screenKey = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }),
            let screenTile = tiles[screenKey] {
             // LANDSCAPE: Screenshare ist DIE einzige Ansicht - Vollbild,
             // kein Strip, keine Eigenansicht (Run-Feedback 12.09.).
-            if view.bounds.width > view.bounds.height {
-                screenTile.container.frame = view.bounds
+            if tileLayoutBounds.width > tileLayoutBounds.height {
+                screenTile.container.frame = tileLayoutBounds
                 screenTile.container.layer.cornerRadius = 0
                 clearPlaceholderTiles()
                 return
@@ -689,11 +794,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Raster: alle Kacheln (remote + Eigenansicht) gleich groß.
     private func layoutRaster() {
-        let width = view.bounds.width
-        let safeTop = view.safeAreaInsets.top
+        let width = tileLayoutBounds.width
+        let safeTop = tileLayoutSafeTop
 
         let remoteKeys = tiles.keys.sorted()
-        let totalTiles = remoteKeys.count + (shouldShowLocalView ? 1 : 0)
+        let totalTiles = remoteKeys.count + (shouldShowLocalView && !isFoldedPortrait ? 1 : 0)
 
         let columns: Int
         if totalTiles <= 1 { columns = 1 }
@@ -738,17 +843,17 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             placeholderTiles.append(placeholder)
             place(placeholder)
         }
-        if shouldShowLocalView {
+        if shouldShowLocalView && !isFoldedPortrait {
             place(localContainer)
         }
     }
 
     /// Fokus/Speaker: große Fokus-Kachel + kleine Kacheln unten.
     private func layoutFocus() {
-        let width = view.bounds.width
-        let height = view.bounds.height
-        let safeTop = view.safeAreaInsets.top
-        let safeBottom = view.safeAreaInsets.bottom
+        let width = tileLayoutBounds.width
+        let height = tileLayoutBounds.height
+        let safeTop = tileLayoutSafeTop
+        let safeBottom = tileLayoutSafeBottom
 
         let focusKey = resolveFocusKey()
         guard let focusKey, let focusTile = tiles[focusKey] else {
@@ -857,9 +962,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         stack.distribution = .equalSpacing
         stack.spacing = 16
         stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
+        chromeContentView.addSubview(stack)
         NSLayoutConstraint.activate([
-            stack.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            stack.centerXAnchor.constraint(equalTo: chromeContentView.centerXAnchor),
             stack.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -32)
         ])
 
