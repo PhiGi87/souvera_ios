@@ -492,7 +492,11 @@ struct MailView: View {
             accessibilityLabel: NSLocalizedString("_mail_folders_", comment: "")
         ) {
             if isWideLayout {
-                foldersCollapsed.toggle()
+                // Run 25.10.: Ordnerspalte gleitet wie Apple Mail - der
+                // Custom-Split animiert die Breite ueber withAnimation.
+                withAnimation(.snappy(duration: 0.3)) {
+                    foldersCollapsed.toggle()
+                }
             } else {
                 viewModel.showFolders()
             }
@@ -667,28 +671,32 @@ struct MailView: View {
         }
     }
 
-    /// Run 25.10. (Apple Conformance): System-Split per NavigationSplitView -
-    /// Apple-Doku: "Prefer system-provided layouts and containers, such as
-    /// split views ... automatically adjusting for the outer display, fully
-    /// open or folded inner display, and camera occlusions." Das System
-    /// animiert das Ein-/Ausblenden der Ordnerspalte selbst (Apple-Mail-
-    /// Verhalten) und behandelt Duo-Falz/Kapselung automatisch.
-    ///
-    /// Bewusst NUR im Regular/Wide-Fall: Im Compact behaelt Mail die
-    /// bewaehrte Route-Logik (Ordner vollflaechig, Liste+Detail-Overlay in
-    /// EINER Listen-Instanz - P62b Scrollposition). navigationDestination
-    /// wuerde dort eine neue Listen-Instanz erzeugen und die Scrollposition
-    /// verlieren.
+    /// Run 25.10.: Ordnerspalte links, Nachrichtenliste/Detail rechts.
+    /// Bewusst KEIN NavigationSplitView (dokumentierte Abweichung von der
+    /// Container-Empfehlung): Unter der UIKit-Bar-Hosting-Architektur
+    /// erzeugt der System-Container eingebettete Spalten-Bars (leeres Band
+    /// oben auf dem iPad), einen zusaetzlichen System-Sidebar-Toggle und
+    /// reserviert nach Tab-Wechsel Sidebar-Raum (Log: Content 497x835 statt
+    /// 669x893). Oeffentliche SwiftUI-APIs: withAnimation + frame + clipped
+    /// - das Ein-/Ausblenden animiert wie Apple Mail.
     private var splitContent: some View {
-        NavigationSplitView(columnVisibility: columnVisibilityBinding) {
-            MailFolderListView(viewModel: viewModel, sidebarStyle: true)
-                // Run 25.10.: Der automatische System-Sidebar-Toggle wird
-                // entfernt (Apple-API) - einziger Toggle bleibt der Button
-                // im Header (SouveraHeaderBridge).
-                .toolbar(removing: .sidebarToggle)
-                .navigationSplitViewColumnWidth(min: 260, ideal: 300, max: 320)
-        } detail: {
-            detailColumn
+        GeometryReader { geo in
+            // ~1/3 fuer die Ordnerspalte: Minimum 260, auf dem schmaleren
+            // iPhone-Landscape maximal 320, damit die Liste nicht verdraengt
+            // wird.
+            let folderWidth = min(320, max(260, geo.size.width / 3))
+            HStack(spacing: 0) {
+                MailFolderListView(viewModel: viewModel, sidebarStyle: true)
+                    .frame(width: foldersCollapsed ? 0 : folderWidth)
+                    .clipped()
+                    .opacity(foldersCollapsed ? 0 : 1)
+                    .allowsHitTesting(!foldersCollapsed)
+                    .accessibilityHidden(foldersCollapsed)
+                Divider()
+                    .opacity(foldersCollapsed ? 0 : 1)
+                detailColumn
+                    .padding(.leading, foldersCollapsed ? 0 : 10)
+            }
         }
         .overlay {
             // Fokus-Leser: Abdunklung ueber die GESAMTE Display-Breite
@@ -714,21 +722,6 @@ struct MailView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    /// `foldersCollapsed` (persistiert) wird auf die System-Visibility
-    /// abgebildet. Der Setter nimmt auch System-Korrekturen (z. B. nach
-    /// Rotation) entgegen und spiegelt sie in den persistierten Zustand.
-    private var columnVisibilityBinding: Binding<NavigationSplitViewVisibility> {
-        Binding(
-            get: { foldersCollapsed ? .detailOnly : .all },
-            set: { newValue in
-                let collapsed = (newValue != .all)
-                if collapsed != foldersCollapsed {
-                    foldersCollapsed = collapsed
-                }
-            }
-        )
     }
 
     /// Karte im Stil des Web-"Fokus-Leser": zentriertes Karten-Element über
