@@ -117,7 +117,16 @@ extension UINavigationItem {
     /// Seiten erben es ueber willShow.
     func souveraApplyHeaderStandard() {
         if #available(iOS 27.0, *) {
-            navigationBarMinimization.minimizationBehavior = .never
+            // WICHTIG: navigationBarMinimization ist ein ObjC-COPY-Property -
+            // das Mutieren der zurueckgegebenen Kopie allein wirkt NICHT auf
+            // das Item (das war der erste, wirkungslose Fix). Erst die Kopie
+            // holen, mutieren, dann ZURUECKSCHREIBEN.
+            let config = navigationBarMinimization
+            config.minimizationBehavior = .never
+            navigationBarMinimization = config
+            #if !EXTENSION
+            SouveraLog.write("Header", "minimization=never")
+            #endif
         }
     }
 }
