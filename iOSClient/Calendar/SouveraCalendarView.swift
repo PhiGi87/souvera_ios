@@ -1065,6 +1065,21 @@ private struct TimelineColumn: View {
         }
     }
 
+    /// Run 26.10.: Drag-Translation -> Tag-Spruenge (Raster: ein Tag pro
+    /// shiftUnit) - statisch, damit der ViewBuilder-Ausdruck klein bleibt.
+    private static func dayShift(from dragTranslation: CGSize?, unit: CGFloat) -> Int {
+        guard let drag = dragTranslation else { return 0 }
+        let ratio = drag.width / unit
+        return Int(ratio.rounded())
+    }
+
+    /// Run 26.10.: Drag-Translation -> Minuten-Spruenge (15-min-Raster).
+    private static func minuteShift(from dragTranslation: CGSize?, hourHeight: CGFloat) -> Int {
+        guard let drag = dragTranslation else { return 0 }
+        let quarterMinutes = (drag.height / hourHeight * 60) / 15
+        return Int(quarterMinutes.rounded()) * 15
+    }
+
     @ViewBuilder
     private func eventBlock(_ event: CalendarEventModel,
                             containerWidth: CGFloat,
@@ -1097,19 +1112,11 @@ private struct TimelineColumn: View {
         // verschiebbar (kein Lift) - wie Apple Kalender.
         let isDraggable = !isDeclined
         let shiftUnit: CGFloat = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
-        // Run 26.10.: Explizit aufgeloest (kein map mit gemischter
-        // CGFloat/Int-Arithmetik) - der Type-Checker brauchte sonst zu
-        // lang fuer den Ausdruck.
-        let dayShift: Int
-        let minuteShift: Int
-        if let drag = dragTranslation {
-            dayShift = Int((drag.width / shiftUnit).rounded())
-            let quarterMinutes = (drag.height / hourHeight * 60) / 15
-            minuteShift = Int(quarterMinutes.rounded()) * 15
-        } else {
-            dayShift = 0
-            minuteShift = 0
-        }
+        // Run 26.10.: Berechnung in statischen Helpers (arithmetikfrei im
+        // ViewBuilder - sowohl gemischte CGFloat/Int-Ketten als auch
+        // if/else-Statements sind hier problematisch).
+        let dayShift = Self.dayShift(from: dragTranslation, unit: shiftUnit)
+        let minuteShift = Self.minuteShift(from: dragTranslation, hourHeight: hourHeight)
         let isLifted = liftedEventId == event.id
 
         Button {
