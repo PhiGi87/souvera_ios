@@ -121,7 +121,7 @@ extension UINavigationItem {
             // das Mutieren der zurueckgegebenen Kopie allein wirkt NICHT auf
             // das Item (das war der erste, wirkungslose Fix). Erst die Kopie
             // holen, mutieren, dann ZURUECKSCHREIBEN.
-            let config = navigationBarMinimization
+            var config = navigationBarMinimization
             config.minimizationBehavior = .never
             navigationBarMinimization = config
             #if !EXTENSION
