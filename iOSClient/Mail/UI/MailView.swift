@@ -698,6 +698,13 @@ struct MailView: View {
                     .padding(.leading, foldersCollapsed ? 0 : 10)
             }
         }
+        // Run 25.10. (Fix "weisser Rand unten in der Ordnerleiste"): Die
+        // Safe-Area-Grenz (Home-Indicator) zeigte den weissen Fenster-
+        // hintergrund, weil die Ordnerspalte dort nicht hinreicht. Der
+        // graue Hintergrund wird hinter beide Spalten gelegt und in die
+        // untere Safe Area gezogen; die Nachrichtenliste ueberdeckt ihn
+        // mit ihrer eigenen (weissen) Flaeche.
+        .background(Color(.systemGroupedBackground).ignoresSafeArea(edges: .bottom))
         .overlay {
             // Fokus-Leser: Abdunklung ueber die GESAMTE Display-Breite
             // (auch ueber die Ordnerspalte), Karte zentriert.
