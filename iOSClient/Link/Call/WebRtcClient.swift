@@ -100,16 +100,26 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     private let captureQueue = DispatchQueue(label: "souvera.camera.capture")
     private var usingFrontCamera = true
     private var currentInput: AVCaptureDeviceInput?
-    /// Zuletzt berechneter AVFoundation-Rotationswinkel (Grad).
+    /// Zuletzt angewendeter AVFoundation-Rotationswinkel (Grad).
     private var captureRotationAngle: CGFloat = 90
+    /// Run 26.10. (Fix "Innenkamera 90 Grad verdreht"): Apple-Doku zu
+    /// AVCaptureConnection.videoRotationAngle: "Set this property to an
+    /// angle that an AVCaptureDevice.RotationCoordinator instance provides".
+    /// Der Coordinator ueberwacht die physische Orientierung DES jeweiligen
+    /// Geraets und kennt dessen Sensor-Montage - die der Duo-Innenkamera
+    /// weicht vom iPhone-Standard ab, weshalb eine harte Orientierungs-
+    /// Tabelle systematisch daneben lag. Das Ersetzen des Inputs erzeugt
+    /// einen neuen Coordinator.
+    /// Quelle: developer.apple.com/documentation/avfoundation/
+    /// avcapturedevice/rotationcoordinator
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
 
     init(delegate: RTCVideoSource) {
         self.delegate = delegate
         self.capturer = RTCVideoCapturer(delegate: delegate)
         super.init()
         configureSession()
-        NotificationCenter.default.addObserver(self, selector: #selector(orientationChanged),
-                                               name: UIDevice.orientationDidChangeNotification, object: nil)
     }
 
     private func configureSession() {
@@ -120,7 +130,6 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         if session.canAddOutput(output) {
             session.addOutput(output)
         }
-        applyCaptureRotation()
         installCameraInput()
     }
 
@@ -157,11 +166,35 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         // Beim Input-Tausch (Front ↔ Rück) wird die AVCaptureConnection neu
         // erzeugt und verliert die Rotations-Einstellung - erneut anwenden.
         applyCaptureRotation()
-        updateRotation()
+        updateRotationCoordinator()
     }
 
-    @objc private func orientationChanged() {
-        updateRotation()
+    /// Run 26.10.: Coordinator fuer das AKTUELLE Geraet erzeugen und den
+    /// Winkel per KVO verfolgen (AVCam-Muster: der Coordinator aktualisiert
+    /// seine Properties selbst, die App wendet sie an).
+    private func updateRotationCoordinator() {
+        rotationObservation?.invalidate()
+        rotationObservation = nil
+        rotationCoordinator = nil
+        guard let device = currentInput?.device else { return }
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        rotationCoordinator = coordinator
+        applyRotationAngle(coordinator.videoRotationAngleForHorizonLevelCapture)
+        rotationObservation = coordinator.observe(
+            \.videoRotationAngleForHorizonLevelCapture,
+            options: [.new]
+        ) { [weak self] _, change in
+            guard let angle = change.newValue else { return }
+            self?.applyRotationAngle(angle)
+        }
+    }
+
+    private func applyRotationAngle(_ angle: CGFloat) {
+        captureRotationAngle = angle
+        // AVCaptureConnection ist thread-safe fuer Rotationsaenderungen
+        // (auch vom KVO-Callback-Thread aus).
+        applyCaptureRotation()
+        CallDebugLog.log("CameraRotation", "angle=\(Int(angle)) (RotationCoordinator)")
     }
 
     /// Wendet den zuletzt berechneten Rotationswinkel auf die
@@ -173,58 +206,18 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         }
     }
 
-    /// Run 25.10. (Fix "Kamera genau 90 Grad falsch auf dem Duo, offen und
-    /// geknickt"): Die Rotation uebernimmt AVFOUNDATION selbst - Apple-API
-    /// AVCaptureConnection.videoRotationAngle (iOS 17+, Nachfolger des
-    /// deprecated videoOrientation). AVFoundation kennt die Sensor-
-    /// Montage des jeweiligen Geraets (beim Duo weicht die innere Kamera
-    /// von der iPhone-Annahme ab - daher war die RTC-Mapping-Tabelle
-    /// systematisch 90 Grad daneben) und dreht die Buffer auf die
-    /// angeforderte Display-Orientierung. Die WebRTC-Frames werden immer
-    /// mit Rotation ._0 gesendet (Buffer kommen fertig gedreht an).
-    /// Quelle der Orientierung: UIWindowScene.interfaceOrientation der
-    /// aktiven Szene (Apple-Duo-Vorgabe: keine UIDevice-Orientierung),
-    /// Gilt fuer offen, geknickt (Tent), hoch und quer.
+    /// Kompatibilitaets-Hook (WebRtcClient/CallSession): der Rotation-
+    /// Coordinator ueberwacht die Orientierung selbststaendig - hier wird
+    /// nur der letzte Winkel erneut auf die Connection angewendet (z. B.
+    /// nach Orientation-Wechseln des Hosts).
     func updateRotation() {
-        // Run 25.10. (Fix "App-Crash beim Call-Start"): startVideoCapture
-        // laeuft auf dem WebRTC-Queue - MainActor.assumeIsolated dort war
-        // ein fataler Trap. Thread-sichere Variante: auf dem Main-Thread
-        // direkt lesen, sonst per main.sync-Hop (Deadlock-frei: der
-        // Main-Thread wartet nirgendwo auf den WebRTC-Queue).
-        let orientation: UIInterfaceOrientation = {
-            let read = { () -> UIInterfaceOrientation in
-                let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-                let scene = scenes.first(where: { $0.activationState == .foregroundActive }) ?? scenes.first
-                return scene?.interfaceOrientation ?? .portrait
-            }
-            if Thread.isMainThread {
-                return MainActor.assumeIsolated { read() }
-            }
-            return DispatchQueue.main.sync { MainActor.assumeIsolated { read() } }
-        }()
-        // Dokumentierte Aequivalente zu AVCaptureVideoOrientation:
-        // .portrait = 90, .portraitUpsideDown = 270,
-        // .landscapeLeft = 0, .landscapeRight = 180.
-        let angle: CGFloat
-        switch orientation {
-        case .portraitUpsideDown: angle = 270
-        case .landscapeLeft: angle = 0
-        case .landscapeRight: angle = 180
-        default: angle = 90
-        }
-        captureRotationAngle = angle
-        // AVCaptureConnection ist thread-safe fuer Rotationsaenderungen
-        // (auch vom WebRTC-Queue aus).
         applyCaptureRotation()
-        CallDebugLog.log("CameraRotation", "angle=\(Int(angle)) orientation=\(orientation.rawValue)")
     }
 
     func startCapture() {
-        updateRotation()
-        // Orientierungs-Benachrichtigungen aktivieren: ohne diesen Aufruf
-        // feuert orientationDidChangeNotification NIE - die Eigenansicht
-        // würde sich während des Calls nicht an Hochkant/Landscape anpassen.
-        UIDevice.current.beginGeneratingDeviceOrientationNotifications()
+        // Run 26.10.: Der RotationCoordinator liefert den Winkel (auch vor
+        // startRunning - per Doku rekonfiguriert das die Render-Pipeline
+        // effizient), applied in updateRotationCoordinator().
         guard !session.isRunning else { return }
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             self?.session.startRunning()
