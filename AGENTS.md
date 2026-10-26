@@ -93,6 +93,21 @@ sub-page (including Settings) and every pushed screen.
 - Content/title may differ per screen (that is content, not layout); the
   foundation must stay identical.
 
+### Apple Conformance Rule (binding, permanent)
+
+Only Apple-conform techniques are allowed:
+
+- Before implementing any UI or platform behaviour, research the current
+  Apple documentation / HIG (online) and use the system-provided API.
+  Document the chosen API and the Apple reference in the code (comment)
+  or the PR description.
+- Prefer system-provided containers and controls (e.g. `NavigationSplitView`,
+  `UINavigationBar`, `UITabBarController`) over custom-built equivalents —
+  they adapt automatically to device poses, reserved regions and size
+  classes (see "Preparing your app for iPhone Duo").
+- Never fight system behaviour with frame overrides or private/undocumented
+  APIs.
+
 ### CI / Release
 
 - ALWAYS monitor GitHub Actions runs (builds, tests, TestFlight uploads) until they reach a terminal state. If a run fails, read the failure logs, fix the problem, and re-run until everything is green and the upload succeeded.
