@@ -1096,10 +1096,10 @@ private struct TimelineColumn: View {
         // Run 25.10. (Drag-and-Drop): Abgelehnte Einladungen sind nicht
         // verschiebbar (kein Lift) - wie Apple Kalender.
         let isDraggable = !isDeclined
+        let shiftUnit = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
         let dayShift = dragTranslation.map { Int(($0.width / shiftUnit).rounded()) } ?? 0
         let minuteShift = dragTranslation.map { Int((($0.height / hourHeight * 60) / 15).rounded() * 15) } ?? 0
         let isLifted = liftedEventId == event.id
-        let shiftUnit = dayShiftUnit > 0 ? dayShiftUnit : containerWidth
 
         Button {
             onSelect(event)
