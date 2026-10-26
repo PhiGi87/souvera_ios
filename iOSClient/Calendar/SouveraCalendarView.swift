@@ -1161,26 +1161,27 @@ private struct TimelineColumn: View {
             LongPressGesture(minimumDuration: 0.45, maximumDistance: 14)
                 .sequenced(before: DragGesture(minimumDistance: 0))
                 .onChanged { (value: SequenceGesture<LongPressGesture, DragGesture>.Value) in
-                    switch value {
-                    case .second:
+                    // SequenceGesture kennt nur .first/.second: drag == nil
+                    // bedeutet Long-Press geloest (Lift), drag != nil ist
+                    // der laufende Zug.
+                    guard case .second(let pressed, let drag) = value else { return }
+                    _ = pressed
+                    if let drag {
+                        guard liftedEventId == event.id else { return }
+                        moveDrag = drag.translation
+                    } else {
                         guard isDraggable, liftedEventId != event.id else { return }
                         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                         liftedEventId = event.id
                         moveDrag = .zero
                         onSlotActive?(true)
-                    case .third(let pressed, let drag):
-                        guard liftedEventId == event.id, let drag else { return }
-                        _ = pressed
-                        moveDrag = drag.translation
-                    default:
-                        break
                     }
                 }
                 .onEnded { (value: SequenceGesture<LongPressGesture, DragGesture>.Value) in
                     guard liftedEventId == event.id else { return }
                     liftedEventId = nil
                     onSlotActive?(false)
-                    guard case .third(let pressed, let drag) = value, let drag else { return }
+                    guard case .second(let pressed, let drag) = value, let drag else { return }
                     _ = pressed
                     // Run 26.10.: Arithmetik einzeln aufgeloest - gemischte
                     // CGFloat/Int-Ketten type-checkt der Compiler sonst nur
