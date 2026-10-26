@@ -1034,9 +1034,16 @@ private struct TimelineColumn: View {
         let start = max(event.start, dayStart)
         let end = min(event.end, calendar.date(byAdding: .day, value: 1, to: dayStart) ?? event.end)
         let startMinutes = max(0, calendar.dateComponents([.minute], from: dayStart, to: start).minute ?? 0)
-        let durationMinutes = max(30, calendar.dateComponents([.minute], from: start, to: end).minute ?? 30)
+        // Run 25.10. (Fix "Termin zu hoch gezeichnet"): REALE Dauer - weder
+        // ein 30-min-Minimum noch pt-Abzuege/-Minima verzerren das
+        // Zeit-Mapping (13:00-13:30 endete in der 3-Tage-Ansicht bei ~13:40,
+        // weil hourHeight=44 -> 22 pt Block, aber das 28-pt-Minimum griff).
+        // Sehr kurze Termine bekommen einen kompakten Modus (nur Titel,
+        // kleiner) statt eines aufgeblasenen Blocks - wie Apple Kalender.
+        let durationMinutes = max(1, calendar.dateComponents([.minute], from: start, to: end).minute ?? 1)
         let offsetY = CGFloat(startMinutes) / 60.0 * hourHeight
         let height = CGFloat(durationMinutes) / 60.0 * hourHeight
+        let isCompact = height < 30
         let layout = columnLayouts()[event.id] ?? (0, 1)
         let width = containerWidth / CGFloat(layout.count)
         let x = CGFloat(layout.column) * width
@@ -1052,8 +1059,9 @@ private struct TimelineColumn: View {
             VStack(alignment: .leading, spacing: 1) {
                 Text(event.title)
                     .strikethrough(isDeclined)
-                    .font(.caption).fontWeight(.semibold)
-                    .lineLimit(2)
+                    .font(isCompact ? .caption2 : .caption)
+                    .fontWeight(.semibold)
+                    .lineLimit(isCompact ? 1 : 2)
                 if height > 40 {
                     Text(timeText(event))
                         .font(.caption2)
@@ -1073,7 +1081,12 @@ private struct TimelineColumn: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .padding(3)
+            .padding(isCompact ? 1 : 3)
+            // Run 25.10. (Fix "Tap nur auf dem Titel"): buttonStyle(.plain)
+            // hit-testet nur den gezeichneten Inhalt - ohne contentShape
+            // gehoerte der transparente Rest des Blocks nicht zur
+            // Tap-Flaeche. Apple-Standard-API fuer genau das.
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         // ERST die volle Blockgröße (Dauer des Termins) setzen, DANN den
@@ -1081,7 +1094,7 @@ private struct TimelineColumn: View {
         // farbige Fläche die exakte Termindauer ab, statt nur die Höhe des
         // Textinhalts (das war der Anzeigefehler: 1h-Termin wirkte wie
         // ~30-45 Minuten).
-        .frame(width: max(width - 3, 0), height: max(height - 4, 28), alignment: .top)
+        .frame(width: max(width - 3, 0), height: height, alignment: .top)
         .background {
             let shape = RoundedRectangle(cornerRadius: 6)
             if isDeclined {
@@ -2352,7 +2365,7 @@ extension SouveraCalendarView {
         bridge.leadingItems = [
             SouveraHeaderBridge.Item(
                 id: "today",
-                icon: "calendar",
+                icon: "clock",
                 text: NSLocalizedString("_calendar_today_", comment: ""),
                 accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")
             ) {
