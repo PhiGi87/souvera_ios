@@ -1056,7 +1056,9 @@ private struct TimelineColumn: View {
     }
 
     @ViewBuilder
-    private func eventBlock(_ event: CalendarEventModel, containerWidth: CGFloat) -> some View {
+    private func eventBlock(_ event: CalendarEventModel,
+                            containerWidth: CGFloat,
+                            dragTranslation: CGSize? = nil) -> some View {
         let calendar = Calendar.current
         let dayStart = calendar.startOfDay(for: day)
         let start = max(event.start, dayStart)
