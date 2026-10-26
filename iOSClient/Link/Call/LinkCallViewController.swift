@@ -573,6 +573,15 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     private func setupVideoViews() {
+        // Run 26.10. (Fix "Abort beim Call-Start"): Die Container muessen
+        // VOR setupControls() in der View-Hierarchie liegen - der Control-
+        // Stack wird an view.safeAreaLayoutGuide verankert. Ohne gemeinsamen
+        // Vorfahren wirft NSLayoutConstraint.activate eine Exception (Abort).
+        // Flacher Modus: frames in viewDidLayoutSubviews. Geknickter Modus:
+        // der Arrangement-Controller re-parented beide Container (addSubview
+        // entfernt sie implizit aus der View).
+        view.addSubview(tilesContentView)
+        view.addSubview(chromeContentView)
         localView.videoContentMode = .scaleAspectFill
         localView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         localView.frame = localContainer.bounds
