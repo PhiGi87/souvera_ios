@@ -512,15 +512,25 @@ struct LinkView: View {
             }
 
             bridge.title = roomTitle
-            // Run 25.10.: Zurueck IMMER (Mail-identisch) - auch bei
-            // sichtbarer Raumliste, sonst ist der Chat eine Sackgasse,
-            // wenn die Raumliste eingeklappt ist.
-            bridge.leadingItems = [
+            // Run 25.10.: Zurueck IMMER (Mail-identisch) - und der
+            // Raumlisten-Toggle auch im Chat, damit die Raumliste aus
+            // jedem Raum heraus ein-/ausgeblendbar ist (Mail-Stil:
+            // Zurueck zuerst).
+            var leading: [SouveraHeaderBridge.Item] = [
                 .init(id: "back", icon: "chevron.backward",
                       accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
                     viewModel.back()
                 }
             ]
+            if landscapeLayout {
+                leading.append(.init(id: "rooms", icon: "sidebar.left",
+                      accessibilityLabel: NSLocalizedString("_link_select_room_", comment: "")) {
+                    withAnimation(.snappy(duration: 0.3)) {
+                        roomsCollapsed.toggle()
+                    }
+                })
+            }
+            bridge.leadingItems = leading
             bridge.trailingItems = trailing
             bridge.trailingMenus = trailingMenus
         } else {
