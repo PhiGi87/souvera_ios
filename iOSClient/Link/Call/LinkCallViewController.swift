@@ -668,6 +668,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Posen-Erkennung: aktive Falz (Division-Region) + Interface-Orientierung.
     private func detectFoldedPose() -> FoldedCallPose? {
+        guard #available(iOS 27.1, *) else { return nil }
         let divisions = view.reservedRegions(kind: .division)
         guard !divisions.isEmpty else { return nil }
         let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait

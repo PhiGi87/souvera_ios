@@ -74,6 +74,11 @@ final class WebRtcClient {
         videoCapturer?.switchCamera()
     }
 
+    /// Run 25.10.: Public-Hook fuer viewWillTransition (Main-Thread).
+    func updateOrientation() {
+        videoCapturer?.updateRotation()
+    }
+
     func dispose() {
         if disposed { return }
         disposed = true
@@ -96,7 +101,7 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
     private var usingFrontCamera = true
     private var currentInput: AVCaptureDeviceInput?
     /// Zuletzt berechneter AVFoundation-Rotationswinkel (Grad).
-    private var captureRotationAngle: Int = 90
+    private var captureRotationAngle: CGFloat = 90
 
     init(delegate: RTCVideoSource) {
         self.delegate = delegate
@@ -159,11 +164,6 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         updateRotation()
     }
 
-    /// Run 25.10.: Public-Hook fuer viewWillTransition (Main-Thread).
-    func updateOrientation() {
-        updateRotation()
-    }
-
     /// Wendet den zuletzt berechneten Rotationswinkel auf die
     /// AVCaptureConnection an (auch nach Input-Tausch/Konfiguration).
     private func applyCaptureRotation() {
@@ -194,7 +194,7 @@ private final class ManualVideoCapturer: NSObject, AVCaptureVideoDataOutputSampl
         // Dokumentierte Aequivalente zu AVCaptureVideoOrientation:
         // .portrait = 90, .portraitUpsideDown = 270,
         // .landscapeLeft = 0, .landscapeRight = 180.
-        let angle: Int
+        let angle: CGFloat
         switch orientation {
         case .portraitUpsideDown: angle = 270
         case .landscapeLeft: angle = 0
