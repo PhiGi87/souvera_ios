@@ -84,6 +84,15 @@ class NCMainTabBarController: UITabBarController {
 
         tabBar.tintColor = NCBrandColor.shared.getElement(account: account)
 
+        // Run 25.10. (Fix "Header verschwindet beim Scrollen"): Die
+        // integrierte Top-Tab-Bar (iPhone Duo) und die NavigationBar
+        // minimieren GEMEINSAM - der Default `.automatic` des
+        // Tab-Bar-Controllers war der fehlende Schalter. Apple-API:
+        // UITabBarController.tabBarMinimizeBehavior (iOS 26+).
+        if #available(iOS 26.0, *) {
+            tabBarMinimizeBehavior = .never
+        }
+
         configureTabControllers()
         configureTabBarAppearance()
 
