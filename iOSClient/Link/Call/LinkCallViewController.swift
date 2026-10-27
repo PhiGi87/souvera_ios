@@ -720,6 +720,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 }
             )
             foldedArrangement = arrangement
+            // Run 27.10.: Nach jedem Posen-Layout mit ENDGUELTIGEN Bounds
+            // nachziehen (Eigenansicht + Kacheln).
+            arrangement.onPoseLayout = { [weak self] in
+                self?.handleFoldedPoseLayout()
+            }
             addChild(arrangement)
             view.addSubview(arrangement.view)
             // Run 27.10.: Die Root-View des Controllers uebernimmt die Flaeche
@@ -732,18 +737,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
         if let pose, #available(iOS 27.1, *), let arrangement = foldedArrangement as? CallFoldedArranging {
             arrangement.apply(pose: pose)
-            if case .portraitFolded = pose {
-                // Self-View in der Control-Haelfte positionieren. Run 26.10.:
-                // ASYNC nach dem Layout-Lauf - die Bounds des Chrome-Containers
-                // sind erst nach dem Arrangement-Durchlauf final (beim Falten
-                // schrumpft der Primary-Slot auf die untere Haelfte).
-                DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
-                    localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
-                                                    y: max(0, chromeContentView.bounds.midY - 40))
-                }
-            }
+            // Run 27.10.: Die Eigenansicht wird IM Pose-Layout-Callback
+            // positioniert (onPoseLayout) - dort sind die Container-Frames
+            // bereits endgueltig. Der fruehere async-Block las mit null/
+            // stale Bounds -> Self-View geklemmt an (0,0).
             return
         }
 
@@ -798,10 +795,28 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     /// Layout-Dispatcher: Raster (Standard) oder Fokus/Speaker.
+    /// Run 27.10.: Wird vom Falz-Controller nach JEDEM Posen-Layout
+    /// aufgerufen - die Container-Frames sind final, alle Bounds frisch.
+    private func handleFoldedPoseLayout() {
+        guard isFoldedLayoutActive else { return }
+        if isFoldedPortrait {
+            // Self-View-Kachel zentriert in der Control-Haelfte
+            // (Nutzer-Entscheidung: Eigenansicht unten, nicht im Video).
+            localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
+            localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
+                                            y: max(0, chromeContentView.bounds.midY - 40))
+        }
+        layoutTiles()
+    }
+
     private func layoutTiles() {
-        // Eigenansicht ausblenden, solange das Video nicht aktiv ist -
-        // im geknickten Hochformat lebt sie in der Control-Haelfte.
-        localContainer.isHidden = !shouldShowLocalView || isFoldedPortrait
+        // Run 27.10. (Fix "nichts ausser Controls im geknickten Hochformat"):
+        // Die Eigenansicht bleibt SICHTBAR - im Hochformat lebt sie laut
+        // Nutzer-Entscheidung in der Control-Haelfte (Position setzt
+        // handleFoldedPoseLayout). layoutTiles platziert sie nicht mit
+        // (Raster/Fokus zaehlen sie via isFoldedPortrait nicht), versteckt
+        // sie aber auch nicht mehr.
+        localContainer.isHidden = !shouldShowLocalView
         // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
         if let screenKey = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }),
            let screenTile = tiles[screenKey] {

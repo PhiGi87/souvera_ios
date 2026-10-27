@@ -72,6 +72,11 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     var onSelfViewToChrome: () -> Void = {}
     /// Rueckweg - im Buch-Modus gehoert die Eigenansicht zur Video-Seite.
     var onSelfViewToTiles: () -> Void = {}
+    /// Run 27.10.: Nach JEDEM Posen-Layout (synchron, frische Frames) -
+    /// der Owner positioniert die Eigenansicht und layoutet die Kacheln
+    /// mit den ENDGUELTIGEN Container-Bounds (keine stale Bounds mehr,
+    /// kein async-Timing).
+    var onPoseLayout: () -> Void = {}
 
     init(tilesContentView: UIView,
          chromeContentView: UIView,
@@ -102,7 +107,9 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
 
     /// Wendet die Platzierung fuer die Pose an. Nur bei Posen-WECHSEL aktiv:
     /// Re-Parenting und Self-View-Callbacks laufen sonst bei jedem Layout-
-    /// Durchlauf des Owners. Die Geometrie selbst folgt in layoutForCurrentPose.
+    /// Durchlauf des Owners. Run 27.10.: Das Layout laeuft SYNCHRON hier -
+    /// setNeedsLayout liess die Frames erst spaeter setzen, waehrend der
+    /// Owner im selben Durchlauf mit stale Bounds weiterrechnete.
     func apply(pose: FoldedCallPose) {
         guard currentPose != pose else { return }
         currentPose = pose
@@ -112,7 +119,7 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
         case .bookFolded:
             onSelfViewToTiles()
         }
-        view.setNeedsLayout()
+        layoutForCurrentPose()
     }
 
     // MARK: - Geometrie
@@ -123,14 +130,23 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
         }
     }
 
-    /// Falz-Band in View-Koordinaten. Ohne gemeldete Division-Region dient
-    /// eine synthetische Halbierung als Fallback.
+    /// Falz-Band in View-Koordinaten. Run 27.10.: Explizit nach AKTIVER
+    /// Division-Region filtern (Apples Query kann inaktive Regionen
+    /// liefern - vgl. SouveraFoldSupport) und degenerierte Frames
+    /// verwerfen; ohne verlaessliche Falz dient eine synthetische
+    /// Halbierung als Fallback.
     private func divisionBand(vertical: Bool) -> CGRect {
         let bounds = view.bounds
         if #available(iOS 27.1, *) {
-            if let frame = view.reservedRegions(kind: .division).first?.frame {
+            let regions = view.reservedRegions(kind: .division)
+            if let frame = regions.first(where: { $0.isActive })?.frame {
                 let isVerticalBand = frame.height > frame.width
-                if isVerticalBand == vertical { return frame }
+                if isVerticalBand == vertical {
+                    let plausible = vertical
+                        ? frame.minX > 0 && frame.maxX < bounds.width * 0.95
+                        : frame.minY > 0 && frame.maxY < bounds.height * 0.95
+                    if plausible { return frame }
+                }
             }
         }
         return vertical
@@ -176,5 +192,6 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
                                              width: leftWidth,
                                              height: max(0, composite.bounds.height - videoHeight))
         }
+        onPoseLayout()
     }
 }
