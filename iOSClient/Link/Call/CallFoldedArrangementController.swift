@@ -113,6 +113,7 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     func apply(pose: FoldedCallPose) {
         guard currentPose != pose else { return }
         currentPose = pose
+        CallDebugLog.log("Fold", "apply \(pose == .portraitFolded ? "portraitFolded" : "bookFolded")")
         switch pose {
         case .portraitFolded:
             onSelfViewToChrome()
@@ -156,6 +157,11 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
 
     private func layoutForCurrentPose() {
         guard let pose = currentPose else { return }
+        // Run 27.10. (Fix "schwarzer Screen beim Drehen/Knicken"): Ein
+        // verzoegerter Layout-Durchlauf nach dem Teardown darf die Container
+        // NICHT mehr aus der Call-View in die abgetrennte Hierarchie
+        // zurueckholen.
+        guard view.window != nil, view.superview != nil else { return }
         let bounds = view.bounds
         guard bounds.width > 0, bounds.height > 0 else { return }
         switch pose {
@@ -192,6 +198,9 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
                                              width: leftWidth,
                                              height: max(0, composite.bounds.height - videoHeight))
         }
+        CallDebugLog.log("Fold", "layout pose=\(pose == .portraitFolded ? "portrait" : "book") "
+                               + "root=\(view.bounds) tiles=\(tilesContentView.frame) "
+                               + "chrome=\(chromeContentView.frame) chat=\(chatContentView.frame)")
         onPoseLayout()
     }
 }

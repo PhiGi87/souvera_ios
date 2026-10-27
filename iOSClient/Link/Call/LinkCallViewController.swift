@@ -694,11 +694,29 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Posen-Erkennung: aktive Falz (Division-Region) + Interface-Orientierung.
     private func detectFoldedPose() -> FoldedCallPose? {
         guard #available(iOS 27.1, *) else { return nil }
-        let divisions = view.reservedRegions(kind: .division)
-        guard !divisions.isEmpty else { return nil }
+        // Run 27.10. (Fix "schwarzer Screen beim Drehen/Knicken"): Nur
+        // AKTIVE Division-Regionen zaehlen - die Query kann inaktive/stale
+        // Regionen liefern (vgl. SouveraFoldSupport). Ohne Filter blieb
+        // das Falz-Arrangement beim Rotieren/Entfalten aktiv und verdeckte
+        // den flachen Screen.
+        guard let band = view.reservedRegions(kind: .division).first(where: { $0.isActive }) else {
+            if lastFoldDiagnostic != "flat" {
+                lastFoldDiagnostic = "flat"
+                CallDebugLog.log("Fold", "flat (keine aktive Division-Region)")
+            }
+            return nil
+        }
         let orientation = view.window?.windowScene?.interfaceOrientation ?? .portrait
-        return orientation.isPortrait ? .portraitFolded : .bookFolded
+        let pose: FoldedCallPose = orientation.isPortrait ? .portraitFolded : .bookFolded
+        if lastFoldDiagnostic != "\(pose)" {
+            lastFoldDiagnostic = "\(pose)"
+            CallDebugLog.log("Fold", "Pose erkannt: \(pose) band=\(band.frame)")
+        }
+        return pose
     }
+
+    /// Run 27.10.: Dedupe-Marker fuer die Fold-Diagnose (Log nur bei Wechsel).
+    private var lastFoldDiagnostic = ""
 
     /// Schaltet zwischen flacher Darstellung (wie heute) und der geknickten
     /// Anordnung um. Run 27.10.: CallFoldedArrangementController verwaltet
@@ -737,6 +755,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             arrangement.onPoseLayout = { [weak self] in
                 self?.handleFoldedPoseLayout()
             }
+            CallDebugLog.log("Fold", "Arrangement erzeugt")
             addChild(arrangement)
             view.addSubview(arrangement.view)
             // Run 27.10.: Die Root-View des Controllers uebernimmt die Flaeche
@@ -758,6 +777,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
         // Zurueck zu flach: Container zurueck in die eigene View.
         if pose == nil, let arrangement = foldedArrangement {
+            CallDebugLog.log("Fold", "Arrangement abgebaut")
             arrangement.willMove(toParent: nil)
             arrangement.view.removeFromSuperview()
             arrangement.removeFromParent()
@@ -831,6 +851,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             localContainer.center = CGPoint(x: bounds.midX,
                                             y: max(0, (bounds.height - controlsReserve) / 2))
         }
+        CallDebugLog.log("Fold", "PoseLayout selfView frame=\(localContainer.frame) "
+                               + "inChrome=\(localContainer.superview === chromeContentView) "
+                               + "tiles=\(tilesContentView.bounds)")
         layoutTiles()
     }
 
@@ -932,7 +955,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // Video-Track): Initiale + Name, Mic-Icon (Run-Entscheid 11.09.).
         for participant in audioOnlyParticipants {
             let placeholder = makePlaceholderTile(participant: participant)
-            view.insertSubview(placeholder, at: 0)
+            // Run 27.10.: In den TILE-Container statt in die Call-View -
+            // im gefalteten Zustand lag die Call-View UNTER dem (opaquen)
+            // Falz-Controller und die Platzhalter waren unsichtbar.
+            tilesContentView.insertSubview(placeholder, at: 0)
             placeholderTiles.append(placeholder)
             place(placeholder)
         }
@@ -996,7 +1022,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             clearPlaceholderTiles()
             for participant in audioOnlyParticipants {
                 let placeholder = makePlaceholderTile(participant: participant)
-                view.insertSubview(placeholder, at: 0)
+                // Run 27.10.: In den TILE-Container statt in die Call-View -
+            // im gefalteten Zustand lag die Call-View UNTER dem (opaquen)
+            // Falz-Controller und die Platzhalter waren unsichtbar.
+            tilesContentView.insertSubview(placeholder, at: 0)
                 placeholderTiles.append(placeholder)
                 placeholder.layer.cornerRadius = 10
                 placeholder.layer.borderWidth = 1.5
