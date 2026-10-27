@@ -1,21 +1,26 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Run 25.10. (Geknicktes Call-Erlebnis): UIArrangementViewController
-// (Apple, iOS 27.1, Overlay-Arrangement) ordnet die Call-Inhalte um die
-// Falz. Apple-Doku nennt als Anwendungsfall wörtlich "a view for video
-// playback and a view with playback controls".
+// Run 25.10. (Geknicktes Call-Erlebnis): Posen-Verwaltung um die Falz.
 //
-// Platzierungs-Matrix (Secondary/Primary):
-// - Flach/offen/zu:  Call-Composite über Chat (Chat verdeckt - wie heute)
-// - Geknickt hoch:   Video OBEN (secondary), Controls + Self-View UNTEN
-//                    (primary; die Self-View-Kachel wandert in die
-//                    Control-Hälfte - Nutzer-Entscheidung)
-// - Geknickt quer (Buch): Call-Composite LINKS (secondary/leading),
-//                    interaktiver Chatraum RECHTS (primary/trailing)
+// Run 27.10. (DOKUMENTIERTE ABWEICHUNG von der System-Container-Präferenz):
+// Die erste Implementierung nutzte UIArrangementViewController (Apple,
+// iOS 27.1, Overlay-Arrangement). In DREI unabhängigen Crash-Logs warf
+// sein SwiftUI-Hosting-Interna beim Umhängen unserer Container eine
+// Auto-Layout-Exception (SIGABRT in -[UIView _postMovedFromSuperview:] /
+// _addChildViewController-Hierarchie-Check), und die Slot-Platzierung
+// ergab einen schwarzen Screen mit geklemmten Controls. Der Container
+// ist nicht mit unserem Content kombinierbar (RTC-Video-Views + SwiftUI-
+// Chat-Host, frame-basierte Flat-Mode-Pflege). Daher verwaltet dieser
+// Controller die Posen jetzt selbst mit expliziten Frames - plain UIKit,
+// keine Constraints an den umgehängten Containern selbst, kein fremdes
+// Container-Interna-Layout. Die Posen-Matrix folgt weiterhin Apples
+// UIOverlayArrangement-Spezifikation (developer.apple.com/documentation/
+// uikit/uioverlayarrangement-swift.struct):
+// - Geknickt hochkant (Tent): Secondary/Video OBEN, Primary/Controls UNTEN
+// - Geknickt quer (Buch):    Secondary/Call LEADING, Primary/Chat TRAILING
 
 import UIKit
-import SwiftUI
 
 /// Dünner Host-VC fuer eine umgezogene Container-View.
 final class CallPartHostViewController: UIViewController {
@@ -38,8 +43,6 @@ final class CallPartHostViewController: UIViewController {
     }
 }
 
-/// Verwaltet die geknickte Anordnung: Secondary/Primary-Belegung je Pose.
-/// Abstraktion fuer die type-eliminierte Referenz im Call-VC.
 /// Posen des geknickten Call-Erlebnisses (dateibweit, damit Referenzen
 /// ohne Availability-Erboundsicht moeglich sind).
 enum FoldedCallPose {
@@ -56,47 +59,30 @@ protocol CallFoldedArranging: AnyObject {
 @available(iOS 27.1, *)
 final class CallFoldedArrangementController: UIViewController, CallFoldedArranging {
 
-    enum Pose { case portraitFolded, bookFolded }
-
     private(set) var currentPose: FoldedCallPose?
 
     private let tilesContentView: UIView
     private let chromeContentView: UIView
     private let chatContentView: UIView
-    private let chatRetain: UIViewController
-
-    private let arrangement = UIArrangementViewController()
-    private let tilesHost: CallPartHostViewController
-    private let chromeHost: CallPartHostViewController
-    private let compositeHost: CallPartHostViewController
-    private let chatHost: UIViewController
+    /// Composite der Buech-Haelfte: Video oben, Controls darunter.
+    private let composite = UIView()
 
     /// Self-View-Container wird im geknickten Hochformat von der Control-
     /// Hälfte gehalten (Nutzer-Entscheidung) - der Call-Owner benachrichtigt.
     var onSelfViewToChrome: () -> Void = {}
-    /// Run 26.10.: Rueckweg - im Buch-Modus gehoert die Eigenansicht zur
-    /// Video-Seite (Composite links). Der Call-Owner benachrichtigt.
+    /// Rueckweg - im Buch-Modus gehoert die Eigenansicht zur Video-Seite.
     var onSelfViewToTiles: () -> Void = {}
 
     init(tilesContentView: UIView,
          chromeContentView: UIView,
          chatContentView: UIView,
-         chatRetain: UIViewController,
          onSelfViewToChrome: @escaping () -> Void,
          onSelfViewToTiles: @escaping () -> Void) {
         self.tilesContentView = tilesContentView
         self.chromeContentView = chromeContentView
         self.chatContentView = chatContentView
-        self.chatRetain = chatRetain
         self.onSelfViewToChrome = onSelfViewToChrome
         self.onSelfViewToTiles = onSelfViewToTiles
-        self.tilesHost = CallPartHostViewController(contentView: tilesContentView)
-        self.chromeHost = CallPartHostViewController(contentView: chromeContentView)
-        self.compositeHost = CallPartHostViewController(contentView: UIView())
-        // Run 26.10. (Fix "Buch-Modus ohne Chat"): Der Chatraum wurde an
-        // einen LEEREN UIViewController uebergeben - chatContentView wurde
-        // nie platziert. Der Host nimmt die Chat-View direkt auf.
-        self.chatHost = CallPartHostViewController(contentView: chatContentView)
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -106,69 +92,89 @@ final class CallFoldedArrangementController: UIViewController, CallFoldedArrangi
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
-        addChild(arrangement)
-        view.addSubview(arrangement.view)
-        arrangement.view.frame = view.bounds
-        arrangement.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
-        arrangement.didMove(toParent: self)
+        composite.backgroundColor = .black
     }
 
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        arrangement.view.frame = view.bounds
+        layoutForCurrentPose()
     }
 
-    /// Wendet die Platzierung fuer die Pose an (animierter Wechsel).
+    /// Wendet die Platzierung fuer die Pose an. Nur bei Posen-WECHSEL aktiv:
+    /// Re-Parenting und Self-View-Callbacks laufen sonst bei jedem Layout-
+    /// Durchlauf des Owners. Die Geometrie selbst folgt in layoutForCurrentPose.
     func apply(pose: FoldedCallPose) {
+        guard currentPose != pose else { return }
         currentPose = pose
-        // Run 26.10. (Fix "Abort beim Falten hochkant"): Das Arrangement
-        // unterordnet die Placement-VCs per addChild - der UIKit-Hierarchie-
-        // Check verweigert einen Child, dessen View noch in einer FREMDEN
-        // VC-Hierarchie liegt. Die Container liegen im flachen Modus in der
-        // View des Call-VCs -> VOR der Uebergabe ausklinken (der Check
-        // greift VOR dem impliziten Re-Parenting).
-        tilesContentView.removeFromSuperview()
-        chromeContentView.removeFromSuperview()
-        // Container-Verdrahtung je Pose:
         switch pose {
         case .portraitFolded:
-            // Self-View in die Control-Haeifte holen (Nutzer-Entscheidung).
             onSelfViewToChrome()
-            tilesHost.setContent(tilesContentView)
-            chromeHost.setContent(chromeContentView)
-            arrangement.setViewController(tilesHost, for: .secondary, animated: true)
-            arrangement.setViewController(chromeHost, for: .primary, animated: true)
         case .bookFolded:
-            // Composite links (Call-View mit Controls), Chatraum rechts.
             onSelfViewToTiles()
-            compositeHost.setContent(makeComposite())
-            arrangement.setViewController(compositeHost, for: .secondary, animated: true)
-            arrangement.setViewController(chatHost, for: .primary, animated: true)
         }
-        arrangement.updateArrangement(.overlay, animated: true)
+        view.setNeedsLayout()
     }
 
-    /// Composite-Container: Video oben, Controls darunter (linke Buech-
-    /// haelfte, Nutzer-Entscheidung 3: "Call-View mit Controls").
-    private func makeComposite() -> UIView {
-        let composite = UIView()
-        composite.backgroundColor = .black
-        tilesContentView.removeFromSuperview()
-        composite.addSubview(tilesContentView)
-        chromeContentView.removeFromSuperview()
-        composite.addSubview(chromeContentView)
-        tilesContentView.translatesAutoresizingMaskIntoConstraints = false
-        chromeContentView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            tilesContentView.topAnchor.constraint(equalTo: composite.topAnchor),
-            tilesContentView.leadingAnchor.constraint(equalTo: composite.leadingAnchor),
-            tilesContentView.trailingAnchor.constraint(equalTo: composite.trailingAnchor),
-            tilesContentView.bottomAnchor.constraint(equalTo: chromeContentView.topAnchor),
-            chromeContentView.leadingAnchor.constraint(equalTo: composite.leadingAnchor),
-            chromeContentView.trailingAnchor.constraint(equalTo: composite.trailingAnchor),
-            chromeContentView.bottomAnchor.constraint(equalTo: composite.bottomAnchor),
-            chromeContentView.heightAnchor.constraint(equalTo: composite.heightAnchor, multiplier: 0.35)
-        ])
-        return composite
+    // MARK: - Geometrie
+
+    private func place(_ subview: UIView, in parent: UIView) {
+        if subview.superview !== parent {
+            parent.addSubview(subview)
+        }
+    }
+
+    /// Falz-Band in View-Koordinaten. Ohne gemeldete Division-Region dient
+    /// eine synthetische Halbierung als Fallback.
+    private func divisionBand(vertical: Bool) -> CGRect {
+        let bounds = view.bounds
+        if #available(iOS 27.1, *) {
+            if let frame = view.reservedRegions(kind: .division).first?.frame {
+                let isVerticalBand = frame.height > frame.width
+                if isVerticalBand == vertical { return frame }
+            }
+        }
+        return vertical
+            ? CGRect(x: bounds.midX - 12, y: 0, width: 24, height: bounds.height)
+            : CGRect(x: 0, y: bounds.midY - 12, width: bounds.width, height: 24)
+    }
+
+    private func layoutForCurrentPose() {
+        guard let pose = currentPose else { return }
+        let bounds = view.bounds
+        guard bounds.width > 0, bounds.height > 0 else { return }
+        switch pose {
+        case .portraitFolded:
+            // Tent-Falte (horizontales Band): Video oben, Controls unten.
+            place(tilesContentView, in: view)
+            place(chromeContentView, in: view)
+            if chatContentView.superview !== nil { chatContentView.removeFromSuperview() }
+            if composite.superview !== nil { composite.removeFromSuperview() }
+            let band = divisionBand(vertical: false)
+            tilesContentView.frame = CGRect(x: 0, y: 0,
+                                            width: bounds.width,
+                                            height: max(0, band.minY))
+            chromeContentView.frame = CGRect(x: 0, y: band.maxY,
+                                             width: bounds.width,
+                                             height: max(0, bounds.height - band.maxY))
+        case .bookFolded:
+            // Buch-Falte (vertikales Band): Call-Composite links, Chat rechts.
+            place(tilesContentView, in: composite)
+            place(chromeContentView, in: composite)
+            place(composite, in: view)
+            place(chatContentView, in: view)
+            let band = divisionBand(vertical: true)
+            let leftWidth = max(0, band.minX)
+            let rightWidth = max(0, bounds.width - band.maxX)
+            composite.frame = CGRect(x: 0, y: 0, width: leftWidth, height: bounds.height)
+            chatContentView.frame = CGRect(x: band.maxX, y: 0,
+                                           width: rightWidth, height: bounds.height)
+            // Innerhalb des Composites: Video oben (65 %), Controls unten.
+            let videoHeight = max(0, composite.bounds.height * 0.65)
+            tilesContentView.frame = CGRect(x: 0, y: 0,
+                                            width: leftWidth, height: videoHeight)
+            chromeContentView.frame = CGRect(x: 0, y: videoHeight,
+                                             width: leftWidth,
+                                             height: max(0, composite.bounds.height - videoHeight))
+        }
     }
 }

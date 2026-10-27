@@ -660,7 +660,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         layoutTiles()
     }
 
-    // MARK: - Geknicktes Call-Erlebnis (UIArrangementViewController)
+    // MARK: - Geknicktes Call-Erlebnis (eigene Falz-Verwaltung)
 
     /// Im geknickten Zustand leben die Kacheln im oberen Arrangement-Slot -
     /// die Layout-Mathematik rechnet mit dessen Bounds (nicht view.bounds).
@@ -689,7 +689,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }
 
     /// Schaltet zwischen flacher Darstellung (wie heute) und der geknickten
-    /// Anordnung um. Apple-API: UIArrangementViewController (iOS 27.1).
+    /// Anordnung um. Run 27.10.: CallFoldedArrangementController verwaltet
+    /// die Posen selbst mit expliziten Frames (dokumentierte Abweichung,
+    /// Begruendung im Controller-Kopf).
     private func applyFoldedStateIfNeeded() {
         let pose = detectFoldedPose()
         guard pose != nil || isFoldedLayoutActive else { return }
@@ -703,7 +705,6 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 tilesContentView: tilesContentView,
                 chromeContentView: chromeContentView,
                 chatContentView: chatHost.view,
-                chatRetain: chatHost,
                 onSelfViewToChrome: { [weak self] in
                     // Self-View-Kachel in die Control-Haelfte (Nutzer-Entscheidung).
                     guard let self else { return }
@@ -721,10 +722,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             foldedArrangement = arrangement
             addChild(arrangement)
             view.addSubview(arrangement.view)
+            // Run 27.10.: Die Root-View des Controllers uebernimmt die Flaeche
+            // des Call-VCs (Frame-basiert, kein Autoresizing-Konflikt).
+            arrangement.view.frame = view.bounds
+            arrangement.view.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             arrangement.didMove(toParent: self)
             isFoldedLayoutActive = true
-            tilesContentView.translatesAutoresizingMaskIntoConstraints = false
-            chromeContentView.translatesAutoresizingMaskIntoConstraints = false
         }
 
         if let pose, #available(iOS 27.1, *), let arrangement = foldedArrangement as? CallFoldedArranging {
