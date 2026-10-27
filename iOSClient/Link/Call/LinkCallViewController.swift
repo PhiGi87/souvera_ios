@@ -667,11 +667,23 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var tileLayoutBounds: CGRect {
         isFoldedLayoutActive ? tilesContentView.bounds : view.bounds
     }
+    /// Run 27.10.: Im gefalteten Zustand aus der FENSTERLAGE des Containers
+    /// abgeleitete Insets statt der (ggf. veralteten/vollflaechigen)
+    /// Container-Safe-Areas - im Buch-Modus liegt z. B. keine Statusleiste
+    /// ueber dem Video, obwohl die Container-Insets noch Portrait-Hoehe
+    /// melden. EffektiverInset = Fenster-Inset, das UEBER dem Container
+    /// (bzw. unter ihm) tatsaechlich liegt.
     private var tileLayoutSafeTop: CGFloat {
-        isFoldedLayoutActive ? tilesContentView.safeAreaInsets.top : view.safeAreaInsets.top
+        if !isFoldedLayoutActive { return view.safeAreaInsets.top }
+        guard let window = view.window else { return 0 }
+        let frameInWindow = tilesContentView.convert(tilesContentView.bounds, to: window)
+        return max(0, window.safeAreaInsets.top - frameInWindow.minY)
     }
     private var tileLayoutSafeBottom: CGFloat {
-        isFoldedLayoutActive ? tilesContentView.safeAreaInsets.bottom : view.safeAreaInsets.bottom
+        if !isFoldedLayoutActive { return view.safeAreaInsets.bottom }
+        guard let window = view.window else { return 0 }
+        let frameInWindow = tilesContentView.convert(tilesContentView.bounds, to: window)
+        return max(0, window.safeAreaInsets.bottom - (window.bounds.height - frameInWindow.maxY))
     }
     /// Geknickt hoch: die Eigenansicht lebt in der Control-Haelfte.
     private var isFoldedPortrait: Bool {
@@ -800,11 +812,24 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private func handleFoldedPoseLayout() {
         guard isFoldedLayoutActive else { return }
         if isFoldedPortrait {
-            // Self-View-Kachel zentriert in der Control-Haelfte
-            // (Nutzer-Entscheidung: Eigenansicht unten, nicht im Video).
-            localContainer.frame = CGRect(x: 0, y: 0, width: 180, height: 135)
-            localContainer.center = CGPoint(x: chromeContentView.bounds.midX,
-                                            y: max(0, chromeContentView.bounds.midY - 40))
+            // Run 27.10. (Fix "Eigenansicht viel zu klein"): Statt einer
+            // festen 180x135-Kachel wird der Bereich oberhalb der Controls
+            // moeglichst weitgehend ausgenutzt (4:3, eingepasst, zentriert).
+            let bounds = chromeContentView.bounds
+            let inset: CGFloat = 16
+            let controlsReserve: CGFloat = 120
+            let maxW = max(120, bounds.width - inset * 2)
+            let maxH = max(90, bounds.height - controlsReserve - inset * 2)
+            let aspect: CGFloat = 4.0 / 3.0
+            var tileWidth = maxW
+            var tileHeight = tileWidth / aspect
+            if tileHeight > maxH {
+                tileHeight = maxH
+                tileWidth = tileHeight * aspect
+            }
+            localContainer.frame = CGRect(x: 0, y: 0, width: tileWidth, height: tileHeight)
+            localContainer.center = CGPoint(x: bounds.midX,
+                                            y: max(0, (bounds.height - controlsReserve) / 2))
         }
         layoutTiles()
     }
@@ -846,7 +871,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Raster: alle Kacheln (remote + Eigenansicht) gleich groß.
     private func layoutRaster() {
         let width = tileLayoutBounds.width
+        let height = tileLayoutBounds.height
         let safeTop = tileLayoutSafeTop
+        let safeBottom = tileLayoutSafeBottom
 
         let remoteKeys = tiles.keys.sorted()
         let totalTiles = remoteKeys.count + (shouldShowLocalView && !isFoldedPortrait ? 1 : 0)
@@ -859,14 +886,29 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         let gap: CGFloat = 8
         let margin: CGFloat = 8
         let availableWidth = width - margin * 2 - gap * CGFloat(columns - 1)
-        let tileWidth = availableWidth / CGFloat(columns)
-        let tileHeight = tileWidth * 1.4
+        let baseTileWidth = availableWidth / CGFloat(columns)
+        let baseTileHeight = baseTileWidth * 1.4
+        // Run 27.10. (Fix "Video faengt zu tief an / wird abgeschnitten"):
+        // Das Raster wird in den Container EINGEPASST - feste Hochformat-
+        // Kacheln liefen in den breiten gefalteten Haelften unten raus.
+        // Regel: alle Kacheln (jede Ansicht, jede Teilnehmerzahl) bleiben
+        // komplett sichtbar, der Block wird zentriert.
+        let rows = max(1, Int(ceil(Double(totalTiles) / Double(columns))))
+        let availableHeight = height - safeTop - safeBottom - margin * 2
+        let baseBlockHeight = baseTileHeight * CGFloat(rows) + gap * CGFloat(max(rows - 1, 0))
+        let scale = availableHeight > 0 ? min(1, availableHeight / baseBlockHeight) : 1
+        let tileWidth = baseTileWidth * scale
+        let tileHeight = baseTileHeight * scale
+        let blockWidth = tileWidth * CGFloat(columns) + gap * CGFloat(max(columns - 1, 0))
+        let blockHeight = tileHeight * CGFloat(rows) + gap * CGFloat(max(rows - 1, 0))
+        let originX = max(margin, (width - blockWidth) / 2)
+        let originY = safeTop + margin + max(0, (availableHeight - blockHeight) / 2)
 
         clearPlaceholderTiles()
 
         var index = 0
-        var x = margin
-        var y = safeTop + margin
+        var x = originX
+        var y = originY
 
         func place(_ container: UIView) {
             container.layer.cornerRadius = 10
@@ -875,7 +917,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             container.frame = CGRect(x: x, y: y, width: tileWidth, height: tileHeight)
             index += 1
             if index % columns == 0 {
-                x = margin
+                x = originX
                 y += tileHeight + gap
             } else {
                 x += tileWidth + gap
