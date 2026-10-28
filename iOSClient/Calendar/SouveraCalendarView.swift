@@ -2515,7 +2515,11 @@ extension SouveraCalendarView {
             SouveraHeaderBridge.Item(
                 id: "calendar-picker",
                 icon: "calendar.badge.checkmark",
-                accessibilityLabel: NSLocalizedString("_calendar_today_", comment: "")
+                // Run 27.10. (Fix "Heute neben dem Kalender-Auswahl-Icon"):
+                // Eigenen Titel tragen - ohne text fiel der Coordinator auf
+                // das (falsche) Accessibility-Label "_calendar_today_" zurueck.
+                text: NSLocalizedString("_calendar_group_own_", comment: ""),
+                accessibilityLabel: NSLocalizedString("_calendar_group_own_", comment: "")
             ) {
                 showCalendarPicker = true
             }
