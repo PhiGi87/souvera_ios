@@ -422,6 +422,18 @@ final class CalendarViewModel: ObservableObject {
     func load() async {
         let gen = generation
         offlineNotice = nil
+        // Run 29.10. (Fix TestFlight-Crash RUNNINGBOARD 0xdead10cc): Der
+        // Ladevorgang greift mehrfach auf Realm zu (Cache-Saves, Pending-
+        // Writes). Suspendierte das System die (hintergrundete) App
+        // mitten in diesen Datei-Zugriffen, killte RUNNINGBOARD den
+        // Prozess. Die Aktivitaet haelt die Suspendierung fuer die Dauer
+        // des Loads zurueck (im Vordergrund ein No-Op); danach suspendiert
+        // das System sauber ohne offene Locks.
+        let activity = ProcessInfo.processInfo.beginActivity(
+            options: [.userInitiated],
+            reason: "Calendar sync"
+        )
+        defer { ProcessInfo.processInfo.endActivity(activity) }
 
         let calendar = Calendar.current
         guard let monthInterval = calendar.dateInterval(of: .month, for: visibleMonth) else { return }

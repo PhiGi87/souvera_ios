@@ -63,11 +63,26 @@ final class CalDavClient {
         accountName = account
     }
 
+    /// Run 29.10. (Fix TestFlight-Crash RUNNINGBOARD 0xdead10cc): tableAccount
+    /// war ein computed Property - JEDER fetchEvents-/fetchCalendars-Aufruf
+    /// las erneut synchron aus Realm. load() feuert die Kalender-Queries
+    /// parallel (TaskGroup), also N gleichzeitige Realm-Reads pro Ladevorgang;
+    /// wurde die App suspendiert, waehrend diese Datei-Zugriffe in-flight
+    /// waren, killte RUNNINGBOARD den Prozess (dead10cc). Der Account-Snapshot
+    /// wird einmalig geladen; nil wird NICHT gecacht (falls die DB beim
+    /// ersten Zugriff noch nicht offen war, liest der naechste Zugriff erneut).
+    private var cachedTableAccount: tableAccount?
+
     private var tableAccount: tableAccount? {
+        if let cachedTableAccount { return cachedTableAccount }
+        let fetched: tableAccount?
         if let accountName {
-            return NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == accountName })
+            fetched = NCManageDatabase.shared.getAllTableAccount().first(where: { $0.account == accountName })
+        } else {
+            fetched = NCManageDatabase.shared.getActiveTableAccount()
         }
-        return NCManageDatabase.shared.getActiveTableAccount()
+        if let fetched { cachedTableAccount = fetched }
+        return fetched
     }
 
     private let urlSession: URLSession = {
