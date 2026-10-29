@@ -378,6 +378,13 @@ class NCMainTabBarController: UITabBarController {
             object: nil,
             queue: .main
         ) { [weak self] _ in
+            // Run 29.10. (Crash 0xdead10cc, zweiter Pfad): Gleicher Schutz
+            // wie beim Link-Badge (Run 15.09.) - KEIN synchroner Realm-Zugriff
+            // im Hintergrund (getActiveTableAccount oeffnete mitten in der
+            // Suspension die Realm-Datei -> SIGKILL). Die Badges aktualisieren
+            // sich beim Foreground-Return (Totals-Aenderungen des Stores
+            // werden dann neu gespiegelt).
+            guard UIApplication.shared.applicationState == .active else { return }
             self?.updateMoreBadge()
             // Run-Fix "Mail-Badge spinnt": Der Push-Pfad füttert den
             // Badge-Store sofort (App-Icon 31 -> 32 im Log 10.09.), der

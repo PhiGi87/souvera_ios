@@ -109,6 +109,11 @@ final class CalendarViewModel: ObservableObject {
                 guard let self else { return }
                 guard let interval = SouveraAutoRefresh.interval else { continue }
                 if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
+                    // Run 29.10. (Crash 0xdead10cc, zweiter Pfad): Kein
+                    // Netz-/Realm-Zugriff im Hintergrund - die Polling-Loops
+                    // feuerten nach dem Backgrounding weiter und das System
+                    // suspendierte mitten in Realm-Datei-Zugriffen (SIGKILL).
+                    guard UIApplication.shared.applicationState == .active else { continue }
                     self.lastAutoRefresh = Date()
                     await self.load()
                 }

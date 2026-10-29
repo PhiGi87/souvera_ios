@@ -638,6 +638,12 @@ final class MailViewModel: ObservableObject {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
                 if Date().timeIntervalSince(self.lastAutoRefresh) >= interval {
+                    // Run 29.10. (Crash 0xdead10cc, zweiter Pfad): Der Timer
+                    // tickte nach dem Backgrounding weiter - Netz- und Realm-
+                    // Zugriff mitten in der Suspension killte den Prozess
+                    // (RUNNINGBOARD SIGKILL). Kein Sync im Hintergrund; beim
+                    // Foreground-Return greift der Intervall-Check sofort.
+                    guard UIApplication.shared.applicationState == .active else { continue }
                     self.lastAutoRefresh = Date()
                     self.nextAutoRefreshAt = Date().addingTimeInterval(interval)
                     JmapLog.write("Mail auto-refresh tick interval=\(Int(interval))s")
