@@ -1008,6 +1008,13 @@ final class CalendarViewModel: ObservableObject {
         draft.start = event.start
         draft.end = event.end
         draft.allDay = event.allDay
+        // Run 30.10. (Fix "Mehrtaegiges All-Day-Event"): Das ICS-Ende ist
+        // exklusiv (RFC 5545), das Draft-Datum inklusiv (User waehlt den
+        // letzten Tag). Ohne Korrektur stünde im End-Picker ein Tag zu viel
+        // und ein Re-Save verlaengerte den Termin pro Edit um einen Tag.
+        if event.allDay {
+            draft.end = Calendar.current.date(byAdding: .day, value: -1, to: event.end) ?? event.end
+        }
         draft.location = event.location ?? ""
         draft.notes = event.description ?? ""
         // Run 25.09. (Feedback): Selbst organisierte Termine fuehren den

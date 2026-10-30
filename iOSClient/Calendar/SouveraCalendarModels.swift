@@ -324,7 +324,13 @@ enum ICSParser {
             // (no GMT conversion, which could shift the date).
             let startComponents = Calendar.current.dateComponents([.year, .month, .day], from: draft.start)
             let startText = String(format: "%04d%02d%02d", startComponents.year ?? 0, startComponents.month ?? 0, startComponents.day ?? 0)
-            let endDate = Calendar.current.date(byAdding: .day, value: 1, to: draft.start) ?? draft.end
+            // Run 30.10. (Fix "Mehrtaegiges All-Day-Event nur am Starttag"):
+            // RFC 5545 (3.6.1): DTEND bei VALUE=DATE ist EXKLUSIV. Der
+            // Editor haelt draft.end als INKLUSIVES letztes Datum - DTEND
+            // ist also draft.end + 1 Tag. Vorher wurde draft.end ignoriert
+            // und immer start+1 geschrieben: JEDES All-Day-Event war
+            // eintaegig (18.12.-03.01. landete als DTEND 19.12.).
+            let endDate = Calendar.current.date(byAdding: .day, value: 1, to: draft.end) ?? draft.end
             let endComponents = Calendar.current.dateComponents([.year, .month, .day], from: endDate)
             let endText = String(format: "%04d%02d%02d", endComponents.year ?? 0, endComponents.month ?? 0, endComponents.day ?? 0)
             startLine = "DTSTART;VALUE=DATE:\(startText)"

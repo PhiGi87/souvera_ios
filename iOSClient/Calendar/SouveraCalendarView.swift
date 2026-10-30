@@ -1752,6 +1752,12 @@ private struct CalendarEventDetailSheet: View {
         if event.allDay {
             formatter.dateStyle = .long
             formatter.timeStyle = .none
+            // Run 30.10.: event.end ist exklusiv (RFC 5545) - als Enddatum
+            // den letzten Gueltigen Tag zeigen (nur bei mehrtaegigen).
+            let lastDay = Calendar.current.date(byAdding: .day, value: -1, to: event.end) ?? event.end
+            if !Calendar.current.isDate(event.start, inSameDayAs: lastDay) {
+                return "\(formatter.string(from: event.start)) – \(formatter.string(from: lastDay))"
+            }
             return formatter.string(from: event.start)
         }
         formatter.dateStyle = .medium
