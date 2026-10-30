@@ -348,6 +348,20 @@ final class LinkChatListController: NSObject, ObservableObject {
             return true
         case .separator(let id):
             if let index = items.firstIndex(where: { $0.message.id == id }) {
+                // Run 30.10. (Fix TestFlight-Crash iPhone 15, iOS 18.6):
+                // scrollToItem wirft eine NSException, wenn der Ziel-IndexPath
+                // groesser ist als die von der Collection View aktuell
+                // gekannte Item-Anzahl (items ist schon verlaengert, das
+                // Snapshot-Apply/Layout noch nicht committed). Grenz-Check
+                // und sonst als pending behandeln - die Rescroll-Paesse/
+                // der Timeout holen den Sprung nach.
+                let known = collectionView.numberOfItems(inSection: Self.messageSection.rawValue)
+                if index >= known {
+                    if didReportPositioned {
+                        scrollToBottom(animated: false)
+                    }
+                    return false
+                }
                 collectionView.layoutIfNeeded()
                 collectionView.scrollToItem(at: messageIndexPath(item: index),
                                             at: .centeredVertically, animated: false)
@@ -464,6 +478,17 @@ final class LinkChatListController: NSObject, ObservableObject {
     func scrollToBottom(animated: Bool) {
         guard let collectionView, !items.isEmpty else { return }
         let indexPath = messageIndexPath(item: items.count - 1)
+        // Run 30.10. (Fix TestFlight-Crash iPhone 15, iOS 18.6): UIKit wirft
+        // bei scrollToItem eine NSException, wenn die Collection View die
+        // Ziel-Item-Anzahl noch nicht kennt (items verlaengert, Snapshot-
+        // Apply/Layout pending). Dann exception-frei auf das reale Listen-
+        // ende fahren (setContentOffset, dokumentiert).
+        let known = collectionView.numberOfItems(inSection: Self.messageSection.rawValue)
+        guard known > 0, indexPath.item < known else {
+            let offsetY = max(0, collectionView.contentSize.height - collectionView.bounds.height)
+            collectionView.setContentOffset(CGPoint(x: 0, y: offsetY), animated: animated)
+            return
+        }
         collectionView.layoutIfNeeded()
         collectionView.scrollToItem(at: indexPath, at: .bottom, animated: animated)
     }
