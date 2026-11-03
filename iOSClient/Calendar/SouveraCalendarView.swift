@@ -512,8 +512,9 @@ struct SouveraCalendarView: View {
         .gesture(horizontalSwipe(step: 1))
     }
 
-    /// Datum + Pfeile (der Wochentag kommt aus dem Timeline-Kopf, sonst
-    /// stünde er doppelt da).
+    /// Datum + Wochentag + Pfeile (Wochentag auch hier, damit er beim
+    /// Scrollen des Stundenrasters sichtbar bleibt - im Timeline-Kopf
+    /// steht er jetzt sticky).
     private func dateOnlySwitcher(day: Date, compact: Bool = false) -> some View {
         HStack {
             Button {
@@ -522,7 +523,12 @@ struct SouveraCalendarView: View {
                 Image(systemName: "chevron.left")
             }
             Spacer()
-            Text(day, style: .date).font(.headline)
+            VStack(spacing: 1) {
+                Text(day.formatted(.dateTime.weekday(.wide)))
+                    .font(.caption).fontWeight(.medium)
+                    .foregroundStyle(.secondary)
+                Text(day, style: .date).font(.headline)
+            }
             Spacer()
             Button {
                 shiftSelectedDay(by: 1)
@@ -819,16 +825,20 @@ private struct TimelineDayView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    header
-                    allDaySection
+            // Fixe Kopfzeile (Wochentag + Ganztagstermine) - Muster der
+            // 3-Tage-Ansicht: nur das Stundenraster scrollt, der Kopf
+            // bleibt sticky.
+            VStack(spacing: 0) {
+                header
+                allDaySection
+                Divider()
+                ScrollView {
                     HStack(alignment: .top, spacing: 0) {
                         hourScale
                         TimelineColumn(day: day, events: events, hourHeight: hourHeight, onSelect: onSelect, colorFor: colorFor, partstatFor: partstatFor, onCreate: onCreate, onSlotActive: { slotActive = $0 }, allowsDayShift: allowsDayShift, dayShiftFraction: dayShiftFraction, onMoveEvent: onMoveEvent)
                     }
+                    .padding(.bottom, bottomPadding)
                 }
-                .padding(.bottom, bottomPadding)
             }
             .scrollDisabled(slotActive)
             .onAppear {
@@ -1372,6 +1382,10 @@ private struct ThreeDayTimelineView: View {
                     .padding(.trailing, 2)
                 }
                 Divider()
+                // Kompakte Ganztagzeile: fix unter den Tageskoepfen,
+                // Spalten synchron zum Stundenraster darunter.
+                allDayRow
+                Divider()
                 ScrollView {
                     HStack(alignment: .top, spacing: 0) {
                         VStack(alignment: .trailing, spacing: 0) {
@@ -1410,6 +1424,44 @@ private struct ThreeDayTimelineView: View {
             }
             .onChange(of: scrollTrigger) { _, _ in
                 scrollToNow(proxy)
+            }
+        }
+    }
+
+    /// Ganztagstermine pro Tag in einer fixen Zeile unter den Kopfzeilen
+    /// (Muster der Apple-Calendar-App). events(on:) liefert mehrtaegige
+    /// allDay-Events bereits fuer jeden betroffenen Tag.
+    private var allDayRow: some View {
+        let hasAllDay = days.contains { !eventsProvider($0).filter { $0.allDay }.isEmpty }
+        return Group {
+            if hasAllDay {
+                HStack(alignment: .top, spacing: 0) {
+                    // Gleiche Fuehrungsspalte wie der Stundenmassstab
+                    // im ScrollView (Breite 34 + Trailing-Padding 2).
+                    Color.clear.frame(width: 34)
+                        .padding(.trailing, 2)
+                    ForEach(days, id: \.self) { day in
+                        VStack(spacing: 3) {
+                            ForEach(eventsProvider(day).filter { $0.allDay }) { event in
+                                Button {
+                                    onSelect(event)
+                                } label: {
+                                    Text(event.title)
+                                        .font(.caption2)
+                                        .lineLimit(1)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .padding(.horizontal, 4)
+                                        .padding(.vertical, 2)
+                                        .background(colorFor(event).opacity(0.18), in: RoundedRectangle(cornerRadius: 4))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.horizontal, 2)
+                        .frame(maxWidth: .infinity, alignment: .top)
+                    }
+                }
+                .padding(.vertical, 3)
             }
         }
     }
