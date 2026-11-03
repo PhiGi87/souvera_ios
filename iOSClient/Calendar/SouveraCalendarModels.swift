@@ -155,15 +155,19 @@ enum ICSParser {
                 }
                 let rawKey = String(line[line.startIndex..<colon])
                 let keyPart = rawKey.uppercased()
+                // Run 30.10.: Outlook/ics-Standard haengt Parameter hinter
+                // den Namen (RFC 5545, z. B. "SUMMARY;LANGUAGE=de-DE:...").
+                // Gegen den Bare-Key (ohne Parameter) matchen.
+                let bareKey = keyPart.components(separatedBy: ";").first ?? keyPart
                 let rawValue = String(line[line.index(after: colon)...])
                 let value = unescape(rawValue)
-                if keyPart == "UID" {
+                if bareKey == "UID" {
                     uid = value
-                } else if keyPart == "SUMMARY" {
+                } else if bareKey == "SUMMARY" {
                     title = value
-                } else if keyPart == "LOCATION" {
+                } else if bareKey == "LOCATION" {
                     location = value
-                } else if keyPart == "DESCRIPTION" {
+                } else if bareKey == "DESCRIPTION" {
                     notes = value
                 } else if keyPart.hasPrefix("ATTENDEE") {
                     // Run 19.09.: mailto:-Praefix case-insensitiv entfernen -
