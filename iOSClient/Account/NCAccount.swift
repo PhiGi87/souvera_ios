@@ -184,6 +184,31 @@ class NCAccount: NSObject {
         MailCache.removeAccount(account: account)
         LinkCache.removeAccount(account: account)
         UsedRecipientStore.removeAccount(account: account)
+        // Run 03.11. (Vollständiges Account-Cleanup): Lokale
+        // Kalender-Erinnerungen (pending + delivered) dieses Kontos
+        // entfernen - bisher blieben Banner eines gelöschten Accounts
+        // liegen und feuerten weiter.
+        await SouveraReminderScheduler.removeAll(account: account)
+        // Run 03.11.: UserDefaults-Reste des Kontos entfernen.
+        // - Kalender-Keys: Suffix ist der ROCHE account (die
+        //   stableAccountKey()-"Normalisierung" in CalendarViewModel
+        //   wählt nur den aktiven/ersten Account aus und sanitisiert
+        //   NICHT) - hier greift also derselbe rohe account.
+        // - Push-Keys (Reg-State, 429-Cooldown, Mail-Gerät): ebenfalls
+        //   roher account.
+        // - App-Gruppe: Push-Toggles (NSE liest dieselben Keys).
+        // NICHT angerührt: SouveraPushCredentialVault - bewusst erhalten,
+        // weil dessen 409-Selbstheilung Alt-Zeilen über historische Keys
+        // selbst löscht (frühzeitiges Leeren würde die Heilung brechen).
+        let userDefaults = UserDefaults.standard
+        userDefaults.removeObject(forKey: "souveraCalendarSelection_\(account)")
+        userDefaults.removeObject(forKey: "souveraCalendarColors_\(account)")
+        userDefaults.removeObject(forKey: "souvera_push_reg_state_\(account)")
+        userDefaults.removeObject(forKey: "souvera_push_nc_429_\(account)")
+        userDefaults.removeObject(forKey: "souvera_mail_device_id_\(account)")
+        userDefaults.removeObject(forKey: "souvera_mail_device_token_\(account)")
+        SouveraPushToggles.store.removeObject(forKey: SouveraPushToggles.mailCalendarKey + account)
+        SouveraPushToggles.store.removeObject(forKey: SouveraPushToggles.linkTalkKey + account)
         // Badge-Zähler dieses Kontos entfernen (Mehr-/App-Icon-Badge).
         await SouveraBadgeStore.shared.removeAccount(account: account)
         // Remove session in NextcloudKit

@@ -164,4 +164,27 @@ enum SouveraReminderScheduler {
             }
         }
     }
+
+    /// Run 03.11. (Account-Cleanup): Entfernt ALLE Erinnerungen EINES
+    /// Accounts - pending UND bereits zugestellt (delivered). Wird beim
+    /// Abmelden/Löschen eines Accounts aufgerufen, damit keine Banner
+    /// eines entfernten Kontos mehr erscheinen. Andere Accounts bleiben
+    /// unberührt (Prefix-Grenze "eventreminder_<account>_").
+    static func removeAll(account: String) async {
+        let prefix = Self.prefix + account + "_"
+        let center = UNUserNotificationCenter.current()
+        let pending = await center.pendingNotificationRequests()
+        let pendingIds = pending.map(\.identifier).filter { $0.hasPrefix(prefix) }
+        if !pendingIds.isEmpty {
+            center.removePendingNotificationRequests(withIdentifiers: pendingIds)
+        }
+        let delivered = await center.deliveredNotifications()
+        let deliveredIds = delivered.map(\.request.identifier).filter { $0.hasPrefix(prefix) }
+        if !deliveredIds.isEmpty {
+            center.removeDeliveredNotifications(withIdentifiers: deliveredIds)
+        }
+        if !pendingIds.isEmpty || !deliveredIds.isEmpty {
+            JmapLog.write("Calendar reminders: removed \(pendingIds.count) pending / \(deliveredIds.count) delivered for logged-out account")
+        }
+    }
 }

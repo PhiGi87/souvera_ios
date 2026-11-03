@@ -499,6 +499,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
 
                 try? await Task.sleep(for: .seconds(1))
 
+                // Run 03.11.: Einmalige Orphan-Migration (Feature 1) -
+                // räumt lokale Reste früher nicht vollständig gelöschter
+                // Accounts auf (UserDefaults, Push-Toggles, Erinnerungen,
+                // Caches). Guard-Key: läuft nur EINMAL pro Installation.
+                // Bewusst nach dem Realm-Warm-up und vor dem Push-Reconcile.
+                await SouveraOrphanAccountCleanup.runOnce()
+
                 // Variante 1: Push nur für den aktiven Account (ein APNs-
                 // Token kann am Proxy nur einem Account gehören). Inaktive
                 // Accounts werden sauber abgemeldet, der aktive registriert.

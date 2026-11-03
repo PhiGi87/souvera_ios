@@ -37,6 +37,7 @@
 		8AD227B5D3FD8FFBB3ED4284 /* SouveraInviteResponse.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */; };
 		48B8910EADF14AAB12840E6D /* SouveraInviteResponseView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3125D522B8F3F9162D0F3D80 /* SouveraInviteResponseView.swift */; };
 		A3D201096C4962E5A83184F6 /* SouveraPushToggles.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62AC80AD4D9EA858F36C45B1 /* SouveraPushToggles.swift */; };
+		A3D2EE014F0A7C21AA000001 /* SouveraOrphanAccountCleanup.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D2EE014F0A7C21AA000002 /* SouveraOrphanAccountCleanup.swift */; };
 		15D5034C070F8E2AA4253A6A /* SouveraCenteredDialog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0547832736946B5C831D5E41 /* SouveraCenteredDialog.swift */; };
 		72F4FE19C1A93FBA981ED1A0 /* SouveraVideoEncoderProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = F29665AE391D7C68A494E732 /* SouveraVideoEncoderProbe.swift */; };
 		563A08B3A7580E4677BCFAB9 /* SouveraToneSynthesizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14318B28514295131706E69F /* SouveraToneSynthesizer.swift */; };
@@ -1354,6 +1355,7 @@
 		30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Calendar/SouveraInviteResponse.swift"; sourceTree = SOURCE_ROOT; };
 		3125D522B8F3F9162D0F3D80 /* SouveraInviteResponseView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Calendar/SouveraInviteResponseView.swift"; sourceTree = SOURCE_ROOT; };
 		62AC80AD4D9EA858F36C45B1 /* SouveraPushToggles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraPushToggles.swift"; sourceTree = SOURCE_ROOT; };
+		A3D2EE014F0A7C21AA000002 /* SouveraOrphanAccountCleanup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraOrphanAccountCleanup.swift"; sourceTree = SOURCE_ROOT; };
 		0547832736946B5C831D5E41 /* SouveraCenteredDialog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Design System/SouveraCenteredDialog.swift"; sourceTree = SOURCE_ROOT; };
 		F29665AE391D7C68A494E732 /* SouveraVideoEncoderProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Link/Call/SouveraVideoEncoderProbe.swift"; sourceTree = SOURCE_ROOT; };
 		14318B28514295131706E69F /* SouveraToneSynthesizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Utility/SouveraToneSynthesizer.swift"; sourceTree = SOURCE_ROOT; };
@@ -3462,6 +3464,7 @@
 				30E9BA9B891B9ACF31D01243 /* SouveraInviteResponse.swift */,
 				3125D522B8F3F9162D0F3D80 /* SouveraInviteResponseView.swift */,
 				62AC80AD4D9EA858F36C45B1 /* SouveraPushToggles.swift */,
+				A3D2EE014F0A7C21AA000002 /* SouveraOrphanAccountCleanup.swift */,
 				0547832736946B5C831D5E41 /* SouveraCenteredDialog.swift */,
 				F29665AE391D7C68A494E732 /* SouveraVideoEncoderProbe.swift */,
 				14318B28514295131706E69F /* SouveraToneSynthesizer.swift */,
@@ -5268,6 +5271,7 @@
 				72F4FE19C1A93FBA981ED1A0 /* SouveraVideoEncoderProbe.swift in Sources */,
 				15D5034C070F8E2AA4253A6A /* SouveraCenteredDialog.swift in Sources */,
 				A3D201096C4962E5A83184F6 /* SouveraPushToggles.swift in Sources */,
+				A3D2EE014F0A7C21AA000001 /* SouveraOrphanAccountCleanup.swift in Sources */,
 				8AD227B5D3FD8FFBB3ED4284 /* SouveraInviteResponse.swift in Sources */,
 				48B8910EADF14AAB12840E6D /* SouveraInviteResponseView.swift in Sources */,
 				B4E8D2C7A5F14928C6B3E9A1 /* SouveraLinkOpener.swift in Sources */,

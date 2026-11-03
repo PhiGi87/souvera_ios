@@ -26,15 +26,57 @@ enum MailCache {
     /// Löscht alle Cache-Dateien EINES Accounts (Abmelden): Mail-Snapshots,
     /// Bodies sowie die darin abgelegten Kalender-/Kontakt-Blobs dieses
     /// Accounts. Andere Accounts bleiben unberührt.
+    /// Run 03.11.: Exakte Account-Grenze statt Substring-contains - der
+    /// alte contains-Match konnte bei präfix-ähnlichen Accounts (z. B.
+    /// "admin" vs. "admin2@...") Dateien des FALSCHEN Kontos treffen.
     static func removeAccount(account: String) {
         let safeAccount = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
         let fm = FileManager.default
         if let files = try? fm.contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil) {
-            for url in files where url.lastPathComponent.contains(safeAccount) {
+            for url in files where isAccountArtifact(url.lastPathComponent, account: safeAccount) {
                 try? fm.removeItem(at: url)
             }
         }
         try? fm.removeItem(at: rootDirectory.appendingPathComponent("bodies-\(safeAccount)", isDirectory: true))
+    }
+
+    /// Run 03.11.: Exakte Grenz-Logik - eine Datei gehört zum Account,
+    /// wenn sie mit "<safe>_" beginnt (Mail-Snapshots "<safe>_<mailbox>",
+    /// Mailboxlisten "<safe>_mailboxes") oder ein bekanntes Kalender-Blob
+    /// mit dem Account-Teil ist ("calendar_events_<safe>_<monat>",
+    /// "calendar_list_<safe>"). Genau, NICHT als Teilstring.
+    private static func isAccountArtifact(_ name: String, account safe: String) -> Bool {
+        name.hasPrefix(safe + "_")
+            || name.hasPrefix("calendar_events_" + safe + "_")
+            || name.hasPrefix("calendar_list_" + safe)
+            || name == "bodies-" + safe
+    }
+
+    /// Run 03.11. (Orphan-Migration): Entfernt Cache-Dateien, deren
+    /// Account-Teil zu KEINEM bekannten (sanitisierten) Account passt.
+    /// Konservativ: eine Datei gilt schon bei EINEM passenden bekannten
+    /// Präfix als bekannt - lieber ein Orphan übrig lassen als Daten eines
+    /// Live-Accounts löschen. Rückgabe: Anzahl gelöschter Einträge.
+    static func removeOrphanAccountFiles(knownSanitized: Set<String>) -> Int {
+        let known = knownSanitized.filter { !$0.isEmpty }
+        guard !known.isEmpty else { return 0 }
+        let fm = FileManager.default
+        guard let files = try? fm.contentsOfDirectory(at: rootDirectory, includingPropertiesForKeys: nil) else { return 0 }
+        var removed = 0
+        for url in files {
+            let name = url.lastPathComponent
+            // Dateien ohne Account-Bezug (z. B. "contacts.json.gz") und
+            // Fremd-Einträge niemals anfassen.
+            guard name.hasSuffix(".json.gz") || name.hasPrefix("bodies-") else { continue }
+            let isKnown = known.contains { account in
+                isAccountArtifact(name, account: account)
+            }
+            if !isKnown {
+                try? fm.removeItem(at: url)
+                removed += 1
+            }
+        }
+        return removed
     }
 
     /// Cache-Datei je Konto+Ordner. LEERE Keys sind verboten: der
