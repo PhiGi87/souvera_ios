@@ -148,6 +148,11 @@ enum SouveraVacationResponder {
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        // Run 03.11. (Härtung): 404 = ältere souvera_mail-Version ohne
+        // Vacation-Endpunkte -> "nicht verfügbar" statt Fehler-Alert.
+        if code == 404 {
+            return .unavailable()
+        }
         guard (200..<300).contains(code) else {
             throw SouveraVacationError.http(code)
         }
