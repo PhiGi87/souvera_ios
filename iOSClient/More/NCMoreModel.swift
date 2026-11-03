@@ -194,6 +194,9 @@ final class NCMoreModel: ObservableObject {
         /// Opens the native Shield (quarantine + lists) screen.
         case shield
 
+        /// Run 03.11.: Öffnet den Abwesenheitsassistenten (souvera_mail).
+        case vacation
+
         /// No-op destination.
         case none
     }
@@ -328,6 +331,19 @@ final class NCMoreModel: ObservableObject {
                     titleKey: "_new_window_",
                     image: "rectangle.on.rectangle",
                     destination: .newWindow
+                )
+            )
+        }
+
+        // Run 03.11.: Abwesenheitsassistent (souvera_mail Vacation-
+        // Endpunkte) - nur mit vorhandenem Account anbieten, da der
+        // Screen die Zugangsdaten des aktiven Accounts nutzt.
+        if !account.isEmpty {
+            functionItems.append(
+                Item(
+                    titleKey: "_vacation_title_",
+                    image: "envelope.badge.clock",
+                    destination: .vacation
                 )
             )
         }
@@ -571,6 +587,14 @@ final class NCMoreModel: ObservableObject {
                 ]
             )
             pushHosted(ShieldView(mailboxPicker: mailboxPicker, addTrigger: addTrigger), title: NSLocalizedString("_shield_", comment: ""), trailing: [addButton, mailboxButton])
+
+        case .vacation:
+            // Run 03.11.: Abwesenheitsassistent - gepusht wie die anderen
+            // SwiftUI-Screens, Speichern-Button im Form-Toolbar der View.
+            pushHosted(
+                SouveraVacationView(),
+                title: NSLocalizedString("_vacation_title_", comment: "")
+            )
 
         case .none:
             break

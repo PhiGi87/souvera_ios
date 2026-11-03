@@ -1339,3 +1339,17 @@ _mail_sort_flagged_ = "Flagged first";
 
 /* Run 23.10.: Ordner-Zugang im Mail-Header */
 "_mail_folders_" = "Folders";
+
+/* Run 03.11.: Abwesenheitsassistent (Vacation Responder) im Mehr-Menü */
+"_vacation_title_" = "Vacation responder";
+"_vacation_enabled_" = "Active";
+"_vacation_from_" = "From";
+"_vacation_to_" = "To";
+"_vacation_subject_" = "Subject";
+"_vacation_message_" = "Message";
+"_vacation_period_" = "Period";
+"_vacation_save_" = "Save";
+"_vacation_unavailable_" = "The mail server does not support an out-of-office note";
+"_vacation_saved_" = "Saved";
+"_vacation_footer_" = "Replies are sent once per sender while the responder is active.";
+"_vacation_error_" = "The vacation responder could not be saved.";
