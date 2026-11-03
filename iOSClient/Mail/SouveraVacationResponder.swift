@@ -142,7 +142,13 @@ enum SouveraVacationResponder {
     /// Liest den Vacation-Zustand. Fehlende Felder → Defaults;
     /// `available == false` wird sauber als "nicht verfügbar" abgebildet.
     static func load(account: String? = nil) async throws -> SouveraVacationState {
-        let info = try accountInfo(account)
+        let info: (baseUrl: String, username: String, password: String)
+        do {
+            info = try accountInfo(account)
+        } catch {
+            SouveraLog.write("Vacation", "load noAccount")
+            throw error
+        }
         var req = try request(baseUrl: info.baseUrl, suffix: "", method: "GET")
         authorize(&req, username: info.username, password: info.password)
 
@@ -151,19 +157,26 @@ enum SouveraVacationResponder {
         // Run 03.11. (Härtung): 404 = ältere souvera_mail-Version ohne
         // Vacation-Endpunkte -> "nicht verfügbar" statt Fehler-Alert.
         if code == 404 {
+            // Run 03.11. (Diagnose): alter Server ohne Vacation-Endpunkt.
+            SouveraLog.write("Vacation", "load status=404 -> unavailable")
             return .unavailable()
         }
         guard (200..<300).contains(code) else {
+            SouveraLog.write("Vacation", "load status=\(code)")
             throw SouveraVacationError.http(code)
         }
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            SouveraLog.write("Vacation", "load status=\(code) -> invalidResponse")
             throw SouveraVacationError.invalidResponse
         }
         // Robustes Parsing: fehlende Felder → Defaults. Manche Server-
         // Varianten liefern das Objekt unter "vacation", andere flach.
         let vacation = (json["vacation"] as? [String: Any]) ?? json
         let available = (json["available"] as? Bool) ?? true
-        guard available else { return .unavailable() }
+        guard available else {
+            SouveraLog.write("Vacation", "load status=\(code) available=false")
+            return .unavailable()
+        }
         return SouveraVacationState(
             enabled: (vacation["enabled"] as? Bool) ?? false,
             subject: (vacation["subject"] as? String) ?? "",
@@ -178,7 +191,13 @@ enum SouveraVacationResponder {
     /// den sofortigen NC→Sieve-Sync an (Fehler des Syncs werden nur
     /// geloggt - der Server synct sonst regelmäßig selbst).
     static func save(account: String? = nil, _ state: SouveraVacationState) async throws {
-        let info = try accountInfo(account)
+        let info: (baseUrl: String, username: String, password: String)
+        do {
+            info = try accountInfo(account)
+        } catch {
+            SouveraLog.write("Vacation", "save noAccount")
+            throw error
+        }
         var body: [String: Any] = [
             "enabled": state.enabled,
             "subject": state.subject,
@@ -196,19 +215,25 @@ enum SouveraVacationResponder {
         let (data, response) = try await URLSession.shared.data(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200..<300).contains(code) else {
+            SouveraLog.write("Vacation", "save failed status=\(code)")
             throw SouveraVacationError.http(code)
         }
         // Antwort format prüfen ({status:"ok"}), aber tolerant bleiben.
         if let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
            let status = json["status"] as? String, status != "ok" {
+            SouveraLog.write("Vacation", "save status=\(code) response-status=\(status)")
             throw SouveraVacationError.invalidResponse
         }
+        SouveraLog.write("Vacation", "save status=\(code) ok")
         triggerSync(baseUrl: info.baseUrl, username: info.username, password: info.password)
     }
 
     /// Fire-and-forget: sofortiger NC→Sieve-Sync nach erfolgreichem POST.
     static func triggerSync(account: String? = nil) async {
-        guard let info = try? accountInfo(account) else { return }
+        guard let info = try? accountInfo(account) else {
+            SouveraLog.write("Vacation", "sync noAccount")
+            return
+        }
         triggerSync(baseUrl: info.baseUrl, username: info.username, password: info.password)
     }
 

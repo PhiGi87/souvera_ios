@@ -512,9 +512,8 @@ struct SouveraCalendarView: View {
         .gesture(horizontalSwipe(step: 1))
     }
 
-    /// Datum + Wochentag + Pfeile (Wochentag auch hier, damit er beim
-    /// Scrollen des Stundenrasters sichtbar bleibt - im Timeline-Kopf
-    /// steht er jetzt sticky).
+    /// Datum + Pfeile (Run 03.11.: kein Wochentag hier - der sticky
+    /// Timeline-Header zeigt ihn dauerhaft, sonst stünde er doppelt).
     private func dateOnlySwitcher(day: Date, compact: Bool = false) -> some View {
         HStack {
             Button {
@@ -523,12 +522,7 @@ struct SouveraCalendarView: View {
                 Image(systemName: "chevron.left")
             }
             Spacer()
-            VStack(spacing: 1) {
-                Text(day.formatted(.dateTime.weekday(.wide)))
-                    .font(.caption).fontWeight(.medium)
-                    .foregroundStyle(.secondary)
-                Text(day, style: .date).font(.headline)
-            }
+            Text(day, style: .date).font(.headline)
             Spacer()
             Button {
                 shiftSelectedDay(by: 1)
