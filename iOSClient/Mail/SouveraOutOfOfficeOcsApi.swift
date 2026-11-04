@@ -69,7 +69,9 @@ enum SouveraOutOfOfficeOcsApi {
             return nil
         }
         guard (200..<300).contains(code) else {
-            SouveraLog.write("Vacation", "get status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            // Diagnose: NC-Antworten können Hinweise im Body enthalten -
+            // die ersten 300 Zeichen mit in die Log-Zeile (escaped, einzeilig).
+            SouveraLog.write("Vacation", "get status=\(code) message=\(errorMessage(from: data) ?? "-") body=\(bodySnippet(from: data))")
             throw SouveraVacationError.http(code, errorMessage(from: data))
         }
         let fields = try ocsDataFields(from: data)
@@ -122,10 +124,61 @@ enum SouveraOutOfOfficeOcsApi {
             // 400 kann {"error":"statusLength"|"firstDay"} enthalten -
             // als Server-Message durchreichen (siehe errorMessage).
             let serverMessage = validationMessage(from: data) ?? errorMessage(from: data)
-            SouveraLog.write("Vacation", "set status=\(code) message=\(serverMessage ?? "-")")
+            SouveraLog.write("Vacation", "set status=\(code) message=\(serverMessage ?? "-") body=\(bodySnippet(from: data))")
+            // Run 04.11.: Bei HTTP 500 (und nur dann) GENAU EINEN Retry
+            // mit identischen Feldern als JSON-Body. NC bindet OCS-
+            // Parameter auch aus JSON-Bodies; der Retry umgeht damit
+            // Form-Body-Parsing-Probleme der konkreten Server-Instanz
+            // (500 = uncaught Throw im Server, z. B. new DateTimeImmutable('')
+            // wenn Params nicht ankommen). replacementUserId wird bei
+            // leerem Wert weggelassen, nicht als null mitgeschickt.
+            if code == 500 {
+                SouveraLog.write("Vacation", "set form status=500 -> retry json")
+                // Bei erneutem Fehler wirft setJson wie bisher.
+                return try await setJson(account: account,
+                                         firstDay: firstDay,
+                                         lastDay: lastDay,
+                                         status: cappedStatus,
+                                         message: message,
+                                         replacementUserId: replacementUserId)
+            }
             throw SouveraVacationError.http(code, serverMessage)
         }
         SouveraLog.write("Vacation", "set status=\(code) ok")
+    }
+
+    /// Retry-Pfad von `set`: identische Felder als JSON-Body
+    /// (Content-Type: application/json), nur bei Form-500 aufgerufen.
+    /// Wirft den (letzten) Fehler, wenn auch der JSON-Versuch fehlschlägt.
+    private static func setJson(account: String?,
+                                firstDay: Date,
+                                lastDay: Date,
+                                status: String,
+                                message: String,
+                                replacementUserId: String?) async throws {
+        let info = try accountInfo(account)
+        var body: [String: String] = [
+            "firstDay": dateString(firstDay),
+            "lastDay": dateString(lastDay),
+            "status": status,
+            "message": message
+        ]
+        if let replacementUserId, !replacementUserId.isEmpty {
+            body["replacementUserId"] = replacementUserId
+        }
+        var request = try request(baseUrl: info.baseUrl, userId: info.username, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        authorize(&request, username: info.username, password: info.password)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(code) else {
+            let serverMessage = validationMessage(from: data) ?? errorMessage(from: data)
+            SouveraLog.write("Vacation", "set json status=\(code) message=\(serverMessage ?? "-") body=\(bodySnippet(from: data))")
+            throw SouveraVacationError.http(code, serverMessage)
+        }
+        SouveraLog.write("Vacation", "set json status=\(code) ok")
     }
 
     /// Löscht die Abwesenheit. 404 wird toleriert (schon gelöscht = ok).
@@ -141,7 +194,7 @@ enum SouveraOutOfOfficeOcsApi {
             return
         }
         guard (200..<300).contains(code) else {
-            SouveraLog.write("Vacation", "clear status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            SouveraLog.write("Vacation", "clear status=\(code) message=\(errorMessage(from: data) ?? "-") body=\(bodySnippet(from: data))")
             throw SouveraVacationError.http(code, errorMessage(from: data))
         }
         SouveraLog.write("Vacation", "clear status=\(code) ok")
@@ -273,5 +326,23 @@ enum SouveraOutOfOfficeOcsApi {
     /// Encodiert einen FORM-Body-Wert (x-www-form-urlencoded).
     private static func formEncode(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+
+    /// Diagnose: die ersten 300 Zeichen des Response-Bodies, escaped und
+    /// einzeilig (NC-Fehlerseiten können Hinweise auf die Ursache tragen).
+    /// Nimmt JSON- und HTML-Bodies gleichermaßen auf; "-" bei leerem Body.
+    private static func bodySnippet(from data: Data?) -> String {
+        guard let data, !data.isEmpty,
+              let raw = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1),
+              !raw.isEmpty else {
+            return "-"
+        }
+        let snippet = String(raw.prefix(300))
+        let escaped = snippet
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+            .replacingOccurrences(of: "\t", with: "\\t")
+        return escaped
     }
 }
