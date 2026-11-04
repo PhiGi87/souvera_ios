@@ -1353,3 +1353,12 @@ _mail_sort_flagged_ = "Flagged first";
 "_vacation_saved_" = "Saved";
 "_vacation_footer_" = "Replies are sent once per sender while the responder is active.";
 "_vacation_error_" = "The vacation responder could not be saved.";
+
+/* Run 04.11.: Sync-Button, NC-Abwesenheits-Sektion, Fehler-Banner */
+"_vacation_sync_now_" = "Sync now";
+"_vacation_nc_absence_" = "Out of office in Nextcloud";
+"_vacation_nc_period_" = "Period";
+"_vacation_nc_replacement_" = "Replacement";
+"_vacation_nc_planned_" = "This period is scheduled and has not started yet.";
+"_vacation_retry_" = "Retry";
+"_vacation_error_status_" = "Request failed (%@)";

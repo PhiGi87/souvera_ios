@@ -1,11 +1,17 @@
 // SPDX-FileCopyrightText: 2026 Nextcloud GmbH and Nextcloud contributors
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// Run 03.11.: Abwesenheitsassistent (Vacation Responder) gegen die
+// Run 04.11.: Abwesenheitsassistent (Vacation Responder) gegen die
 // souvera_mail-Server-Endpunkte:
 //   - GET  /apps/souvera_mail/vacation        → Status lesen
-//   - POST /apps/souvera_mail/vacation        → Status setzen
+//   - POST /apps/souvera_mail/vacation        → Status setzen (FORM-URLENCODED!)
+//   - GET  /apps/souvera_mail/vacation/state  → kombinierter NC+Sieve-Zustand
 //   - POST /apps/souvera_mail/vacation/sync   → sofortiger NC→Sieve-Sync
+//
+// WICHTIG (Server-Vertrag): Der POST liest die Parameter per
+// request->getParam() — das ist Nextcloud-seitig der FORM-Body
+// (application/x-www-form-urlencoded), NICHT JSON. Wir senden daher
+// enabled/subject/message/from/to als urlencodete Key-Value-Paare.
 //
 // Auth: identisch zu den bestehenden souvera_mail-Requests in der App
 // (Login-Flow `SouveraMailLoginFlow`, Geräte-Registrierung
@@ -15,7 +21,7 @@
 // Vacation-Endpunkt ist ein Nextcloud-App-Endpunkt, kein Stalwart-
 // Endpunkt, daher ist das Account-App-Passwort der richtige Schlüssel.
 //
-// Datum-Format: Der Server erwartet "YYYY-MM-DD" bzw. null. Wir
+// Datum-Format: Der Server erwartet "YYYY-MM-DD" bzw. leer/fehlend. Wir
 // formatieren device-local über DateComponents (kein UTC-Shift) und
 // parsen die Antworten symmetrisch zurück.
 
@@ -43,14 +49,58 @@ struct SouveraVacationState: Equatable {
     }
 }
 
+/// Kombinierter Zustand aus `GET /vacation/state`
+/// (`VacationSyncService::getState`): die in Nextcloud gepflegte
+/// Abwesenheit (dav_absence / persönliche Verfügbarkeit) plus
+/// Diagnose-Informationen. Die View zeigt daraus eine read-only
+/// Sektion "In Nextcloud gepflegte Abwesenheit" - genau wie die
+/// Webmail-"Von Nextcloud übernehmen"-Anzeige.
+struct SouveraVacationCombinedState: Equatable {
+    /// NC-Abwesenheits-Feature überhaupt vorhanden (NC 28+ / dav_absence).
+    var supported: Bool
+    /// NC→Sieve-Sync vom Nutzer aktiviert?
+    var syncEnabled: Bool
+    /// Es existiert eine (laufende ODER geplante) NC-Abwesenheit.
+    var ncActive: Bool
+    /// true = Zeitraum läuft aktuell, false = erst geplant.
+    var inEffect: Bool
+    /// Start "yyyy-MM-dd" (kann leer sein, z. B. Availability-Fallback).
+    var start: String
+    /// Ende "yyyy-MM-dd".
+    var end: String
+    /// Kurztext (Betreff) der NC-Abwesenheit.
+    var short: String
+    /// Langtext (Nachricht) der NC-Abwesenheit.
+    var long: String
+    /// Vertretung (display name), optional.
+    var replacement: String
+
+    /// Tolerantes Parsen aus einem untypisierten State-Dictionary
+    /// (fehlende Felder → Defaults, wie beim Vacation-Parsing).
+    static func parse(_ json: [String: Any]) -> SouveraVacationCombinedState {
+        SouveraVacationCombinedState(
+            supported: (json["supported"] as? Bool) ?? true,
+            syncEnabled: (json["syncEnabled"] as? Bool) ?? true,
+            ncActive: (json["ncActive"] as? Bool) ?? false,
+            inEffect: (json["inEffect"] as? Bool) ?? false,
+            start: (json["start"] as? String) ?? "",
+            end: (json["end"] as? String) ?? "",
+            short: (json["short"] as? String) ?? "",
+            long: (json["long"] as? String) ?? "",
+            replacement: (json["replacement"] as? String) ?? ""
+        )
+    }
+}
+
 /// Typisierte Fehler für die UI-Anzeige (NSLocalizedDescriptionKey).
 enum SouveraVacationError: Error, LocalizedError {
     /// Kein aktiver Account bzw. unvollständige Account-Daten.
     case noAccount
     /// Ungültige Server-Antwort (unerwartetes JSON).
     case invalidResponse
-    /// HTTP-Fehler mit Statuscode.
-    case http(Int)
+    /// HTTP-Fehler mit Statuscode und optionaler Server-Message
+    /// (aus {status:'error', message:...} des Antwort-Bodys).
+    case http(Int, String?)
 
     var errorDescription: String? {
         switch self {
@@ -60,8 +110,16 @@ enum SouveraVacationError: Error, LocalizedError {
             return NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")
         case .invalidResponse:
             return NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")
-        case .http(let code):
-            return "\(NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")) (HTTP \(code))"
+        case .http(let code, let message):
+            // Run 04.11.: Statuscode + Server-Message präzise anzeigen
+            // statt alles als "nicht verfügbar" zu werfen. Bsp.:
+            // "Anfrage fehlgeschlagen (412)" + Server-Hinweis.
+            let status = NSLocalizedString("_vacation_error_status_", value: "Request failed (%@)", comment: "")
+            let base = String(format: status, "\(code)")
+            if let message, !message.isEmpty {
+                return "\(base): \(message)"
+            }
+            return base
         }
     }
 }
@@ -100,7 +158,7 @@ enum SouveraVacationResponder {
 
     /// Baut einen Vacation-Request mit demselben Auth-Schema wie die
     /// bestehenden souvera_mail-Calls (Basic: NC-User + Account-App-Passwort).
-    private static func request(baseUrl: String, suffix: String, method: String, body: [String: Any]? = nil) throws -> URLRequest {
+    private static func request(baseUrl: String, suffix: String, method: String, formBody: String? = nil) throws -> URLRequest {
         let root = baseUrl.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         guard let url = URL(string: "\(root)\(path)\(suffix)") else {
             throw SouveraVacationError.noAccount
@@ -108,11 +166,34 @@ enum SouveraVacationResponder {
         var req = URLRequest(url: url)
         req.httpMethod = method
         req.setValue("application/json", forHTTPHeaderField: "Accept")
-        if let body {
-            req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            req.httpBody = try JSONSerialization.data(withJSONObject: body)
+        if let formBody {
+            // Run 04.11.: Server liest per request->getParam() → FORM-Body
+            // (application/x-www-form-urlencoded), NICHT JSON.
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            req.httpBody = Data(formBody.utf8)
         }
         return req
+    }
+
+    /// Encodiert einen FORM-Body-Wert (x-www-form-urlencoded). %20 statt
+    /// '+' für Leerzeichen ist beides gültig und serverseitig äquivalent.
+    private static func formEncode(_ value: String) -> String {
+        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
+    }
+
+    /// Baut den urlencodeten Body für den save-POST: enabled="1"/"0",
+    /// subject, message, from/to als "yyyy-MM-dd" oder (nil) weggelassen.
+    private static func saveFormBody(_ state: SouveraVacationState) -> String {
+        var pairs = ["enabled=\(state.enabled ? "1" : "0")"]
+        pairs.append("subject=\(formEncode(state.subject))")
+        pairs.append("message=\(formEncode(state.message))")
+        if let from = state.from {
+            pairs.append("from=\(dateString(from))")
+        }
+        if let to = state.to {
+            pairs.append("to=\(dateString(to))")
+        }
+        return pairs.joined(separator: "&")
     }
 
     /// Account-Infos (urlBase, NC-User, Account-App-Passwort) des aktiven
@@ -137,6 +218,17 @@ enum SouveraVacationResponder {
     private static func authorize(_ request: inout URLRequest, username: String, password: String) {
         let raw = "\(username):\(password)"
         request.setValue("Basic \(Data(raw.utf8).base64EncodedString())", forHTTPHeaderField: "Authorization")
+    }
+
+    /// Zieht aus einem Antwort-Body eine {status:'error', message:...}
+    /// Server-Message heraus (für .http(code, message)).
+    private static func errorMessage(from data: Data?) -> String? {
+        guard let data,
+              let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let message = json["message"] as? String, !message.isEmpty else {
+            return nil
+        }
+        return message
     }
 
     // MARK: - API
@@ -164,8 +256,8 @@ enum SouveraVacationResponder {
             return .unavailable()
         }
         guard (200..<300).contains(code) else {
-            SouveraLog.write("Vacation", "load status=\(code)")
-            throw SouveraVacationError.http(code)
+            SouveraLog.write("Vacation", "load status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            throw SouveraVacationError.http(code, errorMessage(from: data))
         }
         guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
             SouveraLog.write("Vacation", "load status=\(code) -> invalidResponse")
@@ -189,6 +281,39 @@ enum SouveraVacationResponder {
         )
     }
 
+    /// Liest den kombinierten Zustand aus `GET /vacation/state`
+    /// (NC-Abwesenheit + Sieve + Diagnose, siehe
+    /// `VacationSyncService::getState`). Tolerantes Best-Effort-Parsing:
+    /// fehlende Felder → Defaults. Nur für die read-only Anzeige der
+    /// "In Nextcloud gepflegte Abwesenheit"-Sektion.
+    static func loadState(account: String? = nil) async throws -> SouveraVacationCombinedState {
+        let info: (baseUrl: String, username: String, password: String)
+        do {
+            info = try accountInfo(account)
+        } catch {
+            SouveraLog.write("Vacation", "loadState noAccount")
+            throw error
+        }
+        var req = try request(baseUrl: info.baseUrl, suffix: "/state", method: "GET")
+        authorize(&req, username: info.username, password: info.password)
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(code) else {
+            SouveraLog.write("Vacation", "loadState status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            throw SouveraVacationError.http(code, errorMessage(from: data))
+        }
+        guard let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            SouveraLog.write("Vacation", "loadState status=\(code) -> invalidResponse")
+            throw SouveraVacationError.invalidResponse
+        }
+        // {status:'ok', state:{...}} — state tolerant als Grabbing lesen.
+        let state = (json["state"] as? [String: Any]) ?? json
+        let parsed = SouveraVacationCombinedState.parse(state)
+        SouveraLog.write("Vacation", "loadState status=\(code) ncActive=\(parsed.ncActive) inEffect=\(parsed.inEffect)")
+        return parsed
+    }
+
     /// Speichert den Vacation-Zustand und stößt danach fire-and-forget
     /// den sofortigen NC→Sieve-Sync an (Fehler des Syncs werden nur
     /// geloggt - der Server synct sonst regelmäßig selbst).
@@ -200,58 +325,65 @@ enum SouveraVacationResponder {
             SouveraLog.write("Vacation", "save noAccount")
             throw error
         }
-        var body: [String: Any] = [
-            "enabled": state.enabled,
-            "subject": state.subject,
-            "message": state.message
-        ]
-        if let from = state.from {
-            body["from"] = dateString(from)
-        }
-        if let to = state.to {
-            body["to"] = dateString(to)
-        }
-        var req = try request(baseUrl: info.baseUrl, suffix: "", method: "POST", body: body)
+        var req = try request(
+            baseUrl: info.baseUrl,
+            suffix: "",
+            method: "POST",
+            formBody: saveFormBody(state)
+        )
         authorize(&req, username: info.username, password: info.password)
 
         let (data, response) = try await URLSession.shared.data(for: req)
         let code = (response as? HTTPURLResponse)?.statusCode ?? -1
         guard (200..<300).contains(code) else {
-            SouveraLog.write("Vacation", "save failed status=\(code)")
-            throw SouveraVacationError.http(code)
+            // Run 04.11.: Präzise Fehler mit Server-Message, z. B.
+            // 412 (CSRF-Check des Servers, solange der NoCSRFRequired-
+            // Patch fehlt), 400 (Validierung), 502/503 (Sieve weg).
+            SouveraLog.write("Vacation", "save failed status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            throw SouveraVacationError.http(code, errorMessage(from: data))
         }
-        // Antwort format prüfen ({status:"ok"}), aber tolerant bleiben.
+        // Antwort-Format prüfen ({status:'ok'}), aber tolerant bleiben;
+        // ein {status:'error', message:...} bei 2xx wird ebenfalls
+        // als präziser Fehler mit Server-Message geworfen.
         if let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
            let status = json["status"] as? String, status != "ok" {
-            SouveraLog.write("Vacation", "save status=\(code) response-status=\(status)")
-            throw SouveraVacationError.invalidResponse
+            let message = json["message"] as? String
+            SouveraLog.write("Vacation", "save status=\(code) response-status=\(status) message=\(message ?? "-")")
+            throw SouveraVacationError.http(code, message)
         }
         SouveraLog.write("Vacation", "save status=\(code) ok")
-        triggerSync(baseUrl: info.baseUrl, username: info.username, password: info.password)
-    }
-
-    /// Fire-and-forget: sofortiger NC→Sieve-Sync nach erfolgreichem POST.
-    static func triggerSync(account: String? = nil) async {
-        guard let info = try? accountInfo(account) else {
-            SouveraLog.write("Vacation", "sync noAccount")
-            return
-        }
-        triggerSync(baseUrl: info.baseUrl, username: info.username, password: info.password)
-    }
-
-    private static func triggerSync(baseUrl: String, username: String, password: String) {
+        // Fire-and-forget Sync - Fehler nur loggen.
         Task {
-            guard var req = try? request(baseUrl: baseUrl, suffix: "/sync", method: "POST") else { return }
-            authorize(&req, username: username, password: password)
-            do {
-                let (_, response) = try await URLSession.shared.data(for: req)
-                let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-                SouveraLog.write("Vacation", "sync -> http \(code)")
-            } catch {
-                // Fire-and-forget: Sync-Fehler nur loggen, der Server
-                // synchronisiert sonst periodisch selbst.
-                SouveraLog.write("Vacation", "sync failed: \(error.localizedDescription)")
-            }
+            try? await syncNow(
+                baseUrl: info.baseUrl,
+                username: info.username,
+                password: info.password
+            )
         }
+    }
+
+    /// Sofortiger NC→Sieve-Sync (`POST /vacation/sync`). Wirft bei
+    /// Fehlerstatus präzise (Statuscode + Server-Message) - analog save.
+    static func syncNow(account: String? = nil) async throws {
+        let info = try accountInfo(account)
+        try await syncNow(baseUrl: info.baseUrl, username: info.username, password: info.password)
+    }
+
+    private static func syncNow(baseUrl: String, username: String, password: String) async throws {
+        var req = try request(baseUrl: baseUrl, suffix: "/sync", method: "POST")
+        authorize(&req, username: username, password: password)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard (200..<300).contains(code) else {
+            SouveraLog.write("Vacation", "sync failed status=\(code) message=\(errorMessage(from: data) ?? "-")")
+            throw SouveraVacationError.http(code, errorMessage(from: data))
+        }
+        if let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+           let status = json["status"] as? String, status != "ok" {
+            let message = json["message"] as? String
+            SouveraLog.write("Vacation", "sync status=\(code) response-status=\(status) message=\(message ?? "-")")
+            throw SouveraVacationError.http(code, message)
+        }
+        SouveraLog.write("Vacation", "sync status=\(code) ok")
     }
 }
