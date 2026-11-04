@@ -78,6 +78,7 @@
 				47AD56AED61A4BEB8E552693 /* SouveraNotesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E383EDE411B4213968DFA1D /* SouveraNotesView.swift */; };
 		FEB0BBC090C539965F384ECE /* MailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */; };
 		A3D2EE014F0A7C21AA000003 /* SouveraVacationResponder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D2EE014F0A7C21AA000004 /* SouveraVacationResponder.swift */; };
+		A3D2EE014F0A7C21AA000009 /* SouveraCalendarAvailabilityRepair.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D2EE014F0A7C21AA00000A /* SouveraCalendarAvailabilityRepair.swift */; };
 		A3D2EE014F0A7C21AA000005 /* SouveraVacationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D2EE014F0A7C21AA000006 /* SouveraVacationView.swift */; };
 		A3D2EE014F0A7C21AA000007 /* SouveraOutOfOfficeOcsApi.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3D2EE014F0A7C21AA000008 /* SouveraOutOfOfficeOcsApi.swift */; };
 		FEA0DA7E1DB00123456789AC /* MailDateFormatter.swift in Sources */ = {isa = PBXBuildFile; fileRef = FEA0DA7E1DB00123456789AB /* MailDateFormatter.swift */; };
@@ -1398,6 +1399,7 @@
 				2E383EDE411B4213968DFA1D /* SouveraNotesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Notes/SouveraNotesView.swift"; sourceTree = SOURCE_ROOT; };
 		FEA0C5043D2EB7F73ACDC5DB /* MailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/MailView.swift"; sourceTree = SOURCE_ROOT; };
 		A3D2EE014F0A7C21AA000004 /* SouveraVacationResponder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/SouveraVacationResponder.swift"; sourceTree = SOURCE_ROOT; };
+		A3D2EE014F0A7C21AA00000A /* SouveraCalendarAvailabilityRepair.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/SouveraCalendarAvailabilityRepair.swift"; sourceTree = SOURCE_ROOT; };
 		A3D2EE014F0A7C21AA000006 /* SouveraVacationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/SouveraVacationView.swift"; sourceTree = SOURCE_ROOT; };
 		A3D2EE014F0A7C21AA000008 /* SouveraOutOfOfficeOcsApi.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/SouveraOutOfOfficeOcsApi.swift"; sourceTree = SOURCE_ROOT; };
 		FEA0DA7E1DB00123456789AB /* MailDateFormatter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "iOSClient/Mail/UI/MailDateFormatter.swift"; sourceTree = SOURCE_ROOT; };
@@ -2449,6 +2451,7 @@
 				EC5DA5BB524846C19B39E98A /* CardDavContactSource.swift */,
 				83B6788FE014447AA2ECC5AA /* MailCache.swift */,
 				A3D2EE014F0A7C21AA000004 /* SouveraVacationResponder.swift */,
+				A3D2EE014F0A7C21AA00000A /* SouveraCalendarAvailabilityRepair.swift */,
 				A3D2EE014F0A7C21AA000008 /* SouveraOutOfOfficeOcsApi.swift */,
 				A3D2EE014F0A7C21AA000006 /* SouveraVacationView.swift */,
 			);
@@ -5333,6 +5336,7 @@
 				D170BC925ED7D29598185E8A /* SouveraBuildInfo.swift in Sources */,
 				FEB0BBC090C539965F384ECE /* MailView.swift in Sources */,
 				A3D2EE014F0A7C21AA000003 /* SouveraVacationResponder.swift in Sources */,
+				A3D2EE014F0A7C21AA000009 /* SouveraCalendarAvailabilityRepair.swift in Sources */,
 				A3D2EE014F0A7C21AA000007 /* SouveraOutOfOfficeOcsApi.swift in Sources */,
 				A3D2EE014F0A7C21AA000005 /* SouveraVacationView.swift in Sources */,
 				FEA0DA7E1DB00123456789AC /* MailDateFormatter.swift in Sources */,

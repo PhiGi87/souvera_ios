@@ -90,6 +90,17 @@ enum SouveraOutOfOfficeOcsApi {
     /// Setzt die Abwesenheit. Der Status wird serverkonform auf 100
     /// Zeichen gekappt; ein Zeitraum mit firstDay > lastDay wird lokal
     /// mit einem eigenen Validierungsfehler abgewiesen.
+    ///
+    /// Run 04.11.: Body-Format an den Web-Client angeglichen
+    /// (server: apps/dav/src/components/AbsenceForm.vue). Der Web-Client
+    /// sendet POST als JSON mit Content-Type application/json und den
+    /// Feldern firstDay/lastDay/status/message/replacementUserId - wobei
+    /// replacementUserId OHNE Vertretung explizit als null mitgeschickt
+    /// wird. Dieses Format ist kanonisch; der frühere Form-Body und der
+    /// JSON-Retry (Workaround für Form-Body-Parsing-Probleme) sind damit
+    /// entfallen. Ein 500 wird hier nicht mehr behandelt - die
+    /// Selbstheilung (corrupt calendar-availability) sitzt in
+    /// `SouveraVacationResponder.save` über `SouveraCalendarAvailabilityRepair`.
     static func set(account: String? = nil,
                     firstDay: Date,
                     lastDay: Date,
@@ -104,18 +115,18 @@ enum SouveraOutOfOfficeOcsApi {
             throw SouveraVacationError.validation
         }
         let info = try accountInfo(account)
-        var pairs = [
-            "firstDay=\(dateString(firstDay))",
-            "lastDay=\(dateString(lastDay))",
-            "status=\(formEncode(cappedStatus))",
-            "message=\(formEncode(message))"
+        // replacementUserId: mit Vertretung der UserId, sonst explizit
+        // null (identisch zum Web-Client).
+        let body: [String: Any] = [
+            "firstDay": dateString(firstDay),
+            "lastDay": dateString(lastDay),
+            "status": cappedStatus,
+            "message": message,
+            "replacementUserId": (replacementUserId?.isEmpty == false) ? replacementUserId ?? "" : NSNull()
         ]
-        if let replacementUserId, !replacementUserId.isEmpty {
-            pairs.append("replacementUserId=\(formEncode(replacementUserId))")
-        }
         var request = try request(baseUrl: info.baseUrl, userId: info.username, method: "POST")
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = Data(pairs.joined(separator: "&").utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
         authorize(&request, username: info.username, password: info.password)
 
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -125,60 +136,9 @@ enum SouveraOutOfOfficeOcsApi {
             // als Server-Message durchreichen (siehe errorMessage).
             let serverMessage = validationMessage(from: data) ?? errorMessage(from: data)
             SouveraLog.write("Vacation", "set status=\(code) message=\(serverMessage ?? "-") body=\(bodySnippet(from: data))")
-            // Run 04.11.: Bei HTTP 500 (und nur dann) GENAU EINEN Retry
-            // mit identischen Feldern als JSON-Body. NC bindet OCS-
-            // Parameter auch aus JSON-Bodies; der Retry umgeht damit
-            // Form-Body-Parsing-Probleme der konkreten Server-Instanz
-            // (500 = uncaught Throw im Server, z. B. new DateTimeImmutable('')
-            // wenn Params nicht ankommen). replacementUserId wird bei
-            // leerem Wert weggelassen, nicht als null mitgeschickt.
-            if code == 500 {
-                SouveraLog.write("Vacation", "set form status=500 -> retry json")
-                // Bei erneutem Fehler wirft setJson wie bisher.
-                return try await setJson(account: account,
-                                         firstDay: firstDay,
-                                         lastDay: lastDay,
-                                         status: cappedStatus,
-                                         message: message,
-                                         replacementUserId: replacementUserId)
-            }
             throw SouveraVacationError.http(code, serverMessage)
         }
         SouveraLog.write("Vacation", "set status=\(code) ok")
-    }
-
-    /// Retry-Pfad von `set`: identische Felder als JSON-Body
-    /// (Content-Type: application/json), nur bei Form-500 aufgerufen.
-    /// Wirft den (letzten) Fehler, wenn auch der JSON-Versuch fehlschlägt.
-    private static func setJson(account: String?,
-                                firstDay: Date,
-                                lastDay: Date,
-                                status: String,
-                                message: String,
-                                replacementUserId: String?) async throws {
-        let info = try accountInfo(account)
-        var body: [String: String] = [
-            "firstDay": dateString(firstDay),
-            "lastDay": dateString(lastDay),
-            "status": status,
-            "message": message
-        ]
-        if let replacementUserId, !replacementUserId.isEmpty {
-            body["replacementUserId"] = replacementUserId
-        }
-        var request = try request(baseUrl: info.baseUrl, userId: info.username, method: "POST")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        authorize(&request, username: info.username, password: info.password)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        let code = (response as? HTTPURLResponse)?.statusCode ?? -1
-        guard (200..<300).contains(code) else {
-            let serverMessage = validationMessage(from: data) ?? errorMessage(from: data)
-            SouveraLog.write("Vacation", "set json status=\(code) message=\(serverMessage ?? "-") body=\(bodySnippet(from: data))")
-            throw SouveraVacationError.http(code, serverMessage)
-        }
-        SouveraLog.write("Vacation", "set json status=\(code) ok")
     }
 
     /// Löscht die Abwesenheit. 404 wird toleriert (schon gelöscht = ok).
@@ -200,29 +160,55 @@ enum SouveraOutOfOfficeOcsApi {
         SouveraLog.write("Vacation", "clear status=\(code) ok")
     }
 
-    // MARK: - Datum-Konvertierung (device-local "yyyy-MM-dd")
+    // MARK: - Datum-Konvertierung ("yyyy-MM-dd", en_US_POSIX + UTC)
 
-    /// Date → "yyyy-MM-dd" über DateComponents (device-local, kein UTC-Shift:
-    /// ein Date um Mitternacht lokaler Zeit darf nicht auf den Vortag rutschen).
+    /// Formatter für die OCS-Datumsfelder. `en_US_POSIX` + explizite
+    /// Format-Angabe garantiert "YYYY-MM-DD" unabhängig von Gerätesetting
+    /// (24h-Schalter, andere Kalender, Region); die TimeZone UTC verhindert
+    /// Abweichungen durch Sommer-/Winterzeit-Umrechnungen.
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }()
+
+    /// Date → "yyyy-MM-dd". Die Kalenderkomponenten werden im Gerät-Kalender
+    /// ermittelt (ein Date um Mitternacht lokaler Zeit darf nicht auf den
+    /// Vortag rutschen) und dann auf 12:00 UTC desselben Kalendertags
+    /// abgebildet, damit der UTC-Formatter exakt dieses Datum formatiert.
     static func dateString(_ date: Date) -> String {
-        var calendar = Calendar.current
-        calendar.timeZone = TimeZone.current
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        var local = Calendar.current
+        local.timeZone = TimeZone.current
+        let c = local.dateComponents([.year, .month, .day], from: date)
+        var utc = DateComponents()
+        utc.timeZone = TimeZone(identifier: "UTC")
+        utc.year = c.year
+        utc.month = c.month
+        utc.day = c.day
+        utc.hour = 12
+        guard let noonUTC = utc.date else {
+            return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+        }
+        return dateFormatter.string(from: noonUTC)
     }
 
     /// "yyyy-MM-dd" → Date (Start des Tages, device-local). nil bei
     /// fehlendem/ungültigem Wert.
     static func date(_ string: String?) -> Date? {
-        guard let string, !string.isEmpty else { return nil }
-        var calendar = Calendar.current
-        calendar.timeZone = TimeZone.current
-        let parts = string.split(separator: "-").compactMap { Int($0) }
-        guard parts.count == 3,
-              let date = calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2])) else {
+        guard let string, !string.isEmpty,
+              let parsedUTC = dateFormatter.date(from: string) else {
             return nil
         }
-        return date
+        // Komponenten im UTC-Kalender ablesen und im Gerät-Kalender wieder
+        // zusammensetzen (kein Tages-Shift in Zeitzonen westlich von UTC).
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC") ?? .current
+        let c = utc.dateComponents([.year, .month, .day], from: parsedUTC)
+        var local = Calendar.current
+        local.timeZone = TimeZone.current
+        return local.date(from: c)
     }
 
     // MARK: - Request-Bau
@@ -321,11 +307,6 @@ enum SouveraOutOfOfficeOcsApi {
             return message
         }
         return nil
-    }
-
-    /// Encodiert einen FORM-Body-Wert (x-www-form-urlencoded).
-    private static func formEncode(_ value: String) -> String {
-        value.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? value
     }
 
     /// Diagnose: die ersten 300 Zeichen des Response-Bodies, escaped und

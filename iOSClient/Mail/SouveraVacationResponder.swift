@@ -112,13 +112,45 @@ enum SouveraVacationResponder {
         // UI gilt: Start = heute, Ende = ein Jahr später (unbefristet).
         let firstDay = state.from ?? Calendar.current.startOfDay(for: Date())
         let lastDay = state.to ?? Calendar.current.date(byAdding: .year, value: 1, to: firstDay) ?? firstDay
-        try await SouveraOutOfOfficeOcsApi.set(
-            account: account,
-            firstDay: firstDay,
-            lastDay: lastDay,
-            status: state.subject,
-            message: state.message,
-            replacementUserId: nil
-        )
+        do {
+            try await SouveraOutOfOfficeOcsApi.set(
+                account: account,
+                firstDay: firstDay,
+                lastDay: lastDay,
+                status: state.subject,
+                message: state.message,
+                replacementUserId: nil
+            )
+        } catch let error as SouveraVacationError {
+            // Run 04.11.: Selbstheilung beim 500-Pfad. Der Server liest
+            // beim Schreiben die calendar-availability (Scheduling-Inbox)
+            // ungeschützt mit Sabre VObject; ein korrupter Wert wirft
+            // uncaught → HTTP 500 (siehe
+            // SouveraCalendarAvailabilityRepair.swift, Dateikopf).
+            // Diagnose + Repair laufen, danach GENAU EIN Save-Retry.
+            // Alle anderen Fehler (und gescheiterte Repairs) fliegen
+            // unverändert weiter.
+            guard case .http(500, _) = error else { throw error }
+            SouveraLog.write("Vacation", "save 500 -> availability repair")
+            let repaired = try? await SouveraCalendarAvailabilityRepair.diagnoseAndRepair(account: account)
+            guard repaired == true else {
+                SouveraLog.write("Vacation", "save after repair: repair nicht möglich -> Fehler weiterreichen")
+                throw error
+            }
+            do {
+                try await SouveraOutOfOfficeOcsApi.set(
+                    account: account,
+                    firstDay: firstDay,
+                    lastDay: lastDay,
+                    status: state.subject,
+                    message: state.message,
+                    replacementUserId: nil
+                )
+                SouveraLog.write("Vacation", "save after repair status=ok")
+            } catch let retryError as SouveraVacationError {
+                SouveraLog.write("Vacation", "save after repair status=failed (\(retryError))")
+                throw retryError
+            }
+        }
     }
 }
