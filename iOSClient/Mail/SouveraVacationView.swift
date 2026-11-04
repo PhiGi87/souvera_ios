@@ -22,9 +22,11 @@ struct SouveraVacationView: View {
     var body: some View {
         Form {
             // Server ohne Vacation-Unterstützung: nur Hinweis, keine Bearbeitung.
+            // Run 04.11.: Fallback-Values decken alle Sprachen ohne eigene
+            // lproj-Einträge ab (Transifex liefert spätere Übersetzungen).
             if !state.available {
                 Section {
-                    Label(NSLocalizedString("_vacation_unavailable_", comment: ""), systemImage: "info.circle")
+                    Label(NSLocalizedString("_vacation_unavailable_", value: "The mail server does not support an out-of-office note", comment: ""), systemImage: "info.circle")
                         .foregroundStyle(.secondary)
                 }
             } else {
@@ -43,7 +45,7 @@ struct SouveraVacationView: View {
             }
         }
         .alert(
-            NSLocalizedString("_vacation_error_", comment: ""),
+            NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: ""),
             isPresented: .init(
                 get: { errorMessage != nil },
                 set: { if !$0 { errorMessage = nil } }
@@ -60,16 +62,16 @@ struct SouveraVacationView: View {
 
     private var availabilitySection: some View {
         Section {
-            Toggle(NSLocalizedString("_vacation_enabled_", comment: ""), isOn: $state.enabled)
+            Toggle(NSLocalizedString("_vacation_enabled_", value: "Active", comment: ""), isOn: $state.enabled)
         }
     }
 
     private var periodSection: some View {
         Section {
-            Toggle(NSLocalizedString("_vacation_period_", comment: ""), isOn: $hasPeriod)
+            Toggle(NSLocalizedString("_vacation_period_", value: "Period", comment: ""), isOn: $hasPeriod)
             if hasPeriod {
                 DatePicker(
-                    NSLocalizedString("_vacation_from_", comment: ""),
+                    NSLocalizedString("_vacation_from_", value: "From", comment: ""),
                     selection: Binding(
                         get: { state.from ?? Date() },
                         set: { state.from = $0; validatePeriod() }
@@ -77,7 +79,7 @@ struct SouveraVacationView: View {
                     displayedComponents: .date
                 )
                 DatePicker(
-                    NSLocalizedString("_vacation_to_", comment: ""),
+                    NSLocalizedString("_vacation_to_", value: "To", comment: ""),
                     selection: Binding(
                         get: { state.to ?? state.from ?? Date() },
                         set: { state.to = $0; validatePeriod() }
@@ -91,9 +93,9 @@ struct SouveraVacationView: View {
 
     private var contentSection: some View {
         Section {
-            TextField(NSLocalizedString("_vacation_subject_", comment: ""), text: $state.subject)
+            TextField(NSLocalizedString("_vacation_subject_", value: "Subject", comment: ""), text: $state.subject)
             TextField(
-                NSLocalizedString("_vacation_message_", comment: ""),
+                NSLocalizedString("_vacation_message_", value: "Message", comment: ""),
                 text: $state.message,
                 axis: .vertical
             )
@@ -109,13 +111,13 @@ struct SouveraVacationView: View {
                 if isSaving {
                     ProgressView()
                 } else {
-                    Text(NSLocalizedString("_vacation_save_", comment: ""))
+                    Text(NSLocalizedString("_vacation_save_", value: "Save", comment: ""))
                 }
             }
         } header: {
-            Text(NSLocalizedString("_vacation_title_", comment: ""))
+            Text(NSLocalizedString("_vacation_title_", value: "Vacation responder", comment: ""))
         } footer: {
-            Text(NSLocalizedString("_vacation_footer_", comment: ""))
+            Text(NSLocalizedString("_vacation_footer_", value: "Replies are sent once per sender while the responder is active.", comment: ""))
         }
     }
 

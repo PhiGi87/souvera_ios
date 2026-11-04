@@ -54,12 +54,14 @@ enum SouveraVacationError: Error, LocalizedError {
 
     var errorDescription: String? {
         switch self {
+        // Run 04.11.: Fallback-Value deckt alle Sprachen ohne eigene
+        // lproj-Einträge ab (Transifex liefert spätere Übersetzungen).
         case .noAccount:
-            return NSLocalizedString("_vacation_error_", comment: "")
+            return NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")
         case .invalidResponse:
-            return NSLocalizedString("_vacation_error_", comment: "")
+            return NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")
         case .http(let code):
-            return "\(NSLocalizedString("_vacation_error_", comment: "")) (HTTP \(code))"
+            return "\(NSLocalizedString("_vacation_error_", value: "The vacation responder could not be saved.", comment: "")) (HTTP \(code))"
         }
     }
 }

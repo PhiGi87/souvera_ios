@@ -342,7 +342,11 @@ final class NCMoreModel: ObservableObject {
             functionItems.append(
                 Item(
                     titleKey: "_vacation_title_",
-                    image: "envelope.badge.clock",
+                    // Run 04.11.: "envelope.badge.clock" existiert nicht als
+                    // SF-Symbol (UIImage(systemName:) -> nil, kein Icon).
+                    // "sun.max" ist seit iOS 13 garantiert verfügbar und
+                    // passt thematisch zum Abwesenheitsassistenten.
+                    image: "sun.max",
                     destination: .vacation
                 )
             )
@@ -593,7 +597,9 @@ final class NCMoreModel: ObservableObject {
             // SwiftUI-Screens, Speichern-Button im Form-Toolbar der View.
             pushHosted(
                 SouveraVacationView(),
-                title: NSLocalizedString("_vacation_title_", comment: "")
+                // Run 04.11.: Fallback-Value deckt alle Sprachen ohne eigene
+                // lproj-Einträge ab (Transifex liefert spätere Übersetzungen).
+                title: NSLocalizedString("_vacation_title_", value: "Vacation responder", comment: "")
             )
 
         case .none:
