@@ -1351,7 +1351,10 @@ _mail_sort_flagged_ = "Flagged first";
 "_vacation_save_" = "Save";
 "_vacation_unavailable_" = "The mail server does not support an out-of-office note";
 "_vacation_saved_" = "Saved";
-"_vacation_footer_" = "Replies are sent once per sender while the responder is active.";
+"_vacation_footer_" = "The out-of-office note is synced with the mail server automatically (up to one hour).";
+"_vacation_status_" = "Status";
+"_vacation_error_period_" = "The start date must not be after the end date.";
+"_vacation_error_status_length_" = "The status must not exceed 100 characters.";
 "_vacation_error_" = "The vacation responder could not be saved.";
 
 /* Run 04.11.: Sync-Button, NC-Abwesenheits-Sektion, Fehler-Banner */

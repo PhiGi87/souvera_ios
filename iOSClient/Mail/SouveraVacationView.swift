@@ -7,58 +7,40 @@
 // gepushten Souvera-Screens (host bar liefert Titel/Zurück über
 // `pushHosted`, Speichern-Button im Toolbar-Trailing).
 //
-// Run 04.11.: Fehlerbehandlung präzisiert - Lade-/Save-Fehler werden
-// nicht mehr pauschal als "nicht verfügbar" geworfen, sondern als
-// Fehler-Banner mit Statuscode/Server-Message + Wiederholen-Button
-// gezeigt. Nur available:false bzw. 404 bleibt der unavailable-Hinweis.
-// Neu: "Jetzt synchronisieren"-Button (ruft syncNow, lädt danach neu)
-// und eine read-only Sektion "In Nextcloud gepflegte Abwesenheit"
-// (aus GET /vacation/state, wie die Webmail-"Von Nextcloud übernehmen"-
-// Anzeige). Kein Follow-Toggle - dafür existiert kein Server-Endpunkt.
+// Run 04.11.: Die Abwesenheit läuft komplett über die offizielle
+// Nextcloud Out-of-Office OCS-API (dav-App, siehe
+// SouveraOutOfOfficeOcsApi.swift). Der "Jetzt synchronisieren"-Button
+// und die read-only NC-Sektion sind entfallen: der souvera_mail-Cron
+// übernimmt die NC-Abwesenheit stündlich in den Sieve-Responder, ein
+// manueller Sync ist nicht mehr möglich/nötig. Der "Betreff" heißt
+// jetzt "Status" (OCS-Feld) und ist auf 100 Zeichen begrenzt.
 //
-// Zeitraum: leer = ab sofort/unbefristet - umgesetzt als "Zeitraum"-
+// Zeitraum: leer = ab heute/ein Jahr - umgesetzt als "Zeitraum"-
 // Toggle; wenn an, zwei date-only DatePickers mit Validierung (Bis >= Von).
 
 import SwiftUI
 
 struct SouveraVacationView: View {
     @State private var state = SouveraVacationState(enabled: false, subject: "", message: "", from: nil, to: nil, available: true)
-    @State private var combinedState: SouveraVacationCombinedState?
     @State private var hasPeriod = false
     @State private var isLoading = true
     @State private var isSaving = false
-    @State private var isSyncing = false
     @State private var errorMessage: String?
     @State private var isSaved = false
 
     var body: some View {
         Form {
-            // Server ohne Vacation-Unterstützung: nur Hinweis, keine Bearbeitung.
-            // Run 04.11.: Fallback-Values decken alle Sprachen ohne eigene
-            // lproj-Einträge ab (Transifex liefert spätere Übersetzungen).
-            if !state.available {
-                Section {
-                    Label(NSLocalizedString("_vacation_unavailable_", value: "The mail server does not support an out-of-office note", comment: ""), systemImage: "info.circle")
-                        .foregroundStyle(.secondary)
-                }
-            } else {
-                if let errorMessage {
-                    errorSection(errorMessage)
-                }
-                // Read-only: die in Nextcloud gepflegte Abwesenheit
-                // (Quelle: GET /vacation/state) - wie in der Webmail.
-                if let combined = combinedState, combined.ncActive {
-                    ncAbsenceSection(combined)
-                }
-                availabilitySection
-                if state.enabled {
-                    periodSection
-                    contentSection
-                }
-                footerSection
+            if let errorMessage {
+                errorSection(errorMessage)
             }
+            availabilitySection
+            if state.enabled {
+                periodSection
+                contentSection
+            }
+            footerSection
         }
-        .disabled(isLoading || isSaving || !state.available)
+        .disabled(isLoading || isSaving)
         .overlay {
             if isLoading {
                 ProgressView()
@@ -75,8 +57,7 @@ struct SouveraVacationView: View {
 
     // MARK: - Sektionen
 
-    /// Run 04.11.: Fehler-Banner mit Statuscode/Server-Message und
-    /// Wiederholen-Button statt catch-all → "nicht verfügbar".
+    /// Fehler-Banner mit Statuscode/Server-Message und Wiederholen-Button.
     private func errorSection(_ message: String) -> some View {
         Section {
             VStack(alignment: .leading, spacing: 8) {
@@ -89,48 +70,10 @@ struct SouveraVacationView: View {
         }
     }
 
-    /// Read-only Anzeige der NC-Abwesenheit (start/end/short/long/
-    /// replacement aus dem combined State).
-    private func ncAbsenceSection(_ combined: SouveraVacationCombinedState) -> some View {
-        Section {
-            if !combined.start.isEmpty || !combined.end.isEmpty {
-                LabeledContent(
-                    NSLocalizedString("_vacation_nc_period_", value: "Period", comment: ""),
-                    value: [combined.start, combined.end].filter { !$0.isEmpty }.joined(separator: " – ")
-                )
-            }
-            if !combined.short.isEmpty {
-                LabeledContent(
-                    NSLocalizedString("_vacation_subject_", value: "Subject", comment: ""),
-                    value: combined.short
-                )
-            }
-            if !combined.long.isEmpty {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(NSLocalizedString("_vacation_message_", value: "Message", comment: ""))
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Text(combined.long)
-                }
-            }
-            if !combined.replacement.isEmpty {
-                LabeledContent(
-                    NSLocalizedString("_vacation_nc_replacement_", value: "Replacement", comment: ""),
-                    value: combined.replacement
-                )
-            }
-            if !combined.inEffect {
-                Text(NSLocalizedString("_vacation_nc_planned_", value: "This period is scheduled and has not started yet.", comment: ""))
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
-        } header: {
-            Text(NSLocalizedString("_vacation_nc_absence_", value: "Out of office in Nextcloud", comment: ""))
-        }
-    }
-
     private var availabilitySection: some View {
         Section {
+            // Aus = löscht die OCS-Abwesenheit (Toggle-Semantik, ohne
+            // Bestätigungsdialog - konsistent mit einem einfachen Schalter).
             Toggle(NSLocalizedString("_vacation_enabled_", value: "Active", comment: ""), isOn: $state.enabled)
         }
     }
@@ -162,7 +105,20 @@ struct SouveraVacationView: View {
 
     private var contentSection: some View {
         Section {
-            TextField(NSLocalizedString("_vacation_subject_", value: "Subject", comment: ""), text: $state.subject)
+            // OCS-Feld "status": serverseitig auf 100 Zeichen begrenzt -
+            // hier ebenfalls kappen, damit keine 400-Antwort entsteht.
+            TextField(
+                NSLocalizedString("_vacation_status_", value: "Status", comment: ""),
+                text: Binding(
+                    get: { state.subject },
+                    set: { state.subject = String($0.prefix(100)) }
+                )
+            )
+            .onChange(of: state.subject) { _, newValue in
+                if newValue.count > 100 {
+                    state.subject = String(newValue.prefix(100))
+                }
+            }
             TextField(
                 NSLocalizedString("_vacation_message_", value: "Message", comment: ""),
                 text: $state.message,
@@ -183,22 +139,12 @@ struct SouveraVacationView: View {
                     Text(NSLocalizedString("_vacation_save_", value: "Save", comment: ""))
                 }
             }
-            // Run 04.11.: manueller NC→Sieve-Sync (POST /vacation/sync),
-            // danach den Zustand neu laden.
-            Button {
-                Task { await syncNow() }
-            } label: {
-                if isSyncing {
-                    ProgressView()
-                } else {
-                    Text(NSLocalizedString("_vacation_sync_now_", value: "Sync now", comment: ""))
-                }
-            }
-            .disabled(isSyncing)
         } header: {
             Text(NSLocalizedString("_vacation_title_", value: "Vacation responder", comment: ""))
         } footer: {
-            Text(NSLocalizedString("_vacation_footer_", value: "Replies are sent once per sender while the responder is active.", comment: ""))
+            // Die NC-Abwesenheit wird vom souvera_mail-Cron stündlich
+            // in den Sieve-Responder übernommen.
+            Text(NSLocalizedString("_vacation_footer_", value: "The out-of-office note is synced with the mail server automatically (up to one hour).", comment: ""))
         }
     }
 
@@ -220,19 +166,13 @@ struct SouveraVacationView: View {
             hasPeriod = loaded.from != nil || loaded.to != nil
             errorMessage = nil
         } catch {
-            // Run 04.11.: kein catch-all → .unavailable() mehr. Nur 404
-            // (alter Server) bleibt über load() der unavailable-Hinweis;
-            // alle anderen Fehler (inkl. 412 CSRF, 5xx) landen im
-            // präzisen Fehler-Banner mit Statuscode/Server-Message.
+            // Präzises Fehler-Banner mit Statuscode/Server-Message.
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-        // Combined State ist Best-Effort: Fehler → Sektion einfach
-        // weglassen (Server ohne /state-Route o. ä.).
-        combinedState = try? await SouveraVacationResponder.loadState()
     }
 
     private func save() async {
-        // Zeitraum-Toggle aus: keine Daten mitsenden (nil = ab sofort/unbefristet).
+        // Zeitraum-Toggle aus: keine Daten mitsenden (nil = ab heute/ein Jahr).
         var payload = state
         if !hasPeriod {
             payload.from = nil
@@ -245,22 +185,6 @@ struct SouveraVacationView: View {
             try await SouveraVacationResponder.save(payload)
             errorMessage = nil
             isSaved = true
-        } catch {
-            // Präzise Meldung: Statuscode + Server-Message (z. B. 412
-            // CSRF, solange der Server-Patch fehlt).
-            errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-        }
-    }
-
-    private func syncNow() async {
-        isSyncing = true
-        defer { isSyncing = false }
-        do {
-            try await SouveraVacationResponder.syncNow()
-            errorMessage = nil
-            // Nach dem Sync den Zustand neu laden (Sieve hat ggf. den
-            // Vacation-Block aktualisiert).
-            await load()
         } catch {
             errorMessage = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
