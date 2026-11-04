@@ -112,11 +112,15 @@ final class NCMoreModel: ObservableObject {
     /// Each item contains only presentation data and a destination:
     ///
     /// - `titleKey`: localization key used for the visible title.
+    /// - `fallbackTitle`: optional plain title used when `titleKey` is not
+    ///   translated in the current language (raw-key detection), so
+    ///   untranslated entries never render their localization key.
     /// - `image`: name used as row icon.
     /// - `destination`: generic navigation target executed by `perform(_:)`.
     struct Item {
         let identifier = UUID()
         let titleKey: String
+        var fallbackTitle: String? = nil
         let image: String
         let destination: Destination
     }
@@ -342,6 +346,10 @@ final class NCMoreModel: ObservableObject {
             functionItems.append(
                 Item(
                     titleKey: "_vacation_title_",
+                    // Run 04.11.: "_vacation_title_" ist noch nicht in alle
+                    // Sprachen übersetzt (nur en/de). Ohne Fallback würde in
+                    // anderen Sprachen der Raw-Key als Titel erscheinen.
+                    fallbackTitle: "Vacation responder",
                     // Run 04.11.: "envelope.badge.clock" existiert nicht als
                     // SF-Symbol (UIImage(systemName:) -> nil, kein Icon).
                     // "sun.max" ist seit iOS 13 garantiert verfügbar und

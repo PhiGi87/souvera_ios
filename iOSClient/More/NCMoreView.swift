@@ -266,7 +266,7 @@ struct NCMoreView: View {
                             .background(Color.Souvera.brandSurface,
                                         in: RoundedRectangle(cornerRadius: SouveraTokens.Radius.small,
                                                              style: .continuous))
-                        Text(NSLocalizedString(item.titleKey, comment: ""))
+                        Text(localizedTitle(for: item))
                             .font(.caption)
                             .foregroundStyle(.primary)
                             .lineLimit(1)
@@ -311,8 +311,17 @@ struct NCMoreView: View {
         Button {
             model.perform(item.destination)
         } label: {
-            Label(NSLocalizedString(item.titleKey, comment: ""), systemImage: item.image)
+            Label(localizedTitle(for: item), systemImage: item.image)
         }
+    }
+
+    // Run 04.11.: Raw-Key-Erkennung + Fallback für Einträge, die noch nicht
+    // in alle Sprachen übersetzt sind. `NSLocalizedString` liefert den Key
+    // selbst zurück, wenn es keinen Eintrag in der Strings-Datei gibt; in
+    // dem Fall wird der optionale `fallbackTitle` des Items verwendet.
+    private func localizedTitle(for item: NCMoreModel.Item) -> String {
+        let localized = NSLocalizedString(item.titleKey, comment: "")
+        return localized == item.titleKey ? (item.fallbackTitle ?? localized) : localized
     }
 
     @ViewBuilder
