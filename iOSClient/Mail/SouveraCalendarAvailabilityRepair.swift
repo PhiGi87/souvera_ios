@@ -38,7 +38,7 @@ import Foundation
 enum SouveraCalendarAvailabilityRepair {
 
     private static let inboxPath = "/remote.php/dav/calendars"
-    private static let caldavNamespace = "urn:ietf:params:xml:ns:caldav"
+    static let caldavNamespace = "urn:ietf:params:xml:ns:caldav"
 
     // MARK: - Öffentliche API
 
