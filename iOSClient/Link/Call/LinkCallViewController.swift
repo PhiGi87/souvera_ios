@@ -205,6 +205,21 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     }()
     private var localViewPanOrigin: CGPoint = .zero
 
+    // Run 05.11.: Mini-Kacheln mit Ecken-Snap im Screenshare.
+    private enum TileCorner { case topLeft, topRight, bottomLeft, bottomRight }
+    /// Ecke der Kamera-Kachel des Teilenden (Mini-Kachel über dem Share).
+    private var sharerMiniCorner: TileCorner = .bottomLeft
+    /// Ecke der schwebenden Eigenansicht (Screenshare + Fokus).
+    private var localCorner: TileCorner = .bottomLeft
+    /// Bereits mit Mini-Pan verdrahtete Kachel-Keys (doppelt vermeiden).
+    private var miniPanKeys = Set<String>()
+    /// Gemerkter Frame-Origin pro Pan-Gesture (Key = Kachel-Key).
+    private var miniPanOrigins: [String: CGPoint] = [:]
+    /// Läuft gerade ein Screenshare (irgendeine Kachel vom Typ "screen")?
+    private var isScreenshareActive: Bool {
+        tiles.values.contains { $0.roomType == "screen" }
+    }
+
     private var isMuted = false
     private var isVideoOn: Bool
 
@@ -615,8 +630,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     @objc private func localViewPanned(_ gesture: UIPanGestureRecognizer) {
         // Nur im Floating-Modus (1:1/Fokus) verschiebbar; im Raster bleibt
-        // die Eigenansicht als feste Kachel.
-        guard layoutMode != .raster || tiles.count <= 1 else { return }
+        // die Eigenansicht als feste Kachel. Im Screenshare ziehen geht
+        // IMMER (Run 05.11.) - dort ist sie Mini-Kachel über dem Share.
+        guard layoutMode != .raster || tiles.count <= 1 || isScreenshareActive else { return }
         switch gesture.state {
         case .began:
             localViewPanOrigin = localContainer.frame.origin
@@ -632,21 +648,32 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
     }
 
-    /// Schnappt die Eigenansicht in die nächstgelegene Ecke.
+    /// Schnappt die Eigenansicht in die nächstgelegene Ecke (Run 05.11.:
+    /// über cornerFrame mit tileLayoutBounds/Safe-Areas statt harter
+    /// view.bounds - funktioniert dadurch auch gefaltet und im Screenshare).
     private func snapLocalViewToCorner() {
         let size = localContainer.frame.size
-        let inset: CGFloat = 16
-        let safeTop = view.safeAreaInsets.top
-        let safeBottom = view.safeAreaInsets.bottom
-        let minX = inset
-        let maxX = view.bounds.width - size.width - inset
-        let minY = safeTop + inset
-        let maxY = view.bounds.height - safeBottom - 120 - size.height - inset
-        var target = localContainer.frame.origin
-        if target.x < (minX + maxX) / 2 { target.x = minX } else { target.x = maxX }
-        if target.y < (minY + maxY) / 2 { target.y = minY } else { target.y = maxY }
+        let bounds = tileLayoutBounds
+        let safeTop = tileLayoutSafeTop
+        let safeBottom = tileLayoutSafeBottom
+        localCorner = nearestCorner(
+            for: localContainer.frame.origin,
+            size: size,
+            bounds: bounds,
+            safeTop: safeTop,
+            safeBottom: safeBottom,
+            bottomReserve: 120
+        )
+        let target = cornerFrame(
+            corner: localCorner,
+            size: size,
+            bounds: bounds,
+            safeTop: safeTop,
+            safeBottom: safeBottom,
+            bottomReserve: 120
+        )
         UIView.animate(withDuration: 0.2) {
-            self.localContainer.frame.origin = target
+            self.localContainer.frame = target
         }
     }
 
@@ -868,15 +895,30 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // Screen-Share bleibt immer groß/vorn (Inhalte lesbar).
         if let screenKey = tiles.keys.sorted().first(where: { tiles[$0]?.roomType == "screen" }),
            let screenTile = tiles[screenKey] {
+            // Run 05.11.: Der Share bleibt groß/vorn. NUR die Kamera-Kachel
+            // des Teilenden erscheint zusätzlich als ziehbare Mini-Kachel -
+            // alle übrigen Kacheln sind im Screenshare ausgeblendet.
+            let session = screenKey.components(separatedBy: "|").first ?? ""
+            let sharerKey = Self.key(session: session, roomType: "video")
             // LANDSCAPE: Screenshare ist DIE einzige Ansicht - Vollbild,
-            // kein Strip, keine Eigenansicht (Run-Feedback 12.09.).
+            // kein Strip (Run-Feedback 12.09.) + Mini-Kacheln.
             if tileLayoutBounds.width > tileLayoutBounds.height {
+                for key in tiles.keys where key != screenKey && key != sharerKey {
+                    tiles[key]?.container.isHidden = true
+                }
                 screenTile.container.frame = tileLayoutBounds
                 screenTile.container.layer.cornerRadius = 0
                 clearPlaceholderTiles()
+                layoutScreenShareMinis(sharerKey: sharerKey)
                 return
             }
+            // HOCHKANT: Share im Fokus-Layout, danach Kacheln verstecken und
+            // die Mini-Kacheln (Teilender + Eigenansicht) darüberlegen.
             layoutFocus()
+            for key in tiles.keys where key != screenKey && key != sharerKey {
+                tiles[key]?.container.isHidden = true
+            }
+            layoutScreenShareMinis(sharerKey: sharerKey)
             return
         }
         // Layout-Modus IMMER respektieren - auch bei nur einer Video-Kachel.
@@ -891,8 +933,160 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
     }
 
+    // MARK: - Mini-Kacheln im Screenshare (Run 05.11.)
+
+    /// Platziert die ziehbaren Mini-Kacheln über dem Screenshare: die
+    /// Kamera-Kachel des Teilenden (falls vorhanden) und die Eigenansicht.
+    private func layoutScreenShareMinis(sharerKey: String) {
+        let miniSize = miniTileSize(bounds: tileLayoutBounds.size)
+        if let sharerTile = tiles[sharerKey] {
+            sharerTile.container.isHidden = false
+            sharerTile.container.layer.cornerRadius = 10
+            sharerTile.container.frame = cornerFrame(
+                corner: sharerMiniCorner,
+                size: miniSize,
+                bounds: tileLayoutBounds,
+                safeTop: tileLayoutSafeTop,
+                safeBottom: tileLayoutSafeBottom,
+                bottomReserve: 120
+            )
+            tilesContentView.bringSubviewToFront(sharerTile.container)
+            attachMiniPan(to: sharerTile.container, key: sharerKey)
+        }
+        // Eigenansicht als zweite Mini-Kachel (nicht im gefalteten
+        // Hochformat - dort lebt sie in der Control-Hälfte).
+        if shouldShowLocalView && !isFoldedPortrait {
+            localContainer.isHidden = false
+            localContainer.frame = cornerFrame(
+                corner: localCorner,
+                size: CGSize(width: 180, height: 135),
+                bounds: tileLayoutBounds,
+                safeTop: tileLayoutSafeTop,
+                safeBottom: tileLayoutSafeBottom,
+                bottomReserve: 120
+            )
+            tilesContentView.bringSubviewToFront(localContainer)
+        }
+    }
+
+    /// Größe einer Mini-Kachel: 160 pt Breite (1.4-Höhe wie im Raster),
+    /// proportional geschrumpft, wenn 40 % der Höhe bzw. 50 % der Breite
+    /// unterschritten würden.
+    private func miniTileSize(bounds: CGSize) -> CGSize {
+        let aspect: CGFloat = 1.4
+        var width: CGFloat = 160
+        var height = width * aspect
+        if height > bounds.height * 0.4 {
+            height = bounds.height * 0.4
+            width = height / aspect
+        }
+        if width > bounds.width * 0.5 {
+            width = bounds.width * 0.5
+            height = width * aspect
+        }
+        return CGSize(width: max(60, width), height: max(84, height))
+    }
+
+    /// Frame einer Ecke: 16 pt Innenabstand, oben unter der Safe-Area,
+    /// unten oberhalb des Control-Bereichs (bottomReserve).
+    private func cornerFrame(corner: TileCorner, size: CGSize, bounds: CGRect,
+                             safeTop: CGFloat, safeBottom: CGFloat,
+                             bottomReserve: CGFloat) -> CGRect {
+        let inset: CGFloat = 16
+        let minX = inset
+        let maxX = max(0, bounds.width - size.width - inset)
+        let minY = safeTop + inset
+        let maxY = max(0, bounds.height - safeBottom - bottomReserve - inset - size.height)
+        let x: CGFloat
+        let y: CGFloat
+        switch corner {
+        case .topLeft: x = minX; y = minY
+        case .topRight: x = maxX; y = minY
+        case .bottomLeft: x = minX; y = maxY
+        case .bottomRight: x = maxX; y = maxY
+        }
+        return CGRect(origin: CGPoint(x: max(0, x), y: max(0, y)), size: size)
+    }
+
+    /// Nächstgelegene Ecke anhand des Kachel-Zentrums.
+    private func nearestCorner(for origin: CGPoint, size: CGSize, bounds: CGRect,
+                               safeTop: CGFloat, safeBottom: CGFloat,
+                               bottomReserve: CGFloat) -> TileCorner {
+        let center = CGPoint(x: origin.x + size.width / 2, y: origin.y + size.height / 2)
+        let midX = bounds.width / 2
+        let midY = (safeTop + bounds.height - safeBottom - bottomReserve) / 2
+        let right = center.x > midX
+        let bottom = center.y > midY
+        switch (right, bottom) {
+        case (false, false): return .topLeft
+        case (true, false): return .topRight
+        case (false, true): return .bottomLeft
+        case (true, true): return .bottomRight
+        }
+    }
+
+    /// Pan-Gesture für eine Mini-Kachel attachen (nur einmal pro Key).
+    private func attachMiniPan(to view: UIView, key: String) {
+        guard !miniPanKeys.contains(key) else { return }
+        miniPanKeys.insert(key)
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(miniTilePanned(_:)))
+        pan.name = key
+        view.addGestureRecognizer(pan)
+        view.isUserInteractionEnabled = true
+    }
+
+    /// Ziehen einer Mini-Kachel mit Snap in die nächstgelegene Ecke.
+    @objc private func miniTilePanned(_ gesture: UIPanGestureRecognizer) {
+        guard let key = gesture.name,
+              let tile = tiles[key] else { return }
+        let bounds = tileLayoutBounds
+        let safeTop = tileLayoutSafeTop
+        let safeBottom = tileLayoutSafeBottom
+        switch gesture.state {
+        case .began:
+            miniPanOrigins[key] = tile.container.frame.origin
+        case .changed:
+            guard let origin = miniPanOrigins[key] else { return }
+            let t = gesture.translation(in: view)
+            let size = tile.container.frame.size
+            let inset: CGFloat = 16
+            let x = min(max(origin.x + t.x, 0),
+                        max(0, bounds.width - size.width - inset))
+            let y = min(max(origin.y + t.y, safeTop),
+                        max(0, bounds.height - safeBottom - 120 - size.height))
+            tile.container.frame.origin = CGPoint(x: x, y: y)
+        case .ended, .cancelled:
+            miniPanOrigins[key] = nil
+            let size = tile.container.frame.size
+            sharerMiniCorner = nearestCorner(
+                for: tile.container.frame.origin,
+                size: size,
+                bounds: bounds,
+                safeTop: safeTop,
+                safeBottom: safeBottom,
+                bottomReserve: 120
+            )
+            let target = cornerFrame(
+                corner: sharerMiniCorner,
+                size: size,
+                bounds: bounds,
+                safeTop: safeTop,
+                safeBottom: safeBottom,
+                bottomReserve: 120
+            )
+            UIView.animate(withDuration: 0.2) {
+                tile.container.frame = target
+            }
+        default:
+            break
+        }
+    }
+
     /// Raster: alle Kacheln (remote + Eigenansicht) gleich groß.
     private func layoutRaster() {
+        // Run 05.11.: Versteckte Kacheln (z. B. nach Screenshare-Ende)
+        // wieder sichtbar machen.
+        for tile in tiles.values { tile.container.isHidden = false }
         let width = tileLayoutBounds.width
         let height = tileLayoutBounds.height
         let safeTop = tileLayoutSafeTop
@@ -969,6 +1163,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
 
     /// Fokus/Speaker: große Fokus-Kachel + kleine Kacheln unten.
     private func layoutFocus() {
+        // Run 05.11.: Versteckte Kacheln (z. B. nach Screenshare-Ende)
+        // wieder sichtbar machen.
+        for tile in tiles.values { tile.container.isHidden = false }
         let width = tileLayoutBounds.width
         let height = tileLayoutBounds.height
         let safeTop = tileLayoutSafeTop
