@@ -132,9 +132,26 @@ enum SouveraVacationResponder {
             // unverändert weiter.
             guard case .http(500, _) = error else { throw error }
             SouveraLog.write("Vacation", "save 500 -> availability repair")
-            let repaired = try? await SouveraCalendarAvailabilityRepair.diagnoseAndRepair(account: account)
-            guard repaired == true else {
-                SouveraLog.write("Vacation", "save after repair: repair nicht möglich -> Fehler weiterreichen")
+            let outcome = (try? await SouveraCalendarAvailabilityRepair.diagnoseAndRepair(account: account)) ?? .parseError
+            switch outcome {
+            case .removed:
+                SouveraLog.write("Vacation", "save after repair: availability entfernt -> ein Save-Retry")
+            case .propertyMissing:
+                // Property existiert nicht -> der 500 stammt nicht aus
+                // getUserTimezone(); ein Retry wäre sinnlos.
+                SouveraLog.write("Vacation", "save after repair: availability property missing - 500 hat andere Ursache, nextcloud.log erforderlich")
+                throw error
+            case .propfindFailed(let status):
+                SouveraLog.write("Vacation", "save after repair: propfind fehlgeschlagen (status=\(status)) -> Fehler weiterreichen")
+                throw error
+            case .patchFailed(let status):
+                SouveraLog.write("Vacation", "save after repair: proppatch fehlgeschlagen (status=\(status)) -> Fehler weiterreichen")
+                throw error
+            case .parseError:
+                SouveraLog.write("Vacation", "save after repair: multistatus-XML nicht parsebar -> Fehler weiterreichen")
+                throw error
+            case .skipped(let reason):
+                SouveraLog.write("Vacation", "save after repair: repair übersprungen (\(reason)) -> Fehler weiterreichen")
                 throw error
             }
             do {
