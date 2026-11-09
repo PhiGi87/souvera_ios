@@ -2835,7 +2835,7 @@ private struct AutoGrowingTextView: UIViewRepresentable {
 
         // Run 09.11.: Fokus-Begin (nicht jeder Tastendruck) melden.
         func textViewDidBeginEditing(_ textView: UITextView) {
-            onEditingStarted?()
+            parent.onEditingStarted?()
         }
     }
 }
