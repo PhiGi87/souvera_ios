@@ -2342,58 +2342,6 @@ struct MailComposeView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                if viewModel.fromAddresses.count > 1 {
-                    HStack(spacing: 8) {
-                        Text(NSLocalizedString("_mail_from_", comment: ""))
-                            .foregroundStyle(.secondary)
-                            .frame(width: 64, alignment: .leading)
-                        Picker("", selection: $selectedFromIndex) {
-                            ForEach(Array(viewModel.fromAddresses.enumerated()), id: \.offset) { _, addr in
-                                Text(addr).tag(viewModel.fromAddresses.firstIndex(of: addr) ?? 0)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        // Run 25.09.: Auswahl SOFORT anwenden (inkl. passender
-                        // Identity), nicht erst beim Senden.
-                        .onChange(of: selectedFromIndex) { _, newIndex in
-                            guard viewModel.fromAddresses.indices.contains(newIndex) else { return }
-                            viewModel.selectFromAddress(viewModel.fromAddresses[newIndex])
-                        }
-                        Spacer()
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    Divider()
-                }
-
-                recipientField(label: NSLocalizedString("_mail_to_", comment: ""), text: $to, kind: .to)
-                Divider()
-                if showCcBcc {
-                    recipientField(label: NSLocalizedString("_mail_cc_", comment: ""), text: $cc, kind: .cc)
-                    Divider()
-                    recipientField(label: NSLocalizedString("_mail_bcc_", comment: ""), text: $bcc, kind: .bcc)
-                    Divider()
-                }
-
-                HStack(spacing: 8) {
-                    Text(NSLocalizedString("_mail_subject_", comment: ""))
-                        .foregroundStyle(.secondary)
-                        .frame(width: 64, alignment: .leading)
-                    TextField("", text: $subject)
-                    if !showCcBcc {
-                        Button {
-                            showCcBcc = true
-                        } label: {
-                            Image(systemName: "chevron.down.circle")
-                                .foregroundStyle(.secondary)
-                                .frame(width: 28, height: 28)
-                        }
-                    }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                Divider()
-
                 // Run 09.11. (Apple-Mail-Pattern): Der äußere ScrollView
                 // umschließt Kopfzeilen UND Body. Bisher lag der Body in
                 // einem eigenen ScrollView, das bei Tastatur + aufgeklapptem
