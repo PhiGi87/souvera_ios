@@ -2394,22 +2394,97 @@ struct MailComposeView: View {
                 .padding(.vertical, 8)
                 Divider()
 
-                // The body fills all remaining space and grows with the
-                // text instead of scrolling inside a small box.
+                // Run 09.11. (Apple-Mail-Pattern): Der äußere ScrollView
+                // umschließt Kopfzeilen UND Body. Bisher lag der Body in
+                // einem eigenen ScrollView, das bei Tastatur + aufgeklapptem
+                // Cc/Bcc von den Kopfzeilen auf ~2 Zeilen zusammengedrückt
+                // wurde. Jetzt scrollt der gesamte Inhalt, die Body-Textview
+                // wächst frei mit dem Text und der attachmentsBar bleibt
+                // fix unterhalb.
                 ScrollView {
-                    ZStack(alignment: .topLeading) {
-                        if bodyText.isEmpty {
-                            Text(NSLocalizedString("_mail_message_", comment: ""))
-                                .foregroundStyle(.tertiary)
-                                .padding(.leading, 12)
-                                .padding(.top, 8)
+                    VStack(spacing: 0) {
+                        if viewModel.fromAddresses.count > 1 {
+                            HStack(spacing: 8) {
+                                Text(NSLocalizedString("_mail_from_", comment: ""))
+                                    .foregroundStyle(.secondary)
+                                    .frame(width: 64, alignment: .leading)
+                                Picker("", selection: $selectedFromIndex) {
+                                    ForEach(Array(viewModel.fromAddresses.enumerated()), id: \.offset) { _, addr in
+                                        Text(addr).tag(viewModel.fromAddresses.firstIndex(of: addr) ?? 0)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                // Run 25.09.: Auswahl SOFORT anwenden (inkl. passender
+                                // Identity), nicht erst beim Senden.
+                                .onChange(of: selectedFromIndex) { _, newIndex in
+                                    guard viewModel.fromAddresses.indices.contains(newIndex) else { return }
+                                    viewModel.selectFromAddress(viewModel.fromAddresses[newIndex])
+                                }
+                                Spacer()
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            Divider()
                         }
-                        AutoGrowingTextView(text: $bodyText)
+
+                        recipientField(label: NSLocalizedString("_mail_to_", comment: ""), text: $to, kind: .to)
+                        Divider()
+                        if showCcBcc {
+                            recipientField(label: NSLocalizedString("_mail_cc_", comment: ""), text: $cc, kind: .cc)
+                            Divider()
+                            recipientField(label: NSLocalizedString("_mail_bcc_", comment: ""), text: $bcc, kind: .bcc)
+                            Divider()
+                        }
+
+                        HStack(spacing: 8) {
+                            Text(NSLocalizedString("_mail_subject_", comment: ""))
+                                .foregroundStyle(.secondary)
+                                .frame(width: 64, alignment: .leading)
+                            TextField("", text: $subject)
+                            if !showCcBcc {
+                                Button {
+                                    showCcBcc = true
+                                } label: {
+                                    Image(systemName: "chevron.down.circle")
+                                        .foregroundStyle(.secondary)
+                                        .frame(width: 28, height: 28)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        Divider()
+
+                        // Run 09.11.: Body ohne eigenen ScrollView als
+                        // ZStack (Placeholder + AutoGrowingTextView). Die
+                        // Textview wächst über ihre intrinsic content size
+                        // mit dem Text, das Scrollen übernimmt der äußere
+                        // ScrollView. minHeight hält auch bei leerem Body
+                        // eine komfortable Schreibfläche frei.
+                        ZStack(alignment: .topLeading) {
+                            if bodyText.isEmpty {
+                                Text(NSLocalizedString("_mail_message_", comment: ""))
+                                    .foregroundStyle(.tertiary)
+                                    .padding(.leading, 12)
+                                    .padding(.top, 8)
+                            }
+                            AutoGrowingTextView(text: $bodyText, onEditingStarted: {
+                                // Run 09.11. (Apple-Verhalten): Beim ersten
+                                // Fokus des Bodys Cc/Bcc zuklappen, damit die
+                                // Kopfzeilen die Schreibfläche nicht drücken.
+                                // Der Nutzer öffnet sie über den Chevron wieder.
+                                showCcBcc = false
+                            })
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
+                        }
+                        .frame(minHeight: 200, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                // Run 09.11.: Hintergrund-Scrolling zieht die Tastatur
+                // interaktiv mit den Fingern nach unten zurück.
+                .scrollDismissesKeyboard(.interactively)
 
                 attachmentsBar
             }
@@ -2719,6 +2794,10 @@ extension MailComposeView.RecipientFieldKind: Identifiable {
 /// handle scrolling once the text exceeds the available space.
 private struct AutoGrowingTextView: UIViewRepresentable {
     @Binding var text: String
+    // Run 09.11.: Optionaler Callback, der EINMAL beim Beginn der
+    // Bearbeitung feuert (textViewDidBeginEditing) - genutzt, um in
+    // MailComposeView beim Body-Fokus Cc/Bcc zuzuklappen.
+    var onEditingStarted: (() -> Void)?
 
     func makeUIView(context: Context) -> UITextView {
         let view = UITextView()
@@ -2752,6 +2831,11 @@ private struct AutoGrowingTextView: UIViewRepresentable {
 
         func textViewDidChange(_ textView: UITextView) {
             parent.text = textView.text
+        }
+
+        // Run 09.11.: Fokus-Begin (nicht jeder Tastendruck) melden.
+        func textViewDidBeginEditing(_ textView: UITextView) {
+            onEditingStarted?()
         }
     }
 }
