@@ -189,6 +189,10 @@ struct LinkView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .linkCallStateChanged)) { _ in
             updateCallBannerVisibility()
+            // Run 10.11.: Header neu befuellen - im Call-Fullscreen ist
+            // die Routen-Zurueck-Aktion sinnlos (kein Back-Item), nach
+            // dem Auflegen muss er wieder erscheinen.
+            populateHeaderBridge()
         }
         .onChange(of: viewModel.route) { _, _ in
             // Run 25.09. (Feedback): Der Banner gehoert nur in den Raum, in
@@ -518,12 +522,15 @@ struct LinkView: View {
             // Raumlisten-Toggle auch im Chat, damit die Raumliste aus
             // jedem Raum heraus ein-/ausgeblendbar ist (Mail-Stil:
             // Zurueck zuerst).
-            var leading: [SouveraHeaderBridge.Item] = [
-                .init(id: "back", icon: "chevron.backward",
+            // Run 10.11.: Im Call-Fullscreen ist die Routen-Zurueck-
+            // Aktion sinnlos; nur der Sidebar-Toggle bleibt.
+            var leading: [SouveraHeaderBridge.Item] = []
+            if !LinkVoIPManager.shared.isCallUIPresented {
+                leading.append(.init(id: "back", icon: "chevron.backward",
                       accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
                     viewModel.back()
-                }
-            ]
+                })
+            }
             if landscapeLayout {
                 leading.append(.init(id: "rooms", icon: "sidebar.left",
                       accessibilityLabel: NSLocalizedString("_link_select_room_", comment: "")) {
@@ -625,10 +632,23 @@ struct LinkView: View {
         // Run 25.09. (Feedback iPad): Auf dem iPad IMMER die 2-Spalten-
         // Darstellung (Raeume links, Chat rechts) - auch im Hochformat;
         // die Einschspalte verschwendet dort nur Platz.
+        // Run 10.11.: Nur noch, wenn die FENSTERBREITE das Split-Minimum
+        // erreicht - im Splitscreen ist das iPad-Fenster schmal, dort
+        // faellt der Split sicher zurueck (Wechsel Splitscreen an/aus).
         if layout.isRegularWidth {
-            guard landscapeLayout != true else { return }
-            landscapeLayout = true
-            SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split)")
+            if bounds.width >= SouveraLayoutMode.splitMinimumWidth {
+                guard landscapeLayout != true else { return }
+                landscapeLayout = true
+                SouveraLog.write("LinkUI", "layout landscape=true (iPad always-split, window=\(Int(bounds.width))pt)")
+            } else if bounds.width > 0 {
+                // Regular-Trait, aber schmales Fenster (Splitscreen) -
+                // einspaltig zurueckfallen. width == 0 (unbekannt, z. B.
+                // beim allerersten Layout-Durchlauf) laesst den Zustand
+                // unveraendert, bis echte Bounds vorliegen.
+                guard landscapeLayout != false else { return }
+                landscapeLayout = false
+                SouveraLog.write("LinkUI", "layout landscape=false (regular, narrow window=\(Int(bounds.width))pt)")
+            }
             return
         }
         // Run 24.10.: Auf dem schmalen Außendisplay (~678 pt) keine

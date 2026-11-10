@@ -677,7 +677,10 @@ class NCMainTabBarController: UITabBarController {
         }
 
         private func resolvedTraitCollection() -> UITraitCollection {
-            if let scene = view.window?.windowScene { return scene.traitCollection }
+            // Run 10.11.: Im Splitscreen meldet die Szene die Display-
+            // Umgebung (regular), das FENSTER die echte Groesse (compact)
+            // - das Layout entscheidet das Fenster, nicht die Szene.
+            if let window = view.window { return window.traitCollection }
             if let parent { return parent.traitCollection }
             return traitCollection
         }

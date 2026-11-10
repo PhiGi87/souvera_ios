@@ -41,7 +41,12 @@ final class SouveraLayoutMode: ObservableObject {
     static let splitMinimumWidth: CGFloat = 720
 
     static func usesSplit(isRegularWidth: Bool, isLandscape: Bool, width: CGFloat) -> Bool {
-        if isRegularWidth { return true }
+        // Run 10.11.: Auch regular-Breite muss die echte Fensterbreite
+        // gegen das Split-Minimum pruefen - im Splitscreen meldet die
+        // Szene .regular, obwohl das Fenster schmal ist. width <= 0
+        // (z. B. GeometryReader-Nullgroesse beim Start) liefert damit
+        // korrekt false.
+        if isRegularWidth && width >= splitMinimumWidth { return true }
         return isLandscape && width >= splitMinimumWidth
     }
 
