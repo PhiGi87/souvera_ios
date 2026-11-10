@@ -331,9 +331,14 @@ final class SouveraBarCoordinator {
         if useGroups {
             item.leftBarButtonItems = nil
             item.rightBarButtonItems = nil
-            item.leadingItemGroups = leading.map {
-                UIBarButtonItemGroup(barButtonItems: [$0.bar], representativeItem: $0.representative)
-            }
+            // Run 10.11.: Eine gemeinsame Leading-Gruppe OHNE
+            // Repraesentanten - ohne Repraesentanten kann UIKit die Gruppe
+            // nicht itemweise in den Overflow verschieben (Regression:
+            // Link-Zurueck/Toggle verschwanden am Innendisplay in den
+            // "..."-Button).
+            item.leadingItemGroups = leading.isEmpty
+                ? []
+                : [UIBarButtonItemGroup(barButtonItems: leading.map(\.bar), representativeItem: nil)]
             item.trailingItemGroups = trailingGroups.map {
                 UIBarButtonItemGroup(barButtonItems: [$0.bar], representativeItem: $0.representative)
             }

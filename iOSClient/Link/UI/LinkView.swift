@@ -518,28 +518,26 @@ struct LinkView: View {
             }
 
             bridge.title = roomTitle
-            // Run 25.10.: Zurueck IMMER (Mail-identisch) - und der
-            // Raumlisten-Toggle auch im Chat, damit die Raumliste aus
-            // jedem Raum heraus ein-/ausgeblendbar ist (Mail-Stil:
-            // Zurueck zuerst).
-            // Run 10.11.: Im Call-Fullscreen ist die Routen-Zurueck-
-            // Aktion sinnlos; nur der Sidebar-Toggle bleibt.
-            var leading: [SouveraHeaderBridge.Item] = []
-            if !LinkVoIPManager.shared.isCallUIPresented {
-                leading.append(.init(id: "back", icon: "chevron.backward",
-                      accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
-                    viewModel.back()
-                })
-            }
-            if landscapeLayout {
-                leading.append(.init(id: "rooms", icon: "sidebar.left",
-                      accessibilityLabel: NSLocalizedString("_link_select_room_", comment: "")) {
-                    withAnimation(.snappy(duration: 0.3)) {
-                        roomsCollapsed.toggle()
+            // Run 10.11.: Der Zurueck-Button existiert nur, wenn es KEINEN
+            // Sidebar-Toggle gibt: Innendisplay-Split (landscapeLayout) =
+            // Toggle als Navigation, kein Back noetig; schmale Ansicht
+            // (Aussendisplay/Splitscreen) = kein Toggle, Back als einzige
+            // Navigation.
+            bridge.leadingItems = landscapeLayout
+                ? [
+                    .init(id: "rooms", icon: "sidebar.left",
+                          accessibilityLabel: NSLocalizedString("_link_select_room_", comment: "")) {
+                        withAnimation(.snappy(duration: 0.3)) {
+                            roomsCollapsed.toggle()
+                        }
                     }
-                })
-            }
-            bridge.leadingItems = leading
+                ]
+                : [
+                    .init(id: "back", icon: "chevron.backward",
+                          accessibilityLabel: NSLocalizedString("_back_", comment: "")) {
+                        viewModel.back()
+                    }
+                ]
             bridge.trailingItems = trailing
             bridge.trailingMenus = trailingMenus
         } else {
