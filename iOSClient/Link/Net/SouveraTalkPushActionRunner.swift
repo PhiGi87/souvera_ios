@@ -8,6 +8,13 @@
 // ist. Eine ältere Meldung wird nur EINZELN entfernt - der Server-Marker
 // bleibt unberührt (Talk kennt keinen Einzel-Lesestatus mitten in der
 // Liste). "Antworten" räumt weiterhin raumweit auf (bei Erfolg).
+// Run 10.11.: Das Aufräumen ist SELEKTIV - es werden nur Meldungen mit
+// nid <= getappter nid entfernt. Der Payload enthält `nid` (NC-
+// Notification-Id, vom NSE geschrieben), NICHT die Talk-Message-Id -
+// eine Direktabbildung "Read-Marker bis getappte Meldung" ist deshalb
+// nicht möglich; der Marker bleibt beim neuesten Stand der Seite. Eine
+// getapte (ältere) Meldung berührt die anderen Meldungen des Stapels
+// nicht mehr.
 
 import Foundation
 import UIKit
@@ -54,10 +61,14 @@ enum SouveraTalkPushActionRunner {
         return LinkAccount.from(account: tbl.account, urlBase: tbl.urlBase, user: tbl.user)
     }
 
-    /// Entfernt ALLE Meldungen des Raums aus der Mitteilungszentrale
-    /// (der NSE schreibt das Raum-Token in jede Talk-Meldung; Meldungen
-    /// anderer Räume bleiben unberührt).
-    static func cleanupRoomNotifications(token: String) async {
+    /// Run 10.11. (selektiv): Entfernt Meldungen des Raums aus der
+    /// Mitteilungszentrale. Mit `tappedNid` werden nur Meldungen mit
+    /// nid <= tappedNid entfernt (die getapte Meldung und ältere) -
+    /// neuere Meldungen des Stapels bleiben bestehen. Ohne `tappedNid`
+    /// (z. B. Kaltstart ohne Identifier) gilt weiterhin das raumweite
+    /// Aufräumen. Der NSE schreibt das Raum-Token in jede Talk-Meldung;
+    /// Meldungen anderer Räume bleiben unberührt.
+    static func cleanupRoomNotifications(token: String, tappedNid: Int? = nil) async {
         guard !token.isEmpty else { return }
         let center = UNUserNotificationCenter.current()
         let delivered = await center.deliveredNotifications()
@@ -66,11 +77,36 @@ enum SouveraTalkPushActionRunner {
                 && ($0.request.content.userInfo["token"] as? String) == token
         }
         guard !matching.isEmpty else { return }
-        center.removeDeliveredNotifications(withIdentifiers: matching.map { $0.request.identifier })
-        SouveraLog.write("TalkAction", "room cleanup: \(matching.count) Meldungen entfernt (token=\(token))")
+        let toRemove: [UNNotification]
+        if let tappedNid {
+            // Selektiv: nur die getapte Meldung und ältere. Meldungen
+            // ohne nid lassen sich nicht einordnen und bleiben stehen.
+            toRemove = matching.filter {
+                guard let nid = nidValue($0.request.content.userInfo["nid"]) else {
+                    return false
+                }
+                return nid <= tappedNid
+            }
+        } else {
+            toRemove = matching
+        }
+        guard !toRemove.isEmpty else {
+            SouveraLog.write("TalkAction", "selective cleanup: nichts zu entfernen (tappedNid=\(tappedNid.map(String.init) ?? "-"))")
+            return
+        }
+        center.removeDeliveredNotifications(withIdentifiers: toRemove.map { $0.request.identifier })
+        if let tappedNid {
+            SouveraLog.write("TalkAction", "selective cleanup: \(toRemove.count) von \(matching.count) Meldungen entfernt (nid<=\(tappedNid), token=\(token))")
+        } else {
+            SouveraLog.write("TalkAction", "room cleanup: \(matching.count) Meldungen entfernt (token=\(token))")
+        }
     }
 
     /// Read-Marker raumweit auf die neueste Nachricht setzen.
+    /// Run 10.11.: Der Payload liefert nur die NC-`nid`, nicht die Talk-
+    /// Message-Id - der Marker bleibt deshalb auf dem neuesten Stand der
+    /// Seite; das selektive Cleanup (nid <= tappedNid) stellt sicher,
+    /// dass eine getapte Meldung nicht die anderen des Stapels entfernt.
     @MainActor
     static func markRoomRead(account: String, token: String) async {
         guard !token.isEmpty else { return }
@@ -97,10 +133,14 @@ enum SouveraTalkPushActionRunner {
         }
     }
 
-    /// "Antworten": Text senden und bei Erfolg raumweit aufräumen.
+    /// "Antworten": Text senden und bei Erfolg aufräumen. Run 10.11.:
+    /// Das Aufräumen ist selektiv (nur Meldungen mit nid <= der getappten
+    /// Meldung) - ohne Identifier fällt es auf das raumweite Verhalten
+    /// zurück. Der Read-Marker bleibt auf dem neuesten Stand.
     @MainActor
     @discardableResult
-    static func runReply(account: String, token: String, userText: String) async -> Bool {
+    static func runReply(account: String, token: String, userText: String,
+                         notificationIdentifier: String = "") async -> Bool {
         let text = userText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !account.isEmpty, !token.isEmpty, !text.isEmpty else {
             SouveraLog.write("TalkAction", "reply: account/token/text fehlen")
@@ -117,10 +157,15 @@ enum SouveraTalkPushActionRunner {
             return false
         }
         SouveraLog.write("TalkAction", "reply ok (http=\(result.httpCode)) token=\(token)")
-        // Dasselbe raumweite Aufräumen wie bei "Gelesen" (Feedback: so
-        // belassen - Antworten räumt weiterhin raumweit auf).
+        // Run 10.11.: Selektives Aufräumen wie bei "Gelesen" - die nid der
+        // getapten Meldung begrenzt das Entfernen auf sie und ältere.
+        let center = UNUserNotificationCenter.current()
+        let delivered = await center.deliveredNotifications()
+        let tappedNid = delivered
+            .first { $0.request.identifier == notificationIdentifier }
+            .flatMap { nidValue($0.request.content.userInfo["nid"]) }
         await markRoomRead(account: account, token: token)
-        await cleanupRoomNotifications(token: token)
+        await cleanupRoomNotifications(token: token, tappedNid: tappedNid)
         return true
     }
 
@@ -153,7 +198,10 @@ enum SouveraTalkPushActionRunner {
                                           roomNotifications: infos)
         if newest {
             await markRoomRead(account: account, token: token)
-            await cleanupRoomNotifications(token: token)
+            // Run 10.11.: Selektiv aufräumen - bei der neuesten Meldung
+            // sind das alle (nid <= tappedNid), ohne den Marker ändern zu
+            // müssen; ohne tappedNid greift das raumweite Verhalten.
+            await cleanupRoomNotifications(token: token, tappedNid: tappedNid)
         } else {
             if !notificationIdentifier.isEmpty {
                 center.removeDeliveredNotifications(withIdentifiers: [notificationIdentifier])

@@ -355,7 +355,8 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 if isReply {
                     await SouveraTalkPushActionRunner.runReply(account: account,
                                                                 token: token,
-                                                                userText: userText)
+                                                                userText: userText,
+                                                                notificationIdentifier: identifier)
                 } else if response.actionIdentifier == Self.talkMarkReadAction {
                     await SouveraTalkPushActionRunner.runMarkRead(account: account,
                                                                    token: token,
@@ -663,7 +664,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                 SouveraLog.write("PushPayloadJSON", decrypted)
                 guard app == "souvera_mail" || objectType == "souvera_mail" else { break }
                 let title = (json["subject"] as? String) ?? NSLocalizedString("_mail_", comment: "")
-                let body = (json["message"] as? String) ?? title
+                // Run 10.11. (Dedup): Ohne message früher body = title -
+                // derselbe Text zweimal. Jetzt leer lassen (die Anreicherung
+                // unten greift bei leerem body ohnehin).
+                let body = (json["message"] as? String) ?? ""
                 let mailId = (json["objectId"] as? String)
                     ?? (json["emailId"] as? String)
                     ?? (json["mailId"] as? String)
@@ -682,6 +686,11 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
                                 finalTitle = enriched.0
                                 finalBody = enriched.1
                             }
+                        }
+                        // Run 10.11. (Dedup): identischer Titel/Body nur
+                        // einmal zeigen.
+                        if finalBody == finalTitle {
+                            finalBody = ""
                         }
                         let content = UNMutableNotificationContent()
                         content.title = finalTitle

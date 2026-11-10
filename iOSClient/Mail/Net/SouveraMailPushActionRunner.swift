@@ -5,7 +5,10 @@
 // ("gelesen", "markiert", "löschen") - auch bei Kaltstart, ohne geöffnete
 // Mail-Liste. Der Push-`emailId` ist serverseitig eine KURZFORM (P62e):
 // `Email/set` wirkt mit ihr NICHT (Server-No-Op) - deshalb wird vor jeder
-// Aktion die kanonische (volle) Id per blobId ermittelt.
+// Aktion die kanonische (volle) Id per blobId ermittelt. Run 10.11.:
+// Ohne Auflösung wird die Aktion abgebrochen (kein Fallback auf die
+// Kurzform mehr) und jede Email/set-Antwort wird auf Server-Fehler
+// geprüft (kein stiller No-Op).
 
 import Foundation
 import UIKit
@@ -78,6 +81,21 @@ enum SouveraMailPushActionRunner {
         )
     }
 
+    /// Run 10.11.: Prüft eine Email/set-Antwort auf Server-Fehler
+    /// (notDestroyed / notUpdated, Muster JmapApi.emailSetFailures).
+    /// Rückgabe false = die Mutation wurde vom Server verweigert - kein
+    /// stiller No-Op mehr.
+    private static func checkSetFailures(_ response: [String: Any], action: String) -> Bool {
+        let failures = JmapApi.emailSetFailures(response)
+        guard failures.isEmpty else {
+            for (id, error) in failures.sorted(by: { $0.key < $1.key }) {
+                SouveraLog.write("MailAction", "action \(action) server failure \(id): \(error)")
+            }
+            return false
+        }
+        return true
+    }
+
     /// Führt die Aktion aus; true = erfolgreich.
     @MainActor
     static func run(actionIdentifier: String, account: String, emailId: String) async -> Bool {
@@ -97,21 +115,27 @@ enum SouveraMailPushActionRunner {
         do {
             let session = try await client.refreshSession()
             let accId = session.primaryAccountId
-            // Kanonische Id (Push-Id = Kurzform, P62e); ohne Auflösung
-            // Fallback auf die Push-Id, damit die Aktion versucht wird.
-            let canonical = await resolveCanonicalEmailId(api: api, accountId: accId, emailId: emailId) ?? emailId
+            // Kanonische Id (Push-Id = Kurzform, P62e). Run 10.11.: Ohne
+            // erfolgreiche Kanonisierung ABBRUCH statt Fallback auf die
+            // Kurzform - `Email/set` wirkt mit ihr nicht (stiller No-Op).
+            guard let canonical = await resolveCanonicalEmailId(api: api, accountId: accId, emailId: emailId) else {
+                SouveraLog.write("MailAction", "action \(actionIdentifier) ABORT: kanonische Id für \(emailId) nicht auflösbar")
+                return false
+            }
             // Run 01.10. (Regression gegen Mail-Kaskaden): eine Mail-Aktion
             // betrifft IMMER genau eine Mail - anders als die raumweite
             // Talk-Kaskade. Der Helper dokumentiert/absichert das.
             let targetIds = Self.targetEmailIds(canonicalId: canonical)
             switch actionIdentifier {
             case AppDelegate.mailMarkReadAction:
-                _ = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
-                                                keywordsToAdd: ["$seen": true])
+                let response = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
+                                                           keywordsToAdd: ["$seen": true])
+                guard checkSetFailures(response, action: actionIdentifier) else { return false }
                 await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
             case AppDelegate.mailMarkFlaggedAction:
-                _ = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
-                                                keywordsToAdd: ["$seen": true, "$flagged": true])
+                let response = try await api.setEmailFlags(accountId: accId, emailIds: targetIds,
+                                                           keywordsToAdd: ["$seen": true, "$flagged": true])
+                guard checkSetFailures(response, action: actionIdentifier) else { return false }
                 await mirrorLocally(emailId: canonical, keyword: "$seen", value: true)
                 await mirrorLocally(emailId: canonical, keyword: "$flagged", value: true)
             case AppDelegate.mailDeleteAction:
@@ -123,10 +147,12 @@ enum SouveraMailPushActionRunner {
                     .map { JmapMapper.mapMailbox(account: account, accountId: accId, json: $0) }
                     .first(where: { $0.kind == .trash })?.jmapId
                 if let trashJmapId, !trashJmapId.isEmpty {
-                    _ = try await api.moveEmails(accountId: accId, emailIds: targetIds,
-                                                 targetMailboxId: trashJmapId)
+                    let response = try await api.moveEmails(accountId: accId, emailIds: targetIds,
+                                                            targetMailboxId: trashJmapId)
+                    guard checkSetFailures(response, action: actionIdentifier) else { return false }
                 } else {
-                    _ = try await api.deleteEmails(accountId: accId, emailIds: targetIds)
+                    let response = try await api.deleteEmails(accountId: accId, emailIds: targetIds)
+                    guard checkSetFailures(response, action: actionIdentifier) else { return false }
                 }
             default:
                 return false

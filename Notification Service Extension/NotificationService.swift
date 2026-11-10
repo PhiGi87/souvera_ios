@@ -172,9 +172,45 @@ class NotificationService: UNNotificationServiceExtension {
                                 }
                                 // Titel (fett) = subject (z. B. Absender bei
                                 // Mail-Pushes), Body = message (z. B. Betreff).
+                                // Run 10.11. (Dedup): Talk-Pushes des Proxy
+                                // liefern den KOMBINIERTEN Text ("Absender in
+                                // Raum\nNachricht...") im subject - ohne
+                                // Behandlung würde title == body (doppelt).
+                                // - subject mehrzeilig: title = 1. Zeile,
+                                //   body = Rest (message bevorzugt, wenn sie
+                                //   vorhanden und nicht identisch ist),
+                                // - subject einzeilig: title = subject,
+                                //   body = message; leer/identisch -> body
+                                //   LEER (niemals body = subject).
+                                // - sonst (Mail): body = subject-Fallback
+                                //   bleibt, aber nur wenn body != title -
+                                //   sonst ebenfalls leer (kein Duplikat).
+                                let isTalkPush = (appName == "spreed" || appName == "talk")
                                 var title = subject
                                 let message = json["message"] as? String
                                 var body = (message != nil && !message!.isEmpty) ? message! : subject
+                                if isTalkPush, !subject.isEmpty {
+                                    if subject.contains("\n") {
+                                        let lines = subject.components(separatedBy: "\n")
+                                        title = lines[0]
+                                        if let message, !message.isEmpty, message != subject {
+                                            body = message
+                                        } else {
+                                            body = lines.dropFirst().joined(separator: "\n")
+                                        }
+                                    } else {
+                                        title = subject
+                                        if let message, !message.isEmpty, message != subject {
+                                            body = message
+                                        } else {
+                                            body = ""
+                                        }
+                                    }
+                                } else if body == title {
+                                    // Generischer Schutz (auch für Mail, wenn
+                                    // message leer wäre): kein Doppel-Text.
+                                    body = ""
+                                }
                                 // P68y: NUR bei generischen/leeren Server-Texten
                                 // Absender/Betreff selbst laden. Vorher wurde die
                                 // Anreicherung immer vom title=subject überschrieben
@@ -212,6 +248,10 @@ class NotificationService: UNNotificationServiceExtension {
                                 }
                                 bestAttemptContent.title = title
                                 bestAttemptContent.body = body
+                                // Run 10.11.: Subtitle explizit leeren - er
+                                // erbt sonst den Original-Push-Inhalt und
+                                // würde den Text ein weiteres Mal zeigen.
+                                bestAttemptContent.subtitle = ""
                                 // Sound explizit setzen: Der Proxy-Payload
                                 // enthält keinen sound-Eintrag - ohne diesen
                                 // Wert bleibt die Benachrichtigung stumm
