@@ -54,6 +54,46 @@ final class CallSession: NSObject, HpbSignalingListener {
     /// derselben Session).
     private var peerSids: [String: String] = [:]
     private var observers: [String: PeerObserver] = [:]
+    /// Medien-Gesundheit pro Peer (Key = streamKey, Run 12.11.): Der
+    /// PeerObserver meldet den ICE-Zustand - alive = connected/completed/
+    /// disconnected (disconnected ist laut WebRTC recoverable), dead =
+    /// failed/closed. Zugriff nur ueber mediaHealthLock, weil der
+    /// RTCPeerConnectionDelegate auf der WebRTC-Queue laeuft, die Abfrage
+    /// `isMediaAlive` aber aus LinkViewModel (MainActor) kommt.
+    enum MediaHealth {
+        case alive
+        case dead
+    }
+    private var peerMediaHealth: [String: MediaHealth] = [:]
+    private let mediaHealthLock = NSLock()
+
+    /// true, solange mindestens ein Peer verbunden (oder recoverable
+    /// disconnected) ist und der Call nicht beendet wurde. Keine Beobachtung
+    /// (= Call baut gerade erst auf) gilt konservativ als alive, damit der
+    /// call_ended-Gate in LinkViewModel keinen aufbauenden Call killt.
+    var isMediaAlive: Bool {
+        mediaHealthLock.lock()
+        defer { mediaHealthLock.unlock() }
+        if endedOnce { return false }
+        guard !peerMediaHealth.isEmpty else { return true }
+        return peerMediaHealth.values.contains(.alive)
+    }
+
+    /// Zustand setzen (nur der PeerObserver, laeuft auf der WebRTC-Queue).
+    fileprivate func setPeerMediaHealth(key: String, health: MediaHealth) {
+        mediaHealthLock.lock()
+        defer { mediaHealthLock.unlock() }
+        peerMediaHealth[key] = health
+    }
+
+    /// Eintrag entfernen, wenn eine PeerConnection zerstoert wird (stale
+    /// Recreation, Screen-Unshare) - sonst wuerde ein veralteter dead-Wert
+    /// den ganzen Call als tot melden.
+    fileprivate func clearPeerMediaHealth(key: String) {
+        mediaHealthLock.lock()
+        defer { mediaHealthLock.unlock() }
+        peerMediaHealth.removeValue(forKey: key)
+    }
     private var requestedOffers: Set<String> = []
     private var pendingIceServers: [RTCIceServer] = []
     fileprivate var ownSessionId = ""
@@ -619,6 +659,7 @@ final class CallSession: NSObject, HpbSignalingListener {
             CallDebugLog.log("CallSession", "stale peer \(fromSession.prefix(8))|\(roomType) sid changed - recreating")
             peers.removeValue(forKey: key)
             peerSids.removeValue(forKey: key)
+            clearPeerMediaHealth(key: key)
             stale.close()
         }
         peerSids[key] = sid ?? peerSids[key]
@@ -741,6 +782,7 @@ final class CallSession: NSObject, HpbSignalingListener {
                 peer.close()
             }
             self.peerSids.removeValue(forKey: key)
+            self.clearPeerMediaHealth(key: key)
             self.requestedScreenOffers.remove(fromSession)
             if self.remoteStreams.removeValue(forKey: key) != nil {
                 self.callbacks?.onRemoteVideoRemoved(session: fromSession, roomType: roomType)
@@ -1259,6 +1301,17 @@ private final class PeerObserver: NSObject, RTCPeerConnectionDelegate {
     func peerConnectionShouldNegotiate(_ pc: RTCPeerConnection) {}
     func peerConnection(_ pc: RTCPeerConnection, didChange newState: RTCIceConnectionState) {
         CallDebugLog.log("PeerObserver", "key=\(key.prefix(12)) ICE connection -> \(Self.stateName(newState))")
+        // Run 12.11.: ICE-Gesundheit fuer den call_ended-Gate in LinkViewModel
+        // melden. disconnected gilt als alive (recoverable) - erst failed/
+        // closed ist eine Medienverbindung endgueltig tot.
+        switch newState {
+        case .connected, .completed, .disconnected:
+            owner?.setPeerMediaHealth(key: key, health: .alive)
+        case .failed, .closed:
+            owner?.setPeerMediaHealth(key: key, health: .dead)
+        default:
+            break // new/checking: noch keine belastbare Aussage
+        }
         if newState == .connected || newState == .completed {
             owner?.emitRemoteIceState(session: session, roomType: roomType, connected: true)
         } else if newState == .disconnected || newState == .failed {

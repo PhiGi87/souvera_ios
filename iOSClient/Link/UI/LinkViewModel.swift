@@ -123,6 +123,16 @@ final class LinkViewModel: ObservableObject {
     private let pathMonitor = NWPathMonitor()
     private var nextPendingTempId: Int64 = -1
     private var pollFailureStreak = 0
+    /// Run 12.11.: Zeitpunkt des ersten IGNORIERTEN call_ended pro Raum
+    /// (spurioese Systemnachricht nach kurzem ICE-Disconnect). Der Gate
+    /// beendet den Call fruehestens nach Ablauf der Grace-Period
+    /// (`callEndedGracePeriod`) und nur, wenn die Medien inzwischen
+    /// wirklich tot sind.
+    private var lastIgnoredCallEndedAt: [String: Date] = [:]
+    /// Grace-Period fuer den call_ended-Gate: ein wirklich toter Call endet
+    /// spaetestens nach dem naechsten Poll-Zyklus (~30 s), ein Call mit nur
+    /// recoverable-disconnected Medien ueberlebt.
+    private static let callEndedGracePeriod: TimeInterval = 10
 
     /// Push-Deep-Link-Beobachter (Chat-Raum direkt öffnen).
     private var deepLinkObserver: NSObjectProtocol?
@@ -1324,8 +1334,30 @@ final class LinkViewModel: ObservableObject {
                             && $0.timestamp >= callStartedAt
                     }),
                    LinkVoIPManager.shared.hasActiveCall(for: token) {
-                    CallDebugLog.log("LinkVM", "call_ended (new) received - ending active call for \(token)")
-                    LinkVoIPManager.shared.endActiveCall()
+                    // Run 12.11.: Gate gegen spurioese call_ended-Nachrichten.
+                    // Ein kurzer ICE-Disconnect bringt den Server dazu, eine
+                    // call_ended-Systemnachricht in den Raum zu schreiben,
+                    // waehrend die eigenen Medienverbindungen nur
+                    // "disconnected" (recoverable) sind. Ohne Pruefung endete
+                    // das hier einen lebenden Call und loeste den Rejoin-Loop
+                    // ("getSignalingSettings failed") aus. Bei fehlender
+                    // Session gilt das alte Verhalten (enden).
+                    let session = LinkVoIPManager.shared.activeSession
+                    let mediaAlive = (session?.token == token) ? (session?.isMediaAlive ?? true) : true
+                    if mediaAlive {
+                        CallDebugLog.log("LinkVM", "call_ended ignored - media still alive (disconnected=recoverable)")
+                        lastIgnoredCallEndedAt[token] = lastIgnoredCallEndedAt[token] ?? Date()
+                    } else if let ignoredAt = lastIgnoredCallEndedAt[token],
+                              Date().timeIntervalSince(ignoredAt) >= Self.callEndedGracePeriod {
+                        // Medien wirklich tot und Grace-Period um - jetzt
+                        // beenden (spaetestens ein Poll-Zyklus nach dem
+                        // ersten toten Befund).
+                        CallDebugLog.log("LinkVM", "call_ended - media dead, grace period elapsed - ending active call for \(token)")
+                        lastIgnoredCallEndedAt[token] = nil
+                        LinkVoIPManager.shared.endActiveCall()
+                    } else {
+                        CallDebugLog.log("LinkVM", "call_ended - media dead, grace period running - ignoring for now")
+                    }
                 }
                 // Zugestellte pendent Nachrichten aus der Queue raeumen:
                 // eigene, frische Nachricht mit identischem Text trifft ein
