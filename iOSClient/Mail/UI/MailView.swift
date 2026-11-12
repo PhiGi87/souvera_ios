@@ -430,12 +430,13 @@ struct MailView: View {
             Label(NSLocalizedString("_mail_forward_", comment: ""), systemImage: "arrowshape.turn.up.right")
         }
         Button {
-            Task { await viewModel.setRead([message], !message.isRead) }
+            // Run 12.11.: In der offenen Einzel-Mail gezielt "Als ungelesen
+            // markieren" - die Detailansicht bleibt offen, Badge und Zeile
+            // aktualisieren sich (markUnread).
+            Task { await viewModel.markUnread(message) }
         } label: {
-            Label(message.isRead
-                  ? NSLocalizedString("_mail_mark_unread_", comment: "")
-                  : NSLocalizedString("_mail_mark_read_", comment: ""),
-                  systemImage: message.isRead ? "envelope" : "envelope.open")
+            Label(NSLocalizedString("_mail_mark_unread_", comment: ""),
+                  systemImage: "envelope")
         }
         Button {
             detailMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
@@ -597,8 +598,10 @@ struct MailView: View {
                 .init(id: "forward", title: NSLocalizedString("_mail_forward_", comment: ""), icon: "arrowshape.turn.up.right") {
                     viewModel.startCompose(mode: .forward, message: message)
                 },
-                .init(id: "read", title: message.isRead ? NSLocalizedString("_mail_mark_unread_", comment: "") : NSLocalizedString("_mail_mark_read_", comment: ""), icon: message.isRead ? "envelope" : "envelope.open") {
-                    Task { await viewModel.setRead([message], !message.isRead) }
+                .init(id: "read", title: NSLocalizedString("_mail_mark_unread_", comment: ""), icon: "envelope") {
+                    // Run 12.11.: In der offenen Einzel-Mail immer "Als
+                    // ungelesen markieren" (Detail bleibt offen).
+                    Task { await viewModel.markUnread(message) }
                 },
                 .init(id: "move", title: NSLocalizedString("_mail_move_", comment: ""), icon: "folder") {
                     listMoveTarget = ([message], viewModel.availableMailboxes.filter { $0.accountId == message.accountId })
@@ -1865,6 +1868,20 @@ private struct MailRowContent: View {
                             .foregroundStyle(.secondary)
                     }
                     if message.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption2) }
+                    // Run 12.11.: Beantwortet/Weitergeleitet - dezente Icons
+                    // neben Flag/Datum (wie in Apple Mail).
+                    if message.isAnswered {
+                        Image(systemName: "arrowshape.turn.up.left")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(NSLocalizedString("_mail_answered_", value: "Answered", comment: ""))
+                    }
+                    if message.isForwarded {
+                        Image(systemName: "arrowshape.turn.up.right")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel(NSLocalizedString("_mail_forwarded_", value: "Forwarded", comment: ""))
+                    }
                     Text(MailDateFormatter.listLabel(for: message.dateSent)).font(.caption2).foregroundStyle(.secondary)
                 }
                 Text(message.subject.isEmpty ? NSLocalizedString("_mail_no_subject_", comment: "") : message.subject)

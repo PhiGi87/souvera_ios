@@ -78,6 +78,10 @@ enum JmapMapper {
 
         let isRead = (keywords?["$seen"] as? Bool) ?? false
         let isFlagged = (keywords?["$flagged"] as? Bool) ?? false
+        // Run 12.11.: $answered/$forwarded - der Email/get-Fetch liefert
+        // keywords bereits mit; fehlende Keywords bedeuten "nicht gesetzt".
+        let isAnswered = (keywords?["$answered"] as? Bool) ?? false
+        let isForwarded = (keywords?["$forwarded"] as? Bool) ?? false
 
         let toAddressStr = toList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
         let ccAddressStr = ccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
@@ -99,6 +103,8 @@ enum JmapMapper {
             dateSent: parseJmapDate(json.optString("receivedAt")),
             isRead: isRead,
             isFlagged: isFlagged,
+            isAnswered: isAnswered,
+            isForwarded: isForwarded,
             hasAttachments: hasAtt,
             sizeBytes: json.optInt64("size"),
             blobId: json.optString("blobId"),

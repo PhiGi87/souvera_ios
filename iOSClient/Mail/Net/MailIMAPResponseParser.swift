@@ -102,6 +102,20 @@ enum MailIMAPResponseParser {
         case let .flags(flags):
             m.isRead = flags.contains(.seen)
             m.isFlagged = flags.contains(.flagged)
+            // Run 12.11.: Beantwortet/Weitergeleitet - Systemflag \Answered
+            // plus die Keywords $Answered/$Forwarded (RFC 5788, manche
+            // Server melden $Answered statt \Answered). String(Flag) +
+            // lowercased = Groß-/Kleinschreibung tolerant.
+            for flag in flags {
+                switch String(flag).lowercased() {
+                case "\\answered", "$answered":
+                    m.isAnswered = true
+                case "$forwarded":
+                    m.isForwarded = true
+                default:
+                    break
+                }
+            }
         case let .rfc822Size(size):
             m.size = Int64(size)
         case let .envelope(envelope):
@@ -350,6 +364,8 @@ private struct PartialMessage {
     var dateSent = Date(timeIntervalSince1970: 0)
     var isRead = false
     var isFlagged = false
+    var isAnswered = false
+    var isForwarded = false
     var size: Int64 = 0
 
     func build(account: String, mailboxId: String) -> MailMessage {
@@ -369,6 +385,8 @@ private struct PartialMessage {
             dateSent: dateSent,
             isRead: isRead,
             isFlagged: isFlagged,
+            isAnswered: isAnswered,
+            isForwarded: isForwarded,
             hasAttachments: false,
             sizeBytes: size,
             blobId: nil,

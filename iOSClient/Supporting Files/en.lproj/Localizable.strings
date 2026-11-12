@@ -880,6 +880,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_mail_forward_"                 = "Forward";
 "_mail_mark_read_"               = "Mark as read";
 "_mail_mark_unread_"             = "Mark as unread";
+"_mail_answered_"                = "Answered";
+"_mail_forwarded_"               = "Forwarded";
 "_mail_flag_"                    = "Flag";
 "_mail_souvera_files_"           = "Souvera files";
 "_mail_offline_"                 = "Offline – showing last synced state";

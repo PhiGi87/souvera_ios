@@ -13,8 +13,19 @@ import NIOIMAPCore
 
 /// Message flags we toggle. Mapped to IMAP system flags by the client.
 enum MailFlag {
-    case seen, flagged
-    var imapFlag: Flag { self == .seen ? .seen : .flagged }
+    case seen, flagged, answered, forwarded
+    var imapFlag: Flag {
+        switch self {
+        case .seen: return .seen
+        case .flagged: return .flagged
+        // Run 12.11.: \Answered ist ein Systemflag; $Forwarded wird als
+        // Keyword gesetzt (RFC 5788), wie es auch JMAP/Webmail verwenden.
+        // Flag(stringLiteral:) trapt bei ungültigen Flags - "$Forwarded"
+        // ist ein gültiges atom, der Literal ist damit sicher.
+        case .answered: return .answered
+        case .forwarded: return Flag(stringLiteral: "$Forwarded")
+        }
+    }
 }
 
 /// Authentication failure marker: the message starts with "[AUTH]" so the

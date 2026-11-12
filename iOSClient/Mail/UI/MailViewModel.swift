@@ -3452,6 +3452,11 @@ final class MailViewModel: ObservableObject {
             updated.isRead = value
         } else if keyword == "$flagged" {
             updated.isFlagged = value
+        } else if keyword == "$answered" {
+            // Run 12.11.: Beantwortet/Weitergeleitet lokal mitspiegeln.
+            updated.isAnswered = value
+        } else if keyword == "$forwarded" {
+            updated.isForwarded = value
         }
         dirtyFlagIds[message.mailboxId, default: []].insert(message.emailId)
         updateLocalMessage(updated)
@@ -3485,6 +3490,54 @@ final class MailViewModel: ObservableObject {
             results[idx] = updated
             searchResults = .success(results)
         }
+        // Run 12.11.: Auch die offene Detailansicht auf den neuen Stand
+        // bringen - sonst zeigt das Detail-Menü ("Als ungelesen/lesen
+        // markieren", Flag) nach einer Aktion weiter den alten Zustand.
+        if case let .detail(open) = route, open.id == updated.id {
+            route = .detail(message: updated)
+        }
+    }
+
+    // MARK: - Beantwortet/Weitergeleitet (Run 12.11.)
+
+    /// Nach erfolgreichem Versand einer Antwort (reply/replyAll) bzw.
+    /// Weiterleitung: das passende Keyword auf der QUELL-Mail setzen, so
+    /// dass das Icon in der Liste sofort erscheint. Lokal optimistisch
+    /// (Zeile + Cache-Spiegel via applyLocalKeyword), serverseitig JMAP
+    /// Email/set keywords - im IMAP-Fallback \Answered/$Forwarded. Die
+    /// Icons für IMAP-Nutzer kommen ansonsten beim nächsten Sync vom Server.
+    private func markSourceAnsweredForwarded(_ context: MailComposeContext?) async {
+        guard let ctx = context, let source = ctx.message else { return }
+        guard ctx.mode == .reply || ctx.mode == .replyAll || ctx.mode == .forward else { return }
+        let keyword = ctx.mode == .forward ? "$forwarded" : "$answered"
+        applyLocalKeyword(source, keyword: keyword, value: true)
+        if useJmap {
+            guard let api = jmapApi, let client = jmapClient else { return }
+            let accId = source.accountId.isEmpty
+                ? ((try? await client.refreshSession())?.primaryAccountId ?? "")
+                : source.accountId
+            guard !accId.isEmpty else { return }
+            _ = try? await api.setEmailFlags(accountId: accId, emailIds: [source.emailId], keywordsToAdd: [keyword: true])
+        } else if let client = imapClient {
+            // IMAP-Fallback: Flag am Ursprungsordner der Quell-Mail setzen
+            // (nicht am gerade offenen - z. B. Antwort aus der Suche).
+            let mailbox = allMailboxes.first { $0.id == source.mailboxId } ?? currentMailbox
+            guard let mailbox, let uid = UInt64(source.emailId) else { return }
+            let flag: MailFlag = ctx.mode == .forward ? .forwarded : .answered
+            _ = await client.setFlag(mailboxPath: mailbox.path, uid: uid, flag: flag, value: true)
+        }
+    }
+
+    // MARK: - Ungelesen (Run 12.11.)
+
+    /// "Als ungelesen markieren" in der offenen Einzel-Mail: delegiert an
+    /// setRead(false) (lokal sofort + Server + Badge/Pills). Die Detail-
+    /// ansicht bleibt offen - nur Zeile und Badge aktualisieren sich. Der
+    /// Auto-Read-Mark aus openMessage greift NICHT erneut: er läuft nur
+    /// beim (erneuten) Öffnen der Mail, nicht beim Zurückwechseln in die
+    /// Liste, und der Ungelesen-Status wird serverseitig persistiert.
+    func markUnread(_ message: MailMessage) async {
+        await setRead([message], false)
     }
 
     // MARK: - Move / Delete
@@ -4080,6 +4133,10 @@ final class MailViewModel: ObservableObject {
     // MARK: - Send
 
     func send(_ outgoing: OutgoingMessage) {
+        // Run 12.11.: Compose-Kontext VOR dem Versand sichern - nach dem
+        // Erfolg wird composeContext genullt, die Quell-Mail brauchen wir
+        // aber für das $answered/$forwarded-Keyword.
+        let composeContextForSource = composeContext
         Task {
             isSending = true
             sendError = nil
@@ -4117,6 +4174,10 @@ final class MailViewModel: ObservableObject {
                     emails: outgoing.to + outgoing.cc + outgoing.bcc
                 )
                 composeContext = nil
+                // Run 12.11.: Nach erfolgreichem Versand einer Antwort/
+                // Weiterleitung das Keyword auf der Quell-Mail setzen
+                // (lokal optimistisch + Server), damit das Icon sofort da ist.
+                await markSourceAnsweredForwarded(composeContextForSource)
                 route = .messages(mailbox: currentMailbox ?? allMailboxes.first ?? Mailbox(
                     id: "", account: "", accountId: "", name: "", path: "INBOX", kind: .inbox,
                     unreadCount: 0, messageCount: 0, jmapId: nil, role: nil,

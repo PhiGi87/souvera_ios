@@ -116,6 +116,13 @@ struct MailMessage: Identifiable {
     let dateSent: Date
     var isRead: Bool
     var isFlagged: Bool
+    // Run 12.11.: Beantwortet/Weitergeleitet-Hinweise (JMAP-Keywords
+    // $answered/$forwarded bzw. IMAP \Answered/$Forwarded). Defaults
+    // false, damit alte Call-Sites und alte Cache-Stände weiter funktionieren
+    // (der MailCache speichert rohes JMAP-JSON - fehlende Keywords liefern
+    // beim Mapping schlicht false).
+    var isAnswered: Bool = false
+    var isForwarded: Bool = false
     let hasAttachments: Bool
     let sizeBytes: Int64
     let blobId: String?
