@@ -2170,6 +2170,7 @@ private func attachmentChip(_ att: AttachmentMeta) -> some View {
             } else {
                 Text(SouveraLinkOpener.linkified(body.plainText ?? ""))
                     .foregroundStyle(Color.black)
+                    .lineSpacing(4) // Run 13.11.: Zeilenabstand fuer lesbare Absaetze
                     .textSelection(.enabled)
                     .souveraOpenURLAction()
                     .padding(12)

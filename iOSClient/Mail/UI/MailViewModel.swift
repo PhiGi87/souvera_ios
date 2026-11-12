@@ -4156,17 +4156,22 @@ final class MailViewModel: ObservableObject {
     }
 
     private func buildQuote(for message: MailMessage, plain: String) -> String {
+        guard !plain.isEmpty else { return "" }
         let dateFormatter = DateFormatter()
         dateFormatter.dateStyle = .medium
         dateFormatter.timeStyle = .short
-        let header = String(format: NSLocalizedString("_mail_quote_header_", comment: ""), dateFormatter.string(from: message.dateSent), message.displayFrom)
-        guard !plain.isEmpty else { return "" }
-        let quoted = plain
-            .normalizedLineEndings()
-            .split(separator: "\n", omittingEmptySubsequences: false)
-            .map { "> \($0)" }
-            .joined(separator: "\n")
-        return "\n\n\(header)\n\(quoted)"
+        // Run 13.11. (Zitat-Format): Apple-Mail-Stil statt "> "-Präfixe -
+        // Trennzeile, mehrzeiliger Header (Von/An/Datum/Betreff), Leerzeile,
+        // dann der Originaltext UNVERÄNDERT. Neue Keys mit value:-Fallback,
+        // damit die App auch ohne aktualisierte .strings korrekt funktioniert.
+        let separator = NSLocalizedString("_mail_quote_separator_", value: "----- Original Message -----", comment: "")
+        let headerLines = [
+            NSLocalizedString("_mail_quote_from_", value: "From", comment: "") + ": " + message.displayFrom,
+            NSLocalizedString("_mail_quote_to_", value: "To", comment: "") + ": " + message.toAddresses,
+            NSLocalizedString("_mail_quote_date_", value: "Date", comment: "") + ": " + dateFormatter.string(from: message.dateSent),
+            NSLocalizedString("_mail_quote_subject_", value: "Subject", comment: "") + ": " + message.subject,
+        ]
+        return "\n\n\(separator)\n\(headerLines.joined(separator: "\n"))\n\n\(plain)"
     }
 
     private func downloadOriginalAttachments(_ message: MailMessage, json: [String: Any]) async -> [OutgoingAttachment] {

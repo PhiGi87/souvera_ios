@@ -446,13 +446,24 @@ private struct ShieldDetailSheet: View {
                             Text(entry.time.formatted(date: .abbreviated, time: .shortened))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                        // Run 13.11. (Lesbarkeit): Statt nacktem SwiftUI-Text
+                        // (kein Zeilenabstand, keine Links) rendern wir den
+                        // Inhalt wie der Plaintext-Zweig der Mail-Detailansicht
+                        // (MailView.swift) mit lineSpacing(4) und
+                        // SouveraLinkOpener.linkified. Bewusst KEIN MailHtmlView
+                        // (WKWebView): Der Shield-Inhalt ist Plaintext, und ein
+                        // selbst-dimensionierendes WKWebView innerhalb einer
+                        // List-Section ist fehleranfällig (Höhe-Reporting/
+                        // Reload in recycelten Rows). ScrollView + Text
+                        // dimensioniert sich nativ in der List und ist hier
+                        // die robustere Variante.
                         if let message = payload["content"] as? String, !message.isEmpty {
                             Section {
-                                Text(message).textSelection(.enabled).font(.subheadline)
+                                shieldBodyText(message)
                             }
                         } else if let preview = payload["preview"] as? String, !preview.isEmpty {
                             Section {
-                                Text(preview).textSelection(.enabled).font(.subheadline)
+                                shieldBodyText(preview)
                             }
                         }
                         Section {
@@ -499,6 +510,24 @@ private struct ShieldDetailSheet: View {
             detail = await viewModel.spamDetail(id: entry.id)
             loading = false
         }
+    }
+
+    /// Run 13.11. (Lesbarkeit): Plaintext-Body mit Zeilenabstand, Textauswahl
+    /// und klickbaren Links - gleiche Darstellung wie in der Mail-Detailansicht.
+    /// Fixe Höhe (~400 pt) in einem ScrollView, damit lange Quarantäne-Mails
+    /// die List-Section nicht unendlich in die Länge ziehen.
+    private func shieldBodyText(_ text: String) -> some View {
+        ScrollView {
+            Text(SouveraLinkOpener.linkified(text))
+                .font(.subheadline)
+                .lineSpacing(4)
+                .foregroundStyle(.primary)
+                .textSelection(.enabled)
+                .souveraOpenURLAction()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 4)
+        }
+        .frame(height: 400)
     }
 }
 
