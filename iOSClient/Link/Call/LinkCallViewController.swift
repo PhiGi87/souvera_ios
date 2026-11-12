@@ -204,6 +204,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         return c
     }()
     private var localViewPanOrigin: CGPoint = .zero
+    /// Run 13.11.: Läuft gerade ein Drag auf der Eigenansicht? Analog zu
+    /// `miniPanOrigins` (Registry der aktiven Mini-Kachel-Drags) sorgt das
+    /// Flag dafür, dass Layout-Pässe die Kachel während des Ziehens in
+    /// Ruhe lassen (kein Frame-Override mehr mitten im Drag).
+    private var localPanActive = false
 
     // Run 05.11.: Mini-Kacheln mit Ecken-Snap im Screenshare.
     private enum TileCorner { case topLeft, topRight, bottomLeft, bottomRight }
@@ -635,6 +640,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         guard layoutMode != .raster || tiles.count <= 1 || isScreenshareActive else { return }
         switch gesture.state {
         case .began:
+            // Run 13.11.: Flag setzen, damit layoutTiles/layoutScreenShareMinis
+            // den Frame während des Ziehens nicht mehr überschreiben.
+            localPanActive = true
             localViewPanOrigin = localContainer.frame.origin
         case .changed:
             let t = gesture.translation(in: view)
@@ -642,6 +650,7 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             f.origin = CGPoint(x: localViewPanOrigin.x + t.x, y: localViewPanOrigin.y + t.y)
             localContainer.frame = f
         case .ended, .cancelled:
+            localPanActive = false
             snapLocalViewToCorner()
         default:
             break
@@ -942,14 +951,20 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         if let sharerTile = tiles[sharerKey] {
             sharerTile.container.isHidden = false
             sharerTile.container.layer.cornerRadius = 10
-            sharerTile.container.frame = cornerFrame(
-                corner: sharerMiniCorner,
-                size: miniSize,
-                bounds: tileLayoutBounds,
-                safeTop: tileLayoutSafeTop,
-                safeBottom: tileLayoutSafeBottom,
-                bottomReserve: 120
-            )
+            // Run 13.11.: Aktiven Drag respektieren - solange die Kachel
+            // gezogen wird (Eintrag in miniPanOrigins), darf kein Layout-
+            // Pass den Frame aus der gemerkten Ecke überschreiben (das
+            // brach früher mitten im Ziehen die Position).
+            if miniPanOrigins[sharerKey] == nil {
+                sharerTile.container.frame = cornerFrame(
+                    corner: sharerMiniCorner,
+                    size: miniSize,
+                    bounds: tileLayoutBounds,
+                    safeTop: tileLayoutSafeTop,
+                    safeBottom: tileLayoutSafeBottom,
+                    bottomReserve: 120
+                )
+            }
             tilesContentView.bringSubviewToFront(sharerTile.container)
             attachMiniPan(to: sharerTile.container, key: sharerKey)
         }
@@ -957,14 +972,19 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // Hochformat - dort lebt sie in der Control-Hälfte).
         if shouldShowLocalView && !isFoldedPortrait {
             localContainer.isHidden = false
-            localContainer.frame = cornerFrame(
-                corner: localCorner,
-                size: CGSize(width: 180, height: 135),
-                bounds: tileLayoutBounds,
-                safeTop: tileLayoutSafeTop,
-                safeBottom: tileLayoutSafeBottom,
-                bottomReserve: 120
-            )
+            // Run 13.11.: Dasselbe Muster wie bei den Mini-Kacheln - während
+            // eines aktiven Eigenansicht-Drags (localPanActive) bleibt der
+            // Frame unangetastet.
+            if !localPanActive {
+                localContainer.frame = cornerFrame(
+                    corner: localCorner,
+                    size: CGSize(width: 180, height: 135),
+                    bounds: tileLayoutBounds,
+                    safeTop: tileLayoutSafeTop,
+                    safeBottom: tileLayoutSafeBottom,
+                    bottomReserve: 120
+                )
+            }
             tilesContentView.bringSubviewToFront(localContainer)
         }
     }
@@ -1047,7 +1067,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             miniPanOrigins[key] = tile.container.frame.origin
         case .changed:
             guard let origin = miniPanOrigins[key] else { return }
-            let t = gesture.translation(in: view)
+            // Run 13.11.: Translation im Container-Raum der Kacheln
+            // (tilesContentView) statt in view - im Falz-Modus liegt
+            // tilesContentView verschoben/im anderen Raum, sodass die
+            // translation-in-view-Werte nicht mehr zum Frame (Container-
+            // Space, konsistent zu cornerFrame/Clamps) passten.
+            let t = gesture.translation(in: tilesContentView)
             let size = tile.container.frame.size
             let inset: CGFloat = 16
             let x = min(max(origin.x + t.x, 0),
@@ -1066,6 +1091,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 safeBottom: safeBottom,
                 bottomReserve: 120
             )
+            // Run 13.11.: Snap-Race entschärfen - das Ziel wird SOFORT als
+            // Modell-Frame gesetzt (ein neuer .began während der 0.2-s-
+            // Animation liest damit die korrekte Ziel-Ecke als Drag-Basis),
+            // während visuell von der letzten dargestellten Position zur
+            // Ecke animiert wird.
             let target = cornerFrame(
                 corner: sharerMiniCorner,
                 size: size,
@@ -1074,6 +1104,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 safeBottom: safeBottom,
                 bottomReserve: 120
             )
+            let visual = tile.container.layer.presentation()?.frame ?? tile.container.frame
+            tile.container.frame = target
+            tile.container.frame = visual
             UIView.animate(withDuration: 0.2) {
                 tile.container.frame = target
             }
