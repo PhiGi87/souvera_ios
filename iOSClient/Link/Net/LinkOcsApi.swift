@@ -426,11 +426,12 @@ actor LinkOcsApi {
     /// Bearbeiten-Menü-Eintrag wird nur angezeigt, wenn der Server
     /// Nachrichten-Bearbeitung unterstützt.
     /// Run 12.11.: nur bei Wertwechsel loggen — der Check läuft sonst bei
-    /// jedem Aufruf und flutet das Log (Rauschen).
-    @MainActor static var lastLoggedEditMessagesState: Bool?
+    /// jedem Aufruf und flutet das Log (Rauschen). nonisolated(unsafe): reine
+    /// Log-Dedup-Flags, Benachtheit ist hier unkritisch.
+    nonisolated(unsafe) static var lastLoggedEditMessagesState: Bool?
     /// Run 12.11.: "FAILED (no caps)" nur einmal loggen, sonst Rauschen bei
     /// jedem Check.
-    @MainActor static var loggedNoCapsFailure = false
+    nonisolated(unsafe) static var loggedNoCapsFailure = false
 
     func supportsMessageEditing() async -> Bool {
         // Run 12.11.: korrekter Pfad ist ocs.data.capabilities.spreed.features —
