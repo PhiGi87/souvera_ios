@@ -107,6 +107,14 @@ struct MailMessage: Identifiable {
     let mailboxId: String
     let emailId: String
     let messageId: String?
+    /// Run 12.11. (Rückwirkend-Icons): Thread-Referenz-Header des JMAP
+    /// Email/get. `messageIds` = ALLE Message-ID-Werte (der Server liefert
+    /// eine Liste), `inReplyToIds`/`referencesIds` = In-Reply-To bzw.
+    /// References. Der IMAP-Pfad hält diese Header nicht -> leere Arrays
+    /// (toleriert; Icons kommen dort über Keywords/Server-Sync).
+    var messageIds: [String] = []
+    var inReplyToIds: [String] = []
+    var referencesIds: [String] = []
     let subject: String
     let fromAddress: String
     let fromDisplayName: String?

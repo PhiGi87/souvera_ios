@@ -489,6 +489,8 @@ final class MailViewModel: ObservableObject {
                    !items.contains(where: { $0.emailId == message.emailId || ($0.blobId != nil && $0.blobId == message.blobId) }) {
                     var updated = items
                     updated.insert(message, at: 0)
+                    // Run 12.11.: Deep-Link-Mail in das Referenz-Set aufnehmen.
+                    recordReferences([message])
                     messages = .success(updated)
                 }
             } else if let targetBox {
@@ -602,6 +604,9 @@ final class MailViewModel: ObservableObject {
                 return
             }
             self.applyAccount(account)
+            // Run 12.11.: gespeicherte Referenz-Ids sofort anwenden - die
+            // Icons stimmen damit schon beim ersten List-Load.
+            self.loadReferencedIdsCache()
             await self.loadMailboxes()
             self.isInitialLoad = false
             if let pending = self.pendingDeepLink {
@@ -690,6 +695,8 @@ final class MailViewModel: ObservableObject {
         lastRecoveryAttempt = nil
         mailboxesSignature = ""
         dirtyFlagIds = [:]
+        // Run 12.11.: Referenz-Sets gehören zum Account - nie mischen.
+        resetReferencedIds()
         expandedMailboxIds = []
         collapsedGroupIds = []
         fromAddress = ""
@@ -1671,9 +1678,12 @@ final class MailViewModel: ObservableObject {
             // P62f: Cache-first-Publish filtern (optimistisch entfernte Mails
             // dürfen nicht wieder auftauchen).
             let filteredSnapshot = snapshot.emails.filter { !suppressedIds(in: mailbox.id).contains($0.optString("id") ?? "") }
-            messages = .success(filteredSnapshot.map {
+            let cachedMapped = filteredSnapshot.map {
                 JmapMapper.mapMessage(account: accountName, accountId: mailbox.accountId, mailboxId: mailbox.id, json: $0)
-            })
+            }
+            // Run 12.11.: Auch der Cache-First-Publish füttert das Set.
+            recordReferences(cachedMapped)
+            messages = .success(cachedMapped)
         }
         if useJmap {
             await syncMessagesJmap(mailbox)
@@ -2479,9 +2489,12 @@ final class MailViewModel: ObservableObject {
             guard generation == listGeneration else { return }
             if let cached = MailCache.loadMessages(account: cacheAccountKey, mailboxId: mailbox.id) {
                 let accId = mailbox.accountId
-                messages = .success(cached.emails.map {
+                let offlineMapped = cached.emails.map {
                     JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: mailbox.id, json: $0)
-                })
+                }
+                // Run 12.11.: Offline-Cache ebenfalls ins Referenz-Set.
+                recordReferences(offlineMapped)
+                messages = .success(offlineMapped)
                 offlineNotice = NSLocalizedString("_mail_offline_", comment: "")
                 cacheBannerActive = cacheBannerGate.shouldTrigger()
                 return
@@ -2807,10 +2820,174 @@ final class MailViewModel: ObservableObject {
     private func mapMessagesOffMain(_ emails: [[String: Any]], account: String,
                                     accountId: String, mailboxId: String) async -> [MailMessage] {
         let acc = account, accId = accountId, boxId = mailboxId
-        return await Task.detached(priority: .userInitiated) {
+        let mapped = await Task.detached(priority: .userInitiated) {
             emails.map { JmapMapper.mapMessage(account: acc, accountId: accId, mailboxId: boxId, json: $0) }
         }.value
+        // Run 12.11.: Jeden gemappten Listenstand in das Referenz-Set
+        // aufnehmen (deckt JMAP-Load, Cache-Load und inkrementelle Syncs ab).
+        recordReferences(mapped)
+        return mapped
     }
+
+    // MARK: - Rueckwirkend-Icons (Run 12.11.)
+
+    /// Der Server setzt das JMAP-Keyword $answered NICHT automatisch - nur
+    /// Antworten, die aus DIESER App heraus geschrieben wurden. Damit alte,
+    /// anderweitig beantwortete/weitergeleitete Mails trotzdem das Icon
+    /// zeigen, bauen wir ein Referenz-Set auf: alle Message-IDs, auf die in
+    /// Thread-Headern (In-Reply-To / References) referenziert wird - aus
+    /// den geladenen Mails selbst und aus dem Gesendet-Ordner. Zeigt eine
+    /// Liste-Mail auf so eine ID, wurde sie beantwortet bzw. weitergeleitet.
+    /// Speichergröße: nur normale String-Ids (10500 Mails ≈ einige 100 KB) - ok.
+    private var answeredReferenceIds: Set<String> = []
+    private var forwardedReferenceIds: Set<String> = []
+    private static let referencedIdsCachePrefix = "souvera_mail_referenced_ids_"
+    private static let referencedIdsCacheTTL: TimeInterval = 3600
+
+    /// Message-ID normalisieren: lowercase, "<>"-Klammerung und Whitespace
+    /// entfernen (Server liefern teils "<a@b>", teils "a@b").
+    private static func normalizedMessageId(_ raw: String) -> String {
+        var id = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if id.hasPrefix("<") { id.removeFirst() }
+        if id.hasSuffix(">") { id.removeLast() }
+        return id
+    }
+
+    /// Betreff-Klassifikation: "Fwd:/FW:/WG:..." = Weiterleitung, alles
+    /// andere (inkl. "Re:") = Antwort. Reicht als Heuristik - die Mails
+    /// stammen aus dem eigenen Gesendet-Ordner.
+    private static func looksLikeForward(_ subject: String) -> Bool {
+        let s = subject.trimmingCharacters(in: .whitespaces).lowercased()
+        return ["fwd:", "fw:", "wg:", "forward:"].contains { s.hasPrefix($0) }
+    }
+
+    private func recordReferences(_ messages: [MailMessage]) {
+        for message in messages {
+            let refs = (message.inReplyToIds + message.referencesIds)
+                .map(Self.normalizedMessageId)
+                .filter { !$0.isEmpty }
+            guard !refs.isEmpty else { continue }
+            if Self.looksLikeForward(message.subject) {
+                forwardedReferenceIds.formUnion(refs)
+            } else {
+                // Ohne Fwd-Präfix als Antwort werten (Dominanz des
+                // Antwort-Falls; Fwd-Mails tragen fast immer ein Präfix).
+                answeredReferenceIds.formUnion(refs)
+            }
+        }
+    }
+
+    /// Zeigt auf diese Mail irgendeine bekannte Thread-Referenz?
+    func isReferenced(_ message: MailMessage) -> Bool {
+        let own = Set(message.messageIds.map(Self.normalizedMessageId))
+        guard !own.isEmpty else { return false }
+        return !own.isDisjoint(with: answeredReferenceIds.union(forwardedReferenceIds))
+    }
+
+    /// Icon-Bedingung in der Zeile: Server-Keyword ODER Thread-Referenz-Match.
+    func showsAnswered(_ message: MailMessage) -> Bool {
+        message.isAnswered || showsAnsweredByReference(message)
+    }
+
+    func showsForwarded(_ message: MailMessage) -> Bool {
+        message.isForwarded || showsForwardedByReference(message)
+    }
+
+    private func showsAnsweredByReference(_ message: MailMessage) -> Bool {
+        let own = Set(message.messageIds.map(Self.normalizedMessageId))
+        return !own.isDisjoint(with: answeredReferenceIds)
+    }
+
+    private func showsForwardedByReference(_ message: MailMessage) -> Bool {
+        let own = Set(message.messageIds.map(Self.normalizedMessageId))
+        return !own.isDisjoint(with: forwardedReferenceIds)
+    }
+
+    /// Referenz-Set leeren (Account-Wechsel: keine Vermischung zwischen
+    /// Accounts).
+    private func resetReferencedIds() {
+        answeredReferenceIds = []
+        forwardedReferenceIds = []
+    }
+
+    /// UserDefaults-Cache (JSON, pro Account) sofort anwenden - die Icons
+    /// sind damit schon beim ersten List-Load korrekt, bevor der Netz-Fetch
+    /// durch ist.
+    func loadReferencedIdsCache() {
+        let key = Self.referencedIdsCachePrefix + cacheAccountKey
+        guard let data = UserDefaults.standard.data(forKey: key),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let answered = json["answered"] as? [String],
+              let forwarded = json["forwarded"] as? [String] else { return }
+        answeredReferenceIds.formUnion(answered)
+        forwardedReferenceIds.formUnion(forwarded)
+    }
+
+    private func storeReferencedIdsCache() {
+        let key = Self.referencedIdsCachePrefix + cacheAccountKey
+        let json: [String: Any] = [
+            "ts": Date().timeIntervalSince1970,
+            "answered": Array(answeredReferenceIds),
+            "forwarded": Array(forwardedReferenceIds)
+        ]
+        if let data = try? JSONSerialization.data(withJSONObject: json) {
+            UserDefaults.standard.set(data, forKey: key)
+        }
+    }
+
+    /// Gesendet-Ordner-Header laden: Email/query (nur IDs, letzte 500 Mails)
+    /// + schlankes Email/get (messageId/inReplyTo/references/subject -
+    /// subject wird für die Re:/Fwd:-Klassifikation gebraucht). Fehler werden
+    /// bewusst toleriert (kein Gesendet-Ordner / Offline) - das Set bleibt
+    /// dann einfach beim bisherigen Stand.
+    func refreshReferencedIdsFromSent() async {
+        guard useJmap, let api = jmapApi else { return }
+        // Throttle: nur 1x pro Stunde neu laden (UserDefaults-Cache deckt
+        // den Rest ab).
+        let key = Self.referencedIdsCachePrefix + cacheAccountKey
+        if let data = UserDefaults.standard.data(forKey: key),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let ts = json["ts"] as? Double,
+           Date().timeIntervalSince1970 - ts < Self.referencedIdsCacheTTL {
+            return
+        }
+        guard let sent = allMailboxes.first(where: { $0.kind == .sent }),
+              let sentJmapId = sent.jmapId, !sentJmapId.isEmpty else {
+            JmapLog.write("Mail", "referenced-ids: no sent mailbox - skipping")
+            return
+        }
+        do {
+            let query = try await api.queryEmailsRaw(
+                accountId: sent.accountId,
+                filter: ["inMailbox": sentJmapId],
+                limit: 500
+            )
+            guard let ids = query["ids"] as? [String], !ids.isEmpty else { return }
+            // Absichtlich SCHLANKES Property-Set - keine Bodies/Struktur.
+            let props = ["messageId", "inReplyTo", "references", "subject"]
+            let emails = try await api.getEmails(accountId: sent.accountId, ids: ids, properties: props)
+            for email in emails {
+                let refs = ((email["inReplyTo"] as? [Any])?.compactMap { $0 as? String } ?? [])
+                    + (email["references"] as? String ?? "").split(separator: " ").map(String.init)
+                let normalized = refs.map(Self.normalizedMessageId).filter { !$0.isEmpty }
+                guard !normalized.isEmpty else { continue }
+                // Run 12.11.: Gesendet-Mails referenzieren die URSPRUENG-
+                // liche Mail - also deren ID ins Set (nicht die eigene).
+                if Self.looksLikeForward(email.optString("subject") ?? "") {
+                    forwardedReferenceIds.formUnion(normalized)
+                } else {
+                    answeredReferenceIds.formUnion(normalized)
+                }
+            }
+            storeReferencedIdsCache()
+            JmapLog.write("Mail", "referenced-ids: answered=\(answeredReferenceIds.count) forwarded=\(forwardedReferenceIds.count)")
+        } catch {
+            // Toleriert: Sent fehlt / Offline / Auth-Fehler - Icons fallen
+            // dann auf die Server-Keywords zurueck.
+            JmapLog.write("Mail", "referenced-ids fetch failed: \(error.localizedDescription)")
+        }
+    }
+
 
     /// Run 19.09.: Guard gegen ueberlappende Voll-Refreshs (Log: zwei
     /// forceFullRefresh=true hintereinander).
@@ -2824,6 +3001,9 @@ final class MailViewModel: ObservableObject {
         }
         isFullRefreshRunning = true
         defer { isFullRefreshRunning = false }
+        // Run 12.11.: Gesendet-Referenzen parallel nachziehen (gedrosselt
+        // auf 1x/Std., Fehler toleriert) - beeinflusst den Sync nicht.
+        Task { [weak self] in await self?.refreshReferencedIdsFromSent() }
         guard let mailbox = currentMailbox else { return }
         if useJmap {
             await syncMessagesJmap(mailbox, forceFullRefresh: true)
@@ -3482,6 +3662,8 @@ final class MailViewModel: ObservableObject {
     }
 
     private func updateLocalMessage(_ updated: MailMessage) {
+        // Run 12.11.: aktualisierte Mail ins Referenz-Set aufnehmen.
+        recordReferences([updated])
         if case var .success(list) = messages, let idx = list.firstIndex(where: { $0.id == updated.id }) {
             list[idx] = updated
             messages = .success(list)
@@ -4073,6 +4255,8 @@ final class MailViewModel: ObservableObject {
             let mapped = list.map {
                 JmapMapper.mapMessage(account: mailAccount?.account ?? "", accountId: accId, mailboxId: "search", json: $0)
             }.sorted { $0.dateSent > $1.dateSent }
+            // Run 12.11.: Suchtreffer ebenfalls ins Referenz-Set.
+            recordReferences(mapped)
             searchResults = .success(mapped)
             SouveraLog.write("MailSearch", "query=\(trimmed.prefix(40)) ids=\(ids.count) mapped=\(mapped.count)")
         } catch {

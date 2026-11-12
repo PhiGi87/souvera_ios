@@ -83,6 +83,14 @@ enum JmapMapper {
         let isAnswered = (keywords?["$answered"] as? Bool) ?? false
         let isForwarded = (keywords?["$forwarded"] as? Bool) ?? false
 
+        // Run 12.11. (Rückwirkend-Icons): Thread-Referenzen extrahieren.
+        // messageId/inReplyTo sind [String], references kommt als EINE
+        // Leerzeichen-separierte Zeichenkette (JMAP spec).
+        let messageIds = (json["messageId"] as? [Any])?.compactMap { $0 as? String } ?? []
+        let inReplyToIds = (json["inReplyTo"] as? [Any])?.compactMap { $0 as? String } ?? []
+        let referencesIds = (json["references"] as? String ?? "")
+            .split(separator: " ").map(String.init)
+
         let toAddressStr = toList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
         let ccAddressStr = ccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
         let bccAddressStr = bccList.compactMap { ($0 as? NSDictionary)?["email"] as? String }.joined(separator: ", ")
@@ -94,6 +102,9 @@ enum JmapMapper {
             mailboxId: mailboxId,
             emailId: json.optString("id") ?? "",
             messageId: (json["messageId"] as? [Any])?.first as? String,
+            messageIds: messageIds,
+            inReplyToIds: inReplyToIds,
+            referencesIds: referencesIds,
             subject: json.optString("subject") ?? "",
             fromAddress: fromAddress,
             fromDisplayName: fromName,

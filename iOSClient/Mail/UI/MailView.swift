@@ -1585,13 +1585,22 @@ private struct MailMessageListView: View {
                 HStack(spacing: 10) {
                     Image(systemName: selected.contains(message.id) ? "checkmark.circle.fill" : "circle")
                         .foregroundStyle(Color.Souvera.brandPrimaryDeep)
-                    MailRowContent(message: message)
+                    MailRowContent(
+                        message: message,
+                        showAnswered: viewModel.showsAnswered(message),
+                        showForwarded: viewModel.showsForwarded(message)
+                    )
                 }
             }
             .buttonStyle(.plain)
         } else {
             Button { viewModel.openMessage(message) } label: {
-                MailRow(message: message, showsRecipient: viewModel.currentMailbox?.kind == .sent)
+                MailRow(
+                    message: message,
+                    showsRecipient: viewModel.currentMailbox?.kind == .sent,
+                    showAnswered: viewModel.showsAnswered(message),
+                    showForwarded: viewModel.showsForwarded(message)
+                )
             }
             .buttonStyle(.plain)
             // Run 15.09.: Lang-Touch-Menü um Antworten + Verschieben
@@ -1839,9 +1848,13 @@ private struct MailNewFolderSheet: View {
 private struct MailRow: View {
     let message: MailMessage
     var showsRecipient = false
+    // Run 12.11.: Rueckwirkend-Icons (Thread-Referenz-Match) durchreichen.
+    var showAnswered = false
+    var showForwarded = false
 
     var body: some View {
-        MailRowContent(message: message, showsRecipient: showsRecipient)
+        MailRowContent(message: message, showsRecipient: showsRecipient,
+                       showAnswered: showAnswered, showForwarded: showForwarded)
             .padding(.vertical, 2)
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
@@ -1851,6 +1864,12 @@ private struct MailRow: View {
 private struct MailRowContent: View {
     let message: MailMessage
     var showsRecipient = false
+    // Run 12.11.: Rueckwirkend-Icons - der Server setzt $answered nicht
+    // automatisch; der Parent reicht daher `isAnswered ODER Thread-Referenz-
+    // Match` durch. IMAP-Pfad: ohne Referenz-Header kein Match (toleriert,
+    // Icons kommen dort ueber Keywords/Server-Sync).
+    var showAnswered = false
+    var showForwarded = false
 
     var body: some View {
         HStack(spacing: 10) {
@@ -1870,13 +1889,13 @@ private struct MailRowContent: View {
                     if message.isFlagged { Image(systemName: "flag.fill").foregroundStyle(.orange).font(.caption2) }
                     // Run 12.11.: Beantwortet/Weitergeleitet - dezente Icons
                     // neben Flag/Datum (wie in Apple Mail).
-                    if message.isAnswered {
+                    if message.isAnswered || showAnswered {
                         Image(systemName: "arrowshape.turn.up.left")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                             .accessibilityLabel(NSLocalizedString("_mail_answered_", value: "Answered", comment: ""))
                     }
-                    if message.isForwarded {
+                    if message.isForwarded || showForwarded {
                         Image(systemName: "arrowshape.turn.up.right")
                             .font(.caption2)
                             .foregroundStyle(.secondary)
