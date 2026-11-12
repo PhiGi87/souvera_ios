@@ -2953,7 +2953,7 @@ final class MailViewModel: ObservableObject {
         }
         guard let sent = allMailboxes.first(where: { $0.kind == .sent }),
               let sentJmapId = sent.jmapId, !sentJmapId.isEmpty else {
-            JmapLog.write("Mail", "referenced-ids: no sent mailbox - skipping")
+            JmapLog.write("referenced-ids: no sent mailbox - skipping")
             return
         }
         do {
@@ -2980,11 +2980,11 @@ final class MailViewModel: ObservableObject {
                 }
             }
             storeReferencedIdsCache()
-            JmapLog.write("Mail", "referenced-ids: answered=\(answeredReferenceIds.count) forwarded=\(forwardedReferenceIds.count)")
+            JmapLog.write("referenced-ids: answered=\(answeredReferenceIds.count) forwarded=\(forwardedReferenceIds.count)")
         } catch {
             // Toleriert: Sent fehlt / Offline / Auth-Fehler - Icons fallen
             // dann auf die Server-Keywords zurueck.
-            JmapLog.write("Mail", "referenced-ids fetch failed: \(error.localizedDescription)")
+            JmapLog.write("referenced-ids fetch failed: \(error.localizedDescription)")
         }
     }
 
