@@ -425,19 +425,41 @@ actor LinkOcsApi {
     /// Run 15.09.: Spreed-Capability `edit-messages` prüfen — der
     /// Bearbeiten-Menü-Eintrag wird nur angezeigt, wenn der Server
     /// Nachrichten-Bearbeitung unterstützt.
+    /// Run 12.11.: nur bei Wertwechsel loggen — der Check läuft sonst bei
+    /// jedem Aufruf und flutet das Log (Rauschen).
+    @MainActor static var lastLoggedEditMessagesState: Bool?
+    /// Run 12.11.: "FAILED (no caps)" nur einmal loggen, sonst Rauschen bei
+    /// jedem Check.
+    @MainActor static var loggedNoCapsFailure = false
+
     func supportsMessageEditing() async -> Bool {
+        // Run 12.11.: korrekter Pfad ist ocs.data.capabilities.spreed.features —
+        // die Ebene "capabilities" fehlte, der Check schlug dadurch immer fehl
+        // ("FAILED (no caps)"). features tolerieren [Any]-Kodierung.
         guard let body = await get("\(root)/ocs/v2.php/cloud/capabilities"),
               let data = body.data(using: .utf8),
               let env = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let ocs = env["ocs"] as? [String: Any],
-              let caps = ocs["data"] as? [String: Any],
-              let spreed = caps["spreed"] as? [String: Any],
-              let features = spreed["features"] as? [String] else {
-            CallDebugLog.log("OcsApi", "capabilities: edit-messages check FAILED (no caps)")
+              let caps = (ocs["data"] as? [String: Any])?["capabilities"] as? [String: Any],
+              let spreed = caps["spreed"] as? [String: Any] else {
+            if !Self.loggedNoCapsFailure {
+                Self.loggedNoCapsFailure = true
+                CallDebugLog.log("OcsApi", "capabilities: edit-messages check FAILED (no caps)")
+            }
             return false
         }
+        let features: [String]
+        if let list = spreed["features"] as? [String] {
+            features = list
+        } else {
+            features = (spreed["features"] as? [Any])?.compactMap { $0 as? String } ?? []
+        }
         let supported = features.contains("edit-messages")
-        CallDebugLog.log("OcsApi", "capabilities: edit-messages supported=\(supported)")
+        if Self.lastLoggedEditMessagesState != supported {
+            Self.lastLoggedEditMessagesState = supported
+            Self.loggedNoCapsFailure = false
+            CallDebugLog.log("OcsApi", "capabilities: edit-messages supported=\(supported)")
+        }
         return supported
     }
 

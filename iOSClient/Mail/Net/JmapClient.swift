@@ -459,8 +459,10 @@ actor JmapClient {
         lastPostBody = String(data: bodyData, encoding: .utf8) ?? ""
 
         nkLog(debug: "[JMAP] POST \(normalizedUrl) body: \(lastPostBody ?? "")")
-        JmapLog.write("POST \(normalizedUrl) (method=POST, Content-Type=application/json; charset=utf-8, Accept=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
-        JmapLog.write("body (\(bodyData.count) bytes): \(lastPostBody ?? "")")
+        JmapLog.write("POST \(normalizedUrl) (Content-Type=application/json, Authorization=\(bearerToken != nil ? "Bearer" : "Basic") set)")
+        // Run 12.11.: Request-Body nicht mehr im Log (enthält Betreffs/
+        // Absender im Klartext — Datenschutz + Loggröße); nur die Größe.
+        JmapLog.write("body: \(bodyData.count) bytes (content not logged)")
 
         // The Android client talks to this endpoint over plain HTTP/1.1
         // (HttpURLConnection). URLSession negotiates HTTP/2, which some front
@@ -479,8 +481,15 @@ actor JmapClient {
         JmapLog.write("-> HTTP \(code) headers: \(headerSummary)")
 
         let data = response.body
-        let responsePreview = String(data: data, encoding: .utf8)?.prefix(1000) ?? ""
-        JmapLog.write("response: \(responsePreview)")
+        // Run 12.11.: Diagnose-Log enthielt sonst alle Mails im Klartext
+        // (Datenschutz + Größe). Erfolgs-Antworten nur als Einzeiler-
+        // Zusammenfassung; Voll-Body (bis 2000 Zeichen) nur bei Fehlern.
+        if (200..<300).contains(code) {
+            JmapLog.write("response: jmap POST ok (\(data.count) bytes)")
+        } else {
+            let responsePreview = String(data: data, encoding: .utf8)?.prefix(2000) ?? ""
+            JmapLog.write("response: \(responsePreview)")
+        }
 
         if code == 401 {
             let bodyStr = String(data: data, encoding: .utf8) ?? ""
