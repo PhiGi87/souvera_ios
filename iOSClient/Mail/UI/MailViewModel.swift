@@ -743,6 +743,11 @@ final class MailViewModel: ObservableObject {
             )
             jmapClient = client
             jmapApi = JmapApi(client: client)
+            // Run 12.11.: Erster Anstoß direkt nach der Client-Erstellung -
+            // der Aufruf in refreshMessages() kann vorher kommen und ins
+            // Leere laufen (useJmap/api noch nicht gesetzt). Der Throttle
+            // in refreshReferencedIdsFromSent() verhindert Mehrfach-Fetches.
+            Task { [weak self] in await self?.refreshReferencedIdsFromSent() }
         } else {
             imapClient = MailImapClient(account: account)
         }
@@ -2941,7 +2946,10 @@ final class MailViewModel: ObservableObject {
     /// bewusst toleriert (kein Gesendet-Ordner / Offline) - das Set bleibt
     /// dann einfach beim bisherigen Stand.
     func refreshReferencedIdsFromSent() async {
-        guard useJmap, let api = jmapApi else { return }
+        guard useJmap, let api = jmapApi else {
+            JmapLog.write("referenced-ids: skipped (useJmap=false oder kein api)")
+            return
+        }
         // Throttle: nur 1x pro Stunde neu laden (UserDefaults-Cache deckt
         // den Rest ab).
         let key = Self.referencedIdsCachePrefix + cacheAccountKey
@@ -2949,6 +2957,7 @@ final class MailViewModel: ObservableObject {
            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let ts = json["ts"] as? Double,
            Date().timeIntervalSince1970 - ts < Self.referencedIdsCacheTTL {
+            JmapLog.write("referenced-ids: throttled (cache < TTL)")
             return
         }
         guard let sent = allMailboxes.first(where: { $0.kind == .sent }),
@@ -3066,6 +3075,11 @@ final class MailViewModel: ObservableObject {
         if mailbox.kind == .inbox, useJmap {
             await scanInvitations(mailbox: mailbox)
         }
+        // Run 12.11.: Gesendet-Referenzen auch beim 30-s-Auto-Refresh
+        // nachziehen. Der interne Throttle (1x/Std., UserDefaults-Cache)
+        // verhindert Mehrfach-Fetches - der Task kostet im Normalfall nur
+        // einen "throttled"-Logeintrag.
+        Task { [weak self] in await self?.refreshReferencedIdsFromSent() }
     }
 
     /// Autoritative Ungelesen-Zählung für den persönlichen Posteingang
