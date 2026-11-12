@@ -2361,6 +2361,14 @@ struct MailComposeView: View {
     @State private var suggestions: [RecipientSuggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
     @State private var activeSuggestionField: RecipientFieldKind?
+    // Run 13.11.: Zentrale Signatur (souvera_central). userEditedBody
+    // verhindert, dass die frisch geladene Signatur eine manuelle
+    // Nutzereingabe überschreibt; isApplyingSignature hält das onChange
+    // der eigenen Programm-Anderungen von Nutzer-Eingaben auseinander.
+    @State private var userEditedBody = false
+    @State private var isApplyingSignature = false
+    @State private var appliedSignature: MailSignature?
+    @State private var cachedSignature: MailSignature?
 
     enum RecipientFieldKind { case to, cc, bcc }
 
@@ -2374,6 +2382,10 @@ struct MailComposeView: View {
         _bodyText = State(initialValue: context.quoteBody)
         _showCcBcc = State(initialValue: false)
         _attachments = State(initialValue: context.preAttachments)
+        // Run 13.11.: Signatur synchron aus dem UserDefaults-Cache
+        // vorladen (TTL 5 Minuten) - sie ist damit schon beim ersten
+        // Rendern verfügbar, bevor der Netz-Fetch durch ist.
+        _cachedSignature = State(initialValue: MailSignatureService.cached(account: viewModel.accountKey))
     }
 
     var body: some View {
@@ -2546,6 +2558,59 @@ struct MailComposeView: View {
                 slowSendOverlay
             }
         }
+        // Run 13.11.: Zentrale Signatur - zuerst der synchron vorgeladene
+        // Cache (siehe init), danach ein frischer Fetch. Es wird nur
+        // angewendet, solange der Nutzer den Body noch nicht selbst
+        // verändert hat (userEditedBody), sonst würde die Eingabe
+        // überschrieben.
+        .task {
+            if let cached = cachedSignature, appliedSignature == nil {
+                applySignature(cached)
+            }
+            let fresh = await MailSignatureService.fetch(account: viewModel.accountKey)
+            guard !userEditedBody, let fresh, fresh != appliedSignature else { return }
+            applySignature(fresh)
+        }
+        .onChange(of: bodyText) { _, _ in
+            // Eigene Programm-Anderungen (Signatur-Anhängen/Ersetzen)
+            // sind keine Nutzer-Eingabe.
+            guard !isApplyingSignature else { return }
+            userEditedBody = true
+        }
+    }
+
+    // MARK: - Zentrale Signatur (Run 13.11.)
+
+    /// Hängt die zentrale Signatur mit RFC-3676-Trenner ("-- ") an den
+    /// Body an bzw. ersetzt eine zuvor angehängte Signatur. Der Aufruf
+    /// setzt isApplyingSignature, damit onChange(of: bodyText) die
+    /// Änderung nicht als Nutzer-Eingabe wertet.
+    ///
+    /// TODO (HTML-Senden): Der Send-Flow ist aktuell plaintext-only -
+    /// `MailComposeView` befüllt nur `outgoing.body`, `outgoing.bodyHtml`
+    /// bleibt leer (JMAP sendet htmlBody=nil, der MIME-Builder escaped
+    /// den Plaintext). Sobald HTML-Senden eingebaut ist, muss die
+    /// html-Signatur (mit Data-URL-Assets, siehe MailSignatureService)
+    /// im Send-Flow an `outgoing.bodyHtml` angehängt werden - Webmail-
+    /// Muster: <div data-signature>...</div> mit <p>--</p> als Trenner.
+    private func applySignature(_ signature: MailSignature) {
+        isApplyingSignature = true
+        defer { isApplyingSignature = false }
+        // Vorher angehängte Signatur entfernen (Refresh ersetzt sie,
+        // inkl. des RFC-3676-Trenners "-- ").
+        if let previous = appliedSignature {
+            for separator in ["\n\n-- \n", "\n-- \n"] {
+                let suffix = separator + previous.text
+                if bodyText.hasSuffix(suffix) {
+                    bodyText.removeLast(suffix.count)
+                    break
+                }
+            }
+        }
+        // RFC 3676: Trenner ist eine Zeile "-- " (zwei Bindestriche +
+        // Leerzeichen). Bei nicht-leerem Body mit Leerzeile abtrennen.
+        bodyText += (bodyText.isEmpty ? "\n" : "\n\n") + "-- \n" + signature.text
+        appliedSignature = signature
     }
 
     /// Run 06.10.: zentriertes Overlay "wird verspaetet gesendet".
