@@ -67,6 +67,13 @@ enum MailSignatureService {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        // Run 13.11. (Fix "keine globale Signatur"): Der Endpunkt antwortete
+        // mit 412 CSRF check failed. NC 34 lässt den CSRF-Check für
+        // OCSController-Instanzen mit OCS-APIRequest-Header durch (quellen-
+        // verifiziert: SecurityMiddleware::isValidOCSRequest) — der
+        // MailSettingsApiController extends OCSController, also genügt der
+        // Header auf der Plain-Route, ganz ohne Server-Änderung.
+        request.setValue("true", forHTTPHeaderField: "OCS-APIRequest")
         authorize(&request, username: info.username, password: info.password)
 
         do {
