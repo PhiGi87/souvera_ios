@@ -53,6 +53,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             // Screenshare IMMER komplett sichtbar (Fit statt Fill) -
             // quer wie hochkant; Kamera bleibt AspectFill (Run 12.09.).
             videoView.videoContentMode = roomType == "screen" ? .scaleAspectFit : .scaleAspectFill
+            // Run 21.11. (Diagnose-Härtung Mini-Kachel-Drag): Subviews ohne
+            // eigenen Recognizer duerfen Touches nicht schlucken - sonst
+            // feuert der Pan-Recognizer am Container nie ("Es passiert
+            // nichts"). Der Renderer ist reine Anzeige.
+            videoView.isUserInteractionEnabled = false
             videoView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             videoView.frame = container.bounds
             container.addSubview(videoView)
@@ -66,16 +71,22 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             overlay.backgroundColor = UIColor(white: 0.13, alpha: 1)
             overlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
             overlay.frame = container.bounds
+            // Run 21.11.: Das Overlay liegt vollflaechig ueber der Kachel -
+            // mit default isUserInteractionEnabled = true war es der
+            // Haupt-Touch-Kaeschlucker des Mini-Kachel-Pans.
+            overlay.isUserInteractionEnabled = false
             overlayAvatar.textAlignment = .center
             overlayAvatar.textColor = .white
             overlayAvatar.font = .systemFont(ofSize: 30, weight: .medium)
             // Run 25.09.: neutraler Kreis als Fallback bis das Server-
             // Avatar-Bild geladen ist (keine geratene Farbe).
             overlayAvatar.backgroundColor = UIColor(white: 0.25, alpha: 1)
+            overlayAvatar.isUserInteractionEnabled = false
             overlayAvatar.translatesAutoresizingMaskIntoConstraints = false
             overlayAvatarImage.contentMode = .scaleAspectFill
             overlayAvatarImage.clipsToBounds = true
             overlayAvatarImage.isHidden = true
+            overlayAvatarImage.isUserInteractionEnabled = false
             overlayAvatarImage.translatesAutoresizingMaskIntoConstraints = false
             overlay.addSubview(overlayAvatar)
             overlay.addSubview(overlayAvatarImage)
@@ -216,10 +227,15 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     private var sharerMiniCorner: TileCorner = .bottomLeft
     /// Ecke der schwebenden Eigenansicht (Screenshare + Fokus).
     private var localCorner: TileCorner = .bottomLeft
-    /// Bereits mit Mini-Pan verdrahtete Kachel-Keys (doppelt vermeiden).
-    private var miniPanKeys = Set<String>()
+    // Run 21.11.: miniPanKeys-Set entfernt - attachMiniPan ist jetzt
+    // idempotent (bestehenden Pan entfernen, neu anhaengen), damit ein
+    // ersetzter/neuer Container den Drag nicht verliert.
     /// Gemerkter Frame-Origin pro Pan-Gesture (Key = Kachel-Key).
     private var miniPanOrigins: [String: CGPoint] = [:]
+    /// Run 21.11. (Diagnose): Dedupe-Signatur des letzten Mini-Layout-
+    /// Logs - layoutScreenShareMinis laeuft pro Layout-Durchlauf, ohne
+    /// Dedupe wuerde jede identische Ausgabe das Log fluten.
+    private var lastMiniLayoutSignature: String = ""
     /// Läuft gerade ein Screenshare (irgendeine Kachel vom Typ "screen")?
     private var isScreenshareActive: Bool {
         tiles.values.contains { $0.roomType == "screen" }
@@ -563,6 +579,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         label.shadowOffset = CGSize(width: 0, height: 1)
         label.textAlignment = .center
         label.lineBreakMode = .byTruncatingTail
+        // Run 21.11.: Label ist reine Anzeige - kein Touch-Schlucken
+        // (wuerde sonst den Mini-Kachel-Pan am Container blockieren).
+        label.isUserInteractionEnabled = false
         label.translatesAutoresizingMaskIntoConstraints = false
         container.addSubview(label)
         NSLayoutConstraint.activate([
@@ -968,6 +987,17 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             tilesContentView.bringSubviewToFront(sharerTile.container)
             attachMiniPan(to: sharerTile.container, key: sharerKey)
         }
+        // Run 21.11. (Diagnose): Ein Log pro Aufruf - aber nur, wenn sich
+        // etwas veraendert hat (Dedupe), sonst flutet jeder Layout-Pass
+        // das CallDebugLog mit identischen Zeilen.
+        let localShown = shouldShowLocalView && !isFoldedPortrait
+        let signature = "sharerKey=\(sharerKey) sharerFrame=\(tiles[sharerKey]?.container.frame ?? .zero) " +
+            "localFrame=\(localShown ? localContainer.frame : .zero) " +
+            "dragActive=\(miniPanOrigins[sharerKey] != nil)"
+        if signature != lastMiniLayoutSignature {
+            lastMiniLayoutSignature = signature
+            CallDebugLog.log("CallVC", "screen share minis: \(signature)")
+        }
         // Eigenansicht als zweite Mini-Kachel (nicht im gefalteten
         // Hochformat - dort lebt sie in der Control-Hälfte).
         if shouldShowLocalView && !isFoldedPortrait {
@@ -1045,14 +1075,21 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         }
     }
 
-    /// Pan-Gesture für eine Mini-Kachel attachen (nur einmal pro Key).
+    /// Pan-Gesture fuer eine Mini-Kachel attachen.
+    /// Run 21.11. (Attach-Robustheit): Idempotent statt Set-Guard - falls
+    /// eine Kachel (z. B. nach Re-Offer/Neuerzeugung in onRemoteVideo)
+    /// einen NEUEN Container bekommt, wuerde der alte Set-Eintrag den
+    /// Attach am neuen Container blockieren und der Drag waere tot. Jetzt:
+    /// bestehenden Pan mit gleichem Namen entfernen und frisch anhaengen.
     private func attachMiniPan(to view: UIView, key: String) {
-        guard !miniPanKeys.contains(key) else { return }
-        miniPanKeys.insert(key)
+        view.gestureRecognizers?
+            .filter { $0.name == key && $0 is UIPanGestureRecognizer }
+            .forEach { view.removeGestureRecognizer($0) }
         let pan = UIPanGestureRecognizer(target: self, action: #selector(miniTilePanned(_:)))
         pan.name = key
         view.addGestureRecognizer(pan)
         view.isUserInteractionEnabled = true
+        CallDebugLog.log("CallVC", "mini pan attached key=\(key)")
     }
 
     /// Ziehen einer Mini-Kachel mit Snap in die nächstgelegene Ecke.
@@ -1065,6 +1102,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         switch gesture.state {
         case .began:
             miniPanOrigins[key] = tile.container.frame.origin
+            // Run 21.11. (Diagnose): began/ended sind die Kernsignale -
+            // fehlt BEGAN, wird der Touch schon vorher geschluckt
+            // (Hit-Test/Subview-Problem); fehlt nur ENDED, bricht der
+            // Drag mitten drin ab.
+            CallDebugLog.log("CallVC", "mini pan BEGAN key=\(key) frame=\(tile.container.frame)")
         case .changed:
             guard let origin = miniPanOrigins[key] else { return }
             // Run 13.11.: Translation im Container-Raum der Kacheln
@@ -1110,6 +1152,8 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             UIView.animate(withDuration: 0.2) {
                 tile.container.frame = target
             }
+            // Run 21.11. (Diagnose): Ende inkl. angesnappter Ecke.
+            CallDebugLog.log("CallVC", "mini pan ENDED key=\(key) corner=\(sharerMiniCorner)")
         default:
             break
         }
