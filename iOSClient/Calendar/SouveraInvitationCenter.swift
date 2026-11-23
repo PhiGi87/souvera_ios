@@ -68,6 +68,22 @@ final class SouveraInvitationCenter: ObservableObject {
         if newSig != oldSig {
             calendarInvites = pending
         }
+        // Run 25.11. (Feedback: Outlook-Einladung doppelt): Der Mail-Scan
+        // kann laufen, BEVOR der Kalender-Scan `calendarInvites` gefuellt
+        // hat - der Dedup in `setMailInvites` sah dann ein leeres Set und
+        // griff nicht. Hier nachziehen: Mail-Einladungen, die jetzt gegen
+        // die frischen Kalender-Einladungen matchen, entfernen (gleicher
+        // Matcher inkl. Meta-Fallback, Log je Entscheidung).
+        let stillOpen = mailInvites.filter { invite in
+            if let reason = Self.calendarMatchReason(for: invite, calendarInvites: pending) {
+                JmapLog.write("invite dedup \(reason) hide id=\(invite.id) uid=\(invite.eventUID)")
+                return false
+            }
+            return true
+        }
+        if stillOpen.count != mailInvites.count {
+            mailInvites = stillOpen
+        }
     }
 
     /// Run 24.11. (Feedback: doppelte Einladungen): UID-Dedup ohne
@@ -119,21 +135,72 @@ final class SouveraInvitationCenter: ObservableObject {
         return false
     }
 
+    /// Run 25.11. (Feedback: Outlook-Einladung doppelt): UID-Normalisierung
+    /// fuer den Dedup-Match. Absender kapseln die UID teils in `<...>`,
+    /// ORGANIZER/ATTENDEE-Werte tragen ein `mailto:`-Praefix, und
+    /// Whitespace/CRLF-Folding kann hineinrutschen. Beide Seiten
+    /// (Mail-ICS-UID und Kalender-UID) werden identisch normalisiert.
+    static func normalizedUid(_ raw: String) -> String {
+        var uid = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if uid.hasPrefix("<"), uid.hasSuffix(">") {
+            uid = String(uid.dropFirst().dropLast())
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if uid.lowercased().hasPrefix("mailto:") {
+            uid = String(uid.dropFirst("mailto:".count))
+        }
+        return uid.lowercased()
+    }
+
+    /// Run 25.11.: Zusaetzlicher Meta-Matcher als Fallback, wenn die
+    /// UID-Dedup nicht greift (z. B. serverseitig umgeschriebene UID oder
+    /// Outlook-GlobalObjectID vs. ICS-UID). Match: Betreff (case-
+    /// insensitive, `title` traegt den Betreff des Termins) UND
+    /// |Start-Delta| < 60 s. Liefert den Grund ("uid-match" /
+    /// "meta-match") oder nil.
+    static func calendarMatchReason(for invite: SouveraMailInvitation,
+                                    calendarInvites: [CalendarEventModel]) -> String? {
+        let uid = normalizedUid(invite.eventUID)
+        if !uid.isEmpty,
+           calendarInvites.contains(where: { normalizedUid($0.uid) == uid }) {
+            return "uid-match"
+        }
+        guard let event = invite.event, !event.title.isEmpty else { return nil }
+        let title = event.title.lowercased()
+        for cal in calendarInvites where !cal.title.isEmpty {
+            if cal.title.lowercased() == title,
+               abs(cal.start.timeIntervalSince(event.start)) < 60 {
+                return "meta-match"
+            }
+        }
+        return nil
+    }
+
     func setMailInvites(_ invites: [SouveraMailInvitation], accountKey: String) {
         guard self.accountKey == accountKey || mailInvites.isEmpty || self.accountKey.isEmpty else { return }
         self.accountKey = accountKey
         // Run 19.09. (Feedback): keine Doppelanzeige - eine Mail-Einladung,
         // deren Termin bereits als offene Kalender-Einladung vorliegt,
-        // wird ausgeblendet (UID-basiert).
-        let openCalendarUids = Set(calendarInvites.map { $0.uid.lowercased() }.filter { !$0.isEmpty })
+        // wird ausgeblendet. Run 25.11.: nicht mehr nur per rohem UID-
+        // Vergleich - normalisierte UIDs plus Meta-Fallback (Betreff +
+        // Startzeit), siehe `calendarMatchReason`.
+        //
+        // Run 25.11. (bekannte Grenze, dokumentiert): Antwortet der Nutzer
+        // im WEBMAIL, aendert das den PARTSTAT der Kalender-Kopie NICHT -
+        // der Server sendet dort nur einen iTIP-REPLY an den Organisator,
+        // die Kopie im eigenen Kalender bleibt NEEDS-ACTION. Das kann die
+        // App serverseitig NICHT erkennen (kein Feld, kein CalDAV-Signal)
+        // - diese Antwort wird daher hier weiterhin als offen angezeigt.
+        // Der Weg dafuer bleibt die Loesch-Funktion
+        // (ignoreMailInvitation / ignoreCalendarInvitation, Run 24.11.).
         let deduped = invites.filter { invite in
-            let uid = invite.eventUID.lowercased()
-            if uid.isEmpty || !openCalendarUids.contains(uid) {
-                // Run 24.11.: ohne Antwort entfernte Einladungen (messageId-
-                // basierter Ignore-Marker) erscheinen nicht mehr.
-                return !Self.isIgnored(id: invite.id) && !Self.isIgnored(id: invite.messageId)
+            if let reason = Self.calendarMatchReason(for: invite, calendarInvites: calendarInvites) {
+                JmapLog.write("invite dedup \(reason) hide id=\(invite.id) uid=\(invite.eventUID)")
+                return false
             }
-            return false
+            // Run 24.11.: ohne Antwort entfernte Einladungen (messageId-
+            // basierter Ignore-Marker) erscheinen nicht mehr.
+            return !Self.isIgnored(id: invite.id) && !Self.isIgnored(id: invite.messageId)
         }
         let newSig = deduped.map { $0.id }.sorted().joined(separator: ",")
         let oldSig = mailInvites.map { $0.id }.sorted().joined(separator: ",")
