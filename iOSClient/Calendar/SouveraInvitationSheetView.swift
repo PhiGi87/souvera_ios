@@ -181,7 +181,7 @@ struct SouveraInvitationSheetView: View {
             } else if removedIds.contains(event.href) {
                 // Run 24.11.: ohne Antwort entfernt - Bestaetigungsmuster
                 // wie der CANCEL-Zweig.
-                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed"),
+                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed", comment: ""),
                       systemImage: "trash.circle.fill")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -273,7 +273,7 @@ struct SouveraInvitationSheetView: View {
                     .foregroundStyle(.green)
             } else if removedIds.contains(invite.id) {
                 // Run 24.11.: ohne Antwort entfernt.
-                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed"),
+                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed", comment: ""),
                       systemImage: "trash.circle.fill")
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
@@ -1042,7 +1042,7 @@ struct SouveraInvitationDetailView: View {
             _ = await SouveraInvitationCenter.shared.ignoreCalendarInvitation(displayEvent)
         }
         ignoreBusy = false
-        cancelResultAlert = NSLocalizedString("_invitations_ignored_", value: "Invitation removed")
+        cancelResultAlert = NSLocalizedString("_invitations_ignored_", value: "Invitation removed", comment: "")
     }
 
     private var timeLine: String {
