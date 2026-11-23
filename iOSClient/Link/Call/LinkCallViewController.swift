@@ -949,6 +949,10 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             layoutScreenShareMinis(sharerKey: sharerKey)
             return
         }
+        // Run 23.11.: Screenshare-Ende erkannt (kein screen-Key mehr) -
+        // Mini-Kacheln zurueck in tilesContentView haengen, BEVOR
+        // layoutRaster/layoutFocus ihre Frames setzen.
+        returnMinisToTilesContentView()
         // Layout-Modus IMMER respektieren - auch bei nur einer Video-Kachel.
         // Vorher zwang tiles.count == 1 den Fokus: Teilnehmer OHNE Video
         // (nur Audio) erscheinen als Platzhalter-Kacheln, damit der
@@ -966,10 +970,26 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     /// Platziert die ziehbaren Mini-Kacheln über dem Screenshare: die
     /// Kamera-Kachel des Teilenden (falls vorhanden) und die Eigenansicht.
     private func layoutScreenShareMinis(sharerKey: String) {
-        let miniSize = miniTileSize(bounds: tileLayoutBounds.size)
+        // Run 23.11. (log-verifiziert): "mini pan attached" 3x, aber KEIN
+        // "mini pan BEGAN" - chromeContentView (transparente Controls-Ebene)
+        // liegt als fullscreen-Subview UEBER tilesContentView und fängt im
+        // Hit-Test alle Touches im Kachelbereich (Transparenz zaehlt nicht).
+        // Fix: Die Mini-Kacheln werden waehrend des Screenshares als
+        // Subviews VON chromeContentView gehängt - dort liegen sie ueber
+        // bzw. IN der Chrome-Ebene und erhalten Touches. Frames werden mit
+        // view.bounds/view.safeAreaInsets gerechnet, denn
+        // chrome.frame == view.bounds => Chrome-Space == View-Space.
+        // (NICHT tileLayoutBounds - im Falz-Modus ist das der
+        // Arrangement-Slot mit anderem Ursprung!)
+        let miniSize = miniTileSize(bounds: view.bounds.size)
         if let sharerTile = tiles[sharerKey] {
             sharerTile.container.isHidden = false
             sharerTile.container.layer.cornerRadius = 10
+            // Run 23.11.: Idempotent in chromeContentView umhängen.
+            if sharerTile.container.superview !== chromeContentView {
+                chromeContentView.addSubview(sharerTile.container)
+            }
+            chromeContentView.bringSubviewToFront(sharerTile.container)
             // Run 13.11.: Aktiven Drag respektieren - solange die Kachel
             // gezogen wird (Eintrag in miniPanOrigins), darf kein Layout-
             // Pass den Frame aus der gemerkten Ecke überschreiben (das
@@ -978,13 +998,12 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 sharerTile.container.frame = cornerFrame(
                     corner: sharerMiniCorner,
                     size: miniSize,
-                    bounds: tileLayoutBounds,
-                    safeTop: tileLayoutSafeTop,
-                    safeBottom: tileLayoutSafeBottom,
+                    bounds: view.bounds,
+                    safeTop: view.safeAreaInsets.top,
+                    safeBottom: view.safeAreaInsets.bottom,
                     bottomReserve: 120
                 )
             }
-            tilesContentView.bringSubviewToFront(sharerTile.container)
             attachMiniPan(to: sharerTile.container, key: sharerKey)
         }
         // Run 21.11. (Diagnose): Ein Log pro Aufruf - aber nur, wenn sich
@@ -1002,6 +1021,13 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
         // Hochformat - dort lebt sie in der Control-Hälfte).
         if shouldShowLocalView && !isFoldedPortrait {
             localContainer.isHidden = false
+            // Run 23.11.: Auch die Eigenansicht während des Screenshares in
+            // chromeContentView hängen (nach der Sharer-Kachel => liegt
+            // oben), sonst fängt Chrome wieder alle Touches ab.
+            if localContainer.superview !== chromeContentView {
+                chromeContentView.addSubview(localContainer)
+            }
+            chromeContentView.bringSubviewToFront(localContainer)
             // Run 13.11.: Dasselbe Muster wie bei den Mini-Kacheln - während
             // eines aktiven Eigenansicht-Drags (localPanActive) bleibt der
             // Frame unangetastet.
@@ -1009,13 +1035,33 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
                 localContainer.frame = cornerFrame(
                     corner: localCorner,
                     size: CGSize(width: 180, height: 135),
-                    bounds: tileLayoutBounds,
-                    safeTop: tileLayoutSafeTop,
-                    safeBottom: tileLayoutSafeBottom,
+                    bounds: view.bounds,
+                    safeTop: view.safeAreaInsets.top,
+                    safeBottom: view.safeAreaInsets.bottom,
                     bottomReserve: 120
                 )
             }
-            tilesContentView.bringSubviewToFront(localContainer)
+        }
+    }
+
+    /// Run 23.11.: Rückkehr nach Screenshare-Ende - alle Kacheln, die
+    /// während des Screenshares in chromeContentView gehängt wurden
+    /// (Sharer-Mini-Kachel), wieder idempotent in tilesContentView
+    /// umhängen. Wird SICHER VOR layoutRaster/layoutFocus aufgerufen
+    /// (an den Nicht-Screenshare-Einstiegen von layoutTiles), damit die
+    /// Layout-Pässe die Frames im richtigen Container setzen.
+    private func returnMinisToTilesContentView() {
+        for tile in tiles.values where tile.container.superview === chromeContentView {
+            // Reihenfolge in tilesContentView egal - layoutTiles
+            // positioniert die Kacheln ohnehin neu.
+            tilesContentView.addSubview(tile.container)
+        }
+        // Eigenansicht: zurueck in tilesContentView NUR wenn nicht im
+        // gefalteten Hochformat - dort lebt sie legitim in
+        // chromeContentView (Chrome ist dort aktiv, und als Chrome-Subview
+        // funktioniert der Touch der Eigenansicht).
+        if localContainer.superview === chromeContentView && !isFoldedPortrait {
+            tilesContentView.addSubview(localContainer)
         }
     }
 
@@ -1096,9 +1142,9 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
     @objc private func miniTilePanned(_ gesture: UIPanGestureRecognizer) {
         guard let key = gesture.name,
               let tile = tiles[key] else { return }
-        let bounds = tileLayoutBounds
-        let safeTop = tileLayoutSafeTop
-        let safeBottom = tileLayoutSafeBottom
+        let bounds = view.bounds
+        let safeTop = view.safeAreaInsets.top
+        let safeBottom = view.safeAreaInsets.bottom
         switch gesture.state {
         case .began:
             miniPanOrigins[key] = tile.container.frame.origin
@@ -1109,12 +1155,11 @@ final class LinkCallViewController: UIViewController, CallSessionCallbacks {
             CallDebugLog.log("CallVC", "mini pan BEGAN key=\(key) frame=\(tile.container.frame)")
         case .changed:
             guard let origin = miniPanOrigins[key] else { return }
-            // Run 13.11.: Translation im Container-Raum der Kacheln
-            // (tilesContentView) statt in view - im Falz-Modus liegt
-            // tilesContentView verschoben/im anderen Raum, sodass die
-            // translation-in-view-Werte nicht mehr zum Frame (Container-
-            // Space, konsistent zu cornerFrame/Clamps) passten.
-            let t = gesture.translation(in: tilesContentView)
+            // Run 23.11.: Translation zurueck auf view - die Mini-Kacheln
+            // leben jetzt in chromeContentView (frame == view.bounds =>
+            // Chrome-Space == View-Space), damit sind Frames und
+            // translation konsistent im selben Raum.
+            let t = gesture.translation(in: view)
             let size = tile.container.frame.size
             let inset: CGFloat = 16
             let x = min(max(origin.x + t.x, 0),
