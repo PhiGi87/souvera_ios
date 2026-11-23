@@ -285,12 +285,7 @@ struct SouveraCalendarView: View {
             }
         }
         .sheet(item: $detailEvent) { event in
-            // Run 24.11. (Tasks): VTODOs in ein vereinfachtes Detail-Sheet
-            // (kein Termin-Editor, Tasks sind vom Edit-Pfad ausgeschlossen).
-            if event.isTask {
-                SouveraCalendarTaskDetailView(viewModel: viewModel, event: event)
-            } else {
-                CalendarEventDetailSheet(
+            CalendarEventDetailSheet(
                 viewModel: viewModel,
                 event: event,
                 onEdit: { draft in
@@ -308,7 +303,6 @@ struct SouveraCalendarView: View {
                     }
                 } : nil
             )
-            }
         }
         .sheet(item: $editState) { state in
             CalendarEventEditSheet(viewModel: viewModel, draft: state.draft, existing: state.existing)
@@ -667,10 +661,7 @@ struct SouveraCalendarView: View {
         } label: {
             CalendarEventRow(event: event, color: viewModel.color(for: event),
                              partstat: viewModel.displayPartstat(for: event),
-                             showDate: showDate,
-                             onToggleTask: event.isTask ? {
-                                 Task { await viewModel.toggleTask(event) }
-                             } : nil)
+                             showDate: showDate)
         }
         .buttonStyle(.plain)
     }
@@ -683,11 +674,6 @@ struct SouveraCalendarView: View {
                 .padding(.horizontal)
                 .padding(.top, 6)
             let dayEvents = viewModel.events(on: selectedDay)
-            // Run 24.11. (Tasks): Aufgaben in eigener Sektion am Tagesende
-            // (undatierte Tasks sind im Parser auf den Tagesanfang von
-            // heute geankert und würden sonst die Terminliste anführen).
-            let dayTasks = dayEvents.filter(\.isTask)
-            let pureEvents = dayEvents.filter { !$0.isTask }
             let upcoming = viewModel.upcomingEvents(after: nowTick)
             if dayEvents.isEmpty {
                 if upcoming.isEmpty {
@@ -705,19 +691,8 @@ struct SouveraCalendarView: View {
                     .listStyle(.plain)
                 }
             } else {
-                List {
-                    Section {
-                        ForEach(pureEvents) { event in
-                            eventRow(event)
-                        }
-                    }
-                    if !dayTasks.isEmpty {
-                        Section(NSLocalizedString("_calendar_tasks_", comment: "")) {
-                            ForEach(dayTasks) { event in
-                                eventRow(event)
-                            }
-                        }
-                    }
+                List(dayEvents) { event in
+                    eventRow(event)
                 }
                 .listStyle(.plain)
             }
@@ -739,9 +714,6 @@ private struct CalendarEventRow: View {
     /// anderen Tageskopf) - sonst liest sich ein Termine eines ANDEREN Tags
     /// wie einer des gewählten Tages.
     var showDate: Bool = false
-    /// Run 24.11. (Tasks): Tap auf die Checkbox -> toggleTask. nil = keine
-    /// Checkbox (z. B. Timeline-Spalten ohne ViewModel-Zugriff).
-    var onToggleTask: (() -> Void)? = nil
 
 
     private var isDeclined: Bool { partstat.lowercased() == "declined" }
@@ -763,36 +735,17 @@ private struct CalendarEventRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            // Run 24.11. (Tasks): statt Farbbalken eine Checkbox - Tap
-            // haakt ab (toggleTask), kollidiert nicht mit dem Row-Tap
-            // (Button-Komponente gewinnt den Touch im eigenen Bereich).
+            leadingBar
             if event.isTask {
-                if let onToggleTask {
-                    Button {
-                        onToggleTask()
-                    } label: {
-                        Image(systemName: event.isCompleted ? "checkmark.circle.fill" : "circle")
-                            .font(.title3)
-                            .foregroundStyle(event.isCompleted ? Color.Souvera.brandPrimaryDeep : Color.secondary)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(event.isCompleted
-                        ? NSLocalizedString("_calendar_task_mark_open_", comment: "")
-                        : NSLocalizedString("_calendar_task_mark_done_", comment: ""))
-                } else {
-                    Image(systemName: event.isCompleted ? "checkmark.circle.fill" : "circle")
-                        .font(.title3)
-                        .foregroundStyle(event.isCompleted ? Color.Souvera.brandPrimaryDeep : Color.secondary)
-                }
-            } else {
-                leadingBar
+                Image(systemName: "checklist")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
                     Text(event.title)
-                        .strikethrough(isDeclined || (event.isTask && event.isCompleted))
+                        .strikethrough(isDeclined)
                         .font(.subheadline).fontWeight(.medium).lineLimit(1)
-                        .foregroundStyle(event.isTask && event.isCompleted ? Color.secondary : Color.primary)
                     if !event.reminders.isEmpty {
                         Image(systemName: "bell.fill").font(.system(size: 9)).foregroundStyle(.secondary)
                     }
