@@ -2563,11 +2563,23 @@ struct MailComposeView: View {
         // angewendet, solange der Nutzer den Body noch nicht selbst
         // verändert hat (userEditedBody), sonst würde die Eingabe
         // überschrieben.
+        // Run 25.11.: Ohne zentrale Signatur (kein Cache, Fetch found:false)
+        // greift die lokale Signatur aus den Einstellungen - sie ist sofort
+        // verfügbar, kein Fetch nötig. Ein erfolgreicher zentraler Fetch
+        // ersetzt sie (applySignature entfernt die zuvor angehängte
+        // Signatur inklusive Trenner).
         .task {
-            if let cached = cachedSignature, appliedSignature == nil {
-                applySignature(cached)
+            if appliedSignature == nil {
+                if let cached = cachedSignature {
+                    applySignature(cached)
+                } else {
+                    applyLocalSignature()
+                }
             }
             let fresh = await MailSignatureService.fetch(account: viewModel.accountKey)
+            // Frischer zentraler Fetch nur anwenden, wenn er tatsächlich
+            // eine Signatur liefert (found:true); sonst bleibt die evtl.
+            // bereits aus dem init-Cached-Pfad angehängte lokale Signatur.
             guard !userEditedBody, let fresh, fresh != appliedSignature else { return }
             applySignature(fresh)
         }
@@ -2580,6 +2592,17 @@ struct MailComposeView: View {
     }
 
     // MARK: - Zentrale Signatur (Run 13.11.)
+
+    /// Run 25.11.: Hängt die lokale Signatur an den Body an (nur wenn der
+    /// Nutzer einen nicht-leeren Text hinterlegt hat - leerer Text heißt
+    /// explizit "keine Signatur"). Nutzt denselben applySignature-Pfad,
+    /// damit ein späterer Wechsel zu einer zentralen Signatur die lokale
+    /// sauber ersetzen kann.
+    private func applyLocalSignature() {
+        let text = SouveraMailDisplaySettings.localSignature(account: viewModel.accountKey)
+        guard !text.isEmpty else { return }
+        applySignature(MailSignature(html: text, text: text))
+    }
 
     /// Hängt die zentrale Signatur mit RFC-3676-Trenner ("-- ") an den
     /// Body an bzw. ersetzt eine zuvor angehängte Signatur. Der Aufruf

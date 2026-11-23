@@ -175,6 +175,28 @@ struct NCSettingsView: View {
                 })
                 .tint(Color(NCBrandColor.shared.getElement(account: model.session.account)))
             }
+            // Run 25.11.: Lokale E-Mail-Signatur (Editor). Wird bei jeder
+            // Änderung direkt gespeichert (Debounce unnötig, kleine Texte).
+            Section(content: {
+                TextEditor(text: Binding(
+                    get: { SouveraMailDisplaySettings.localSignature(account: model.session.account) },
+                    set: { SouveraMailDisplaySettings.setLocalSignature($0, account: model.session.account) }
+                ))
+                .frame(minHeight: 90)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(Color(.systemGray4), lineWidth: 1)
+                )
+            }, header: {
+                Text(NSLocalizedString("_settings_mail_signature_", value: "E-Mail signature", comment: "")).font(.headline)
+            }, footer: {
+                Text(NSLocalizedString(
+                    "_settings_mail_signature_desc_",
+                    value: "Appended to new mails and replies. A central signature from the admin takes precedence.",
+                    comment: ""
+                ))
+                .font(.footnote)
+            })
             // Sprache (In-App-Wechsel, wirkt nach Neustart)
             Section(header: Text(NSLocalizedString("_settings_language_", comment: "")).font(.headline), content: {
                 Picker(NSLocalizedString("_settings_language_", comment: ""), selection: Binding(

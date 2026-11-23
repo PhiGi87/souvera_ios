@@ -29,4 +29,25 @@ enum SouveraMailDisplaySettings {
     static func setFoldersCollapsed(_ collapsed: Bool, account: String) {
         UserDefaults.standard.set(collapsed, forKey: key("souvera_mail_folders_collapsed", account: account))
     }
+
+    // MARK: - Lokale E-Mail-Signatur (Run 25.11.)
+
+    /// Brand-String, wenn der Nutzer noch keine lokale Signatur
+    /// hinterlegt hat. Bewusst NICHT lokalisiert (Markenzeichen).
+    private static let defaultLocalSignature = "\u{2014} Gesendet mit Souvera Workspace \u{2014}"
+
+    /// Lokale Signatur des Nutzers (pro Account). Fehlt der Key,
+    /// wird der Brand-Default geliefert; ein vorhandener - auch
+    /// leerer - Wert wird 1:1 geliefert (leer = keine Signatur).
+    static func localSignature(account: String) -> String {
+        let storageKey = key("souvera_mail_signature_local", account: account)
+        if UserDefaults.standard.object(forKey: storageKey) is String {
+            return UserDefaults.standard.string(forKey: storageKey) ?? ""
+        }
+        return defaultLocalSignature
+    }
+
+    static func setLocalSignature(_ text: String, account: String) {
+        UserDefaults.standard.set(text, forKey: key("souvera_mail_signature_local", account: account))
+    }
 }
