@@ -125,7 +125,13 @@ final class ShieldViewModel: ObservableObject {
         var discovered: [String] = []
         if let result = await api.quarantineList(.spam) {
             guard gen == self.generation else { return }
-            warnings += result.warnings
+            // Run 25.11. (Multidomains): Shield-Warnungen (z. B. "E-Mail
+            // domain is not allowed for this app" bei Alias-Domaenen) nur
+            // noch ins Log — sie waren als Fehlerblock in der UI sichtbar
+            // und betreffen Admin-seitige Domain-Freischaltungen.
+            if !result.warnings.isEmpty {
+                SouveraLog.write("Shield", "warnings: " + result.warnings.joined(separator: " | "))
+            }
             let entries = result.data.compactMap { ShieldSpamEntry.from($0) }
             discovered += entries.compactMap(\.mailbox)
             let signature = entries.map { "\($0.id):\($0.seen)" }.joined(separator: ",")
@@ -172,13 +178,25 @@ final class ShieldViewModel: ObservableObject {
             selectedMailbox = nil
         }
         if let result = await api.list(.whitelist) {
-            warnings += result.warnings
+            // Run 25.11. (Multidomains): Shield-Warnungen (z. B. "E-Mail
+            // domain is not allowed for this app" bei Alias-Domaenen) nur
+            // noch ins Log — sie waren als Fehlerblock in der UI sichtbar
+            // und betreffen Admin-seitige Domain-Freischaltungen.
+            if !result.warnings.isEmpty {
+                SouveraLog.write("Shield", "warnings: " + result.warnings.joined(separator: " | "))
+            }
             whitelist = .success(result.data.compactMap { $0["value"] as? String })
         } else {
             whitelist = .error(NSLocalizedString("_shield_load_error_", comment: ""))
         }
         if let result = await api.list(.blacklist) {
-            warnings += result.warnings
+            // Run 25.11. (Multidomains): Shield-Warnungen (z. B. "E-Mail
+            // domain is not allowed for this app" bei Alias-Domaenen) nur
+            // noch ins Log — sie waren als Fehlerblock in der UI sichtbar
+            // und betreffen Admin-seitige Domain-Freischaltungen.
+            if !result.warnings.isEmpty {
+                SouveraLog.write("Shield", "warnings: " + result.warnings.joined(separator: " | "))
+            }
             blacklist = .success(result.data.compactMap { $0["value"] as? String })
         } else {
             blacklist = .error(NSLocalizedString("_shield_load_error_", comment: ""))
