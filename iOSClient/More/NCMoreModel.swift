@@ -201,6 +201,9 @@ final class NCMoreModel: ObservableObject {
         /// Run 03.11.: Öffnet den Abwesenheitsassistenten (souvera_mail).
         case vacation
 
+        /// Run 25.11.: Öffnet die eigenständige Aufgabenliste (VTODO).
+        case tasks
+
         /// No-op destination.
         case none
     }
@@ -256,6 +259,21 @@ final class NCMoreModel: ObservableObject {
             quotaDescription = ""
             quotaProgress = 0
         }
+
+        // Run 25.11.: Aufgaben (VTODO, eigenstaendiger Screen) als ERSTES
+        // Element im Mehr-Menue - vor den Favoriten. Titel mit value-
+        // Fallback (wie _vacation_title_), damit Sprachen ohne eigene
+        // lproj-Eintraege nicht den Raw-Key zeigen.
+        functionItems.append(
+            Item(
+                titleKey: "_tasks_title_",
+                fallbackTitle: "Tasks",
+                // "checklist" ist seit iOS 15 als SF-Symbol verfuegbar und
+                // passt thematisch zur Aufgabenliste.
+                image: "checklist",
+                destination: .tasks
+            )
+        )
 
         functionItems.append(
             Item(
@@ -608,6 +626,16 @@ final class NCMoreModel: ObservableObject {
                 // Run 04.11.: Fallback-Value deckt alle Sprachen ohne eigene
                 // lproj-Einträge ab (Transifex liefert spätere Übersetzungen).
                 title: NSLocalizedString("_vacation_title_", value: "Vacation responder", comment: "")
+            )
+
+        case .tasks:
+            // Run 25.11.: Eigenstaendige Aufgabenliste (VTODO aus allen
+            // Task-Kalendern) - gepusht wie die anderen SwiftUI-Screens,
+            // Refresh-Button in der View-Toolbar. Fallback-Value wie beim
+            // Vacation-Screen.
+            pushHosted(
+                SouveraTasksView(),
+                title: NSLocalizedString("_tasks_title_", value: "Tasks", comment: "")
             )
 
         case .none:
