@@ -32,6 +32,10 @@ struct CalendarEventModel: Identifiable {
     /// PARTSTAT des eigenen ATTENDEE (NEEDS-ACTION = unbeantwortete
     /// Einladung; leer = kein Teilnehmer-Kontext / bereits beantwortet).
     let ownPartstat: String
+    /// Run 24.11. (Tasks): STATUS des VTODO (NEEDS-ACTION/COMPLETED/...).
+    var taskStatus: String = "NEEDS-ACTION"
+    /// Abgehakt? (STATUS:COMPLETED oder COMPLETED-Timestamp vorhanden.)
+    var isCompleted: Bool = false
 }
 
 struct EventDraft {
@@ -104,6 +108,8 @@ enum ICSParser {
             var duration: TimeInterval?
             var sequenceValue = 0
             var allDay = false
+            var taskStatus = "NEEDS-ACTION"
+            var hasCompletedStamp = false
             var startDay: Date?
             var endDay: Date?
             var inTimeZone = false
@@ -249,6 +255,15 @@ enum ICSParser {
                     duration = parseDuration(value)
                 } else if keyPart == "SEQUENCE" {
                     sequenceValue = Int(value) ?? 0
+                } else if bareKey == "STATUS" {
+                    // Run 24.11. (Tasks): VTODO-Status (NC-Tasks schreibt
+                    // NEEDS-ACTION/COMPLETED/CANCELLED/IN-PROCESS).
+                    taskStatus = value.uppercased()
+                } else if bareKey == "COMPLETED" {
+                    // Abhaken: COMPLETED-Timestamp (UTC) vorhanden.
+                    hasCompletedStamp = true
+                } else if bareKey == "PERCENT-COMPLETE" {
+                    if Int(value) == 100 { hasCompletedStamp = true }
                 }
             }
 
@@ -267,8 +282,11 @@ enum ICSParser {
             }
 
             if isTask && start == nil && startDay == nil && end == nil && endDay == nil {
-                // Stack ohne Datum: nicht im Kalender anzeigen
-                continue
+                // Run 24.11. (Tasks): Undatierte Tasks NICHT mehr verwerfen -
+                // sie erscheinen als "Aufgaben"-Sektion am Tagesende von
+                // heute (start = Tagesanfang heute).
+                startDay = Calendar.current.startOfDay(for: Date())
+                allDay = false
             }
             var resolvedStart = start ?? startDay ?? Date.distantPast
             // Run 26.09. (Feedback: Deck-Termine dauerten 1 h): Aufgaben aus
@@ -307,10 +325,64 @@ enum ICSParser {
                 isTask: isTask,
                 organizerName: organizerName,
                 organizerEmail: organizerEmail,
-                ownPartstat: ownPartstat
+                ownPartstat: ownPartstat,
+                taskStatus: taskStatus,
+                isCompleted: isTask && (hasCompletedStamp || taskStatus == "COMPLETED")
             ))
         }
         return events
+    }
+
+    /// Run 24.11. (Tasks): VTODO abhaken - NC-Konvention (Tasks-App):
+    /// STATUS:COMPLETED + COMPLETED:<UTC-Zeitstempel> +
+    /// PERCENT-COMPLETE:100. Bestehende STATUS/COMPLETED/PERCENT-COMPLETE-
+    /// Zeilen im VTODO-Block werden ersetzt; ohne VTODO-Block unverändert.
+    static func completeTodo(_ ics: String) -> String {
+        return rewriteTodoStatus(ics) { lines in
+            lines.append("STATUS:COMPLETED")
+            lines.append("COMPLETED:\(utcStamp(Date()))")
+            lines.append("PERCENT-COMPLETE:100")
+        }
+    }
+
+    /// Run 24.11. (Tasks): Abhaken zurücknehmen - STATUS:NEEDS-ACTION,
+    /// COMPLETED/PERCENT-COMPLETE entfernen (wie NC-Web "uncheck").
+    static func uncompleteTodo(_ ics: String) -> String {
+        return rewriteTodoStatus(ics) { lines in
+            lines.append("STATUS:NEEDS-ACTION")
+        }
+    }
+
+    /// Gemeinsame Rewrite-Logik (Muster updatePartstat): ICS entfalten,
+    /// VTODO-Block finden, dort STATUS/COMPLETED/PERCENT-COMPLETE-Zeilen
+    /// entfernen und vor END:VTODO die neuen Status-Zeilen einfügen.
+    private static func rewriteTodoStatus(_ ics: String,
+                                          insertion: (inout [String]) -> Void) -> String {
+        let unfolded = unfold(ics)
+        var lines = unfolded.components(separatedBy: "\n")
+        guard let beginIdx = lines.firstIndex(where: { $0.uppercased().hasPrefix("BEGIN:VTODO") }),
+              let endIdx = lines.firstIndex(where: { $0.uppercased().hasPrefix("END:VTODO") }),
+              beginIdx < endIdx else { return ics }
+        let statusKeys = ["STATUS", "COMPLETED", "PERCENT-COMPLETE"]
+        // Status-Zeilen nur innerhalb des VTODO-Blocks entfernen (ein
+        // VCALENDAR kann theoretisch VEVENT+VTODO mischen).
+        for i in (beginIdx + 1)..<endIdx {
+            let bareKey = lines[i].prefix(while: { $0 != ":" && $0 != ";" }).uppercased()
+            if statusKeys.contains(bareKey) { lines[i] = "" }
+        }
+        var insertLines: [String] = []
+        insertion(&insertLines)
+        lines.insert(contentsOf: insertLines, at: endIdx)
+        return lines.filter { !$0.isEmpty }.joined(separator: "\r\n")
+    }
+
+    /// UTC-Zeitstempel im RFC-5545-Format (wie buildICS).
+    private static func utcStamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        return formatter.string(from: date)
     }
 
     /// Serializes a draft into an iCalendar VEVENT (all UTC).

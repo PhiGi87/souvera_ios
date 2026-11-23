@@ -503,11 +503,20 @@ final class CalendarViewModel: ObservableObject {
         // der Summe aller Kalender.
         let selectedCalendars = calendars.filter { selectedCalendarHrefs.contains($0.href) }
         let calClient = client
+        // Run 24.11. (Tasks): Kalender mit VTODO-Support zusätzlich per
+        // VTODO-REPORT laden (ohne time-range); Fehler tolerieren (leer).
+        let taskCalendars = selectedCalendars.filter(\.supportsTasks)
         let results: [(String, [CalDavEventEntry])] = await withTaskGroup(of: (String, [CalDavEventEntry]).self) { group in
             for cal in selectedCalendars {
                 group.addTask {
                     let fetched = await calClient.fetchEvents(calendarHref: cal.href, start: start, end: end)
                     return (cal.href, fetched)
+                }
+            }
+            for cal in taskCalendars {
+                group.addTask {
+                    let todos = await calClient.fetchTodos(calendarHref: cal.href)
+                    return (cal.href, todos)
                 }
             }
             var collected: [(String, [CalDavEventEntry])] = []
@@ -517,6 +526,10 @@ final class CalendarViewModel: ObservableObject {
 
         var entries: [CalDavEventEntry] = []
         var suspiciousEmpty: [String] = []
+        // Run 24.11. (Tasks): Dedup nach href - Tasks-Kalender liefern
+        // (leeres) VEVENT-Ergebnis UND das VTODO-REPORT; der Cache-Restand
+        // bei "suspicious empty" darf frische Todos nicht doppeln.
+        var collectedHrefs: Set<String> = []
         for (href, fetched) in results {
             if fetched.isEmpty, let previous = previousByHref[href], previous > 0 {
                 suspiciousEmpty.append(href)
@@ -528,10 +541,16 @@ final class CalendarViewModel: ObservableObject {
                     JmapLog.write("Calendar SUSPICIOUS empty result for \(href) (previous=\(previous))")
                 }
                 // Vorstand dieses Kalenders BEHALTEN (Run 19.09.).
-                entries += cachedByHref[href] ?? []
+                for entry in cachedByHref[href] ?? [] where !collectedHrefs.contains(entry.href) {
+                    collectedHrefs.insert(entry.href)
+                    entries.append(entry)
+                }
                 continue
             }
-            entries += fetched
+            for entry in fetched where !collectedHrefs.contains(entry.href) {
+                collectedHrefs.insert(entry.href)
+                entries.append(entry)
+            }
         }
         JmapLog.write("Calendar load: \(calendars.count) calendars, \(selectedCalendarHrefs.count) selected, \(entries.count) entries fetched\(suspiciousEmpty.isEmpty ? "" : ", SUSPICIOUS-EMPTY: \(suspiciousEmpty.count)")")
         JmapLog.write("Calendar selection: \(selectedCalendarHrefs.sorted().joined(separator: ", "))")
@@ -854,6 +873,39 @@ final class CalendarViewModel: ObservableObject {
     }
 
     // MARK: - Optimistische Termine (Run 29.09.)
+
+    /// Run 24.11. (Tasks): VTODO abhaken/zuruecknehmen. Optimistisch:
+    /// neuer ICS-Stand SOFORT lokal (upsertLocalEntry parst STATUS/COMPLETED
+    /// mit), Server-PUT im Hintergrund + PendingWrite bei Fehlschlag
+    /// (bestehendes Muster scheduleEventSync).
+    func toggleTask(_ event: CalendarEventModel) async {
+        // ICS-Quelle: gecachtes Entry, sonst frisch per GET nachladen.
+        var entry = cachedEntries.first(where: { $0.href == event.href })
+            ?? CalDavEventEntry(calendarHref: event.calendarHref, href: event.href,
+                                etag: event.etag, ics: "")
+        if entry.ics.isEmpty {
+            entry = CalDavEventEntry(calendarHref: entry.calendarHref, href: entry.href,
+                                     etag: entry.etag,
+                                     ics: await client.fetchEventICS(entry) ?? "")
+        }
+        guard !entry.ics.isEmpty else {
+            JmapLog.write("Calendar toggleTask: no ICS for \(event.href)")
+            return
+        }
+        let updated = event.isCompleted
+            ? ICSParser.uncompleteTodo(entry.ics)
+            : ICSParser.completeTodo(entry.ics)
+        let optimistic = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                          href: entry.href, etag: entry.etag,
+                                          ics: updated)
+        upsertLocalEntry(optimistic)
+        actionFeedback = CalendarActionFeedback(
+            success: true,
+            message: NSLocalizedString("_calendar_sync_pending_", comment: "")
+        )
+        // Server-Schreib im Hintergrund (Retry-Ladder + Warteschlange).
+        scheduleEventSync(kind: .update, entry: optimistic)
+    }
 
     /// Optimistischen Stand SOFORT in Cache + Liste übernehmen - die
     /// Ansicht aktualisiert sich ohne Netz-Wartezeit.

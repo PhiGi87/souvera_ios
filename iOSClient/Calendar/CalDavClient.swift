@@ -14,6 +14,19 @@ struct CalDavCalendar {
     let color: String?
     /// Schreibrecht laut current-user-privilege-set (write/all).
     let canWrite: Bool
+    /// Komponenten laut supported-calendar-component-set (RFC 4791 §5.2.2),
+    /// z. B. ["VEVENT", "VTODO"] - leer, wenn der Server das Prop nicht
+    /// liefert (dann greift die Deck-Heuristik in supportsTasks).
+    var supportedComponents: [String] = []
+
+    /// Run 24.11. (Tasks): Kalender liefert VTODOs? Primär via
+    /// supported-calendar-component-set (die NC-Tasks-App legt den
+    /// Kalender "tasks" mit VTODO-only an); Fallback: Deck-Heuristik
+    /// (Deck-Boards speichern Karten als VTODO).
+    var supportsTasks: Bool {
+        if supportedComponents.contains(where: { $0.uppercased() == "VTODO" }) { return true }
+        return href.range(of: "deck", options: .caseInsensitive) != nil
+    }
 
     /// Run 22.09.: Gruppierung der Kalender-Uebersicht (wie Android):
     /// eigene, freigegebene, Deck-Kalender.
@@ -166,7 +179,11 @@ final class CalDavClient {
                 href: href,
                 displayName: (name?.isEmpty == false) ? name! : (href as NSString).lastPathComponent,
                 color: response["color"],
-                canWrite: response["canWrite"] == "1"
+                canWrite: response["canWrite"] == "1",
+                // VTODO-Erkennung: comp-Namen aus dem
+                // supported-calendar-component-set (im Parser gesammelt).
+                supportedComponents: (response["supportedComponents"] ?? "")
+                    .split(separator: ";").map(String.init)
             ))
         }
         return calendars
@@ -215,6 +232,42 @@ final class CalDavClient {
         }
         JmapLog.write("CalDAV calendar-query \(url.absoluteString) -> \(events.count) events parsed")
         return events
+    }
+
+    /// Run 24.11. (Tasks): Alle VTODOs eines Task-Kalenders laden (REPORT
+    /// comp-filter VTODO OHNE time-range - siehe todoReportBody). Fehler
+    /// werden toleriert (leeres Ergebnis), der Kalender-Stream bleibt
+    /// dadurch unbeeinträchtigt.
+    func fetchTodos(calendarHref: String) async -> [CalDavEventEntry] {
+        guard let home = calendarHomeURLs().first,
+              let url = URL(string: calendarHref, relativeTo: home)?.absoluteURL else { return [] }
+        var req = authorizedRequest(for: url, method: "REPORT", contentType: "application/xml; charset=utf-8")
+        req.setValue("1", forHTTPHeaderField: "Depth")
+        let queryBody = Self.todoReportBody()
+        req.httpBody = queryBody.data(using: .utf8)
+        queryBodiesLock.lock()
+        lastQueryBodies[calendarHref] = queryBody
+        queryBodiesLock.unlock()
+        guard let (data, response) = try? await urlSession.data(for: req) else { return [] }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? -1
+        guard status == 207,
+              let xml = String(data: data, encoding: .utf8) else {
+            JmapLog.write("CalDAV todo-query \(url.absoluteString) -> \(status)")
+            return []
+        }
+        JmapLog.write("CalDAV todo-query \(url.absoluteString) -> \(status), \(data.count) bytes")
+        var todos: [CalDavEventEntry] = []
+        for response in DavMultistatusParser().parse(xml) {
+            guard let vcalendar = response["calendar-data"], !vcalendar.isEmpty else { continue }
+            todos.append(CalDavEventEntry(
+                calendarHref: calendarHref,
+                href: response["href"] ?? "",
+                etag: response["etag"],
+                ics: vcalendar
+            ))
+        }
+        JmapLog.write("CalDAV todo-query \(url.absoluteString) -> \(todos.count) todos parsed")
+        return todos
     }
 
     // MARK: - Writing
@@ -406,6 +459,8 @@ final class CalDavClient {
     // MARK: - XML bodies
 
     private static var propfindBody: String {
+        // Run 24.11. (Tasks): supported-calendar-component-set liefert die
+        // Komponenten des Kalenders (VEVENT/VTODO) - RFC 4791 §5.2.2.
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <d:propfind xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav" xmlns:a="http://apple.com/ns/ical/">
@@ -414,6 +469,7 @@ final class CalDavClient {
             <d:resourcetype/>
             <a:calendar-color/>
             <d:current-user-privilege-set/>
+            <c:supported-calendar-component-set/>
           </d:prop>
         </d:propfind>
         """
@@ -445,6 +501,27 @@ final class CalDavClient {
         """
     }
 
+    /// Run 24.11. (Tasks): VTODO-REPORT OHNE time-range. Tasks ohne
+    /// Fälligkeit (undatierte Deck-Karten/offene NC-Tasks) wären bei einem
+    /// time-range-Filter nicht im Ergebnis - daher wird der gesamte
+    /// VTODO-Bestand des Kalenders abgefragt.
+    private static func todoReportBody() -> String {
+        """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <c:calendar-query xmlns:d="DAV:" xmlns:c="urn:ietf:params:xml:ns:caldav">
+          <d:prop>
+            <d:getetag/>
+            <c:calendar-data/>
+          </d:prop>
+          <c:filter>
+            <c:comp-filter name="VCALENDAR">
+              <c:comp-filter name="VTODO"/>
+            </c:comp-filter>
+          </c:filter>
+        </c:calendar-query>
+        """
+    }
+
 }
 
 // MARK: - Shared multistatus parser (Foundation XMLParser)
@@ -460,6 +537,10 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
     private var currentElement = ""
     private var currentValue = ""
     private var inPrivilegeSet = false
+    /// Run 24.11. (Tasks): innerhalb von supported-calendar-component-set -
+    /// die <c:comp name="VTODO"/>-Kinder tragen die Komponente nur als
+    /// Attribut (kein Textinhalt), darum Element-Tracking + Attribut-Lesung.
+    private var inComponentSet = false
 
     func parse(_ xml: String) -> [[String: String]] {
         responses = []
@@ -478,9 +559,15 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
         if local == "response" {
             currentResponse = [:]
             inPrivilegeSet = false
+            inComponentSet = false
         }
         if local == "current-user-privilege-set" {
             inPrivilegeSet = true
+        } else if local == "supported-calendar-component-set" {
+            inComponentSet = true
+        } else if inComponentSet, local == "comp",
+                  let name = attributeDict["name"], !name.isEmpty {
+            currentResponse?["supportedComponents"] = (currentResponse?["supportedComponents"] ?? "") + name + ";"
         } else if inPrivilegeSet, local == "write" || local == "all" {
             // write/all im Privilege-Set => Schreibrecht auf den Kalender.
             currentResponse?["canWrite"] = "1"
@@ -511,6 +598,9 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
         }
         if local == "current-user-privilege-set" {
             inPrivilegeSet = false
+        }
+        if local == "supported-calendar-component-set" {
+            inComponentSet = false
         }
         if local == "response" {
             responses.append(response)
