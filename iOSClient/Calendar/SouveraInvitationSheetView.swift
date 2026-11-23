@@ -73,11 +73,11 @@ struct SouveraInvitationSheetView: View {
             }
             // Run 24.11.: Bestaetigung vor dem Entfernern ohne Antwort
             // (role: .destructive, Apple-Standard-Alert).
-            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?", comment: ""),
                    isPresented: Binding(
                     get: { calendarIgnoreTarget != nil },
                     set: { if !$0 { calendarIgnoreTarget = nil } })) {
-                Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+                Button(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: ""), role: .destructive) {
                     guard let event = calendarIgnoreTarget else { return }
                     calendarIgnoreTarget = nil
                     ignoreBusyId = event.href
@@ -91,11 +91,11 @@ struct SouveraInvitationSheetView: View {
                     calendarIgnoreTarget = nil
                 }
             }
-            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?", comment: ""),
                    isPresented: Binding(
                     get: { mailIgnoreTarget != nil },
                     set: { if !$0 { mailIgnoreTarget = nil } })) {
-                Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+                Button(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: ""), role: .destructive) {
                     guard let invite = mailIgnoreTarget else { return }
                     mailIgnoreTarget = nil
                     ignoreBusyId = invite.id
@@ -207,7 +207,7 @@ struct SouveraInvitationSheetView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(ignoreBusyId != nil)
-                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove")))
+                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: "")))
                 }
             }
         }
@@ -298,7 +298,7 @@ struct SouveraInvitationSheetView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(ignoreBusyId != nil)
-                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove")))
+                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: "")))
                 }
             }
         }
@@ -565,9 +565,9 @@ struct SouveraInvitationDetailView: View {
             }
         }
         // Run 24.11.: Bestaetigung vor dem Entfernern ohne Antwort.
-        .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+        .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?", comment: ""),
                isPresented: $ignoreConfirm) {
-            Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+            Button(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: ""), role: .destructive) {
                 Task { await performIgnoreRemoval() }
             }
             Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
@@ -902,7 +902,7 @@ struct SouveraInvitationDetailView: View {
                     } label: {
                         HStack(spacing: 8) {
                             Image(systemName: "trash")
-                            Text(NSLocalizedString("_invitations_ignore_", value: "Remove"))
+                            Text(NSLocalizedString("_invitations_ignore_", value: "Remove", comment: ""))
                         }
                         .foregroundStyle(.red)
                     }

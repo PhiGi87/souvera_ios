@@ -783,13 +783,15 @@ final class CalendarViewModel: ObservableObject {
                 ?? calendars.first(where: { !$0.href.contains("deck") })
             guard let targetCalendar = chosen else { return false }
             let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
+            let currentEvents: [CalendarEventModel]
+            if case let .success(list) = events { currentEvents = list } else { currentEvents = [] }
             // Run 24.11. (Feedback: saveEvent legte Duplikate an): VOR dem
             // Create pruefen, ob ein Event mit gleicher UID bereits in einem
             // ANDEREN Kalender existiert (cachedEntries/events nach uid) -
             // dann auf dessen href updaten statt neu anlegen.
             if let duplicateEntry = Self.findExistingEntryForUID(uid,
                                                                  cachedEntries: cachedEntries,
-                                                                 events: events),
+                                                                 events: currentEvents),
                duplicateEntry.calendarHref != targetCalendar.href {
                 JmapLog.write("Calendar saveEvent: uid \(uid) already exists in \(duplicateEntry.calendarHref) - update instead of create")
                 kind = .update
@@ -825,15 +827,14 @@ final class CalendarViewModel: ObservableObject {
     /// Kalendergrenzen hinweg zu verhindern.
     static func findExistingEntryForUID(_ uid: String,
                                         cachedEntries: [CalDavEventEntry],
-                                        events: Result<[CalendarEventModel], Error>) -> CalDavEventEntry? {
+                                        events: [CalendarEventModel]) -> CalDavEventEntry? {
         let key = uid.lowercased()
         if let entry = cachedEntries.first(where: {
             (SouveraInvitationCenter.quickExtract($0.ics, key: "UID") ?? "").lowercased() == key
         }) {
             return entry
         }
-        if case let .success(list) = events,
-           let event = list.first(where: { $0.uid.lowercased() == key }) {
+        if let event = events.first(where: { $0.uid.lowercased() == key }) {
             return CalDavEventEntry(calendarHref: event.calendarHref,
                                     href: event.href,
                                     etag: event.etag,
