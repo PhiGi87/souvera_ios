@@ -34,7 +34,7 @@ enum SouveraMailDisplaySettings {
 
     /// Brand-String, wenn der Nutzer noch keine lokale Signatur
     /// hinterlegt hat. Bewusst NICHT lokalisiert (Markenzeichen).
-    private static let defaultLocalSignature = "\u{2014} Gesendet mit Souvera Workspace \u{2014}"
+    private static let defaultLocalSignature = "Gesendet mit Souvera Workspace."
 
     /// Lokale Signatur des Nutzers (pro Account). Fehlt der Key,
     /// wird der Brand-Default geliefert; ein vorhandener - auch
