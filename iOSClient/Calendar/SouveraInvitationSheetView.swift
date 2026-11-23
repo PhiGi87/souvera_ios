@@ -23,6 +23,12 @@ struct SouveraInvitationSheetView: View {
     @State private var processedIds: Set<String> = []
     @State private var removedIds: Set<String> = []
     @State private var cancelRemoveId: String?
+    /// Run 24.11.: Einladung ohne Antwort entfernen - Bestaetigungs-
+    /// Ziele fuer Kalender- und Mail-Zeile (gleiches Muster wie der
+    /// CANCEL-Zweig) plus laufende Entfernung fuer den Spinner.
+    @State private var calendarIgnoreTarget: CalendarEventModel?
+    @State private var mailIgnoreTarget: SouveraMailInvitation?
+    @State private var ignoreBusyId: String?
 
     var body: some View {
         NavigationStack {
@@ -63,6 +69,44 @@ struct SouveraInvitationSheetView: View {
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button(NSLocalizedString("_done_", comment: "")) { dismiss() }
+                }
+            }
+            // Run 24.11.: Bestaetigung vor dem Entfernern ohne Antwort
+            // (role: .destructive, Apple-Standard-Alert).
+            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+                   isPresented: Binding(
+                    get: { calendarIgnoreTarget != nil },
+                    set: { if !$0 { calendarIgnoreTarget = nil } })) {
+                Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+                    guard let event = calendarIgnoreTarget else { return }
+                    calendarIgnoreTarget = nil
+                    ignoreBusyId = event.href
+                    Task {
+                        _ = await center.ignoreCalendarInvitation(event)
+                        removedIds.insert(event.href)
+                        ignoreBusyId = nil
+                    }
+                }
+                Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                    calendarIgnoreTarget = nil
+                }
+            }
+            .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+                   isPresented: Binding(
+                    get: { mailIgnoreTarget != nil },
+                    set: { if !$0 { mailIgnoreTarget = nil } })) {
+                Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+                    guard let invite = mailIgnoreTarget else { return }
+                    mailIgnoreTarget = nil
+                    ignoreBusyId = invite.id
+                    Task {
+                        await center.ignoreMailInvitation(invite)
+                        removedIds.insert(invite.id)
+                        ignoreBusyId = nil
+                    }
+                }
+                Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {
+                    mailIgnoreTarget = nil
                 }
             }
         }
@@ -134,12 +178,36 @@ struct SouveraInvitationSheetView: View {
                 Text(NSLocalizedString("_invitations_answered_", comment: ""))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.green)
+            } else if removedIds.contains(event.href) {
+                // Run 24.11.: ohne Antwort entfernt - Bestaetigungsmuster
+                // wie der CANCEL-Zweig.
+                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed"),
+                      systemImage: "trash.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             } else {
                 HStack {
                     rsvpButtons(id: event.href) { rsvp in
                         await respondCalendar(event, rsvp)
                     }
                     Spacer()
+                    // Run 24.11.: Einladung ohne Antwort loeschbar -
+                    // rotes Trash-Icon neben den RSVP-Kreisen.
+                    Button {
+                        calendarIgnoreTarget = event
+                    } label: {
+                        if ignoreBusyId == event.href {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                                .frame(width: 36, height: 36)
+                                .background(Circle().fill(Color.red.opacity(0.14)))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(ignoreBusyId != nil)
+                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove")))
                 }
             }
         }
@@ -203,12 +271,34 @@ struct SouveraInvitationSheetView: View {
                 Text(NSLocalizedString("_invitations_answered_", comment: ""))
                     .font(.caption.weight(.medium))
                     .foregroundStyle(.green)
+            } else if removedIds.contains(invite.id) {
+                // Run 24.11.: ohne Antwort entfernt.
+                Label(NSLocalizedString("_invitations_ignored_", value: "Invitation removed"),
+                      systemImage: "trash.circle.fill")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
             } else if mailInteractionEnabled {
                 HStack {
                     rsvpButtons(id: invite.id) { rsvp in
                         await respondMail(invite, rsvp)
                     }
                     Spacer()
+                    // Run 24.11.: Mail-Einladung ohne Antwort loeschbar.
+                    Button {
+                        mailIgnoreTarget = invite
+                    } label: {
+                        if ignoreBusyId == invite.id {
+                            ProgressView().scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "trash")
+                                .foregroundStyle(.red)
+                                .frame(width: 36, height: 36)
+                                .background(Circle().fill(Color.red.opacity(0.14)))
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(ignoreBusyId != nil)
+                    .accessibilityLabel(Text(NSLocalizedString("_invitations_ignore_", value: "Remove")))
                 }
             }
         }
@@ -333,6 +423,10 @@ struct SouveraInvitationDetailView: View {
     }
     /// Run 19.09. (Feedback): Ergebnis-Popup beim Entfernen.
     @State private var cancelResultAlert: String?
+    /// Run 24.11.: Einladung ohne Antwort entfernen - Bestaetigung
+    /// (role: .destructive) + Spinner waehrend der Entfernung.
+    @State private var ignoreConfirm = false
+    @State private var ignoreBusy = false
 
     private var effectiveEvent: CalendarEventModel {
         center.mailInvites.first(where: { $0.id == event.href })?.event ?? event
@@ -469,6 +563,14 @@ struct SouveraInvitationDetailView: View {
                 cancelResultAlert = nil
                 onFinished?()
             }
+        }
+        // Run 24.11.: Bestaetigung vor dem Entfernern ohne Antwort.
+        .alert(NSLocalizedString("_invitations_ignore_confirm_", value: "Remove this invitation without responding?"),
+               isPresented: $ignoreConfirm) {
+            Button(NSLocalizedString("_invitations_ignore_", value: "Remove"), role: .destructive) {
+                Task { await performIgnoreRemoval() }
+            }
+            Button(NSLocalizedString("_cancel_", comment: ""), role: .cancel) {}
         }
         // Run 17.09. (Feedback): echtes Popup-Overlay statt Sheet.
         .overlay {
@@ -784,6 +886,29 @@ struct SouveraInvitationDetailView: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            // Run 24.11.: Entfernen ohne Antwort - roter Eintrag NACH den
+            // RSVP-Kreisen (Quelle entscheidet Kalender- vs. Mail-Pfad).
+            if !isResolving, !isCancellation {
+                if ignoreBusy {
+                    HStack(spacing: 10) {
+                        ProgressView()
+                        Text(NSLocalizedString("_invitations_loading_", comment: ""))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    Button {
+                        ignoreConfirm = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "trash")
+                            Text(NSLocalizedString("_invitations_ignore_", value: "Remove"))
+                        }
+                        .foregroundStyle(.red)
+                    }
+                    .disabled(ignoreBusy)
+                }
+            }
         } header: {
             Text(NSLocalizedString("_invitations_rsvp_", comment: ""))
         } footer: {
@@ -904,6 +1029,20 @@ struct SouveraInvitationDetailView: View {
                 cancelResultAlert = NSLocalizedString("_invitations_declined_kept_", comment: "")
             }
         }
+    }
+
+    /// Run 24.11.: Einladung ohne Antwort entfernen - Mail-Einladung
+    /// (live aus dem Center) bzw. Kalender-Einladung, danach Ergebnis-
+    /// Popup wie cancelSection (Schliessen beendet den Dialog).
+    private func performIgnoreRemoval() async {
+        ignoreBusy = true
+        if let live = liveInvitation {
+            await SouveraInvitationCenter.shared.ignoreMailInvitation(live)
+        } else {
+            _ = await SouveraInvitationCenter.shared.ignoreCalendarInvitation(displayEvent)
+        }
+        ignoreBusy = false
+        cancelResultAlert = NSLocalizedString("_invitations_ignored_", value: "Invitation removed")
     }
 
     private var timeLine: String {

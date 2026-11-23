@@ -59,6 +59,9 @@ final class SouveraInvitationCenter: ObservableObject {
             $0.ownPartstat == "needs-action"
                 && !Self.isAnswered(uid: $0.uid)
                 && !serverAnsweredUids.contains($0.uid.lowercased())
+                // Run 24.11.: ohne Antwort entfernte Einladungen (href-
+                // basierter Ignore-Marker) erscheinen nicht mehr.
+                && !Self.isIgnored(id: $0.href)
         }
         let newSig = pending.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
         let oldSig = calendarInvites.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
@@ -125,7 +128,12 @@ final class SouveraInvitationCenter: ObservableObject {
         let openCalendarUids = Set(calendarInvites.map { $0.uid.lowercased() }.filter { !$0.isEmpty })
         let deduped = invites.filter { invite in
             let uid = invite.eventUID.lowercased()
-            return uid.isEmpty || !openCalendarUids.contains(uid)
+            if uid.isEmpty || !openCalendarUids.contains(uid) {
+                // Run 24.11.: ohne Antwort entfernte Einladungen (messageId-
+                // basierter Ignore-Marker) erscheinen nicht mehr.
+                return !Self.isIgnored(id: invite.id) && !Self.isIgnored(id: invite.messageId)
+            }
+            return false
         }
         let newSig = deduped.map { $0.id }.sorted().joined(separator: ",")
         let oldSig = mailInvites.map { $0.id }.sorted().joined(separator: ",")
@@ -178,6 +186,35 @@ final class SouveraInvitationCenter: ObservableObject {
     }
 
     // MARK: - Beantwortete Einladungen (persistiert)
+
+    /// Run 24.11. (Feedback: Einladungen ohne Antwort loeschbar): lokal
+    /// ignorierte Einladungen, key = Kalender-href bzw. Mail-messageId.
+    /// Der Marker blendet die Einladung dauerhaft aus - OHNE "beantwortet"
+    /// zu implizieren (bewusst NICHT markAnsweredUid, das faerbt Labels).
+    private static let ignoredKey = "invitations_ignored_ids"
+    private static let ignoredEndKey = "invitations_ignored_enddates"
+
+    static func ignoredIds() -> Set<String> {
+        Set(UserDefaults.standard.stringArray(forKey: ignoredKey) ?? [])
+    }
+
+    static func isIgnored(id: String) -> Bool {
+        guard !id.isEmpty else { return false }
+        return ignoredIds().contains(id)
+    }
+
+    /// Ignore-Marker setzen (mit Enddatum als Basis fuer das Cleanup).
+    static func markIgnored(id: String, eventEnd: Date? = nil) {
+        guard !id.isEmpty else { return }
+        var ids = ignoredIds()
+        ids.insert(id)
+        UserDefaults.standard.set(Array(ids), forKey: ignoredKey)
+        if let eventEnd {
+            var ends = UserDefaults.standard.dictionary(forKey: ignoredEndKey) as? [String: Double] ?? [:]
+            ends[id] = eventEnd.timeIntervalSince1970
+            UserDefaults.standard.set(ends, forKey: ignoredEndKey)
+        }
+    }
 
     private static let answeredKey = "invitations_answered_message_ids"
     private static let answeredSequenceKey = "invitations_answered_sequence_by_uid"
@@ -343,8 +380,21 @@ final class SouveraInvitationCenter: ObservableObject {
             for uid in expiredUids { pending.remove(uid) }
             UserDefaults.standard.set(Array(pending), forKey: pendingRemovalKey)
         }
-        if !expiredIds.isEmpty || !expiredUids.isEmpty {
-            SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs entfernt (Termin vorbei)")
+        // Run 24.11.: Ignore-Marker abgelaufener Termine aufraeumen
+        // (Muster der uebrigen Keys - sonst wachsen sie unbefristet).
+        var ignored = ignoredIds()
+        var ignoredEnds = UserDefaults.standard.dictionary(forKey: ignoredEndKey) as? [String: Double] ?? [:]
+        let expiredIgnored = ignoredEnds.filter { Date(timeIntervalSince1970: $0.value) < cutoff }.map(\.key)
+        for id in expiredIgnored {
+            ignored.remove(id)
+            ignoredEnds.removeValue(forKey: id)
+        }
+        if !expiredIgnored.isEmpty {
+            UserDefaults.standard.set(Array(ignored), forKey: ignoredKey)
+            UserDefaults.standard.set(ignoredEnds, forKey: ignoredEndKey)
+        }
+        if !expiredIds.isEmpty || !expiredUids.isEmpty || !expiredIgnored.isEmpty {
+            SouveraLog.write("Invitations", "cleanup: \(expiredIds.count) Antworten, \(expiredUids.count) UIDs, \(expiredIgnored.count) Ignore-Marker entfernt (Termin vorbei)")
         }
     }
 
@@ -407,9 +457,10 @@ final class SouveraInvitationCenter: ObservableObject {
                                                    bodyProperties: bodyProperties,
                                                    fetchAllBodyValues: false)
             let answered = Self.answeredMessageIds
+            let ignored = Self.ignoredIds()
             let candidateIds: [String] = overview.compactMap { json in
                 guard let id = json["id"] as? String else { return nil }
-                guard !answered.contains(id) else { return nil }
+                guard !answered.contains(id), !ignored.contains(id) else { return nil }
                 let attachments = ((json["attachments"] as? [[String: Any]]) ?? [])
                     + ((json["inlineAttachments"] as? [[String: Any]]) ?? [])
                 return Self.isInvitationCandidate(subject: (json["subject"] as? String) ?? "",
@@ -486,6 +537,9 @@ final class SouveraInvitationCenter: ObservableObject {
         }
 
         let answered = Self.answeredMessageIds
+        // Run 24.11.: ohne Antwort entfernte Einladungen nicht erneut
+        // einsammeln (gleiches Gate-Muster wie answeredMessageIds).
+        let ignored = Self.ignoredIds()
         var invites: [SouveraMailInvitation] = []
         for json in candidates {
             let subject = (json["subject"] as? String) ?? ""
@@ -494,7 +548,7 @@ final class SouveraInvitationCenter: ObservableObject {
             // nicht mehr uebersprungen werden - der Tester oeffnet die
             // Mail natuerlich zuerst ($seen). Gefiltert werden nur noch
             // BEANTWORTETE Einladungen.
-            guard !answered.contains(messageId) else { continue }
+            guard !answered.contains(messageId), !ignored.contains(messageId) else { continue }
             let from = Self.firstFromAddress(json)
             let lowerSubject = subject.lowercased()
             // Run 18.09. (Feedback): auch ABLESAGEN erkennen - Betreff-
@@ -1116,6 +1170,56 @@ final class SouveraInvitationCenter: ObservableObject {
             SouveraLog.write("Invitations", "decline remove uid=\(uid): nicht im Kalender")
         }
         return removedAny
+    }
+
+    // MARK: - Run 24.11.: Einladungen ohne Antwort entfernen
+    //
+    // Feedback: "Nicht antworten" ist keine Antwort - die Einladung soll
+    // trotzdem aus der Liste verschwinden koennen. Kein PARTSTAT, kein
+    // markAnsweredUid (impliziert eine Antwort und faerbt Labels) - nur
+    // Kalender-Loeschung bzw. Mail-Aufraeumen plus Ignore-Marker.
+
+    /// Entfernt eine Kalender-Einladung OHNE zu antworten: Termin per UID
+    /// aus allen Kalendern loeschen (ohne UID: Titel+Zeit-Fallback wie bei
+    /// Absagen ohne ICS), lokal ausblenden und href-basierten Ignore-Marker
+    /// setzen. Fehler (412/Netz) werden weich quittiert (addPendingRemoval-
+    /// Muster) - die Einladung verschwindet trotzdem lokal.
+    @discardableResult
+    func ignoreCalendarInvitation(_ event: CalendarEventModel) async -> Bool {
+        var ok = false
+        if event.uid.isEmpty {
+            // Keine UID (z. B. geparste Kopie ohne UID): Fallback auf
+            // Titel + Start/Ende ±5 min wie `removeCancelledEvent`.
+            let result = await removeCancelledEvent(
+                uid: "", title: event.title, start: event.start, end: event.end)
+            ok = result == .removed || result == .notFound
+        } else {
+            ok = await removeEventByUID(event.uid)
+        }
+        if !ok, !event.uid.isEmpty {
+            // Run 22.09.-Muster: Server-DELETE gestoert -> gedrosselten
+            // Retry vormerken, lokal trotzdem quittieren.
+            Self.addPendingRemoval(event.uid)
+        }
+        removeCalendarInvitation(event.href)
+        Self.markIgnored(id: event.href, eventEnd: event.end)
+        SouveraLog.write("Invitations", "ignore calendar invite uid=\(event.uid) href=\(event.href): ok=\(ok)")
+        return ok
+    }
+
+    /// Entfernt eine Mail-Einladung OHNE zu antworten: aus dem Scan-
+    /// Stand ausblenden (markAnswered-Gate + Ignore-Marker, messageId-
+    /// basiert) und die Mail in den Papierkorb verschieben (Muster der
+    /// bestehenden Absage-Behandlung).
+    func ignoreMailInvitation(_ invite: SouveraMailInvitation) async {
+        // markAnswered gleicht dem Scanner-Gate der beantworteten Mails;
+        // zusaetzlich der eigene Ignore-Marker (wird mit Enddatum gecleaned).
+        Self.markAnswered(messageId: invite.messageId, eventEnd: invite.event?.end)
+        Self.markIgnored(id: invite.messageId, eventEnd: invite.event?.end)
+        Self.markIgnored(id: invite.id, eventEnd: invite.event?.end)
+        removeMailInvitation(invite.id)
+        SouveraLog.write("Invitations", "ignore mail invite id=\(invite.id)")
+        await SouveraInviteMailSender.shared.moveToTrash(messageId: invite.messageId)
     }
 
     // MARK: - Exakter UID-Match (Run 19.09.)

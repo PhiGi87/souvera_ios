@@ -1372,3 +1372,6 @@ _mail_sort_flagged_ = "Flagged first";
 "_vacation_nc_planned_" = "This period is scheduled and has not started yet.";
 "_vacation_retry_" = "Retry";
 "_vacation_error_status_" = "Request failed (%@)";
+"_invitations_ignore_" = "Remove";
+"_invitations_ignored_" = "Invitation removed";
+"_invitations_ignore_confirm_" = "Remove this invitation without responding?";
