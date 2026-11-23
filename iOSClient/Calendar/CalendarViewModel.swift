@@ -547,36 +547,64 @@ final class CalendarViewModel: ObservableObject {
         loadedStart = start
         loadedEnd = end
 
-        let all = Self.parseEntries(entries, ownEmail: Self.ownAttendeeEmail())
+        let parsedAll = Self.parseEntries(entries, ownEmail: Self.ownAttendeeEmail())
+        // Run 24.11. (Feedback: doppelte Einladungen bleiben nach
+        // Web-Antwort sichtbar): Bestands-Duplikate aufraeumen - Einladungs-
+        // Events mit gleicher UID liegen in zwei Kalendern (app-generierte
+        // Kopie in "personal" + Original im geteilten Kalender). Die
+        // personal-Kopie ist die ueberzaehlige und wird geloescht.
+        let removedDuplicateHrefs = await removeDuplicateInviteCopies(parsedAll)
+        if !removedDuplicateHrefs.isEmpty {
+            entries.removeAll { removedDuplicateHrefs.contains($0.href) }
+        }
+        let all = removedDuplicateHrefs.isEmpty
+            ? parsedAll
+            : Self.parseEntries(entries, ownEmail: Self.ownAttendeeEmail())
         let sortedAll = all.sorted { $0.start < $1.start }
         // Run 16.09.: offene Einladungen (ownPartstat = needs-action) an
         // den zentralen InvitationCenter melden (FAB-Badge + Sheet).
         // Run 25.09.: eigene Adressen pro Load auffrischen (Mail-Modul kann
         // Identitaeten nachgeladen haben).
         Self.cachedOwnAddresses = Self.computeOwnAddresses()
-        // Run 25.09.: eigene Termine sind keine offenen Einladungen.
-        let pending = sortedAll.filter {
-            $0.ownPartstat == "needs-action" && Self.isForeignOrganizer($0)
-        }
-        // Run 19.09. (Feedback Cross-Device): Server-beantwortete UIDs
-        // melden - damit werden auf anderen Geraeten beantwortete
-        // Mail-Einladungen ebenfalls ausgeblendet.
+        // Run 24.11. (Feedback: Web-Antwort im geteilten Kalender, die
+        // app-generierte Kopie in "personal" bleibt needs-action): UIDs mit
+        // konkreter PARTSTAT (accepted/declined/tentative) gelten als
+        // beantwortet - unabhaengig davon, WELCHE Kopie die Antwort traegt.
         let serverAnswered = Set(
             sortedAll
                 .filter { !$0.ownPartstat.isEmpty && $0.ownPartstat != "needs-action" && !$0.uid.isEmpty }
                 .map { $0.uid.lowercased() }
         )
+        // Run 25.09.: eigene Termine sind keine offenen Einladungen.
+        let pending = sortedAll.filter {
+            $0.ownPartstat == "needs-action"
+                && Self.isForeignOrganizer($0)
+                && !serverAnswered.contains($0.uid.lowercased())
+        }
+        // Run 19.09. (Feedback Cross-Device): Server-beantwortete UIDs
+        // melden - damit werden auf anderen Geraeten beantwortete
+        // Mail-Einladungen ebenfalls ausgeblendet.
         SouveraInvitationCenter.shared.setServerAnsweredUids(serverAnswered)
         // Run 22.09. (Feedback: veralteter lokaler Antwort-Marker): Meldet
         // der Server eine konkrete, ABWEICHENDE Antwort, den lokalen Marker
         // damit ueberschreiben (Selbstheilung) - sonst zeigt diese Ansicht
         // weiter den auf DIESEM Geraet zuletzt gespeicherten Status.
         for event in sortedAll where Self.isConcretePartstat(event.ownPartstat) && !event.uid.isEmpty {
-            if let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid),
-               !stored.isEmpty, stored.lowercased() != event.ownPartstat.lowercased() {
+            let stored = SouveraInvitationCenter.answeredStatus(forUID: event.uid)
+            if let stored, !stored.isEmpty {
+                if stored.lowercased() != event.ownPartstat.lowercased() {
+                    SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
+                                                            status: event.ownPartstat)
+                    JmapLog.write("Calendar partstat heal uid=\(event.uid): \(stored) -> \(event.ownPartstat)")
+                }
+            } else {
+                // Run 24.11. (Heal-Fix): bisher verhinderte `!stored.isEmpty`
+                // die ERST-Markierung - ohne lokalen Marker wurde nie einer
+                // gesetzt. Jetzt markieren, sobald der Server-Stand vom
+                // lokalen abweicht ODER lokal (noch) nichts gemerkt ist.
                 SouveraInvitationCenter.markAnsweredUid(event.uid, end: event.end,
                                                         status: event.ownPartstat)
-                JmapLog.write("Calendar partstat heal uid=\(event.uid): \(stored) -> \(event.ownPartstat)")
+                JmapLog.write("Calendar partstat heal (first marker) uid=\(event.uid): -> \(event.ownPartstat)")
             }
         }
         // Run 25.09.: Selbst organisierte Termine duerfen KEINEN lokalen
@@ -602,7 +630,7 @@ final class CalendarViewModel: ObservableObject {
             events = .success(sortedAll)
         }
         for event in all.prefix(12) {
-            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) attendees=[\(event.attendees.joined(separator: ","))] reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
+            JmapLog.write("Calendar event parsed: \"\(event.title)\" start=\(event.start) uid=\(event.uid) partstat=\(event.ownPartstat) attendees=[\(event.attendees.joined(separator: ","))] reminders=[\(event.reminders.map(String.init).joined(separator: ","))]")
         }
         if all.count > 12 {
             JmapLog.write("Calendar event parsed: ... \(all.count - 12) weitere")
@@ -625,6 +653,34 @@ final class CalendarViewModel: ObservableObject {
     }
 
     // MARK: - Mutations
+
+    /// Run 24.11. (Feedback: doppelte Einladungen, Web-Antwort bleibt
+    /// sichtbar): Bestands-Duplikate aufraeumen. Zwei Events mit gleicher
+    /// UID: die personal-Kopie (calendarHref enthaelt "/personal/") ist die
+    /// ueberzaehlige und wird via bestehender `deleteEvent`-Pipeline
+    /// (optimistisch + Server-DELETE) geloescht. Sicherheitspruefung:
+    /// organizerEmail identisch UND Start identisch (+/- 5 min) - sonst
+    /// nur loggen, nichts loeschen.
+    private func removeDuplicateInviteCopies(_ events: [CalendarEventModel]) async -> Set<String> {
+        var removedHrefs: Set<String> = []
+        let byUid = Dictionary(grouping: events.filter { !$0.uid.isEmpty }) { $0.uid.lowercased() }
+        for (uid, group) in byUid where group.count > 1 {
+            guard let copy = group.first(where: { $0.calendarHref.contains("/personal/") }),
+                  let original = group.first(where: { !$0.calendarHref.contains("/personal/") }) else { continue }
+            let sameOrganizer = !copy.organizerEmail.isEmpty
+                && copy.organizerEmail.lowercased() == original.organizerEmail.lowercased()
+            let sameStart = abs(copy.start.timeIntervalSince(original.start)) <= 300
+            guard sameOrganizer, sameStart else {
+                JmapLog.write("Calendar invites dedup cleanup uid=\(uid): safety check FAILED (organizer='\(copy.organizerEmail)' vs '\(original.organizerEmail)', startDelta=\(Int(copy.start.timeIntervalSince(original.start)))s) - copy kept")
+                continue
+            }
+            JmapLog.write("Calendar invites dedup cleanup uid=\(uid): removing personal copy \(copy.href) (original \(original.href))")
+            if await deleteEvent(copy) {
+                removedHrefs.insert(copy.href)
+            }
+        }
+        return removedHrefs
+    }
 
     /// Geladenes Zeitfenster (aus dem letzten load()) - Tage außerhalb
     /// werden bei Bedarf gezielt nachgeladen.
@@ -689,8 +745,8 @@ final class CalendarViewModel: ObservableObject {
             }
             .joined(separator: " | ")
         JmapLog.write("Calendar saveEvent existing=\(existing != nil) talk=\(draft.talkRoomToken ?? "-") \n\(interesting)")
-        let optimistic: CalDavEventEntry
-        let kind: SouveraCalendarPendingWrites.Kind
+        var optimistic: CalDavEventEntry
+        var kind: SouveraCalendarPendingWrites.Kind
         if let existing {
             kind = .update
             optimistic = CalDavEventEntry(calendarHref: existing.calendarHref,
@@ -708,12 +764,29 @@ final class CalendarViewModel: ObservableObject {
                 ?? calendars.first(where: { !$0.href.contains("deck") })
             guard let targetCalendar = chosen else { return false }
             let uid = draft.uid.isEmpty ? UUID().uuidString.lowercased() : draft.uid
-            // Dateiname aus der UID bereinigen (wie CalDavClient.createEvent).
-            let fileBase = uid.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
-            optimistic = CalDavEventEntry(calendarHref: targetCalendar.href,
-                                          href: "\(fileBase).ics",
-                                          etag: nil,
-                                          ics: ics)
+            // Run 24.11. (Feedback: saveEvent legte Duplikate an): VOR dem
+            // Create pruefen, ob ein Event mit gleicher UID bereits in einem
+            // ANDEREN Kalender existiert (cachedEntries/events nach uid) -
+            // dann auf dessen href updaten statt neu anlegen.
+            if let duplicateEntry = Self.findExistingEntryForUID(uid,
+                                                                 cachedEntries: cachedEntries,
+                                                                 events: events),
+               duplicateEntry.calendarHref != targetCalendar.href {
+                JmapLog.write("Calendar saveEvent: uid \(uid) already exists in \(duplicateEntry.calendarHref) - update instead of create")
+                kind = .update
+                optimistic = CalDavEventEntry(calendarHref: duplicateEntry.calendarHref,
+                                              href: duplicateEntry.href,
+                                              etag: duplicateEntry.etag,
+                                              ics: ics)
+            } else {
+                kind = .create
+                // Dateiname aus der UID bereinigen (wie CalDavClient.createEvent).
+                let fileBase = uid.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+                optimistic = CalDavEventEntry(calendarHref: targetCalendar.href,
+                                              href: "\(fileBase).ics",
+                                              etag: nil,
+                                              ics: ics)
+            }
         }
         // Run 29.09. (Feedback: Termin-Änderungen dauerten bei schlechter
         // Verbindung lange, bis sie sichtbar wurden): SOFORT lokal zeigen,
@@ -725,6 +798,29 @@ final class CalendarViewModel: ObservableObject {
             message: NSLocalizedString("_calendar_sync_pending_", comment: "")
         )
         return true
+    }
+
+    /// Run 24.11.: Sucht ein bereits existierendes CalDAV-Entry mit der
+    /// uebergebenen UID (zuerst cachedEntries, dann die geparsten Events).
+    /// Wird vor dem Create in `saveEvent` benutzt, um Duplikate ueber
+    /// Kalendergrenzen hinweg zu verhindern.
+    static func findExistingEntryForUID(_ uid: String,
+                                        cachedEntries: [CalDavEventEntry],
+                                        events: Result<[CalendarEventModel], Error>) -> CalDavEventEntry? {
+        let key = uid.lowercased()
+        if let entry = cachedEntries.first(where: {
+            (SouveraInvitationCenter.quickExtract($0.ics, key: "UID") ?? "").lowercased() == key
+        }) {
+            return entry
+        }
+        if case let .success(list) = events,
+           let event = list.first(where: { $0.uid.lowercased() == key }) {
+            return CalDavEventEntry(calendarHref: event.calendarHref,
+                                    href: event.href,
+                                    etag: event.etag,
+                                    ics: "")
+        }
+        return nil
     }
 
     func deleteEvent(_ event: CalendarEventModel) async -> Bool {
@@ -1218,7 +1314,18 @@ final class CalendarViewModel: ObservableObject {
         // die Uebersicht kurz komplett leer war.
         let remainingInvites: [CalendarEventModel] = {
             if case let .success(list) = events {
-                return list.filter { $0.ownPartstat == "needs-action" }
+                // Run 24.11.: gleiche UID-Dedup-Logik wie im InvitationCenter;
+                // UIDs mit konkreter PARTSTAT (auch kopien-uebergreifend -
+                // z. B. Web-Antwort auf der geteilten Kopie) sind beantwortet.
+                let answeredOnServer = Set(
+                    list.filter { !$0.ownPartstat.isEmpty && $0.ownPartstat != "needs-action" && !$0.uid.isEmpty }
+                        .map { $0.uid.lowercased() }
+                )
+                return SouveraInvitationCenter.deduplicateByUID(list.filter { $0.ownPartstat == "needs-action" })
+                    .filter {
+                        !answeredOnServer.contains($0.uid.lowercased())
+                            && !SouveraInvitationCenter.shared.serverAnsweredUids.contains($0.uid.lowercased())
+                    }
             }
             return []
         }()

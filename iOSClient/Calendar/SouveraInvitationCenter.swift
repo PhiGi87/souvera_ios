@@ -47,14 +47,73 @@ final class SouveraInvitationCenter: ObservableObject {
         // PARTSTAT != needs-action) erscheinen NICHT mehr im Center - der
         // Einladungs-Button/Badge verschwindet sofort nach der Antwort.
         let answered = Self.answeredUids()
-        let pending = events.filter {
-            $0.ownPartstat == "needs-action" && !Self.isAnswered(uid: $0.uid)
+        // Run 24.11. (Feedback: Einladungen doppelt, Web-Antwort bleibt
+        // sichtbar): Einladungs-Events mit gleicher UID liegen in zwei
+        // Kalendern (app-generierte Kopie in "personal" + Original im
+        // geteilten Kalender). Pro UID nur EIN Eintrag meld.
+        let deduped = Self.deduplicateByUID(events)
+        // Run 24.11.: Zusaetzlich gegen serverAnsweredUids filtern - die
+        // UIDs mit konkreter PARTSTAT (accepted/declined/tentative) gelten
+        // geraeteuebergreifend als beantwortet.
+        let pending = deduped.filter {
+            $0.ownPartstat == "needs-action"
+                && !Self.isAnswered(uid: $0.uid)
+                && !serverAnsweredUids.contains($0.uid.lowercased())
         }
         let newSig = pending.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
         let oldSig = calendarInvites.map { "\($0.href)|\($0.etag ?? "")" }.sorted().joined(separator: ",")
         if newSig != oldSig {
             calendarInvites = pending
         }
+    }
+
+    /// Run 24.11. (Feedback: doppelte Einladungen): UID-Dedup ohne
+    /// Antwort-Filter - pro UID nur EIN Eintrag, Kopien-Praeferenz siehe
+    /// `preferInviteCopy`. Wird auch vom CalendarViewModel (u. a.
+    /// `remainingInvites`) benutzt, damit alle Aufrufer konsistent sind.
+    static func deduplicateByUID(_ events: [CalendarEventModel]) -> [CalendarEventModel] {
+        var keptByUid: [String: CalendarEventModel] = [:]
+        var withoutUid: [CalendarEventModel] = []
+        var drops: [(uid: String, kept: String, dropped: String)] = []
+        for event in events {
+            let key = event.uid.lowercased()
+            guard !key.isEmpty else {
+                withoutUid.append(event)
+                continue
+            }
+            if let current = keptByUid[key] {
+                if Self.preferInviteCopy(event, over: current) {
+                    drops.append((key, event.href, current.href))
+                    keptByUid[key] = event
+                } else {
+                    drops.append((key, current.href, event.href))
+                }
+            } else {
+                keptByUid[key] = event
+            }
+        }
+        // Run 24.11.: jede Dedup-Entscheidung nachvollziehbar loggen.
+        for drop in drops {
+            JmapLog.write("Calendar invites dedup uid=\(drop.uid): kept \(drop.kept), dropped \(drop.dropped)")
+        }
+        return Array(keptByUid.values) + withoutUid
+    }
+
+    /// Run 24.11.: Kopien-Praeferenz bei zwei Events mit gleicher UID.
+    /// Gewinnt: 1. calendarHref enthaelt NICHT "/personal/" (das Original
+    /// im geteilten Kalender - dort landet auch die Web-Antwort),
+    /// 2. mehr Erinnerungen, 3. der zuerst gesehene Eintrag.
+    static func preferInviteCopy(_ candidate: CalendarEventModel,
+                                 over current: CalendarEventModel) -> Bool {
+        let candidatePersonal = candidate.calendarHref.contains("/personal/")
+        let currentPersonal = current.calendarHref.contains("/personal/")
+        if candidatePersonal != currentPersonal {
+            return currentPersonal // Kandidat ohne /personal/ gewinnt
+        }
+        if candidate.reminders.count != current.reminders.count {
+            return candidate.reminders.count > current.reminders.count
+        }
+        return false
     }
 
     func setMailInvites(_ invites: [SouveraMailInvitation], accountKey: String) {
