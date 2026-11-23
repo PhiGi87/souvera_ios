@@ -324,6 +324,11 @@ jobs:
     runs-on: xcode-27
     needs: build-check
     timeout-minutes: 90
+    # Run 24.11.: Der Self-hosted-Runner (xcode-27) killt den Sim-Build
+    # nach ~15 Min (Runner-seitiges Limit, Workflow erlaubt 90). Der
+    # .app-Artifact ist ein Nice-to-have - der Run soll dadurch nicht
+    # rot werden (AGENTS-CI-Regel), der TestFlight-Pfad läuft via Dispatch.
+    continue-on-error: true
     if: |
       always() &&
       !cancelled() &&
