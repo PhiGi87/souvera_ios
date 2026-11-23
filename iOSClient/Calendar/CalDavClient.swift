@@ -567,7 +567,9 @@ final class DavMultistatusParser: NSObject, XMLParserDelegate {
             inComponentSet = true
         } else if inComponentSet, local == "comp",
                   let name = attributeDict["name"], !name.isEmpty {
-            currentResponse?["supportedComponents"] = (currentResponse?["supportedComponents"] ?? "") + name + ";"
+            var supported = currentResponse?["supportedComponents"] ?? ""
+            supported += name + ";"
+            currentResponse?["supportedComponents"] = supported
         } else if inPrivilegeSet, local == "write" || local == "all" {
             // write/all im Privilege-Set => Schreibrecht auf den Kalender.
             currentResponse?["canWrite"] = "1"
