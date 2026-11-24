@@ -51,15 +51,33 @@ enum SouveraMailDisplaySettings {
         UserDefaults.standard.set(text, forKey: key("souvera_mail_signature_local", account: account))
     }
 
-    // MARK: - Run 25.11.: Standard-Task-Liste (neue Aufgabe)
+    // MARK: - Run 26.11.: Standard-Liste (Settings-Picker)
 
-    /// Gespeicherte Standard-Task-Liste (calendarHref, pro Account).
-    /// Leer/nicht gesetzt = Fallback (erste schreibbare Liste).
-    static func defaultTaskListId(account: String) -> String {
-        UserDefaults.standard.string(forKey: key("souvera_tasks_default_list", account: account)) ?? ""
+    /// UserDefaults-Schlüssel der Standard-Liste (pro Account).
+    private static func defaultTaskListSettingKey(account: String) -> String {
+        key("souvera_tasks_default_setting", account: account)
     }
 
-    static func setDefaultTaskListId(_ href: String, account: String) {
-        UserDefaults.standard.set(href, forKey: key("souvera_tasks_default_list", account: account))
+    /// Gespeicherte Standard-Liste (calendarHref) oder nil
+    /// (nicht gesetzt - Fallback: erster schreibbarer Task-Kalender).
+    /// Quelle ist der Picker in den Einstellungen; das Neuanlage-Sheet
+    /// ueberschreibt diesen Wert bewusst NICHT.
+    static func defaultTaskListSetting(account: String) -> String? {
+        UserDefaults.standard.string(forKey: defaultTaskListSettingKey(account: account))
+    }
+
+    static func setDefaultTaskListSetting(_ href: String?, account: String) {
+        UserDefaults.standard.set(href ?? "", forKey: defaultTaskListSettingKey(account: account))
+    }
+
+    /// Task-Kalender (supportsTasks && canWrite) fuer den Settings-Picker
+    /// "Standard-Liste". Die Settings laden kein SouveraTasksViewModel -
+    /// daher statisch mit explizitem Account (frischer PROPFIND via
+    /// CalDavClient.fetchCalendars). Muster wie
+    /// CalendarViewModel.writableCalendarChoices, zusaetzlich mit dem
+    /// supportsTasks-Filter (dort nicht noetig: Termin-Kalender).
+    static func taskListChoices(account: String) async -> [CalDavCalendar] {
+        await CalDavClient(account: account).fetchCalendars()
+            .filter { $0.supportsTasks && $0.canWrite }
     }
 }

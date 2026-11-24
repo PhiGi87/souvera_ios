@@ -33,6 +33,9 @@ struct NCSettingsView: View {
     // (ohne Deck) für den Picker, geladen via CalDAV-PROPFIND.
     @State private var writableCalendars: [CalDavCalendar] = []
     @State private var defaultCalendarHref = ""
+    // Run 26.11.: Standard-Task-Liste (Tasks-Modul, supportsTasks).
+    @State private var defaultTaskListHref = ""
+    @State private var taskListChoices: [CalDavCalendar] = []
     // Object of ViewModel of this view
     @ObservedObject var model: NCSettingsModel
 
@@ -176,6 +179,37 @@ struct NCSettingsView: View {
                 }
                 .onChange(of: defaultCalendarHref) { _, newValue in
                     CalendarViewModel.setDefaultCalendarHref(
+                        newValue.isEmpty ? nil : newValue,
+                        account: model.session.account)
+                }
+                // Run 26.11.: Standard-Liste für neue Aufgaben - Picker
+                // über die Task-Kalender (supportsTasks && canWrite).
+                // Lädt via SouveraMailDisplaySettings.taskListChoices
+                // (frischer CalDAV-PROPFIND); gespeichert wird der
+                // calendarHref via UserDefaults - das Neuanlage-Sheet
+                // im Tasks-Modul nutzt ihn als Vorauswahl und
+                // überschreibt ihn bewusst nicht (die Settings-Option
+                // ist die Quelle).
+                Picker(NSLocalizedString("_settings_default_task_list_",
+                                         value: "Default task list", comment: ""),
+                       selection: $defaultTaskListHref) {
+                    Text(NSLocalizedString("_calendar_no_selection_", value: "No selection", comment: ""))
+                        .tag("")
+                    ForEach(taskListChoices, id: \.href) { list in
+                        Text(list.displayName).tag(list.href)
+                    }
+                }
+                .font(.body)
+                .onAppear {
+                    defaultTaskListHref = SouveraMailDisplaySettings.defaultTaskListSetting(
+                        account: model.session.account) ?? ""
+                    Task {
+                        taskListChoices = await SouveraMailDisplaySettings.taskListChoices(
+                            account: model.session.account)
+                    }
+                }
+                .onChange(of: defaultTaskListHref) { _, newValue in
+                    SouveraMailDisplaySettings.setDefaultTaskListSetting(
                         newValue.isEmpty ? nil : newValue,
                         account: model.session.account)
                 }

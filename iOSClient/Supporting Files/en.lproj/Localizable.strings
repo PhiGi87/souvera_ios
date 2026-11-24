@@ -1401,3 +1401,5 @@ _mail_sort_flagged_ = "Flagged first";
 "_tasks_summary_" = "Titel";
 "_tasks_notes_" = "Notizen";
 "_tasks_due_" = "Fälligkeit";
+"_settings_default_task_list_" = "Default task list";
+"_tasks_lists_all_" = "All lists";

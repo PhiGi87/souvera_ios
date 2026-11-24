@@ -487,6 +487,43 @@ struct SouveraTasksView: View {
                                                                comment: "")))
                 }
             }
+            // Run 26.11.: Listen-Auswahl im schmalen Layout (iPhone/
+            // Außendisplay) - dort gibt es keine Sidebar. Menu über
+            // alle Task-Listen (flache Liste, "Alle Listen" oben);
+            // Tap setzt selectedList (nil = "Alle").
+            ToolbarItem(placement: .topBarLeading) {
+                if !isWideLayout {
+                    Menu {
+                        Button {
+                            selectedList = nil
+                        } label: {
+                            if selectedList == nil {
+                                Label(NSLocalizedString("_tasks_lists_all_",
+                                                        value: "All lists", comment: ""),
+                                      systemImage: "checkmark")
+                            } else {
+                                Text(NSLocalizedString("_tasks_lists_all_",
+                                                       value: "All lists", comment: ""))
+                            }
+                        }
+                        ForEach(viewModel.taskLists, id: \.href) { list in
+                            Button {
+                                selectedList = list.href
+                            } label: {
+                                if selectedList == list.href {
+                                    Label(list.displayName, systemImage: "checkmark")
+                                } else {
+                                    Text(list.displayName)
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "list.bullet")
+                    }
+                    .accessibilityLabel(Text(NSLocalizedString("_tasks_lists_all_",
+                                                               value: "All lists", comment: "")))
+                }
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showNewTaskSheet = true
@@ -814,11 +851,13 @@ struct SouveraTaskNewSheet: View {
                 }
             }
             .onAppear {
-                // Run 25.11.: Vorauswahl = gespeicherte Standard-Liste
-                // (Settings-Ablage), sonst Fallback: erster schreibbarer
-                // Task-Kalender.
+                // Run 26.11.: Vorauswahl = Standard-Liste aus den
+                // Einstellungen (souvera_tasks_default_setting_), sonst
+                // Fallback: erster schreibbarer Task-Kalender. Die alte
+                // "last used"-Ablage (defaultTaskListId) wird bewusst
+                // NICHT mehr gelesen - die Settings-Option ist die Quelle.
                 if calendarHref.isEmpty {
-                    let saved = SouveraMailDisplaySettings.defaultTaskListId(
+                    let saved = SouveraMailDisplaySettings.defaultTaskListSetting(
                         account: SouveraTasksViewModel.stableAccountKey())
                     if let match = viewModel.writableTaskCalendars.first(where: { $0.href == saved }) {
                         calendarHref = match.href
@@ -857,11 +896,10 @@ struct SouveraTaskNewSheet: View {
                                                calendar: calendar)
             isSaving = false
             if ok {
-                // Run 25.11.: Gewählte Liste als Standard-Liste merken
-                // (Vorauswahl beim nächsten Neuanlage-Sheet).
-                SouveraMailDisplaySettings.setDefaultTaskListId(
-                    calendar.href,
-                    account: SouveraTasksViewModel.stableAccountKey())
+                // Run 26.11.: Die gewaehlte Liste wird NICHT als
+                // Standard-Liste ueberschrieben - die Einstellungen
+                // ("Standard-Liste") sind die alleinige Quelle; ein
+                // einmaliges Abweichen im Sheet aendert den Default nicht.
                 dismiss()
             }
         }
