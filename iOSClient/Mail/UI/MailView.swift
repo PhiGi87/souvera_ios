@@ -2459,10 +2459,10 @@ struct MailComposeView: View {
 
                         // Run 26.11. (Apple-Mail-Layout): Drei Blöcke unter
                         // den Kopfzeilen - 1. eigene Antwort (leer, Cursor
-                        // oben), 2. Signatur als separater Block mit
-                        // Trennlinie, 3. das editierbare Zitat der
-                        // ursprünglichen Mail. Das Anhängen der Signatur an
-                        // den Body-Text ist damit entfallen.
+                        // oben), 2. Signatur als Fließtext (Run 25.11.),
+                        // 3. das editierbare Zitat der ursprünglichen Mail.
+                        // Das Anhängen der Signatur an den Body-Text ist
+                        // damit entfallen.
                         ZStack(alignment: .topLeading) {
                             AutoGrowingTextView(text: $bodyText, onEditingStarted: {
                                 // Run 09.11. (Apple-Verhalten): Beim ersten
@@ -2477,19 +2477,20 @@ struct MailComposeView: View {
                         .frame(minHeight: 200, alignment: .topLeading)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                        // Run 26.11.: Signatur-Block (nur bei nicht-leerer
-                        // Signatur) mit Trennlinie zum Antworttext.
+                        // Run 25.11. (Nutzer-Feedback): Die Signatur ist KEIN
+                        // separater Block mehr, sondern normaler Fließtext
+                        // direkt unterhalb des Antworttexts - gleiche Schrift
+                        // (.body), gleiche Farbe (.primary), gleiche Paddings
+                        // wie der Body-Text, ohne Trennlinie darüber.
                         if !signatureText.isEmpty {
-                            VStack(alignment: .leading, spacing: 0) {
-                                Divider()
-                                // RFC 3676: Trenner ist eine Zeile "-- "
-                                // (zwei Bindestriche + Leerzeichen).
-                                Text("-- \n" + signatureText)
-                                    .font(.subheadline)
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 12)
-                                    .padding(.vertical, 6)
-                            }
+                            // RFC 3676: Trenner ist eine Zeile "-- "
+                            // (zwei Bindestriche + Leerzeichen).
+                            Text("-- \n" + signatureText)
+                                .font(.body)
+                                .foregroundStyle(.primary)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 4)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
 
                         // Run 26.11.: Zitat der ursprünglichen Mail - bleibt
