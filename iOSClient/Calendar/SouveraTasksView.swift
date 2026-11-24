@@ -443,11 +443,14 @@ struct SouveraTasksView: View {
     /// Run 26.11.: Neuanlage-Sheet.
     @State private var showNewTaskSheet = false
     // Run 25.11.: Listen-Sidebar - Listen-Spalte eingeklappt und aktive
-    // Liste (nil = "Alle"). Beides bewusst NICHT persistiert (wie
+    // Listen. Beides bewusst NICHT persistiert (wie
     // roomsCollapsed im Link-Modul); die Spalte existiert nur bei breitem
     // Layout (Fensterbreite >= 720pt, wie Kalender).
+    // Run 25.11. (Multiselect, wie CalendarPickerSheet): Mehrere Listen
+    // gleichzeitig sichtbar - leeres Set = alle Listen. Tap toggelt die
+    // Liste im Set statt sie zu ersetzen.
     @State private var listsCollapsed = false
-    @State private var selectedList: String?
+    @State private var selectedLists: Set<String> = []
     @State private var isWideLayout = false
 
     var body: some View {
@@ -489,15 +492,15 @@ struct SouveraTasksView: View {
             }
             // Run 26.11.: Listen-Auswahl im schmalen Layout (iPhone/
             // Außendisplay) - dort gibt es keine Sidebar. Menu über
-            // alle Task-Listen (flache Liste, "Alle Listen" oben);
-            // Tap setzt selectedList (nil = "Alle").
+            // alle Task-Listen ("Alle Listen" oben); Tap toggelt die
+            // Liste im Set (Multiselect, wie Kalender).
             ToolbarItem(placement: .topBarLeading) {
                 if !isWideLayout {
                     Menu {
                         Button {
-                            selectedList = nil
+                            selectedLists = []
                         } label: {
-                            if selectedList == nil {
+                            if selectedLists.isEmpty {
                                 Label(NSLocalizedString("_tasks_lists_all_",
                                                         value: "All lists", comment: ""),
                                       systemImage: "checkmark")
@@ -508,9 +511,9 @@ struct SouveraTasksView: View {
                         }
                         ForEach(viewModel.taskLists, id: \.href) { list in
                             Button {
-                                selectedList = list.href
+                                toggleList(list.href)
                             } label: {
-                                if selectedList == list.href {
+                                if selectedLists.contains(list.href) {
                                     Label(list.displayName, systemImage: "checkmark")
                                 } else {
                                     Text(list.displayName)
@@ -570,12 +573,12 @@ struct SouveraTasksView: View {
         viewModel.taskLists.filter { $0.category == .deck }
     }
 
-    /// Zeile in der Sidebar: Listenname + Todo-Anzahl, aktive Liste
-    /// hervorgehoben. Tap setzt selectedList (nil = "Alle").
+    /// Zeile in der Sidebar: Listenname + Todo-Anzahl, aktive Listen
+    /// hervorgehoben. Tap toggelt die Liste im Set (Multiselect).
     private func listRow(_ list: CalDavCalendar) -> some View {
         Button {
             withAnimation(.snappy(duration: 0.2)) {
-                selectedList = list.href
+                toggleList(list.href)
             }
         } label: {
             HStack(spacing: 10) {
@@ -589,7 +592,7 @@ struct SouveraTasksView: View {
                 Text("\(viewModel.todoCounts[list.href] ?? 0)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if selectedList == list.href {
+                if selectedLists.contains(list.href) {
                     Image(systemName: "checkmark")
                         .font(.caption)
                         .foregroundStyle(Color.Souvera.brandPrimaryDeep)
@@ -599,13 +602,24 @@ struct SouveraTasksView: View {
         .buttonStyle(.plain)
     }
 
+    /// Run 25.11. (Multiselect): Toggle einer Liste im Auswahl-Set -
+    /// gemeinsam von Sidebar und schmalem Menu genutzt (wie
+    /// viewModel.toggleCalendar im Kalender).
+    private func toggleList(_ href: String) {
+        if selectedLists.contains(href) {
+            selectedLists.remove(href)
+        } else {
+            selectedLists.insert(href)
+        }
+    }
+
     private var taskListSidebar: some View {
         List {
-            // "Alle" - Filter zurücksetzen.
+            // "Alle" - Auswahl leeren (= alle Listen sichtbar).
             Section {
                 Button {
                     withAnimation(.snappy(duration: 0.2)) {
-                        selectedList = nil
+                        selectedLists = []
                     }
                 } label: {
                     HStack(spacing: 10) {
@@ -615,7 +629,7 @@ struct SouveraTasksView: View {
                         Text(NSLocalizedString("_tasks_lists_all_", value: "All", comment: ""))
                             .font(.body)
                         Spacer()
-                        if selectedList == nil {
+                        if selectedLists.isEmpty {
                             Image(systemName: "checkmark")
                                 .font(.caption)
                                 .foregroundStyle(Color.Souvera.brandPrimaryDeep)
@@ -648,14 +662,15 @@ struct SouveraTasksView: View {
         .listStyle(.insetGrouped)
     }
 
-    /// Die Aufgaben-Liste - gefiltert nach der aktiven Liste (nil = alle).
+    /// Die Aufgaben-Liste - gefiltert nach den ausgewählten Listen
+    /// (leeres Set = alle).
     private var taskListView: some View {
-        let filteredOpen = selectedList == nil
+        let filteredOpen = selectedLists.isEmpty
             ? viewModel.openTasks
-            : viewModel.openTasks.filter { $0.event.calendarHref == selectedList }
-        let filteredCompleted = selectedList == nil
+            : viewModel.openTasks.filter { selectedLists.contains($0.event.calendarHref) }
+        let filteredCompleted = selectedLists.isEmpty
             ? viewModel.completedTasks
-            : viewModel.completedTasks.filter { $0.event.calendarHref == selectedList }
+            : viewModel.completedTasks.filter { selectedLists.contains($0.event.calendarHref) }
 
         return List {
             if let message = viewModel.errorMessage {
