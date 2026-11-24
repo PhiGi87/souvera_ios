@@ -509,14 +509,22 @@ struct SouveraTasksView: View {
                                                        value: "All lists", comment: ""))
                             }
                         }
-                        ForEach(viewModel.taskLists, id: \.href) { list in
-                            Button {
-                                toggleList(list.href)
-                            } label: {
-                                if selectedLists.contains(list.href) {
-                                    Label(list.displayName, systemImage: "checkmark")
-                                } else {
-                                    Text(list.displayName)
+                        // Run 25.11. (Gruppierung): gleiche Sections wie
+                        // die Sidebar, dieselbe Datenquelle (ownLists/
+                        // deckLists) - nur nicht-leere Sections zeigen.
+                        if !ownLists.isEmpty {
+                            Section(NSLocalizedString("_tasks_lists_own_",
+                                                      value: "Own lists", comment: "")) {
+                                ForEach(ownLists, id: \.href) { list in
+                                    menuListRow(list)
+                                }
+                            }
+                        }
+                        if !deckLists.isEmpty {
+                            Section(NSLocalizedString("_tasks_lists_deck_",
+                                                      value: "Deck lists", comment: "")) {
+                                ForEach(deckLists, id: \.href) { list in
+                                    menuListRow(list)
                                 }
                             }
                         }
@@ -571,6 +579,20 @@ struct SouveraTasksView: View {
     /// Deck-Listen (Board-Karten als VTODO).
     private var deckLists: [CalDavCalendar] {
         viewModel.taskLists.filter { $0.category == .deck }
+    }
+
+    /// Run 25.11. (Gruppierung): Zeile im schmalen Toolbar-Menu -
+    /// identische Auswahl-Logik/Datenquelle wie die Sidebar-Zeile.
+    private func menuListRow(_ list: CalDavCalendar) -> some View {
+        Button {
+            toggleList(list.href)
+        } label: {
+            if selectedLists.contains(list.href) {
+                Label(list.displayName, systemImage: "checkmark")
+            } else {
+                Text(list.displayName)
+            }
+        }
     }
 
     /// Zeile in der Sidebar: Listenname + Todo-Anzahl, aktive Listen
