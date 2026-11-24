@@ -35,6 +35,12 @@ final class SouveraTasksViewModel: ObservableObject {
     /// Run 26.11.: Task-Kalender mit Schreibrecht (canWrite && supportsTasks)
     /// - Grundlage für die Kalender-Auswahl im Neuanlage-Sheet.
     @Published var writableTaskCalendars: [CalDavCalendar] = []
+    /// Run 25.11.: ALLE Task-Kalender (supportsTasks, auch ohne Schreib-
+    /// recht) für die Listen-Sidebar.
+    @Published var taskLists: [CalDavCalendar] = []
+    /// Run 25.11.: Todo-Anzahl je Listen-href - wird in der Sidebar neben
+    /// dem Listennamen angezeigt.
+    @Published var todoCounts: [String: Int] = [:]
 
     private let client = CalDavClient()
     /// Roh-Einträge nach href - Basis für die Toggle-PUTs (If-Match).
@@ -53,6 +59,9 @@ final class SouveraTasksViewModel: ObservableObject {
         // Run 26.11.: Schreibbare Task-Kalender parallel mithalten (Picker
         // im Neuanlage-Sheet; Fallback dort: erster Eintrag).
         writableTaskCalendars = calendars.filter { $0.canWrite }
+        // Run 25.11.: Alle Listen für die Sidebar mithalten.
+        taskLists = calendars
+        todoCounts = [:]
         guard !calendars.isEmpty else {
             SouveraLog.write("Tasks", "load: keine Task-Kalender (supportsTasks) gefunden")
             apply([], [])
@@ -84,6 +93,8 @@ final class SouveraTasksViewModel: ObservableObject {
             SouveraLog.write("Tasks", "load: \(href) -> \(entries.count) Todos")
             if entries.isEmpty { emptyCalendars.append(href) }
             all.append(contentsOf: entries)
+            // Run 25.11.: Todo-Anzahl je Liste für die Sidebar.
+            todoCounts[href] = entries.count
         }
         if all.isEmpty {
             SouveraLog.write("Tasks", "load: ALLE \(calendars.count) Task-Kalender lieferten 0 Todos -> Banner")
@@ -410,9 +421,185 @@ struct SouveraTasksView: View {
     @State private var showCompleted = false
     /// Run 26.11.: Neuanlage-Sheet.
     @State private var showNewTaskSheet = false
+    // Run 25.11.: Listen-Sidebar - Listen-Spalte eingeklappt und aktive
+    // Liste (nil = "Alle"). Beides bewusst NICHT persistiert (wie
+    // roomsCollapsed im Link-Modul); die Spalte existiert nur bei breitem
+    // Layout (Fensterbreite >= 720pt, wie Kalender).
+    @State private var listsCollapsed = false
+    @State private var selectedList: String?
+    @State private var isWideLayout = false
 
     var body: some View {
+        // Run 25.11.: Listen-Sidebar (Muster LinkView/Raumliste) - nur bei
+        // breitem Layout (>= 720pt) gibt es die linke Spalte; der Toggle
+        // im Header blendet sie mit snappy-Animation ein/aus.
+        GeometryReader { bounds in
+            let wide = bounds.size.width >= 720
+            HStack(spacing: 0) {
+                if wide && !listsCollapsed {
+                    taskListSidebar
+                        .frame(width: 260)
+                        .transition(.move(edge: .leading).combined(with: .opacity))
+                    Divider()
+                }
+                taskListView
+            }
+            .onAppear { isWideLayout = wide }
+            .onChange(of: bounds.size.width) { _, width in
+                isWideLayout = width >= 720
+            }
+        }
+        .toolbar {
+            // Run 25.11.: Sidebar-Toggle (Muster LinkView sidebar.left),
+            // nur bei breitem Layout - schmal hat keine Spalte zum Blenden.
+            ToolbarItem(placement: .topBarLeading) {
+                if isWideLayout {
+                    Button {
+                        withAnimation(.snappy(duration: 0.3)) {
+                            listsCollapsed.toggle()
+                        }
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                    }
+                    .accessibilityLabel(Text(NSLocalizedString("_tasks_lists_toggle_",
+                                                               value: "Show or hide lists",
+                                                               comment: "")))
+                }
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showNewTaskSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(Text(NSLocalizedString("_tasks_new_", value: "New task", comment: "")))
+            }
+            ToolbarItem(placement: .topBarTrailing) {
+                // Run 26.11. (Layout-Fix): ProgressView und Icon stapeln
+                // sich in einem ZStack mit fester Größe - der Wechsel
+                // isLoading löst keinen Toolbar-Layout-Sprung mehr aus.
+                Button {
+                    Task { await viewModel.load() }
+                } label: {
+                    ZStack {
+                        Image(systemName: "arrow.clockwise")
+                            .opacity(viewModel.isLoading ? 0 : 1)
+                        ProgressView()
+                            .frame(width: 20, height: 20)
+                            .opacity(viewModel.isLoading ? 1 : 0)
+                    }
+                }
+            }
+        }
+        .sheet(item: $selectedItem) { item in
+            SouveraCalendarTaskDetailView(viewModel: viewModel, item: item)
+        }
+        // Run 26.11.: Neuanlage-Sheet über Toolbar "+".
+        .sheet(isPresented: $showNewTaskSheet) {
+            SouveraTaskNewSheet(viewModel: viewModel)
+        }
+    }
+
+    // MARK: - Run 25.11.: Listen-Sidebar (Deck/Eigene, wie Kalender)
+
+    /// Eigene Listen (persönlich, kein Deck).
+    private var ownLists: [CalDavCalendar] {
+        viewModel.taskLists.filter { $0.isPersonal && $0.category != .deck }
+    }
+
+    /// Deck-Listen (Board-Karten als VTODO).
+    private var deckLists: [CalDavCalendar] {
+        viewModel.taskLists.filter { $0.category == .deck }
+    }
+
+    /// Zeile in der Sidebar: Listenname + Todo-Anzahl, aktive Liste
+    /// hervorgehoben. Tap setzt selectedList (nil = "Alle").
+    private func listRow(_ list: CalDavCalendar) -> some View {
+        Button {
+            withAnimation(.snappy(duration: 0.2)) {
+                selectedList = list.href
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(Color(hex: list.color ?? "") ?? Color(NCBrandColor.shared.customer))
+                    .frame(width: 10, height: 10)
+                Text(list.displayName)
+                    .font(.body)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(viewModel.todoCounts[list.href] ?? 0)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if selectedList == list.href {
+                    Image(systemName: "checkmark")
+                        .font(.caption)
+                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var taskListSidebar: some View {
         List {
+            // "Alle" - Filter zurücksetzen.
+            Section {
+                Button {
+                    withAnimation(.snappy(duration: 0.2)) {
+                        selectedList = nil
+                    }
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "tray.full")
+                            .font(.body)
+                            .foregroundStyle(Color.Souvera.brandPrimaryDeep)
+                        Text(NSLocalizedString("_tasks_lists_all_", value: "All", comment: ""))
+                            .font(.body)
+                        Spacer()
+                        if selectedList == nil {
+                            Image(systemName: "checkmark")
+                                .font(.caption)
+                                .foregroundStyle(Color.Souvera.brandPrimaryDeep)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+
+            if !ownLists.isEmpty {
+                Section(header: Text(NSLocalizedString("_tasks_lists_own_",
+                                                       value: "Own lists",
+                                                       comment: ""))) {
+                    ForEach(ownLists, id: \.href) { list in
+                        listRow(list)
+                    }
+                }
+            }
+
+            if !deckLists.isEmpty {
+                Section(header: Text(NSLocalizedString("_tasks_lists_deck_",
+                                                       value: "Deck lists",
+                                                       comment: ""))) {
+                    ForEach(deckLists, id: \.href) { list in
+                        listRow(list)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    /// Die Aufgaben-Liste - gefiltert nach der aktiven Liste (nil = alle).
+    private var taskListView: some View {
+        let filteredOpen = selectedList == nil
+            ? viewModel.openTasks
+            : viewModel.openTasks.filter { $0.event.calendarHref == selectedList }
+        let filteredCompleted = selectedList == nil
+            ? viewModel.completedTasks
+            : viewModel.completedTasks.filter { $0.event.calendarHref == selectedList }
+
+        return List {
             if let message = viewModel.errorMessage {
                 // Run 26.11. (Layout-Fix): dezente Fehlermeldung als
                 // kompakte Zeile innerhalb der Liste - ohne feste Höhen-
@@ -427,24 +614,24 @@ struct SouveraTasksView: View {
                 }
             }
             Section {
-                if viewModel.openTasks.isEmpty && viewModel.completedTasks.isEmpty {
+                if filteredOpen.isEmpty && filteredCompleted.isEmpty {
                     Text(NSLocalizedString("_tasks_empty_", value: "No tasks", comment: ""))
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                ForEach(viewModel.openTasks) { item in
+                ForEach(filteredOpen) { item in
                     taskRow(item)
                 }
             } header: {
                 Text(NSLocalizedString("_tasks_open_", value: "Open", comment: ""))
             }
 
-            if !viewModel.completedTasks.isEmpty {
+            if !filteredCompleted.isEmpty {
                 Section {
                     if showCompleted {
-                        ForEach(viewModel.completedTasks) { item in
+                        ForEach(filteredCompleted) { item in
                             taskRow(item)
                         }
                     }
@@ -471,39 +658,6 @@ struct SouveraTasksView: View {
         .task {
             guard viewModel.openTasks.isEmpty, viewModel.completedTasks.isEmpty else { return }
             await viewModel.load()
-        }
-        .sheet(item: $selectedItem) { item in
-            SouveraCalendarTaskDetailView(viewModel: viewModel, item: item)
-        }
-        // Run 26.11.: Neuanlage-Sheet über Toolbar "+".
-        .sheet(isPresented: $showNewTaskSheet) {
-            SouveraTaskNewSheet(viewModel: viewModel)
-        }
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button {
-                    showNewTaskSheet = true
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .accessibilityLabel(Text(NSLocalizedString("_tasks_new_", value: "New task", comment: "")))
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                // Run 26.11. (Layout-Fix): ProgressView und Icon stapeln
-                // sich in einem ZStack mit fester Größe - der Wechsel
-                // isLoading löst keinen Toolbar-Layout-Sprung mehr aus.
-                Button {
-                    Task { await viewModel.load() }
-                } label: {
-                    ZStack {
-                        Image(systemName: "arrow.clockwise")
-                            .opacity(viewModel.isLoading ? 0 : 1)
-                        ProgressView()
-                            .frame(width: 20, height: 20)
-                            .opacity(viewModel.isLoading ? 1 : 0)
-                    }
-                }
-            }
         }
     }
 
