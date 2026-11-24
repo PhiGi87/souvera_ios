@@ -2350,6 +2350,11 @@ struct MailComposeView: View {
     @State private var bcc: String
     @State private var subject: String
     @State private var bodyText: String
+    // Run 26.11.: Das Zitat ist kein Teil des bodyText mehr, sondern ein
+    // eigener editierbarer Block unterhalb von Antwort und Signatur
+    // (Apple-Mail-Layout). Der bodyText enthaelt ausschliesslich die
+    // eigene Antwort - der Cursor steht damit automatisch oben.
+    @State private var quoteText: String
     @State private var showCcBcc: Bool
     @State private var selectedFromIndex = 0
     @State private var attachments: [OutgoingAttachment]
@@ -2361,14 +2366,12 @@ struct MailComposeView: View {
     @State private var suggestions: [RecipientSuggestion] = []
     @State private var suggestionTask: Task<Void, Never>?
     @State private var activeSuggestionField: RecipientFieldKind?
-    // Run 13.11.: Zentrale Signatur (souvera_central). userEditedBody
-    // verhindert, dass die frisch geladene Signatur eine manuelle
-    // Nutzereingabe überschreibt; isApplyingSignature hält das onChange
-    // der eigenen Programm-Anderungen von Nutzer-Eingaben auseinander.
-    @State private var userEditedBody = false
-    @State private var isApplyingSignature = false
-    @State private var appliedSignature: MailSignature?
-    @State private var cachedSignature: MailSignature?
+    // Run 26.11.: Die Signatur ist ein separater, statischer Block zwischen
+    // Antwort und Zitat - kein Body-Anhängen mehr. Daher genügt ein
+    // einfacher Text-State (ohne RFC-Trenner, der wird beim Rendern und
+    // Senden ergänzt); die frühere appliedSignature/userEditedBody-
+    // Mechanik ist damit entfallen.
+    @State private var signatureText: String = ""
 
     enum RecipientFieldKind { case to, cc, bcc }
 
@@ -2379,13 +2382,15 @@ struct MailComposeView: View {
         _cc = State(initialValue: context.cc.joined(separator: ", "))
         _bcc = State(initialValue: "")
         _subject = State(initialValue: context.subject)
-        _bodyText = State(initialValue: context.quoteBody)
+        _bodyText = State(initialValue: "")
+        _quoteText = State(initialValue: context.quoteBody)
+        // Run 26.11.: Signatur synchron vorladen - zentraler Cache, sonst
+        // lokale Signatur. Sie ist damit schon beim ersten Rendern als
+        // eigener Block sichtbar, bevor der Netz-Fetch durch ist.
+        signatureText = MailSignatureService.cached(account: viewModel.accountKey)?.text
+            ?? SouveraMailDisplaySettings.localSignature(account: viewModel.accountKey)
         _showCcBcc = State(initialValue: false)
         _attachments = State(initialValue: context.preAttachments)
-        // Run 13.11.: Signatur synchron aus dem UserDefaults-Cache
-        // vorladen (TTL 5 Minuten) - sie ist damit schon beim ersten
-        // Rendern verfügbar, bevor der Netz-Fetch durch ist.
-        _cachedSignature = State(initialValue: MailSignatureService.cached(account: viewModel.accountKey))
     }
 
     var body: some View {
@@ -2452,19 +2457,13 @@ struct MailComposeView: View {
                         .padding(.vertical, 8)
                         Divider()
 
-                        // Run 09.11.: Body ohne eigenen ScrollView als
-                        // ZStack (Placeholder + AutoGrowingTextView). Die
-                        // Textview wächst über ihre intrinsic content size
-                        // mit dem Text, das Scrollen übernimmt der äußere
-                        // ScrollView. minHeight hält auch bei leerem Body
-                        // eine komfortable Schreibfläche frei.
+                        // Run 26.11. (Apple-Mail-Layout): Drei Blöcke unter
+                        // den Kopfzeilen - 1. eigene Antwort (leer, Cursor
+                        // oben), 2. Signatur als separater Block mit
+                        // Trennlinie, 3. das editierbare Zitat der
+                        // ursprünglichen Mail. Das Anhängen der Signatur an
+                        // den Body-Text ist damit entfallen.
                         ZStack(alignment: .topLeading) {
-                            if bodyText.isEmpty {
-                                Text(NSLocalizedString("_mail_message_", comment: ""))
-                                    .foregroundStyle(.tertiary)
-                                    .padding(.leading, 12)
-                                    .padding(.top, 8)
-                            }
                             AutoGrowingTextView(text: $bodyText, onEditingStarted: {
                                 // Run 09.11. (Apple-Verhalten): Beim ersten
                                 // Fokus des Bodys Cc/Bcc zuklappen, damit die
@@ -2477,6 +2476,33 @@ struct MailComposeView: View {
                         }
                         .frame(minHeight: 200, alignment: .topLeading)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                        // Run 26.11.: Signatur-Block (nur bei nicht-leerer
+                        // Signatur) mit Trennlinie zum Antworttext.
+                        if !signatureText.isEmpty {
+                            VStack(alignment: .leading, spacing: 0) {
+                                Divider()
+                                // RFC 3676: Trenner ist eine Zeile "-- "
+                                // (zwei Bindestriche + Leerzeichen).
+                                Text("-- \n" + signatureText)
+                                    .font(.subheadline)
+                                    .foregroundStyle(.secondary)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                            }
+                        }
+
+                        // Run 26.11.: Zitat der ursprünglichen Mail - bleibt
+                        // wie bei Apple Mail editierbar, als eigener Block
+                        // unterhalb der Signatur.
+                        if !quoteText.isEmpty {
+                            Divider()
+                            ZStack(alignment: .topLeading) {
+                                AutoGrowingTextView(text: $quoteText)
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 4)
+                            }
+                        }
                     }
                 }
                 // Run 09.11.: Hintergrund-Scrolling zieht die Tastatur
@@ -2539,7 +2565,17 @@ struct MailComposeView: View {
                             outgoing.cc = cc.commaSeparated()
                             outgoing.bcc = bcc.commaSeparated()
                             outgoing.subject = subject
-                            outgoing.body = bodyText
+                            // Run 26.11.: Body beim Senden aus den drei
+                            // Blöcken komponieren - Antwort oben, dann
+                            // Signatur (RFC-3676-Trenner), dann Zitat.
+                            var full = bodyText
+                            if !signatureText.isEmpty {
+                                full += (full.isEmpty ? "" : "\n\n") + "-- \n" + signatureText
+                            }
+                            if !quoteText.isEmpty {
+                                full += "\n\n" + quoteText
+                            }
+                            outgoing.body = full
                             outgoing.attachments = attachments
                             outgoing.inReplyTo = context.message?.messageId
                             viewModel.selectFromAddress(viewModel.fromAddresses[selectedFromIndex])
@@ -2558,83 +2594,19 @@ struct MailComposeView: View {
                 slowSendOverlay
             }
         }
-        // Run 13.11.: Zentrale Signatur - zuerst der synchron vorgeladene
-        // Cache (siehe init), danach ein frischer Fetch. Es wird nur
-        // angewendet, solange der Nutzer den Body noch nicht selbst
-        // verändert hat (userEditedBody), sonst würde die Eingabe
-        // überschrieben.
-        // Run 25.11.: Ohne zentrale Signatur (kein Cache, Fetch found:false)
-        // greift die lokale Signatur aus den Einstellungen - sie ist sofort
-        // verfügbar, kein Fetch nötig. Ein erfolgreicher zentraler Fetch
-        // ersetzt sie (applySignature entfernt die zuvor angehängte
-        // Signatur inklusive Trenner).
+        // Run 26.11.: Zentrale Signatur - der init hat bereits Cache bzw.
+        // lokale Signatur als Block angezeigt; hier nur noch ein frischer
+        // Fetch. Bei found:true ersetzt der zentrale Text den angezeigten
+        // Text, bei nil bleibt der bisherige Block stehen.
         .task {
-            if appliedSignature == nil {
-                if let cached = cachedSignature {
-                    applySignature(cached)
-                } else {
-                    applyLocalSignature()
-                }
-            }
             let fresh = await MailSignatureService.fetch(account: viewModel.accountKey)
-            // Frischer zentraler Fetch nur anwenden, wenn er tatsächlich
-            // eine Signatur liefert (found:true); sonst bleibt die evtl.
-            // bereits aus dem init-Cached-Pfad angehängte lokale Signatur.
-            guard !userEditedBody, let fresh, fresh != appliedSignature else { return }
-            applySignature(fresh)
-        }
-        .onChange(of: bodyText) { _, _ in
-            // Eigene Programm-Anderungen (Signatur-Anhängen/Ersetzen)
-            // sind keine Nutzer-Eingabe.
-            guard !isApplyingSignature else { return }
-            userEditedBody = true
-        }
-    }
-
-    // MARK: - Zentrale Signatur (Run 13.11.)
-
-    /// Run 25.11.: Hängt die lokale Signatur an den Body an (nur wenn der
-    /// Nutzer einen nicht-leeren Text hinterlegt hat - leerer Text heißt
-    /// explizit "keine Signatur"). Nutzt denselben applySignature-Pfad,
-    /// damit ein späterer Wechsel zu einer zentralen Signatur die lokale
-    /// sauber ersetzen kann.
-    private func applyLocalSignature() {
-        let text = SouveraMailDisplaySettings.localSignature(account: viewModel.accountKey)
-        guard !text.isEmpty else { return }
-        applySignature(MailSignature(html: text, text: text))
-    }
-
-    /// Hängt die zentrale Signatur mit RFC-3676-Trenner ("-- ") an den
-    /// Body an bzw. ersetzt eine zuvor angehängte Signatur. Der Aufruf
-    /// setzt isApplyingSignature, damit onChange(of: bodyText) die
-    /// Änderung nicht als Nutzer-Eingabe wertet.
-    ///
-    /// TODO (HTML-Senden): Der Send-Flow ist aktuell plaintext-only -
-    /// `MailComposeView` befüllt nur `outgoing.body`, `outgoing.bodyHtml`
-    /// bleibt leer (JMAP sendet htmlBody=nil, der MIME-Builder escaped
-    /// den Plaintext). Sobald HTML-Senden eingebaut ist, muss die
-    /// html-Signatur (mit Data-URL-Assets, siehe MailSignatureService)
-    /// im Send-Flow an `outgoing.bodyHtml` angehängt werden - Webmail-
-    /// Muster: <div data-signature>...</div> mit <p>--</p> als Trenner.
-    private func applySignature(_ signature: MailSignature) {
-        isApplyingSignature = true
-        defer { isApplyingSignature = false }
-        // Vorher angehängte Signatur entfernen (Refresh ersetzt sie,
-        // inkl. des RFC-3676-Trenners "-- ").
-        if let previous = appliedSignature {
-            for separator in ["\n\n-- \n", "\n-- \n"] {
-                let suffix = separator + previous.text
-                if bodyText.hasSuffix(suffix) {
-                    bodyText.removeLast(suffix.count)
-                    break
-                }
+            if let fresh {
+                signatureText = fresh.text
             }
         }
-        // RFC 3676: Trenner ist eine Zeile "-- " (zwei Bindestriche +
-        // Leerzeichen). Bei nicht-leerem Body mit Leerzeile abtrennen.
-        bodyText += (bodyText.isEmpty ? "\n" : "\n\n") + "-- \n" + signature.text
-        appliedSignature = signature
     }
+
+    // MARK: - Signatur (Run 26.11.)
 
     /// Run 06.10.: zentriertes Overlay "wird verspaetet gesendet".
     private var slowSendOverlay: some View {
