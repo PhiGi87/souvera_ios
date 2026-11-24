@@ -6,6 +6,11 @@
 // SouveraTasksViewModel.toggle, optimistisch + CalDAV-PUT). Basis: die
 // Detail-View aus dem Revert-Commit 230e7585fd, entkoppelt vom
 // CalendarViewModel (die Kalender-UI-Integration bleibt revertiert).
+// Run 26.11. (Tasks, standalone): Bearbeitung - Titel (TextField),
+// Notizen (TextEditor) und Fälligkeit (date-only, optional, Vacation-
+// Pattern mit Toggle) sind editierbar; Speichern via
+// SouveraTasksViewModel.saveEdit (ICS-Patch updateTodoFields + PUT mit
+// If-Match, optimistische lokale Aktualisierung).
 
 import SwiftUI
 
@@ -13,6 +18,16 @@ struct SouveraCalendarTaskDetailView: View {
     @ObservedObject var viewModel: SouveraTasksViewModel
     let item: SouveraTasksViewModel.TaskItem
     @Environment(\.dismiss) private var dismiss
+
+    // Run 26.11.: Editierbare Felder - Vorbelegung in onAppear aus dem
+    // geparsten Model. Notizen sind im Model noch RFC-5545-maskiert,
+    // daher unescapeTodoText (die Rueckschreibung maskiert erneut).
+    @State private var title = ""
+    @State private var notes = ""
+    @State private var hasDue = false
+    @State private var due = Date()
+    @State private var isSaving = false
+    @State private var didPrefill = false
 
     var body: some View {
         NavigationStack {
@@ -40,25 +55,40 @@ struct SouveraCalendarTaskDetailView: View {
                     .padding(.vertical, 4)
 
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(item.event.title)
+                        // Run 26.11.: Titel editierbar.
+                        TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""),
+                                  text: $title)
                             .font(.title3).fontWeight(.semibold)
                             .strikethrough(item.event.isCompleted)
                             .foregroundStyle(item.event.isCompleted ? Color.secondary : Color.primary)
-                        Text(dueLabel)
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if let notes = item.event.description, !notes.isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text(NSLocalizedString("_calendar_notes_", value: "Notes", comment: ""))
-                                .font(.caption).fontWeight(.semibold)
+                        if hasDue {
+                            // Run 26.11.: Fälligkeit date-only und optional
+                            // (Toggle wie im Vacation-Pattern).
+                            DatePicker(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""),
+                                       selection: $due,
+                                       displayedComponents: [.date])
+                                .font(.subheadline)
+                        } else {
+                            Text(NSLocalizedString("_calendar_task_no_due_", value: "No due date", comment: ""))
+                                .font(.subheadline)
                                 .foregroundStyle(.secondary)
-                            Text(notes)
-                                .font(.body)
-                                .textSelection(.enabled)
                         }
                     }
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""))
+                            .font(.caption).fontWeight(.semibold)
+                            .foregroundStyle(.secondary)
+                        // Run 26.11.: Notizen editierbar.
+                        TextEditor(text: $notes)
+                            .font(.body)
+                            .frame(minHeight: 100)
+                            .scrollContentBackground(.hidden)
+                    }
+
+                    // Run 26.11.: Fälligkeit an/aus (Vacation-Pattern).
+                    Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
+                        .font(.body)
 
                     Spacer(minLength: 0)
                 }
@@ -68,33 +98,65 @@ struct SouveraCalendarTaskDetailView: View {
             .navigationTitle(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .topBarLeading) {
                     Button {
                         dismiss()
                     } label: {
                         Image(systemName: "xmark")
                     }
                 }
+                // Run 26.11.: Speichern - ICS patchen (updateTodoFields)
+                // und per PUT mit If-Match zurueckschreiben.
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        save()
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                        }
+                    }
+                    .disabled(!canSave)
+                }
             }
+            .onAppear { prefill() }
         }
     }
 
-    /// Fälligkeit formatiert (Ganztag = nur Datum, sonst Datum + Uhrzeit);
-    /// undatierte Tasks zeigen "ohne Fälligkeit".
-    private var dueLabel: String {
-        let calendar = Calendar.current
+    /// Speichern nur mit Titel (Pflichtfeld) und nicht laufendem PUT.
+    private var canSave: Bool {
+        !isSaving
+            && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Run 26.11.: Felder aus dem Eintrag vorbelegen. Undatierte Tasks
+    /// (Parser-Anker: Tagesanfang heute) starten ohne Fälligkeit.
+    private func prefill() {
+        guard !didPrefill else { return }
+        didPrefill = true
+        title = item.event.title
+        notes = ICSParser.unescapeTodoText(item.event.description ?? "")
         if item.isUndated {
-            // Undatierte Tasks (Parser-Anker: Tagesanfang heute) - kein
-            // echtes Fälligkeitsdatum vorhanden.
-            return NSLocalizedString("_calendar_task_no_due_", value: "No due date", comment: "")
+            hasDue = false
+        } else {
+            hasDue = true
+            due = item.event.start
         }
-        let df = DateFormatter()
-        if item.event.allDay {
-            df.setLocalizedDateFormatFromTemplate("EdMMM")
-            return NSLocalizedString("_calendar_task_due_", value: "Due:", comment: "") + " " + df.string(from: item.event.start)
+    }
+
+    private func save() {
+        isSaving = true
+        Task {
+            let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ok = await viewModel.saveEdit(item,
+                                              summary: trimmed,
+                                              notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                                              due: due,
+                                              hasDue: hasDue)
+            isSaving = false
+            if ok { dismiss() }
         }
-        df.dateStyle = .medium
-        df.timeStyle = .short
-        return NSLocalizedString("_calendar_task_due_", value: "Due:", comment: "") + " " + df.string(from: item.event.start)
     }
 }

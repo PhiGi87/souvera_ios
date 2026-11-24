@@ -1387,3 +1387,10 @@ _mail_sort_flagged_ = "Flagged first";
 "_invitations_ignore_" = "Remove";
 "_invitations_ignored_" = "Invitation removed";
 "_invitations_ignore_confirm_" = "Remove this invitation without responding?";
+
+/* Run 26.11. (Tasks, standalone): Bearbeiten/Neuanlage */
+"_tasks_new_" = "Neue Aufgabe";
+"_tasks_save_" = "Speichern";
+"_tasks_summary_" = "Titel";
+"_tasks_notes_" = "Notizen";
+"_tasks_due_" = "Fälligkeit";

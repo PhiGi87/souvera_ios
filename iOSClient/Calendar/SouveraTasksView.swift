@@ -32,6 +32,9 @@ final class SouveraTasksViewModel: ObservableObject {
     /// Dezente Fehlermeldung (Banner unter der Liste), z. B. nach
     /// fehlgeschlagenem Abhaken oder Ladefehler.
     @Published var errorMessage: String?
+    /// Run 26.11.: Task-Kalender mit Schreibrecht (canWrite && supportsTasks)
+    /// - Grundlage für die Kalender-Auswahl im Neuanlage-Sheet.
+    @Published var writableTaskCalendars: [CalDavCalendar] = []
 
     private let client = CalDavClient()
     /// Roh-Einträge nach href - Basis für die Toggle-PUTs (If-Match).
@@ -43,6 +46,9 @@ final class SouveraTasksViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
         let calendars = await client.fetchCalendars().filter { $0.supportsTasks }
+        // Run 26.11.: Schreibbare Task-Kalender parallel mithalten (Picker
+        // im Neuanlage-Sheet; Fallback dort: erster Eintrag).
+        writableTaskCalendars = calendars.filter { $0.canWrite }
         guard !calendars.isEmpty else {
             apply([], [])
             return
@@ -162,6 +168,134 @@ final class SouveraTasksViewModel: ObservableObject {
                                                 isUndated: targetItem.isUndated))
     }
 
+    /// Run 26.11.: Bearbeiteten Task speichern - die ICS wird via
+    /// ICSParser.updateTodoFields gepatcht (SUMMARY/DESCRIPTION/DUE/
+    /// DTSTAMP) und per PUT mit If-Match (Muster performEventUpdate)
+    /// zurueckgeschrieben; bei Stale-ETag (412) einmalig frisch nachladen
+    /// und erneut versuchen (Muster toggle). Optimistische lokale
+    /// Aktualisierung der Listen statt Refresh der ganzen Liste.
+    /// Rueckgabe true = PUT erfolgreich.
+    func saveEdit(_ item: TaskItem,
+                  summary: String,
+                  notes: String?,
+                  due: Date?,
+                  hasDue: Bool) async -> Bool {
+        errorMessage = nil
+
+        // ICS patchen und PUT mit dem ETag des Eintrags versuchen - bei
+        // Stale-ETag frisch nachladen und erneut versuchen.
+        var entry = item.entry
+        var newICS = ICSParser.updateTodoFields(entry.ics,
+                                                summary: summary,
+                                                notes: notes,
+                                                due: due,
+                                                hasDue: hasDue)
+        var result = await client.performEventUpdate(entry, ics: newICS)
+        if !result.ok, let fresh = await client.fetchEventICS(entry) {
+            newICS = ICSParser.updateTodoFields(fresh,
+                                                summary: summary,
+                                                notes: notes,
+                                                due: due,
+                                                hasDue: hasDue)
+            entry = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                     href: entry.href,
+                                     etag: nil,
+                                     ics: fresh)
+            result = await client.performEventUpdate(entry, ics: newICS)
+        }
+        guard result.ok else {
+            // Kein Rollback noetig - die UI wurde noch nicht gedreht.
+            errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+            return false
+        }
+
+        // Lokale Aktualisierung: CalendarEventModel hat let-Felder -
+        // daher komplett neu konstruieren (Muster toggle). Die Fälligkeit
+        // wird als ganztägiges Datum dargestellt (entspricht
+        // DUE;VALUE=DATE); ohne Fälligkeit Parser-Anker wie bei
+        // undatierten Tasks (Tagesanfang heute, 15 Minuten).
+        let calendar = Calendar.current
+        let newStart: Date
+        let newEnd: Date
+        let newAllDay: Bool
+        if hasDue {
+            let day = calendar.startOfDay(for: due ?? Date())
+            newStart = day
+            newEnd = day.addingTimeInterval(86400)
+            newAllDay = true
+        } else {
+            let dayStart = calendar.startOfDay(for: Date())
+            newStart = dayStart
+            newEnd = dayStart.addingTimeInterval(900)
+            newAllDay = false
+        }
+        let newEvent = CalendarEventModel(
+            id: item.event.id,
+            uid: item.event.uid,
+            sequence: item.event.sequence,
+            title: summary,
+            start: newStart,
+            end: newEnd,
+            allDay: newAllDay,
+            location: item.event.location,
+            description: (notes?.isEmpty == false) ? notes : nil,
+            attendees: item.event.attendees,
+            talkRoomToken: item.event.talkRoomToken,
+            talkRoomName: item.event.talkRoomName,
+            calendarHref: item.event.calendarHref,
+            href: item.event.href,
+            etag: result.etag ?? item.entry.etag,
+            reminders: item.event.reminders,
+            isTask: item.event.isTask,
+            organizerName: item.event.organizerName,
+            organizerEmail: item.event.organizerEmail,
+            ownPartstat: item.event.ownPartstat,
+            taskStatus: item.event.taskStatus,
+            isCompleted: item.event.isCompleted
+        )
+        var updatedEntry = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                            href: entry.href,
+                                            etag: result.etag ?? entry.etag,
+                                            ics: newICS)
+        // Server-ICS nachziehen, damit der naechste PUT/Toggle auf dem
+        // echten Serverstand aufsetzt (Muster toggle).
+        if let fresh = await client.fetchEventICS(updatedEntry) {
+            updatedEntry = CalDavEventEntry(calendarHref: updatedEntry.calendarHref,
+                                            href: updatedEntry.href,
+                                            etag: updatedEntry.etag,
+                                            ics: fresh)
+        }
+        mutate(item: item, with: TaskItem(entry: updatedEntry,
+                                          event: newEvent,
+                                          isUndated: Self.isUndated(newEvent)))
+        return true
+    }
+
+    /// Run 26.11.: Neue Aufgabe anlegen - minimalen VTODO via
+    /// ICSParser.buildVTODO bauen und als neue Ressource PUTen (Muster
+    /// createEvent: PUT ohne If-Match, Dateiname aus der bereinigten UID).
+    /// Zielkalender: der uebergebene canWrite && supportsTasks-Kalender.
+    /// Danach die Liste neu laden (der Server ordnet href/ETag selbst).
+    func createTask(summary: String,
+                    notes: String?,
+                    due: Date?,
+                    hasDue: Bool,
+                    calendar: CalDavCalendar) async -> Bool {
+        errorMessage = nil
+        let uid = UUID().uuidString.lowercased()
+        let ics = ICSParser.buildVTODO(uid: uid,
+                                       summary: summary,
+                                       notes: notes,
+                                       due: due,
+                                       hasDue: hasDue)
+        guard await client.createEvent(calendarHref: calendar.href, ics: ics, uid: uid) != nil else {
+            errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+            return false
+        }
+        await load()
+        return true
+    }
+
     /// Ersetzt ein Item in beiden Listen durch ein aktualisiertes (gleiche
     /// id) und verschiebt es ggf. in die andere Sektion.
     private func mutate(item: TaskItem, with updated: TaskItem) {
@@ -195,6 +329,8 @@ struct SouveraTasksView: View {
     /// Ausgewählter Task für das Detail-Sheet.
     @State private var selectedItem: SouveraTasksViewModel.TaskItem?
     @State private var showCompleted = false
+    /// Run 26.11.: Neuanlage-Sheet.
+    @State private var showNewTaskSheet = false
 
     var body: some View {
         List {
@@ -252,7 +388,19 @@ struct SouveraTasksView: View {
         .sheet(item: $selectedItem) { item in
             SouveraCalendarTaskDetailView(viewModel: viewModel, item: item)
         }
+        // Run 26.11.: Neuanlage-Sheet über Toolbar "+".
+        .sheet(isPresented: $showNewTaskSheet) {
+            SouveraTaskNewSheet(viewModel: viewModel)
+        }
         .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button {
+                    showNewTaskSheet = true
+                } label: {
+                    Image(systemName: "plus")
+                }
+                .accessibilityLabel(Text(NSLocalizedString("_tasks_new_", value: "New task", comment: "")))
+            }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     Task { await viewModel.load() }
@@ -310,5 +458,119 @@ struct SouveraTasksView: View {
             df.timeStyle = .short
         }
         return df.string(from: item.event.start)
+    }
+}
+
+// MARK: - Run 26.11. (Tasks, standalone): Neue Aufgabe anlegen
+
+/// Run 26.11.: Sheet zur Neuanlage einer VTODO-Aufgabe. Titel (Pflicht),
+/// Notizen, optionale Fälligkeit (date-only, Vacation-Pattern mit Toggle)
+/// und Kalender-Auswahl über die canWrite && supportsTasks-Kalender;
+/// bei nur einem Kalender entfaellt der Picker (Fallback: erster).
+struct SouveraTaskNewSheet: View {
+    @ObservedObject var viewModel: SouveraTasksViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var title = ""
+    @State private var notes = ""
+    @State private var hasDue = false
+    /// Vorauswahl: übermorgen (startOfDay) - bewusst nicht "heute", damit
+    /// eine schnell angelegte Aufgabe nicht sofort faellig wirkt.
+    @State private var due = Calendar.current.startOfDay(for: Date()).addingTimeInterval(2 * 86400)
+    @State private var calendarHref = ""
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section(header: Text(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""))) {
+                    TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""), text: $title)
+                }
+                Section(header: Text(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""))) {
+                    TextEditor(text: $notes)
+                        .frame(minHeight: 80)
+                }
+                // Fälligkeit: date-only und optional (Toggle wie im
+                // Vacation-Pattern).
+                Section(header: Text(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""))) {
+                    Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
+                    if hasDue {
+                        DatePicker(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""),
+                                   selection: $due,
+                                   displayedComponents: [.date])
+                    }
+                }
+                if viewModel.writableTaskCalendars.count > 1 {
+                    Section(header: Text(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))) {
+                        Picker(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""),
+                               selection: $calendarHref) {
+                            ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
+                                Text(calendar.displayName).tag(calendar.href)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle(NSLocalizedString("_tasks_new_", value: "New task", comment: ""))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        dismiss()
+                    } label: {
+                        Image(systemName: "xmark")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        save()
+                    } label: {
+                        if isSaving {
+                            ProgressView()
+                        } else {
+                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                        }
+                    }
+                    .disabled(!canSave)
+                }
+            }
+            .onAppear {
+                // Fallback: erster schreibbarer Task-Kalender; der Picker
+                // erscheint nur bei mehreren Kalendern.
+                if calendarHref.isEmpty {
+                    calendarHref = viewModel.writableTaskCalendars.first?.href ?? ""
+                }
+            }
+        }
+    }
+
+    /// Speichern nur mit Titel und gültiger Kalender-Auswahl.
+    private var canSave: Bool {
+        !isSaving
+            && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && selectedCalendar != nil
+    }
+
+    private var selectedCalendar: CalDavCalendar? {
+        if let explicit = viewModel.writableTaskCalendars.first(where: { $0.href == calendarHref }) {
+            return explicit
+        }
+        // Fallback: erster schreibbarer Task-Kalender.
+        return viewModel.writableTaskCalendars.first
+    }
+
+    private func save() {
+        guard let calendar = selectedCalendar else { return }
+        isSaving = true
+        Task {
+            let trimmedNotes = notes.trimmingCharacters(in: .whitespacesAndNewlines)
+            let ok = await viewModel.createTask(summary: title.trimmingCharacters(in: .whitespacesAndNewlines),
+                                               notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
+                                               due: due,
+                                               hasDue: hasDue,
+                                               calendar: calendar)
+            isSaving = false
+            if ok { dismiss() }
+        }
     }
 }

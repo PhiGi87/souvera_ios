@@ -353,6 +353,119 @@ enum ICSParser {
         }
     }
 
+    // MARK: - Run 26.11. (Tasks, standalone): VTODO-Bearbeitung + Neuanlage
+
+    /// Run 26.11.: Text-Escaping für VTODO-Eigenschaften nach RFC 5545
+    /// §3.3.11 (TEXT): Backslash, Semikolon und Komma werden maskiert,
+    /// Zeilenumbrüche als Literal "\\n". (Muster escape/buildICS.)
+    static func escapeTodoText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: ";", with: "\\;")
+            .replacingOccurrences(of: ",", with: "\\,")
+            .replacingOccurrences(of: "\r\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\n")
+            .replacingOccurrences(of: "\n", with: "\\n")
+    }
+
+    /// Run 26.11.: Kehrt escapeTodoText um - zum Vorbelegen der Editor-
+    /// Felder mit dem geparsten (noch maskierten) Rohwert.
+    static func unescapeTodoText(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "\\n", with: "\n")
+            .replacingOccurrences(of: "\\,", with: ",")
+            .replacingOccurrences(of: "\\;", with: ";")
+            .replacingOccurrences(of: "\\\\", with: "\\")
+    }
+
+    /// Lokaler Kalendertag als RFC-5545-DATUM (YYYYMMDD) - wie beim
+    /// All-Day-Zweig in buildICS ohne Zeitzonenkonvertierung, damit der
+    /// gewählte Tag nicht verschoben wird.
+    private static func todoDayStamp(_ date: Date) -> String {
+        let components = Calendar.current.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d%02d%02d",
+                      components.year ?? 0,
+                      components.month ?? 0,
+                      components.day ?? 0)
+    }
+
+    /// Run 26.11.: Patcht SUMMARY, DESCRIPTION, DUE und DTSTAMP im
+    /// VTODO-Block einer ICS (Bearbeiten im Detail-Sheet). Nur der
+    /// VTODO-Block wird verändert - ein VCALENDAR kann theoretisch
+    /// VEVENT+VTODO mischen, und VALARM-Blöcke tragen eigene
+    /// DESCRIPTION-Zeilen, die nicht angetastet werden dürfen.
+    /// - SUMMARY wird ersetzt (falls fehlend, neu eingefügt).
+    /// - DESCRIPTION wird ersetzt oder (bei nil/leer) entfernt; als
+    ///   einzelne Zeile mit RFC-5545-Escaping (siehe escapeTodoText).
+    /// - DUE wird als `DUE;VALUE=DATE:YYYYMMDD` gesetzt (ganztagig) oder
+    ///   bei hasDue=false entfernt.
+    /// - DTSTAMP wird auf den aktuellen UTC-Zeitstempel aktualisiert.
+    /// Rückgabe mit CRLF-Zeilentrennung (RFC 5545 §3.1).
+    static func updateTodoFields(_ ics: String,
+                                 summary: String,
+                                 notes: String?,
+                                 due: Date?,
+                                 hasDue: Bool) -> String {
+        let unfolded = unfold(ics)
+        var lines = unfolded.components(separatedBy: "\n")
+        guard let beginIdx = lines.firstIndex(where: { $0.uppercased().hasPrefix("BEGIN:VTODO") }),
+              let endIdx = lines.firstIndex(where: { $0.uppercased().hasPrefix("END:VTODO") }),
+              beginIdx < endIdx else { return ics }
+
+        // Alte Zeilen der betroffenen Properties innerhalb des VTODO-
+        // Blocks entfernen (blank markieren, danach herausfiltern).
+        let patchedKeys: Set<String> = ["SUMMARY", "DESCRIPTION", "DUE", "DTSTAMP"]
+        for i in (beginIdx + 1)..<endIdx {
+            let bareKey = lines[i].prefix(while: { $0 != ":" && $0 != ";" }).uppercased()
+            if patchedKeys.contains(bareKey) { lines[i] = "" }
+        }
+
+        // Neue Zeilen direkt nach BEGIN:VTODO einfügen (Reihenfolge
+        // DTSTAMP/SUMMARY/DESCRIPTION/DUE ist RFC-5545-valide).
+        var insert: [String] = [
+            "DTSTAMP:\(utcStamp(Date()))",
+            "SUMMARY:\(escapeTodoText(summary))",
+        ]
+        if let notes, !notes.isEmpty {
+            insert.append("DESCRIPTION:\(escapeTodoText(notes))")
+        }
+        if hasDue {
+            insert.append("DUE;VALUE=DATE:\(todoDayStamp(due ?? Date()))")
+        }
+        lines.insert(contentsOf: insert, at: beginIdx + 1)
+        return lines.filter { !$0.isEmpty }.joined(separator: "\r\n")
+    }
+
+    /// Run 26.11.: Baut eine minimale ICS mit einem neuen VTODO (Neuanlage
+    /// im Aufgaben-Modul). CRLF-Zeilentrennung, RFC-5545-Escaping via
+    /// escapeTodoText. Die Fälligkeit wird - wie in der NC-Tasks-App
+    /// üblich - als ganztägiges `DUE;VALUE=DATE` geschrieben.
+    static func buildVTODO(uid: String,
+                           summary: String,
+                           notes: String?,
+                           due: Date?,
+                           hasDue: Bool) -> String {
+        var lines = [
+            "BEGIN:VCALENDAR",
+            "VERSION:2.0",
+            "PRODID:-//Souvera//Souvera iOS//DE",
+            "BEGIN:VTODO",
+            "UID:\(uid)",
+            "DTSTAMP:\(utcStamp(Date()))",
+            "SUMMARY:\(escapeTodoText(summary))",
+        ]
+        if let notes, !notes.isEmpty {
+            lines.append("DESCRIPTION:\(escapeTodoText(notes))")
+        }
+        if hasDue {
+            lines.append("DUE;VALUE=DATE:\(todoDayStamp(due ?? Date()))")
+        }
+        lines.append("STATUS:NEEDS-ACTION")
+        lines.append("END:VTODO")
+        lines.append("END:VCALENDAR")
+        return lines.joined(separator: "\r\n")
+    }
+
     /// Gemeinsame Rewrite-Logik (Muster updatePartstat): ICS entfalten,
     /// VTODO-Block finden, dort STATUS/COMPLETED/PERCENT-COMPLETE-Zeilen
     /// entfernen und vor END:VTODO die neuen Status-Zeilen einfügen.
