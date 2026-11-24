@@ -2387,8 +2387,8 @@ struct MailComposeView: View {
         // Run 26.11.: Signatur synchron vorladen - zentraler Cache, sonst
         // lokale Signatur. Sie ist damit schon beim ersten Rendern als
         // eigener Block sichtbar, bevor der Netz-Fetch durch ist.
-        signatureText = MailSignatureService.cached(account: viewModel.accountKey)?.text
-            ?? SouveraMailDisplaySettings.localSignature(account: viewModel.accountKey)
+        _signatureText = State(initialValue: MailSignatureService.cached(account: viewModel.accountKey)?.text
+            ?? SouveraMailDisplaySettings.localSignature(account: viewModel.accountKey))
         _showCcBcc = State(initialValue: false)
         _attachments = State(initialValue: context.preAttachments)
     }
