@@ -444,6 +444,32 @@ final class SouveraTasksViewModel: ObservableObject {
         return true
     }
 
+    // MARK: - Run 25.11.: Swipe-Delete für editierbare Aufgaben
+
+    /// Run 25.11.: Spiegel von isReadOnlyList für die Swipe-Aktion - nur
+    /// schreibbare, nicht-Deck-Listen dürfen per Swipe gelöscht werden.
+    func isEditable(href: String) -> Bool {
+        !isReadOnlyList(href: href)
+    }
+
+    /// Run 25.11.: Aufgabe löschen - DELETE via deleteEvent (If-Match mit
+    /// dem ETag + Retry-Leiter), bei Erfolg lokal entfernen, bei Fehler
+    /// dezente Fehlermeldung. Logging je Schritt ([Tasks] delete: href ->
+    /// Status) für die Nutzer-Fehlersuche.
+    func deleteTask(_ item: TaskItem) async {
+        errorMessage = nil
+        SouveraLog.write("Tasks", "delete: href=\(item.entry.href), calendar=\(item.entry.calendarHref), etag=\(item.entry.etag != nil ? "vorhanden" : "FEHLT")")
+        let ok = await client.deleteEvent(item.entry)
+        SouveraLog.write("Tasks", "delete: \(item.entry.href) -> \(ok ? "ok" : "FEHLER")")
+        guard ok else {
+            errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+            return
+        }
+        openTasks.removeAll { $0.id == item.entry.href }
+        completedTasks.removeAll { $0.id == item.entry.href }
+        entriesByHref.removeValue(forKey: item.entry.href)
+    }
+
     /// Account-Schlüssel für die Settings-Ablage (Muster
     /// CalendarViewModel.stableAccountKey).
     static func stableAccountKey() -> String {
@@ -508,6 +534,9 @@ struct SouveraTasksView: View {
     @State private var listsCollapsed = false
     @State private var selectedLists: Set<String> = []
     @State private var isWideLayout = false
+    /// Run 25.11.: Vor dem Swipe-Delete bestätigen (Muster
+    /// confirmationDialog wie die Ignore-Confirmation im Einladungs-Sheet).
+    @State private var pendingDelete: SouveraTasksViewModel.TaskItem?
 
     var body: some View {
         // Run 25.11.: Listen-Sidebar (Muster LinkView/Raumliste) - nur bei
@@ -797,6 +826,20 @@ struct SouveraTasksView: View {
                 }
                 ForEach(filteredOpen) { item in
                     taskRow(item)
+                        // Run 25.11.: Swipe-Delete nur in editierbaren
+                        // (schreibbaren, nicht-Deck-) Listen.
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            if viewModel.isEditable(href: item.event.calendarHref) {
+                                Button(role: .destructive) {
+                                    pendingDelete = item
+                                } label: {
+                                    Label(NSLocalizedString("_tasks_delete_action_",
+                                                            value: "Delete",
+                                                            comment: ""),
+                                          systemImage: "trash")
+                                }
+                            }
+                        }
                 }
             } header: {
                 // Run 25.11. (Audit): dezenter Hinweis auf die aktive
@@ -820,6 +863,20 @@ struct SouveraTasksView: View {
                     if showCompleted {
                         ForEach(filteredCompleted) { item in
                             taskRow(item)
+                                // Run 25.11.: Swipe-Delete auch für
+                                // erledigte Tasks (editierbare Listen).
+                                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                    if viewModel.isEditable(href: item.event.calendarHref) {
+                                        Button(role: .destructive) {
+                                            pendingDelete = item
+                                        } label: {
+                                            Label(NSLocalizedString("_tasks_delete_action_",
+                                                                    value: "Delete",
+                                                                    comment: ""),
+                                                  systemImage: "trash")
+                                        }
+                                    }
+                                }
                         }
                     }
                 } header: {
@@ -845,6 +902,29 @@ struct SouveraTasksView: View {
         .task {
             guard viewModel.openTasks.isEmpty, viewModel.completedTasks.isEmpty else { return }
             await viewModel.load()
+        }
+        // Run 25.11.: Bestätigung vor dem DELETE (confirmationDialog, Muster
+        // Ignore-Confirmation im Einladungs-Sheet).
+        .confirmationDialog(
+            NSLocalizedString("_tasks_delete_confirm_", value: "Delete task?", comment: ""),
+            isPresented: Binding(
+                get: { pendingDelete != nil },
+                set: { if !$0 { pendingDelete = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting: pendingDelete
+        ) { item in
+            Button(NSLocalizedString("_tasks_delete_action_", value: "Delete", comment: ""),
+                   role: .destructive) {
+                Task { await viewModel.deleteTask(item) }
+                pendingDelete = nil
+            }
+            Button(NSLocalizedString("_tasks_cancel_", value: "Cancel", comment: ""),
+                   role: .cancel) {
+                pendingDelete = nil
+            }
+        } message: { item in
+            Text(item.event.title)
         }
     }
 
