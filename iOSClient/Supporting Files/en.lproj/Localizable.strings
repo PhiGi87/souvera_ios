@@ -1009,6 +1009,8 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_tasks_delete_confirm_"  = "Delete task?";
 "_tasks_delete_action_"   = "Delete";
 "_tasks_cancel_"          = "Cancel";
+"_tasks_section_task_"    = "Task";
+"_tasks_section_due_"     = "Due date";
 "_calendar_no_selection_"      = "No selection";
 "_settings_default_calendar_" = "Default calendar";
 "_tasks_readonly_"            = "Read-only list";

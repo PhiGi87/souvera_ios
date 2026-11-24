@@ -1002,19 +1002,45 @@ struct SouveraTaskNewSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section(header: Text(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""))) {
-                    TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""), text: $title)
+                // Run 25.11. (Save-Button-Fix): Spinner in der FORM statt
+                // im Toolbar-Label - gleicher Stil wie das Detail-Sheet,
+                // keine Lücke rechts neben dem Wort "Speichern".
+                if isSaving {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                Section(header: Text(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""))) {
-                    TextEditor(text: $notes)
-                        .frame(minHeight: 80)
+                Section(header: Text(NSLocalizedString("_tasks_section_task_",
+                                                       value: "Task",
+                                                       comment: ""))) {
+                    TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""),
+                              text: $title,
+                              prompt: Text(NSLocalizedString("_tasks_summary_", value: "Title", comment: "")))
+                    // Run 25.11.: Notizen als vertikales TextField (3-6
+                    // Zeilen) - konsistenter Form-Look wie im Detail.
+                    TextField(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""),
+                              text: $notes,
+                              axis: .vertical)
+                        .lineLimit(3...6)
                 }
                 // Fälligkeit: date-only und optional (Toggle wie im
                 // Vacation-Pattern).
-                Section(header: Text(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""))) {
-                    Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
+                Section(header: Text(NSLocalizedString("_tasks_section_due_",
+                                                       value: "Due date",
+                                                       comment: ""))) {
+                    Toggle(NSLocalizedString("_tasks_section_due_",
+                                             value: "Due date",
+                                             comment: ""),
+                           isOn: $hasDue)
                     if hasDue {
-                        DatePicker(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""),
+                        DatePicker(NSLocalizedString("_tasks_section_due_",
+                                                     value: "Due date",
+                                                     comment: ""),
                                    selection: $due,
                                    displayedComponents: [.date])
                     }
@@ -1023,8 +1049,12 @@ struct SouveraTaskNewSheet: View {
                 // einer Liste) - der Nutzer soll die Zielliste sehen und
                 // die Standard-Liste (Ablage beim Speichern) ableiten
                 // können.
-                Section(header: Text(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))) {
-                    Picker(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""),
+                Section(header: Text(NSLocalizedString("_tasks_section_list_",
+                                                       value: "List",
+                                                       comment: ""))) {
+                    Picker(NSLocalizedString("_tasks_section_list_",
+                                             value: "List",
+                                             comment: ""),
                            selection: $calendarHref) {
                         ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
                             Text(calendar.displayName).tag(calendar.href)
@@ -1043,18 +1073,15 @@ struct SouveraTaskNewSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    // Run 26.11. (Layout-Fix): Label bleibt stehen, der
-                    // ProgressView (feste 20x20) stapelt sich daneben -
-                    // kein Layout-Sprung beim Drücken.
+                    // Run 25.11. (Save-Button-Fix): Label NUR der Text -
+                    // kein HStack, kein reservierter 20x20-ProgressView
+                    // (das war die "Lücke rechts neben dem Wort"). Der
+                    // Spinner erscheint in der Form; der Button bleibt
+                    // in seiner Größe stabil, disabled während isSaving.
                     Button {
                         save()
                     } label: {
-                        HStack(spacing: 8) {
-                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
-                            ProgressView()
-                                .frame(width: 20, height: 20)
-                                .opacity(isSaving ? 1 : 0)
-                        }
+                        Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
                     }
                     .disabled(!canSave)
                 }

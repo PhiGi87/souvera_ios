@@ -11,6 +11,12 @@
 // Pattern mit Toggle) sind editierbar; Speichern via
 // SouveraTasksViewModel.saveEdit (ICS-Patch updateTodoFields + PUT mit
 // If-Match, optimistische lokale Aktualisierung).
+// Run 25.11. (Feedback "Speicher-Button-Lücke + professionelles Design"):
+// Das Detail ist jetzt ein Form mit klaren Sections (Aufgabe / Liste /
+// Fälligkeit, Apple-HIG Form-Stil wie die Settings-Seiten). Der Speicher-
+// Button trägt NUR das Label "Speichern" - der Spinner erscheint während
+// isSaving als kompakte Zeile in der Form (kein reservierter 20x20-
+// ProgressView neben dem Wort = keine Lücke rechts im Toolbar-Label).
 
 import SwiftUI
 
@@ -31,8 +37,8 @@ struct SouveraCalendarTaskDetailView: View {
 
     /// Run 25.11.: Deck-Listen (Board-Karten als VTODO) und Listen ohne
     /// Schreibrecht sind read-only - Checkbox und Bearbeitung gesperrt,
-    /// Hinweis-Footer unten. Quelle: taskLists des ViewModels (canWrite /
-    /// Deck-Kategorie aus dem PROPFIND).
+    /// Hinweis als Section-Footer. Quelle: taskLists des ViewModels
+    /// (canWrite / Deck-Kategorie aus dem PROPFIND).
     private var isReadOnly: Bool {
         viewModel.isReadOnlyList(href: item.event.calendarHref)
     }
@@ -50,8 +56,27 @@ struct SouveraCalendarTaskDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
+            Form {
+                // Run 25.11. (Save-Button-Fix): der Spinner wohnt in der
+                // FORM (kompakte Zeile über dem ersten Inhalt), NICHT im
+                // Toolbar-Label - das Label bleibt exakt "Speichern"
+                // breit, kein Größensprung, keine Lücke rechts.
+                if isSaving {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
+                // Section "Aufgabe": Erledigt-Status (konsistent als
+                // Checkbox-Zeile dargestellt), Titel und Notizen.
+                Section(header: Text(NSLocalizedString("_tasks_section_task_",
+                                                       value: "Task",
+                                                       comment: ""))) {
                     // Checkbox-Toggle (NC-Konvention: STATUS:COMPLETED +
                     // COMPLETED:UTC + PERCENT-COMPLETE:100). Run 25.11.:
                     // Bei read-only Listen nicht antippbar (grau).
@@ -61,101 +86,100 @@ struct SouveraCalendarTaskDetailView: View {
                     } label: {
                         HStack(spacing: 12) {
                             Image(systemName: item.event.isCompleted ? "checkmark.circle.fill" : "circle")
-                                .font(.title2)
+                                .font(.title3)
                                 .foregroundStyle(isReadOnly
                                     ? Color.secondary.opacity(0.4)
                                     : (item.event.isCompleted
                                         ? Color.Souvera.brandPrimaryDeep
                                         : Color.secondary))
-                                Text(item.event.isCompleted
-                                    ? NSLocalizedString("_calendar_task_mark_open_", value: "Mark as open", comment: "")
-                                    : NSLocalizedString("_calendar_task_mark_done_", value: "Mark as done", comment: ""))
-                                    .font(.body)
-                                    .foregroundStyle(isReadOnly ? Color.secondary : Color.primary)
+                            Text(item.event.isCompleted
+                                ? NSLocalizedString("_calendar_task_mark_open_", value: "Mark as open", comment: "")
+                                : NSLocalizedString("_calendar_task_mark_done_", value: "Mark as done", comment: ""))
+                                .foregroundStyle(isReadOnly ? Color.secondary : Color.primary)
                         }
                     }
                     .buttonStyle(.plain)
                     .disabled(isReadOnly)
-                    .padding(.vertical, 4)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        // Run 26.11.: Titel editierbar.
-                        TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""),
-                                  text: $title)
-                            .font(.title3).fontWeight(.semibold)
-                            .strikethrough(item.event.isCompleted)
-                            .foregroundStyle(item.event.isCompleted ? Color.secondary : Color.primary)
-                        if hasDue {
-                            // Run 26.11.: Fälligkeit date-only und optional
-                            // (Toggle wie im Vacation-Pattern).
-                            DatePicker(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""),
-                                       selection: $due,
-                                       displayedComponents: [.date])
-                                .font(.subheadline)
-                        } else {
-                            Text(NSLocalizedString("_calendar_task_no_due_", value: "No due date", comment: ""))
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+                    TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""),
+                              text: $title,
+                              prompt: Text(NSLocalizedString("_tasks_summary_", value: "Title", comment: "")))
+                        .font(.body)
+                        .strikethrough(item.event.isCompleted)
+                        .foregroundStyle(item.event.isCompleted ? Color.secondary : Color.primary)
+                        .disabled(isReadOnly)
 
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""))
-                            .font(.caption).fontWeight(.semibold)
-                            .foregroundStyle(.secondary)
-                        // Run 26.11.: Notizen editierbar.
-                        TextEditor(text: $notes)
-                            .font(.body)
-                            .frame(minHeight: 100)
-                            .scrollContentBackground(.hidden)
-                    }
+                    // Run 25.11.: Notizen als vertikales TextField
+                    // (3-6 Zeilen, wachst mit dem Inhalt) statt TextEditor
+                    // mit fester Rahmenhöhe - konsistenter Form-Look.
+                    TextField(NSLocalizedString("_tasks_notes_", value: "Notes", comment: ""),
+                              text: $notes,
+                              axis: .vertical)
+                        .lineLimit(3...6)
+                        .disabled(isReadOnly)
+                }
 
-                    // Run 25.11.: Liste anzeigen/ändern - Farbpunkt +
-                    // Name aus dem PROPFIND; editierbar via Picker über
-                    // writableTaskCalendars, read-only nur Anzeige.
-                    VStack(alignment: .leading, spacing: 6) {
-                        if !isReadOnly {
-                            Picker(NSLocalizedString("_tasks_section_list_",
-                                                     value: "List",
-                                                     comment: ""),
-                                   selection: $selectedListHref) {
-                                ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
-                                    Text(calendar.displayName).tag(calendar.href)
-                                }
-                            }
-                        } else {
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(Color(hex: currentList?.color ?? "") ?? Color(NCBrandColor.shared.customer))
-                                    .frame(width: 10, height: 10)
-                                Text(listLabel(currentList))
-                                    .font(.body)
-                            }
-                        }
-                    }
-
-                    // Run 26.11.: Fälligkeit an/aus (Vacation-Pattern).
-                    // Run 25.11.: Bei read-only Listen aus (nur Anzeige).
+                // Section "Liste": Anzeige (Farbpunkt + Name) bzw. Picker
+                // über writableTaskCalendars; read-only-Hinweis als Footer.
+                Section {
                     if !isReadOnly {
-                        Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
-                            .font(.body)
+                        Picker(NSLocalizedString("_tasks_section_list_",
+                                                 value: "List",
+                                                 comment: ""),
+                               selection: $selectedListHref) {
+                            ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
+                                Text(calendar.displayName).tag(calendar.href)
+                            }
+                        }
+                    } else {
+                        HStack(spacing: 10) {
+                            Circle()
+                                .fill(Color(hex: currentList?.color ?? "") ?? Color(NCBrandColor.shared.customer))
+                                .frame(width: 10, height: 10)
+                            Text(listLabel(currentList))
+                        }
                     }
-
-                    // Run 25.11.: Hinweis-Footer für read-only Listen
-                    // (Deck / ohne Schreibrecht).
+                } header: {
+                    Text(NSLocalizedString("_tasks_section_list_",
+                                           value: "List",
+                                           comment: ""))
+                } footer: {
                     if isReadOnly {
                         Label(NSLocalizedString("_tasks_readonly_",
                                                 value: "Read-only list",
                                                 comment: ""),
                               systemImage: "lock")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
                     }
-
-                    Spacer(minLength: 0)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
+
+                // Section "Fälligkeit": Toggle + DatePicker (nur
+                // editierbar), read-only nur Anzeige.
+                Section(header: Text(NSLocalizedString("_tasks_section_due_",
+                                                       value: "Due date",
+                                                       comment: ""))) {
+                    if isReadOnly {
+                        if hasDue {
+                            Text(dueText)
+                        } else {
+                            Text(NSLocalizedString("_calendar_task_no_due_", value: "No due date", comment: ""))
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Toggle(NSLocalizedString("_tasks_section_due_",
+                                                 value: "Due date",
+                                                 comment: ""),
+                               isOn: $hasDue)
+                        if hasDue {
+                            // Run 26.11.: Fälligkeit date-only und optional
+                            // (Toggle wie im Vacation-Pattern).
+                            DatePicker(NSLocalizedString("_tasks_section_due_",
+                                                         value: "Due date",
+                                                         comment: ""),
+                                       selection: $due,
+                                       displayedComponents: [.date])
+                        }
+                    }
+                }
             }
             .navigationTitle(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))
             .navigationBarTitleDisplayMode(.inline)
@@ -169,22 +193,16 @@ struct SouveraCalendarTaskDetailView: View {
                 }
                 // Run 26.11.: Speichern - ICS patchen (updateTodoFields)
                 // und per PUT mit If-Match zurueckschreiben.
+                // Run 25.11. (Save-Button-Fix): Label NUR der Text - kein
+                // HStack, kein reservierter 20x20-ProgressView (das war
+                // die "Lücke rechts neben dem Wort"). Der Spinner liegt in
+                // der Form; der Button bleibt in seiner Größe stabil und
+                // ist während isSaving deaktiviert.
                 ToolbarItem(placement: .topBarTrailing) {
-                    // Run 26.11. (Feedback "komische optische Änderungen"):
-                    // Das Label wechselte beim Drücken zwischen Text und
-                    // ProgressView (Größensprung in der Toolbar). Jetzt
-                    // bleibt das Label stehen und der ProgressView mit
-                    // fester 20x20-Größe erscheint daneben (opacity-
-                    // gesteuert, kein Layout-Umbau).
                     Button {
                         save()
                     } label: {
-                        HStack(spacing: 8) {
-                            Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
-                            ProgressView()
-                                .frame(width: 20, height: 20)
-                                .opacity(isSaving ? 1 : 0)
-                        }
+                        Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
                     }
                     .disabled(!canSave || isReadOnly)
                 }
@@ -199,8 +217,16 @@ struct SouveraCalendarTaskDetailView: View {
             && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Run 25.11.: Fälligkeit als lokalisierte Ganztages-Darstellung
+    /// (entspricht DUE;VALUE=DATE).
+    private var dueText: String {
+        let df = DateFormatter()
+        df.setLocalizedDateFormatFromTemplate("EdMMM")
+        return df.string(from: due)
+    }
+
     /// Run 25.11.: Listenname - aus dem PROPFIND-Bestand, mit Fallback
-    /// auf den href-Pfad, wenn die Liste (noch) nicht bekannt ist.
+    /// auf den Section-Titel, wenn die Liste (noch) nicht bekannt ist.
     private func listLabel(_ calendar: CalDavCalendar?) -> String {
         calendar?.displayName
             ?? NSLocalizedString("_tasks_section_list_", value: "List", comment: "")
