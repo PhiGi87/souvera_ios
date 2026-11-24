@@ -37,6 +37,17 @@ struct SouveraCalendarTaskDetailView: View {
         viewModel.isReadOnlyList(href: item.event.calendarHref)
     }
 
+    // Run 25.11.: Listenwechsel - die aktuelle Liste wird angezeigt (auch
+    // bei read-only), bei editierbaren Aufgaben kann sie über einen Picker
+    // (writableTaskCalendars) geändert werden; beim Speichern wird der
+    // Move via viewModel.moveTask ausgeführt.
+    @State private var selectedListHref = ""
+
+    /// Aktuelle Liste (Farbpunkt + Name) aus dem PROPFIND-Bestand.
+    private var currentList: CalDavCalendar? {
+        viewModel.taskLists.first(where: { $0.href == item.event.calendarHref })
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -97,6 +108,30 @@ struct SouveraCalendarTaskDetailView: View {
                             .font(.body)
                             .frame(minHeight: 100)
                             .scrollContentBackground(.hidden)
+                    }
+
+                    // Run 25.11.: Liste anzeigen/ändern - Farbpunkt +
+                    // Name aus dem PROPFIND; editierbar via Picker über
+                    // writableTaskCalendars, read-only nur Anzeige.
+                    VStack(alignment: .leading, spacing: 6) {
+                        if !isReadOnly {
+                            Picker(NSLocalizedString("_tasks_section_list_",
+                                                     value: "List",
+                                                     comment: ""),
+                                   selection: $selectedListHref) {
+                                ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
+                                    Text(calendar.displayName).tag(calendar.href)
+                                }
+                            }
+                        } else {
+                            HStack(spacing: 8) {
+                                Circle()
+                                    .fill(Color(hex: currentList?.color ?? "") ?? Color(NCBrandColor.shared.customer))
+                                    .frame(width: 10, height: 10)
+                                Text(listLabel(currentList))
+                                    .font(.body)
+                            }
+                        }
                     }
 
                     // Run 26.11.: Fälligkeit an/aus (Vacation-Pattern).
@@ -164,6 +199,13 @@ struct SouveraCalendarTaskDetailView: View {
             && !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Run 25.11.: Listenname - aus dem PROPFIND-Bestand, mit Fallback
+    /// auf den href-Pfad, wenn die Liste (noch) nicht bekannt ist.
+    private func listLabel(_ calendar: CalDavCalendar?) -> String {
+        calendar?.displayName
+            ?? NSLocalizedString("_tasks_section_list_", value: "List", comment: "")
+    }
+
     /// Run 26.11.: Felder aus dem Eintrag vorbelegen. Undatierte Tasks
     /// (Parser-Anker: Tagesanfang heute) starten ohne Fälligkeit.
     private func prefill() {
@@ -171,6 +213,7 @@ struct SouveraCalendarTaskDetailView: View {
         didPrefill = true
         title = item.event.title
         notes = ICSParser.unescapeTodoText(item.event.description ?? "")
+        selectedListHref = item.event.calendarHref
         if item.isUndated {
             hasDue = false
         } else {
@@ -184,6 +227,8 @@ struct SouveraCalendarTaskDetailView: View {
         // Closure-Kette DetailView -> saveEdit -> PUT nachvollziehbar
         // machen (Titel leer => Button disabled, hier gar kein Aufruf).
         SouveraLog.write("Tasks", "DetailView.save: '\(title.trimmingCharacters(in: .whitespacesAndNewlines))' hasDue=\(hasDue), disabled=\(!canSave)")
+        // Run 25.11.: gewählte Zielliste für den Move (nil = unverändert).
+        let targetList = viewModel.writableTaskCalendars.first(where: { $0.href == selectedListHref })
         isSaving = true
         Task {
             let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -193,9 +238,16 @@ struct SouveraCalendarTaskDetailView: View {
                                               notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
                                               due: due,
                                               hasDue: hasDue)
+            // Run 25.11.: Listenwechsel nach dem Feld-Save ausführen -
+            // saveEdit hat die ICS/ETags im Cache aktualisiert, moveTask
+            // liest von dort (gleicher href-Schlüssel).
+            var moved = true
+            if ok, let target = targetList, target.href != item.event.calendarHref {
+                moved = await viewModel.moveTask(item, to: target)
+            }
             isSaving = false
-            SouveraLog.write("Tasks", "DetailView.save: Ergebnis \(ok ? "ok" : "fehlgeschlagen")")
-            if ok { dismiss() }
+            SouveraLog.write("Tasks", "DetailView.save: Ergebnis \(ok ? "ok" : "fehlgeschlagen")\(ok ? ", move \(moved ? "ok" : "fehlgeschlagen")" : "")")
+            if ok, moved { dismiss() }
         }
     }
 }

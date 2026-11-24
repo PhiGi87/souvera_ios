@@ -388,6 +388,62 @@ final class SouveraTasksViewModel: ObservableObject {
 
     // MARK: - Run 25.11.: Read-only-Listen (Deck / ohne Schreibrecht)
 
+    /// Run 25.11.: Aufgabe in eine andere (schreibbare) Liste verschieben.
+    /// Ablauf: frische ICS besorgen (lokaler Eintrag, sonst GET), PUT der
+    /// ICS in die Ziel-Kalender-URL (Dateiname vom alten href übernommen,
+    /// sonst UUID - createEvent-Abdeckung text/calendar) und danach DELETE
+    /// der alten Ressource (If-Match mit dem alten ETag + Retry-Leiter in
+    /// deleteEvent). Ein fehlgeschlagener DELETE wird nur geloggt - der
+    /// Move gilt trotzdem als ok (Doppel existiert dann bis zum nächsten
+    /// Load, der je href deduped; ein sauberer DELETE folgt beim nächsten
+    /// Refresh nicht automatisch, wird aber akzeptiert und dokumentiert).
+    func moveTask(_ item: TaskItem, to target: CalDavCalendar) async -> Bool {
+        // Nach einem saveEdit liegt die aktuelle ICS unter dem alten href
+        // im Cache - daher zuerst dort nachsehen, sonst Roheintrag/GET.
+        let entry = entriesByHref[item.entry.href] ?? item.entry
+        SouveraLog.write("Tasks", "move: '\(item.event.title)' von \(entry.calendarHref) nach \(target.href)")
+        guard target.href != entry.calendarHref else {
+            SouveraLog.write("Tasks", "move: Ziel == Quelle -> nichts zu tun")
+            return true
+        }
+        var ics = entry.ics
+        if ics.isEmpty {
+            SouveraLog.write("Tasks", "move: ICS leer -> frisch nachladen")
+            guard let fresh = await client.fetchEventICS(entry) else {
+                SouveraLog.write("Tasks", "move: ICS nicht ladbar -> Abbruch")
+                errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+                return false
+            }
+            ics = fresh
+        }
+        // Dateiname vom alten href übernehmen (ohne .ics), sonst UUID -
+        // createEvent bereinigt Sonderzeichen und PUTet mit
+        // Content-Type text/calendar.
+        let oldName = (entry.href as NSString).lastPathComponent
+        let base = oldName.hasSuffix(".ics") ? String(oldName.dropLast(4)) : oldName
+        let uid = base.isEmpty ? UUID().uuidString.lowercased() : base
+        guard let newEntry = await client.createEvent(calendarHref: target.href, ics: ics, uid: uid) else {
+            SouveraLog.write("Tasks", "move: PUT in Zielliste fehlgeschlagen -> Abbruch (alter Eintrag bleibt bestehen)")
+            errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+            return false
+        }
+        SouveraLog.write("Tasks", "move: PUT ok, neuer href=\(newEntry.href), etag=\(newEntry.etag ?? "-")")
+        // Alte Ressource löschen (deleteEvent: If-Match + Retry-Leiter).
+        let deleted = await client.deleteEvent(entry)
+        if deleted {
+            SouveraLog.write("Tasks", "move: DELETE alter href ok (\(entry.href))")
+        } else {
+            SouveraLog.write("Tasks", "move: WARNUNG - DELETE des alten href fehlgeschlagen (\(entry.href)) - Aufgabe existiert ggf. doppelt bis zum nächsten Load")
+        }
+        // Lokal aufräumen (alter href weg) und die Listen neu laden - der
+        // Server ordnet href/ETag in der Zielliste selbst zu.
+        openTasks.removeAll { $0.id == entry.href }
+        completedTasks.removeAll { $0.id == entry.href }
+        entriesByHref.removeValue(forKey: entry.href)
+        await load()
+        return true
+    }
+
     /// Account-Schlüssel für die Settings-Ablage (Muster
     /// CalendarViewModel.stableAccountKey).
     static func stableAccountKey() -> String {
