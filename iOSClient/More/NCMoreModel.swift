@@ -357,26 +357,10 @@ final class NCMoreModel: ObservableObject {
             )
         }
 
-        // Run 03.11.: Abwesenheitsassistent (souvera_mail Vacation-
-        // Endpunkte) - nur mit vorhandenem Account anbieten, da der
-        // Screen die Zugangsdaten des aktiven Accounts nutzt.
-        if !account.isEmpty {
-            functionItems.append(
-                Item(
-                    titleKey: "_vacation_title_",
-                    // Run 04.11.: "_vacation_title_" ist noch nicht in alle
-                    // Sprachen übersetzt (nur en/de). Ohne Fallback würde in
-                    // anderen Sprachen der Raw-Key als Titel erscheinen.
-                    fallbackTitle: "Vacation responder",
-                    // Run 04.11.: "envelope.badge.clock" existiert nicht als
-                    // SF-Symbol (UIImage(systemName:) -> nil, kein Icon).
-                    // "sun.max" ist seit iOS 13 garantiert verfügbar und
-                    // passt thematisch zum Abwesenheitsassistenten.
-                    image: "sun.max",
-                    destination: .vacation
-                )
-            )
-        }
+        // Run 25.11.: Vacation-Assistent aus dem Mehr-Menue entfernt
+        // (erstmal, Feature folgt spaeter). Der Destination-Case .vacation
+        // und SouveraVacationView bleiben im Code; der Eintrag wurde hier
+        // nur aus dem Items-Array genommen.
 
         functionItems.append(
             Item(
