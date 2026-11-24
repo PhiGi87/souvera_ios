@@ -1244,34 +1244,23 @@ final class SouveraInvitationCenter: ObservableObject {
     // Feedback: "Nicht antworten" ist keine Antwort - die Einladung soll
     // trotzdem aus der Liste verschwinden koennen. Kein PARTSTAT, kein
     // markAnsweredUid (impliziert eine Antwort und faerbt Labels) - nur
-    // Kalender-Loeschung bzw. Mail-Aufraeumen plus Ignore-Marker.
+    // Mail-Aufraeumen (Mail-Pfad) bzw. Ignore-Marker (Kalender-Pfad).
 
-    /// Entfernt eine Kalender-Einladung OHNE zu antworten: Termin per UID
-    /// aus allen Kalendern loeschen (ohne UID: Titel+Zeit-Fallback wie bei
-    /// Absagen ohne ICS), lokal ausblenden und href-basierten Ignore-Marker
-    /// setzen. Fehler (412/Netz) werden weich quittiert (addPendingRemoval-
-    /// Muster) - die Einladung verschwindet trotzdem lokal.
+    /// Run 25.11. (Feedback): Das Entfernen einer Einladung darf den Termin
+    /// nicht loeschen - der Kalender-Eintrag bleibt; nur die Einladung wird
+    /// aus dem Overlay ausgeblendet. Ein echter Termin-Delete bleibt ueber
+    /// die Termin-Detailansicht moeglich.
+    ///
+    /// Ohne zu antworten: href-basierten Ignore-Marker setzen (mit
+    /// event.end, damit der Marker nach Ablauf des Termins gecleaned wird)
+    /// und die Einladung lokal aus der Liste entfernen. Kein CalDAV-DELETE
+    /// mehr - auch ein bereits angenommener Termin bleibt erhalten.
     @discardableResult
     func ignoreCalendarInvitation(_ event: CalendarEventModel) async -> Bool {
-        var ok = false
-        if event.uid.isEmpty {
-            // Keine UID (z. B. geparste Kopie ohne UID): Fallback auf
-            // Titel + Start/Ende ±5 min wie `removeCancelledEvent`.
-            let result = await removeCancelledEvent(
-                uid: "", title: event.title, start: event.start, end: event.end)
-            ok = result == .removed || result == .notFound
-        } else {
-            ok = await removeEventByUID(event.uid)
-        }
-        if !ok, !event.uid.isEmpty {
-            // Run 22.09.-Muster: Server-DELETE gestoert -> gedrosselten
-            // Retry vormerken, lokal trotzdem quittieren.
-            Self.addPendingRemoval(event.uid)
-        }
         removeCalendarInvitation(event.href)
         Self.markIgnored(id: event.href, eventEnd: event.end)
-        SouveraLog.write("Invitations", "ignore calendar invite uid=\(event.uid) href=\(event.href): ok=\(ok)")
-        return ok
+        SouveraLog.write("Invitations", "ignore calendar invite uid=\(event.uid) href=\(event.href): ok=true")
+        return true
     }
 
     /// Entfernt eine Mail-Einladung OHNE zu antworten: aus dem Scan-
