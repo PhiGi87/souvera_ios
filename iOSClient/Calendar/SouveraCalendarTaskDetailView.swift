@@ -108,13 +108,20 @@ struct SouveraCalendarTaskDetailView: View {
                 // Run 26.11.: Speichern - ICS patchen (updateTodoFields)
                 // und per PUT mit If-Match zurueckschreiben.
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Run 26.11. (Feedback "komische optische Änderungen"):
+                    // Das Label wechselte beim Drücken zwischen Text und
+                    // ProgressView (Größensprung in der Toolbar). Jetzt
+                    // bleibt das Label stehen und der ProgressView mit
+                    // fester 20x20-Größe erscheint daneben (opacity-
+                    // gesteuert, kein Layout-Umbau).
                     Button {
                         save()
                     } label: {
-                        if isSaving {
-                            ProgressView()
-                        } else {
+                        HStack(spacing: 8) {
                             Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                            ProgressView()
+                                .frame(width: 20, height: 20)
+                                .opacity(isSaving ? 1 : 0)
                         }
                     }
                     .disabled(!canSave)
@@ -146,6 +153,10 @@ struct SouveraCalendarTaskDetailView: View {
     }
 
     private func save() {
+        // Run 26.11. (Feedback "Speichern geht nicht"): Start-Diagnose -
+        // Closure-Kette DetailView -> saveEdit -> PUT nachvollziehbar
+        // machen (Titel leer => Button disabled, hier gar kein Aufruf).
+        SouveraLog.write("Tasks", "DetailView.save: '\(title.trimmingCharacters(in: .whitespacesAndNewlines))' hasDue=\(hasDue), disabled=\(!canSave)")
         isSaving = true
         Task {
             let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -156,6 +167,7 @@ struct SouveraCalendarTaskDetailView: View {
                                               due: due,
                                               hasDue: hasDue)
             isSaving = false
+            SouveraLog.write("Tasks", "DetailView.save: Ergebnis \(ok ? "ok" : "fehlgeschlagen")")
             if ok { dismiss() }
         }
     }

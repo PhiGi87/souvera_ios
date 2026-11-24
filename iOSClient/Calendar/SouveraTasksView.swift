@@ -45,32 +45,56 @@ final class SouveraTasksViewModel: ObservableObject {
     func load() async {
         isLoading = true
         defer { isLoading = false }
+        // Run 26.11. (Feedback "Banner obwohl Queries ok"): veraltete
+        // Fehlermeldung beim Neuladen zurücksetzen - sie hing sonst als
+        // Banner in der Liste, obwohl alle todo-Queries erfolgreich waren.
+        errorMessage = nil
         let calendars = await client.fetchCalendars().filter { $0.supportsTasks }
         // Run 26.11.: Schreibbare Task-Kalender parallel mithalten (Picker
         // im Neuanlage-Sheet; Fallback dort: erster Eintrag).
         writableTaskCalendars = calendars.filter { $0.canWrite }
         guard !calendars.isEmpty else {
+            SouveraLog.write("Tasks", "load: keine Task-Kalender (supportsTasks) gefunden")
             apply([], [])
             return
         }
         // Run 25.11.: Task-Kalender parallel abfragen (Muster TaskGroup,
         // wie im revertierten CalendarViewModel-TaskGroup-Zweig).
-        let results = await withTaskGroup(of: [CalDavEventEntry].self) { group in
+        // Run 26.11. (Feedback): Ergebnis je Kalender zählen - ein
+        // Teilfehler (z. B. ein Kalender, der auf den VTODO-REPORT leer
+        // oder fehlerhaft reagiert) setzt KEINEN Gesamt-Fehler mehr;
+        // die erfolgreichen Daten werden angezeigt. Der Banner erscheint
+        // nur, wenn ALLE Task-Kalender nichts liefern.
+        let results = await withTaskGroup(of: (String, [CalDavEventEntry]).self) { group in
             for calendar in calendars {
                 group.addTask { [client] in
-                    await client.fetchTodos(calendarHref: calendar.href)
+                    let entries = await client.fetchTodos(calendarHref: calendar.href)
+                    return (calendar.href, entries)
                 }
             }
-            var all: [CalDavEventEntry] = []
-            for await entries in group {
-                all.append(contentsOf: entries)
+            var all: [(String, [CalDavEventEntry])] = []
+            for await result in group {
+                all.append(result)
             }
             return all
+        }
+        var all: [CalDavEventEntry] = []
+        var emptyCalendars: [String] = []
+        for (href, entries) in results {
+            SouveraLog.write("Tasks", "load: \(href) -> \(entries.count) Todos")
+            if entries.isEmpty { emptyCalendars.append(href) }
+            all.append(contentsOf: entries)
+        }
+        if all.isEmpty {
+            SouveraLog.write("Tasks", "load: ALLE \(calendars.count) Task-Kalender lieferten 0 Todos -> Banner")
+            errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+        } else if !emptyCalendars.isEmpty {
+            SouveraLog.write("Tasks", "load: Teilfehler/leer bei \(emptyCalendars.count)/\(calendars.count) Kalendern (\(emptyCalendars.joined(separator: ", "))) - erfolgreiche Daten werden angezeigt")
         }
         // Dedup nach href (ein Kalender kann theoretisch doppelt
         // auftauchen, z. B. bei mehreren Principal-Kandidaten).
         var byHref: [String: CalDavEventEntry] = [:]
-        for entry in results where !entry.href.isEmpty {
+        for entry in all where !entry.href.isEmpty {
             byHref[entry.href] = entry
         }
         entriesByHref = byHref
@@ -117,6 +141,10 @@ final class SouveraTasksViewModel: ObservableObject {
     /// und per PUT mit If-Match zurückschreiben. Bei endgültigem
     /// Fehlschlag: UI zurückdrehen + dezente Fehlermeldung.
     func toggle(_ item: TaskItem) async {
+        // Run 26.11. (Feedback "Speichern geht nicht"): Diagnose-Logging
+        // am Start - ohne ICS-Laenge/ETag/calendarHref war der Fehler
+        // nicht auffindbar.
+        SouveraLog.write("Tasks", "toggle: '\(item.event.title)' href=\(item.entry.href), ics=\(item.entry.ics.count)B, etag=\(item.entry.etag != nil ? "vorhanden" : "FEHLT"), calendar=\(item.entry.calendarHref)")
         let wasCompleted = item.event.isCompleted
         let targetItem = flip(item)
         mutate(item: item, with: targetItem)
@@ -126,10 +154,29 @@ final class SouveraTasksViewModel: ObservableObject {
         // ETag (412) einmalig frisch laden und erneut versuchen (Muster
         // scheduleEventSync aus dem Kalender-Modul).
         var entry = targetItem.entry
+        // Run 26.11. (Härtung): Wenn der REPORT keinen ICS-Body lieferte,
+        // vor dem Patch frisch nachladen - auf einem leeren String patchen
+        // erzeugt eine invalide ICS und der PUT scheitert.
+        if entry.ics.isEmpty {
+            SouveraLog.write("Tasks", "toggle: ICS leer -> frisch nachladen")
+            if let fresh = await client.fetchEventICS(entry) {
+                entry = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                         href: entry.href,
+                                         etag: entry.etag,
+                                         ics: fresh)
+            } else {
+                SouveraLog.write("Tasks", "toggle: ICS leer und Nachladen fehlgeschlagen -> Abbruch")
+                mutate(item: targetItem, with: item)
+                errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+                return
+            }
+        }
         var newICS = wasCompleted
             ? ICSParser.uncompleteTodo(entry.ics)
             : ICSParser.completeTodo(entry.ics)
+        SouveraLog.write("Tasks", "toggle: gepatchte ICS \(newICS.count)B (etag \(entry.etag != nil ? "mit" : "OHNE") If-Match)")
         var result = await client.performEventUpdate(entry, ics: newICS)
+        SouveraLog.write("Tasks", "toggle: PUT -> \(result.ok ? "ok" : "FEHLER"), etag=\(result.etag ?? "-")")
         if !result.ok {
             if let fresh = await client.fetchEventICS(entry) {
                 newICS = wasCompleted
@@ -140,10 +187,12 @@ final class SouveraTasksViewModel: ObservableObject {
                                          etag: nil,
                                          ics: fresh)
                 result = await client.performEventUpdate(entry, ics: newICS)
+                SouveraLog.write("Tasks", "toggle: Retry-PUT (frisch geladen) -> \(result.ok ? "ok" : "FEHLER"), etag=\(result.etag ?? "-")")
             }
         }
         guard result.ok else {
             // Rollback der optimistischen Änderung.
+            SouveraLog.write("Tasks", "toggle: endgültig fehlgeschlagen -> Rollback")
             mutate(item: targetItem, with: item)
             errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
             return
@@ -181,16 +230,43 @@ final class SouveraTasksViewModel: ObservableObject {
                   due: Date?,
                   hasDue: Bool) async -> Bool {
         errorMessage = nil
+        // Run 26.11. (Feedback "Speichern geht nicht"): Diagnose-Logging
+        // am Start - Entry-Zustand vor dem PATCH sichtbar machen.
+        SouveraLog.write("Tasks", "saveEdit: '\(summary)' href=\(item.entry.href), ics=\(item.entry.ics.count)B, etag=\(item.entry.etag != nil ? "vorhanden" : "FEHLT -> PUT ohne If-Match"), calendar=\(item.entry.calendarHref), hasDue=\(hasDue)")
 
         // ICS patchen und PUT mit dem ETag des Eintrags versuchen - bei
         // Stale-ETag frisch nachladen und erneut versuchen.
         var entry = item.entry
+        // Run 26.11. (Härtung): Wenn der REPORT keinen ICS-Body lieferte,
+        // vor dem Patch frisch nachladen - auf einem leeren String patchen
+        // erzeugt eine invalide ICS und der PUT scheitert.
+        if entry.ics.isEmpty {
+            SouveraLog.write("Tasks", "saveEdit: ICS leer -> frisch nachladen")
+            if let fresh = await client.fetchEventICS(entry) {
+                entry = CalDavEventEntry(calendarHref: entry.calendarHref,
+                                         href: entry.href,
+                                         etag: entry.etag,
+                                         ics: fresh)
+            } else {
+                SouveraLog.write("Tasks", "saveEdit: ICS leer und Nachladen fehlgeschlagen -> Abbruch")
+                errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
+                return false
+            }
+        }
+        // Diagnose: enthält die ICS überhaupt einen VTODO-Block? Sonst
+        // liefert updateTodoFields die ICS unverändert zurück und der
+        // PUT schreibt den alten Stand zurück (Speichern "wirkt tot").
+        if !entry.ics.uppercased().contains("BEGIN:VTODO") {
+            SouveraLog.write("Tasks", "saveEdit: WARNUNG - ICS enthält keinen VTODO-Block, Patch wird keine Wirkung haben")
+        }
         var newICS = ICSParser.updateTodoFields(entry.ics,
                                                 summary: summary,
                                                 notes: notes,
                                                 due: due,
                                                 hasDue: hasDue)
+        SouveraLog.write("Tasks", "saveEdit: gepatchte ICS \(newICS.count)B")
         var result = await client.performEventUpdate(entry, ics: newICS)
+        SouveraLog.write("Tasks", "saveEdit: PUT -> \(result.ok ? "ok" : "FEHLER"), etag=\(result.etag ?? "-")")
         if !result.ok, let fresh = await client.fetchEventICS(entry) {
             newICS = ICSParser.updateTodoFields(fresh,
                                                 summary: summary,
@@ -202,12 +278,15 @@ final class SouveraTasksViewModel: ObservableObject {
                                      etag: nil,
                                      ics: fresh)
             result = await client.performEventUpdate(entry, ics: newICS)
+            SouveraLog.write("Tasks", "saveEdit: Retry-PUT (frisch geladen) -> \(result.ok ? "ok" : "FEHLER"), etag=\(result.etag ?? "-")")
         }
         guard result.ok else {
             // Kein Rollback noetig - die UI wurde noch nicht gedreht.
+            SouveraLog.write("Tasks", "saveEdit: endgültig fehlgeschlagen")
             errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
             return false
         }
+        SouveraLog.write("Tasks", "saveEdit: erfolgreich")
 
         // Lokale Aktualisierung: CalendarEventModel hat let-Felder -
         // daher komplett neu konstruieren (Muster toggle). Die Fälligkeit
@@ -335,17 +414,25 @@ struct SouveraTasksView: View {
     var body: some View {
         List {
             if let message = viewModel.errorMessage {
-                // Dezente Fehlermeldung statt Alert.
+                // Run 26.11. (Layout-Fix): dezente Fehlermeldung als
+                // kompakte Zeile innerhalb der Liste - ohne feste Höhen-
+                // angaben/Overlays, damit kein unbeschränkter Hintergrund
+                // ("Blob") über die Liste wachsen kann.
                 Section {
                     Label(message, systemImage: "exclamationmark.triangle")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             Section {
                 if viewModel.openTasks.isEmpty && viewModel.completedTasks.isEmpty {
                     Text(NSLocalizedString("_tasks_empty_", value: "No tasks", comment: ""))
+                        .font(.body)
                         .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
                 ForEach(viewModel.openTasks) { item in
                     taskRow(item)
@@ -402,13 +489,18 @@ struct SouveraTasksView: View {
                 .accessibilityLabel(Text(NSLocalizedString("_tasks_new_", value: "New task", comment: "")))
             }
             ToolbarItem(placement: .topBarTrailing) {
+                // Run 26.11. (Layout-Fix): ProgressView und Icon stapeln
+                // sich in einem ZStack mit fester Größe - der Wechsel
+                // isLoading löst keinen Toolbar-Layout-Sprung mehr aus.
                 Button {
                     Task { await viewModel.load() }
                 } label: {
-                    if viewModel.isLoading {
-                        ProgressView()
-                    } else {
+                    ZStack {
                         Image(systemName: "arrow.clockwise")
+                            .opacity(viewModel.isLoading ? 0 : 1)
+                        ProgressView()
+                            .frame(width: 20, height: 20)
+                            .opacity(viewModel.isLoading ? 1 : 0)
                     }
                 }
             }
@@ -522,13 +614,17 @@ struct SouveraTaskNewSheet: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
+                    // Run 26.11. (Layout-Fix): Label bleibt stehen, der
+                    // ProgressView (feste 20x20) stapelt sich daneben -
+                    // kein Layout-Sprung beim Drücken.
                     Button {
                         save()
                     } label: {
-                        if isSaving {
-                            ProgressView()
-                        } else {
+                        HStack(spacing: 8) {
                             Text(NSLocalizedString("_tasks_save_", value: "Save", comment: ""))
+                            ProgressView()
+                                .frame(width: 20, height: 20)
+                                .opacity(isSaving ? 1 : 0)
                         }
                     }
                     .disabled(!canSave)
