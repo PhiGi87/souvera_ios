@@ -789,7 +789,7 @@ final class CalendarViewModel: ObservableObject {
             // souvera_calendar_default_<accountKey>), erst DANACH die
             // bestehenden Fallbacks (gewählter Kalender, eigener/
             // persönlicher, sonst bisheriger Fallback).
-            let storedDefault = Self.defaultCalendarHref(account: stableAccountKey())
+            let storedDefault = Self.defaultCalendarHref(account: Self.stableAccountKey())
             let chosen: CalDavCalendar? =
                 storedDefault.flatMap { stored in
                     calendars.first(where: { $0.href == stored && $0.canWrite })
