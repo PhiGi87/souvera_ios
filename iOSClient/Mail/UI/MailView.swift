@@ -2474,7 +2474,11 @@ struct MailComposeView: View {
                             .padding(.horizontal, 12)
                             .padding(.vertical, 4)
                         }
-                        .frame(minHeight: 200, alignment: .topLeading)
+                        // Run 25.11. (Feedback): Die Signatur beginnt direkt
+                        // unter der Antwort-Zeile - der Body-Block reserviert
+                        // nur eine Zeile, solange die Antwort leer ist, und
+                        // waechst beim Tippen (AutoGrowingTextView).
+                        .frame(minHeight: bodyText.isEmpty ? 44 : 200, alignment: .topLeading)
                         .frame(maxWidth: .infinity, alignment: .topLeading)
 
                         // Run 25.11. (Nutzer-Feedback): Die Signatur ist KEIN
