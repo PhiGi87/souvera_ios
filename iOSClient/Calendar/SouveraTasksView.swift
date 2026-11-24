@@ -627,12 +627,31 @@ struct SouveraTasksView: View {
     /// Run 25.11. (Multiselect): Toggle einer Liste im Auswahl-Set -
     /// gemeinsam von Sidebar und schmalem Menu genutzt (wie
     /// viewModel.toggleCalendar im Kalender).
+    /// Run 25.11. (Audit): Diagnose-Logging beim Toggle - ohne dieses Log
+    /// war nicht nachvollziehbar, ob ein Tap die Auswahl wirklich aendert
+    /// (Nutzer-Feedback "Multiauswahl geht nicht" auf Build 202611242250).
     private func toggleList(_ href: String) {
-        if selectedLists.contains(href) {
-            selectedLists.remove(href)
+        let key = normalizedHref(href)
+        if selectedLists.contains(key) {
+            selectedLists.remove(key)
         } else {
-            selectedLists.insert(href)
+            selectedLists.insert(key)
         }
+        SouveraLog.write("Tasks", "list toggle: \(href) -> selected=\(selectedLists.sorted().joined(separator: ", "))")
+    }
+
+    /// Run 25.11. (Audit): href-Normalisierung fuer den Listen-Vergleich.
+    /// Die Task-Eintraege tragen event.calendarHref aus dem REPORT und die
+    /// Sidebar list.href aus dem PROPFIND - beide stammen aus derselben
+    /// Multistatus-Antwort und matchen exakt, aber Collection-hrefs koennen
+    /// je nach Server mit/ohne trailing slash geliefert werden. Damit ein
+    /// Tap nicht "ins Leere" laeuft, wird beim Vergleich der Slash
+    /// entfernt (Beide Seiten werden normalisiert - Set-Schluessel UND
+    /// Filter-Vergleich).
+    private func normalizedHref(_ href: String) -> String {
+        var trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
+        while trimmed.hasSuffix("/") { trimmed.removeLast() }
+        return trimmed
     }
 
     private var taskListSidebar: some View {
@@ -685,14 +704,18 @@ struct SouveraTasksView: View {
     }
 
     /// Die Aufgaben-Liste - gefiltert nach den ausgewählten Listen
-    /// (leeres Set = alle).
+    /// (leeres Set = alle). Run 25.11. (Audit): der Filter vergleicht
+    /// normalisierte hrefs (siehe normalizedHref) - event.calendarHref
+    /// der Tasks stammt aus fetchTodos und ist genau das calendar.href
+    /// derselben Liste, aber ein abweichender trailing slash haette den
+    /// Filter stumm gemacht (wahrgenommen als "Multiselect geht nicht").
     private var taskListView: some View {
         let filteredOpen = selectedLists.isEmpty
             ? viewModel.openTasks
-            : viewModel.openTasks.filter { selectedLists.contains($0.event.calendarHref) }
+            : viewModel.openTasks.filter { selectedLists.contains(normalizedHref($0.event.calendarHref)) }
         let filteredCompleted = selectedLists.isEmpty
             ? viewModel.completedTasks
-            : viewModel.completedTasks.filter { selectedLists.contains($0.event.calendarHref) }
+            : viewModel.completedTasks.filter { selectedLists.contains(normalizedHref($0.event.calendarHref)) }
 
         return List {
             if let message = viewModel.errorMessage {
@@ -720,7 +743,20 @@ struct SouveraTasksView: View {
                     taskRow(item)
                 }
             } header: {
-                Text(NSLocalizedString("_tasks_open_", value: "Open", comment: ""))
+                // Run 25.11. (Audit): dezenter Hinweis auf die aktive
+                // Listen-Auswahl - ohne Feedback war nicht sichtbar, dass
+                // der Filter überhaupt greift ("N Listen ausgewählt").
+                VStack(alignment: .leading, spacing: 2) {
+                    if !selectedLists.isEmpty {
+                        Text(String(format: NSLocalizedString("_tasks_lists_selected_",
+                                                              value: "%d lists selected",
+                                                              comment: ""),
+                                    selectedLists.count))
+                            .font(.caption2)
+                            .foregroundStyle(.tint)
+                    }
+                    Text(NSLocalizedString("_tasks_open_", value: "Open", comment: ""))
+                }
             }
 
             if !filteredCompleted.isEmpty {

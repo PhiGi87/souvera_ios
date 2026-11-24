@@ -1004,6 +1004,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_tasks_lists_all_"       = "All";
 "_tasks_lists_own_"       = "Own lists";
 "_tasks_lists_deck_"      = "Deck lists";
+"_tasks_lists_selected_"  = "%d lists selected";
 "_calendar_no_selection_"      = "No selection";
 "_settings_default_calendar_" = "Default calendar";
 "_tasks_readonly_"            = "Read-only list";
