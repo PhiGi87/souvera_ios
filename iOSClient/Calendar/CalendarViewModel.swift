@@ -141,6 +141,35 @@ final class CalendarViewModel: ObservableObject {
     private var selectionDefaultsKey: String { "souveraCalendarSelection_\(accountKey)" }
     private var colorDefaultsKey: String { "souveraCalendarColors_\(accountKey)" }
 
+    // MARK: - Run 25.11.: Standard-Kalender (Termine)
+
+    /// UserDefaults-Schlüssel für den Standard-Kalender (pro Account,
+    /// bereinigt wie SouveraMailDisplaySettings.key).
+    private static func defaultCalendarKey(account: String) -> String {
+        let safe = account.replacingOccurrences(of: "[^A-Za-z0-9._-]", with: "_", options: .regularExpression)
+        return "souvera_calendar_default_\(safe)"
+    }
+
+    /// Gespeicherter Standard-Kalender (calendarHref) oder nil
+    /// (leer = nicht gesetzt, Fallbacks greifen).
+    static func defaultCalendarHref(account: String) -> String? {
+        let value = UserDefaults.standard.string(forKey: defaultCalendarKey(account: account)) ?? ""
+        return value.isEmpty ? nil : value
+    }
+
+    static func setDefaultCalendarHref(_ href: String?, account: String) {
+        UserDefaults.standard.set(href ?? "", forKey: defaultCalendarKey(account: account))
+    }
+
+    /// Run 25.11.: Schreibbare Kalender (OHNE Deck) für die Settings-
+    /// Auswahl. Die Settings laden kein CalendarViewModel - daher
+    /// statisch mit explizitem Account (frischer PROPFIND via
+    /// fetchCalendars, canWrite-Filter).
+    static func writableCalendarChoices(account: String) async -> [CalDavCalendar] {
+        await CalDavClient(account: account).fetchCalendars()
+            .filter { $0.canWrite && $0.category != .deck }
+    }
+
     func isSelected(_ calendar: CalDavCalendar) -> Bool {
         selectedCalendarHrefs.contains(calendar.href)
     }
@@ -755,10 +784,17 @@ final class CalendarViewModel: ObservableObject {
                                           ics: ics)
         } else {
             kind = .create
-            // Ziel-Kalender: gewählter (schreibbarer) Kalender, sonst der
-            // eigene/persönliche, sonst bisheriger Fallback.
+            // Run 25.11.: Ziel-Kalender - ZUERST der gespeicherte
+            // Standard-Kalender aus den Settings (UserDefaults
+            // souvera_calendar_default_<accountKey>), erst DANACH die
+            // bestehenden Fallbacks (gewählter Kalender, eigener/
+            // persönlicher, sonst bisheriger Fallback).
+            let storedDefault = Self.defaultCalendarHref(account: stableAccountKey())
             let chosen: CalDavCalendar? =
-                calendars.first(where: { $0.href == draft.calendarHref && $0.canWrite })
+                storedDefault.flatMap { stored in
+                    calendars.first(where: { $0.href == stored && $0.canWrite })
+                }
+                ?? calendars.first(where: { $0.href == draft.calendarHref && $0.canWrite })
                 ?? calendars.first(where: { $0.canWrite && $0.isPersonal })
                 ?? calendars.first(where: { $0.canWrite && !$0.href.contains("deck") })
                 ?? calendars.first(where: { !$0.href.contains("deck") })

@@ -29,6 +29,10 @@ struct NCSettingsView: View {
     // Cache leeren: Bestätigung + Ergebnis-Overlay
     @State private var showClearCacheConfirm = false
     @State private var clearCacheResult: String?
+    // Run 25.11.: Standard-Kalender (Termine) - schreibbare Kalender
+    // (ohne Deck) für den Picker, geladen via CalDAV-PROPFIND.
+    @State private var writableCalendars: [CalDavCalendar] = []
+    @State private var defaultCalendarHref = ""
     // Object of ViewModel of this view
     @ObservedObject var model: NCSettingsModel
 
@@ -145,6 +149,36 @@ struct NCSettingsView: View {
                     Text(NSLocalizedString("_calendar_month_", comment: "")).tag("month")
                 }
                 .pickerStyle(.segmented)
+                // Run 25.11.: Standard-Kalender für neue Termine - Picker
+                // über die schreibbaren Kalender (ohne Deck). Das
+                // CalendarViewModel ist in den Settings nicht geladen,
+                // daher lädt der statische Helper
+                // CalendarViewModel.writableCalendarChoices die Kalender
+                // frisch per CalDAV-PROPFIND; gespeichert wird der
+                // calendarHref via UserDefaults (CalendarViewModel.saveEvent
+                // prüft den Default im create-Branch zuerst).
+                Picker(NSLocalizedString("_settings_default_calendar_", comment: ""),
+                       selection: $defaultCalendarHref) {
+                    Text(NSLocalizedString("_calendar_no_selection_", value: "No selection", comment: ""))
+                        .tag("")
+                    ForEach(writableCalendars, id: \.href) { calendar in
+                        Text(calendar.displayName).tag(calendar.href)
+                    }
+                }
+                .font(.body)
+                .onAppear {
+                    defaultCalendarHref = CalendarViewModel.defaultCalendarHref(
+                        account: model.session.account) ?? ""
+                    Task {
+                        writableCalendars = await CalendarViewModel.writableCalendarChoices(
+                            account: model.session.account)
+                    }
+                }
+                .onChange(of: defaultCalendarHref) { _, newValue in
+                    CalendarViewModel.setDefaultCalendarHref(
+                        newValue.isEmpty ? nil : newValue,
+                        account: model.session.account)
+                }
             })
             // Auto-Refresh (Mail & Kalender)
             Section(header: Text(NSLocalizedString("_settings_auto_refresh_", comment: "")).font(.headline), content: {

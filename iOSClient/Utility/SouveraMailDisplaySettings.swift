@@ -50,4 +50,16 @@ enum SouveraMailDisplaySettings {
     static func setLocalSignature(_ text: String, account: String) {
         UserDefaults.standard.set(text, forKey: key("souvera_mail_signature_local", account: account))
     }
+
+    // MARK: - Run 25.11.: Standard-Task-Liste (neue Aufgabe)
+
+    /// Gespeicherte Standard-Task-Liste (calendarHref, pro Account).
+    /// Leer/nicht gesetzt = Fallback (erste schreibbare Liste).
+    static func defaultTaskListId(account: String) -> String {
+        UserDefaults.standard.string(forKey: key("souvera_tasks_default_list", account: account)) ?? ""
+    }
+
+    static func setDefaultTaskListId(_ href: String, account: String) {
+        UserDefaults.standard.set(href, forKey: key("souvera_tasks_default_list", account: account))
+    }
 }

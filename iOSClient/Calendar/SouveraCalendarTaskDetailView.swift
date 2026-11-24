@@ -29,12 +29,21 @@ struct SouveraCalendarTaskDetailView: View {
     @State private var isSaving = false
     @State private var didPrefill = false
 
+    /// Run 25.11.: Deck-Listen (Board-Karten als VTODO) und Listen ohne
+    /// Schreibrecht sind read-only - Checkbox und Bearbeitung gesperrt,
+    /// Hinweis-Footer unten. Quelle: taskLists des ViewModels (canWrite /
+    /// Deck-Kategorie aus dem PROPFIND).
+    private var isReadOnly: Bool {
+        viewModel.isReadOnlyList(href: item.event.calendarHref)
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     // Checkbox-Toggle (NC-Konvention: STATUS:COMPLETED +
-                    // COMPLETED:UTC + PERCENT-COMPLETE:100).
+                    // COMPLETED:UTC + PERCENT-COMPLETE:100). Run 25.11.:
+                    // Bei read-only Listen nicht antippbar (grau).
                     Button {
                         Task { await viewModel.toggle(item) }
                         dismiss()
@@ -42,16 +51,20 @@ struct SouveraCalendarTaskDetailView: View {
                         HStack(spacing: 12) {
                             Image(systemName: item.event.isCompleted ? "checkmark.circle.fill" : "circle")
                                 .font(.title2)
-                                .foregroundStyle(item.event.isCompleted
-                                    ? Color.Souvera.brandPrimaryDeep
-                                    : Color.secondary)
-                            Text(item.event.isCompleted
-                                ? NSLocalizedString("_calendar_task_mark_open_", value: "Mark as open", comment: "")
-                                : NSLocalizedString("_calendar_task_mark_done_", value: "Mark as done", comment: ""))
-                                .font(.body)
+                                .foregroundStyle(isReadOnly
+                                    ? Color.secondary.opacity(0.4)
+                                    : (item.event.isCompleted
+                                        ? Color.Souvera.brandPrimaryDeep
+                                        : Color.secondary))
+                                Text(item.event.isCompleted
+                                    ? NSLocalizedString("_calendar_task_mark_open_", value: "Mark as open", comment: "")
+                                    : NSLocalizedString("_calendar_task_mark_done_", value: "Mark as done", comment: ""))
+                                    .font(.body)
+                                    .foregroundStyle(isReadOnly ? Color.secondary : Color.primary)
                         }
                     }
                     .buttonStyle(.plain)
+                    .disabled(isReadOnly)
                     .padding(.vertical, 4)
 
                     VStack(alignment: .leading, spacing: 6) {
@@ -87,8 +100,22 @@ struct SouveraCalendarTaskDetailView: View {
                     }
 
                     // Run 26.11.: Fälligkeit an/aus (Vacation-Pattern).
-                    Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
-                        .font(.body)
+                    // Run 25.11.: Bei read-only Listen aus (nur Anzeige).
+                    if !isReadOnly {
+                        Toggle(NSLocalizedString("_tasks_due_", value: "Due date", comment: ""), isOn: $hasDue)
+                            .font(.body)
+                    }
+
+                    // Run 25.11.: Hinweis-Footer für read-only Listen
+                    // (Deck / ohne Schreibrecht).
+                    if isReadOnly {
+                        Label(NSLocalizedString("_tasks_readonly_",
+                                                value: "Read-only list",
+                                                comment: ""),
+                              systemImage: "lock")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
 
                     Spacer(minLength: 0)
                 }
@@ -124,7 +151,7 @@ struct SouveraCalendarTaskDetailView: View {
                                 .opacity(isSaving ? 1 : 0)
                         }
                     }
-                    .disabled(!canSave)
+                    .disabled(!canSave || isReadOnly)
                 }
             }
             .onAppear { prefill() }

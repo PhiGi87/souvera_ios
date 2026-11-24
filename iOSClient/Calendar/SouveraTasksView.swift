@@ -386,6 +386,27 @@ final class SouveraTasksViewModel: ObservableObject {
         return true
     }
 
+    // MARK: - Run 25.11.: Read-only-Listen (Deck / ohne Schreibrecht)
+
+    /// Account-Schlüssel für die Settings-Ablage (Muster
+    /// CalendarViewModel.stableAccountKey).
+    static func stableAccountKey() -> String {
+        NCManageDatabase.shared.getActiveTableAccount()?.account
+            ?? NCManageDatabase.shared.getAllTableAccount().first?.account
+            ?? "default"
+    }
+
+    /// Run 25.11.: Deck-Listen (Board-Karten als VTODO) und Listen ohne
+    /// Schreibrecht sind read-only - Checkbox und Bearbeitung gesperrt.
+    /// Bekannter Kalender: canWrite/Deck-Kategorie; unbekannter href:
+    /// Deck-Heuristik wie in CalDavCalendar.supportsTasks.
+    func isReadOnlyList(href: String) -> Bool {
+        if let calendar = taskLists.first(where: { $0.href == href }) {
+            return !calendar.canWrite || calendar.category == .deck
+        }
+        return href.range(of: "deck", options: .caseInsensitive) != nil
+    }
+
     /// Ersetzt ein Item in beiden Listen durch ein aktualisiertes (gleiche
     /// id) und verschiebt es ggf. in die andere Sektion.
     private func mutate(item: TaskItem, with updated: TaskItem) {
@@ -664,7 +685,10 @@ struct SouveraTasksView: View {
     /// Zeile: Checkbox (Tap = Abhaken) + Titel; Tap auf die Zeile öffnet
     /// das Detail-Sheet.
     private func taskRow(_ item: SouveraTasksViewModel.TaskItem) -> some View {
-        Button {
+        // Run 25.11.: Deck-/schreibgeschützte Listen - Checkbox gesperrt
+        // (grau), Abhaken nur in schreibbaren Listen.
+        let readOnly = viewModel.isReadOnlyList(href: item.event.calendarHref)
+        return Button {
             selectedItem = item
         } label: {
             HStack(spacing: 12) {
@@ -673,11 +697,14 @@ struct SouveraTasksView: View {
                 } label: {
                     Image(systemName: item.event.isCompleted ? "checkmark.circle.fill" : "circle")
                         .font(.title3)
-                        .foregroundStyle(item.event.isCompleted
-                            ? Color.Souvera.brandPrimaryDeep
-                            : Color.secondary)
+                        .foregroundStyle(readOnly
+                            ? Color.secondary.opacity(0.4)
+                            : (item.event.isCompleted
+                                ? Color.Souvera.brandPrimaryDeep
+                                : Color.secondary))
                 }
                 .buttonStyle(.plain)
+                .disabled(readOnly)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(item.event.title)
@@ -746,13 +773,15 @@ struct SouveraTaskNewSheet: View {
                                    displayedComponents: [.date])
                     }
                 }
-                if viewModel.writableTaskCalendars.count > 1 {
-                    Section(header: Text(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))) {
-                        Picker(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""),
-                               selection: $calendarHref) {
-                            ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
-                                Text(calendar.displayName).tag(calendar.href)
-                            }
+                // Run 25.11.: Kalender-Picker IMMER zeigen (auch bei nur
+                // einer Liste) - der Nutzer soll die Zielliste sehen und
+                // die Standard-Liste (Ablage beim Speichern) ableiten
+                // können.
+                Section(header: Text(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""))) {
+                    Picker(NSLocalizedString("_calendar_tasks_", value: "Tasks", comment: ""),
+                           selection: $calendarHref) {
+                        ForEach(viewModel.writableTaskCalendars, id: \.href) { calendar in
+                            Text(calendar.displayName).tag(calendar.href)
                         }
                     }
                 }
@@ -785,10 +814,17 @@ struct SouveraTaskNewSheet: View {
                 }
             }
             .onAppear {
-                // Fallback: erster schreibbarer Task-Kalender; der Picker
-                // erscheint nur bei mehreren Kalendern.
+                // Run 25.11.: Vorauswahl = gespeicherte Standard-Liste
+                // (Settings-Ablage), sonst Fallback: erster schreibbarer
+                // Task-Kalender.
                 if calendarHref.isEmpty {
-                    calendarHref = viewModel.writableTaskCalendars.first?.href ?? ""
+                    let saved = SouveraMailDisplaySettings.defaultTaskListId(
+                        account: SouveraTasksViewModel.stableAccountKey())
+                    if let match = viewModel.writableTaskCalendars.first(where: { $0.href == saved }) {
+                        calendarHref = match.href
+                    } else {
+                        calendarHref = viewModel.writableTaskCalendars.first?.href ?? ""
+                    }
                 }
             }
         }
@@ -820,7 +856,14 @@ struct SouveraTaskNewSheet: View {
                                                hasDue: hasDue,
                                                calendar: calendar)
             isSaving = false
-            if ok { dismiss() }
+            if ok {
+                // Run 25.11.: Gewählte Liste als Standard-Liste merken
+                // (Vorauswahl beim nächsten Neuanlage-Sheet).
+                SouveraMailDisplaySettings.setDefaultTaskListId(
+                    calendar.href,
+                    account: SouveraTasksViewModel.stableAccountKey())
+                dismiss()
+            }
         }
     }
 }
