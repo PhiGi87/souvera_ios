@@ -356,15 +356,26 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // WICHTIG: rightBarButtonItems werden NICHT angefasst - die
         // gepushten Seiten mit eigenen Buttons (Shield: addButton/
         // mailboxButton, Mail: search/compose, Kontakte: add) setzen
-        // genau dieses Property via pushHosted("trailing:"). Und nur
-        // bei wirklich nicht-leeren Groups raeumen, dann mit nil statt
-        // []: eine leere Group-Zuweisung koennte auf iOS 26 (dort sind
-        // die ItemGroups die fuehrende API) die rightBarButtonItems
-        // ueberschreiben und die Shield-Buttons killen. Frische
-        // NCHostedController haben nil -> unberuehrt.
+        // genau dieses Property via pushHosted("trailing:").
+        // Run 25.11. (Compile-Fix): trailingItemGroups ist in diesem
+        // SDK non-optional ([UIBarButtonItemGroup]) - keine
+        // Optional-Chaining/nil-Zuweisung moeglich. Statt alles zu
+        // leeren (koennte auf iOS 26 die aus rightBarButtonItems
+        // abgeleiteten Shield-Buttons killen) entfernen wir gezielt
+        // nur den Stale-optionButtonItem (Tag 100) aus den Groups und
+        // bauen sie ohne ihn neu - eigene Buttons der Seite bleiben.
         if topViewController is NCHostedScreen {
-            if topViewController.navigationItem.trailingItemGroups?.isEmpty == false {
-                topViewController.navigationItem.trailingItemGroups = nil
+            let groups = topViewController.navigationItem.trailingItemGroups
+            let hasStaleOptionItem = groups.contains { group in
+                group.barButtonItems.contains { $0.tag == optionButtonTag }
+            }
+            if hasStaleOptionItem {
+                topViewController.navigationItem.trailingItemGroups = groups.map { group in
+                    UIBarButtonItemGroup(
+                        barButtonItems: group.barButtonItems.filter { $0.tag != optionButtonTag },
+                        representativeItem: group.representativeItem
+                    )
+                }
             }
             return
         }
