@@ -72,11 +72,12 @@ struct SouveraCalendarTaskDetailView: View {
                     }
                 }
 
-                // Section "Aufgabe": Erledigt-Status (konsistent als
-                // Checkbox-Zeile dargestellt), Titel und Notizen.
-                Section(header: Text(NSLocalizedString("_tasks_section_task_",
-                                                       value: "Task",
-                                                       comment: ""))) {
+                // Run 25.11. (Feedback): "Als erledigt markieren" als
+                // EIGENE Section VOR "Aufgabe" ziehen (Apple-HIG: eine
+                // Aktion pro Section) - die "Aufgabe"-Section enthält
+                // nur noch Titel/Notizen. Verhalten unverändert
+                // (toggle + dismiss).
+                Section {
                     // Checkbox-Toggle (NC-Konvention: STATUS:COMPLETED +
                     // COMPLETED:UTC + PERCENT-COMPLETE:100). Run 25.11.:
                     // Bei read-only Listen nicht antippbar (grau).
@@ -100,7 +101,12 @@ struct SouveraCalendarTaskDetailView: View {
                     }
                     .buttonStyle(.plain)
                     .disabled(isReadOnly)
+                }
 
+                // Section "Aufgabe": Titel und Notizen.
+                Section(header: Text(NSLocalizedString("_tasks_section_task_",
+                                                       value: "Task",
+                                                       comment: ""))) {
                     TextField(NSLocalizedString("_tasks_summary_", value: "Title", comment: ""),
                               text: $title,
                               prompt: Text(NSLocalizedString("_tasks_summary_", value: "Title", comment: "")))
