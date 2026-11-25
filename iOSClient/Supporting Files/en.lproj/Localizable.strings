@@ -1003,6 +1003,7 @@ You can stop it at any time, adjust the settings, and enable it again.";
 "_tasks_lists_toggle_"    = "Show or hide lists";
 "_tasks_lists_all_"       = "All";
 "_tasks_lists_own_"       = "Own lists";
+"_tasks_lists_shared_"    = "Shared lists";
 "_tasks_lists_deck_"      = "Deck lists";
 "_tasks_lists_selected_"  = "%d lists selected";
 "_tasks_section_list_"    = "List";

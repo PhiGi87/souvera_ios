@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Run 25.11. (Tasks, standalone): eigenständiger Aufgaben-Screen im
-// Mehr-Menü. Lädt VTODOs aus ALLEN Kalendern mit supportsTasks (PROPFIND
-// via fetchCalendars, REPORT via CalDavClient.fetchTodos), zeigt offene
-// Tasks zuerst (nach Fälligkeit, undatierte zuletzt) und erledigte
+// Mehr-Menü. Lädt VTODOs aus ALLEN Kalendern (PROPFIND via
+// fetchCalendars, VTODO-REPORT via CalDavClient.fetchTodos - auf
+// VEVENT-only-Kalendern harmlos mit 0 Todos), zeigt offene Tasks
+// zuerst (nach Fälligkeit, undatierte zuletzt) und erledigte
 // eingeklappt. Abhaken via ICSParser.completeTodo/uncompleteTodo + PUT
 // mit If-Match (Muster performEventUpdate), optimistische UI.
 // Basis der Netzwerk-/Parsing-Logik: Commit 230e7585fd (Kalender-UI-
@@ -35,8 +36,8 @@ final class SouveraTasksViewModel: ObservableObject {
     /// Run 26.11.: Task-Kalender mit Schreibrecht (canWrite && supportsTasks)
     /// - Grundlage für die Kalender-Auswahl im Neuanlage-Sheet.
     @Published var writableTaskCalendars: [CalDavCalendar] = []
-    /// Run 25.11.: ALLE Task-Kalender (supportsTasks, auch ohne Schreib-
-    /// recht) für die Listen-Sidebar.
+    /// Run 25.11.: ALLE Task-Kalender (auch ohne Schreib-recht) für die
+    /// Listen-Sidebar.
     @Published var taskLists: [CalDavCalendar] = []
     /// Run 25.11.: Todo-Anzahl je Listen-href - wird in der Sidebar neben
     /// dem Listennamen angezeigt.
@@ -55,25 +56,33 @@ final class SouveraTasksViewModel: ObservableObject {
         // Fehlermeldung beim Neuladen zurücksetzen - sie hing sonst als
         // Banner in der Liste, obwohl alle todo-Queries erfolgreich waren.
         errorMessage = nil
-        let calendars = await client.fetchCalendars().filter { $0.supportsTasks }
-        // Run 26.11.: Schreibbare Task-Kalender parallel mithalten (Picker
+        // Run 25.11. (Feedback): ALLE Kalender laden, ohne
+        // supportsTasks-Filter - auch leere Listen (z. B. persönliche
+        // Kalender, deren supported-calendar-component-set kein VTODO
+        // meldet) und geteilte Listen gehören in die Auswahl.
+        let calendars = await client.fetchCalendars()
+        // Run 26.11.: Schreibbare Kalender parallel mithalten (Picker
         // im Neuanlage-Sheet; Fallback dort: erster Eintrag).
         writableTaskCalendars = calendars.filter { $0.canWrite }
         // Run 25.11.: Alle Listen für die Sidebar mithalten.
         taskLists = calendars
         todoCounts = [:]
         guard !calendars.isEmpty else {
-            SouveraLog.write("Tasks", "load: keine Task-Kalender (supportsTasks) gefunden")
+            SouveraLog.write("Tasks", "load: keine Kalender gefunden")
             apply([], [])
             return
         }
-        // Run 25.11.: Task-Kalender parallel abfragen (Muster TaskGroup,
-        // wie im revertierten CalendarViewModel-TaskGroup-Zweig).
+        // Run 25.11.: Kalender parallel abfragen (Muster TaskGroup, wie
+        // im revertierten CalendarViewModel-TaskGroup-Zweig). Run 25.11.
+        // (Feedback): Queries für ALLE Kalender - auf VEVENT-only-
+        // Kalendern liefert der VTODO-REPORT eine 207 mit 0 Todos
+        // (harmlos), die Listen erscheinen mit "0", was der Nutzer
+        // explizit will.
         // Run 26.11. (Feedback): Ergebnis je Kalender zählen - ein
         // Teilfehler (z. B. ein Kalender, der auf den VTODO-REPORT leer
         // oder fehlerhaft reagiert) setzt KEINEN Gesamt-Fehler mehr;
         // die erfolgreichen Daten werden angezeigt. Der Banner erscheint
-        // nur, wenn ALLE Task-Kalender nichts liefern.
+        // nur, wenn ALLE Kalender nichts liefern.
         let results = await withTaskGroup(of: (String, [CalDavEventEntry]).self) { group in
             for calendar in calendars {
                 group.addTask { [client] in
@@ -97,7 +106,7 @@ final class SouveraTasksViewModel: ObservableObject {
             todoCounts[href] = entries.count
         }
         if all.isEmpty {
-            SouveraLog.write("Tasks", "load: ALLE \(calendars.count) Task-Kalender lieferten 0 Todos -> Banner")
+            SouveraLog.write("Tasks", "load: ALLE \(calendars.count) Kalender lieferten 0 Todos -> Banner")
             errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
         } else if !emptyCalendars.isEmpty {
             SouveraLog.write("Tasks", "load: Teilfehler/leer bei \(emptyCalendars.count)/\(calendars.count) Kalendern (\(emptyCalendars.joined(separator: ", "))) - erfolgreiche Daten werden angezeigt")
@@ -596,11 +605,20 @@ struct SouveraTasksView: View {
                         }
                         // Run 25.11. (Gruppierung): gleiche Sections wie
                         // die Sidebar, dieselbe Datenquelle (ownLists/
-                        // deckLists) - nur nicht-leere Sections zeigen.
+                        // sharedLists/deckLists) - nur nicht-leere
+                        // Sections zeigen.
                         if !ownLists.isEmpty {
                             Section(NSLocalizedString("_tasks_lists_own_",
                                                       value: "Own lists", comment: "")) {
                                 ForEach(ownLists, id: \.href) { list in
+                                    menuListRow(list)
+                                }
+                            }
+                        }
+                        if !sharedLists.isEmpty {
+                            Section(NSLocalizedString("_tasks_lists_shared_",
+                                                      value: "Shared lists", comment: "")) {
+                                ForEach(sharedLists, id: \.href) { list in
                                     menuListRow(list)
                                 }
                             }
@@ -656,9 +674,17 @@ struct SouveraTasksView: View {
 
     // MARK: - Run 25.11.: Listen-Sidebar (Deck/Eigene, wie Kalender)
 
-    /// Eigene Listen (persönlich, kein Deck).
+    /// Run 25.11.: Eigene Listen (Run 25.11. (Feedback): alle Kalender
+    /// der Kategorie .own, auch Geburtstags-/System-Kalender - die
+    /// Auswahl soll ALLE Listen zeigen, auch leere).
     private var ownLists: [CalDavCalendar] {
-        viewModel.taskLists.filter { $0.isPersonal && $0.category != .deck }
+        viewModel.taskLists.filter { $0.category == .own }
+    }
+
+    /// Run 25.11. (Feedback): Geteilte Listen (_shared_by_) - eigene
+    /// Section zwischen "Eigene Listen" und "Deck-Listen".
+    private var sharedLists: [CalDavCalendar] {
+        viewModel.taskLists.filter { $0.category == .shared }
     }
 
     /// Deck-Listen (Board-Karten als VTODO).
@@ -777,6 +803,16 @@ struct SouveraTasksView: View {
                                                        value: "Own lists",
                                                        comment: ""))) {
                     ForEach(ownLists, id: \.href) { list in
+                        listRow(list)
+                    }
+                }
+            }
+
+            if !sharedLists.isEmpty {
+                Section(header: Text(NSLocalizedString("_tasks_lists_shared_",
+                                                       value: "Shared lists",
+                                                       comment: ""))) {
+                    ForEach(sharedLists, id: \.href) { list in
                         listRow(list)
                     }
                 }
