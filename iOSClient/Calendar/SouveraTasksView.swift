@@ -61,11 +61,6 @@ final class SouveraTasksViewModel: ObservableObject {
         // Kalender, deren supported-calendar-component-set kein VTODO
         // meldet) und geteilte Listen gehören in die Auswahl.
         let calendars = await client.fetchCalendars()
-        // Run 26.11.: Schreibbare Kalender parallel mithalten (Picker
-        // im Neuanlage-Sheet; Fallback dort: erster Eintrag).
-        writableTaskCalendars = calendars.filter { $0.canWrite }
-        // Run 25.11.: Alle Listen für die Sidebar mithalten.
-        taskLists = calendars
         todoCounts = [:]
         guard !calendars.isEmpty else {
             SouveraLog.write("Tasks", "load: keine Kalender gefunden")
@@ -105,6 +100,21 @@ final class SouveraTasksViewModel: ObservableObject {
             // Run 25.11.: Todo-Anzahl je Liste für die Sidebar.
             todoCounts[href] = entries.count
         }
+        // Run 25.11. (Feedback): Persönlich und Geburtstage von Kontakten
+        // sind keine Aufgaben-Listen - VEVENT-only-Kalender ohne Todos
+        // werden nicht als Listen geführt; Kalender mit VTODOs (auch ohne
+        // VTODO-Flag im component-set, z. B. Host-On) bleiben über die
+        // todo-Anzahl erhalten, contact_birthdays fliegt immer raus.
+        // Die Queries oben laufen bewusst über ALLE Kalender, damit
+        // todoCounts je href vollständig befüllt ist, bevor gefiltert
+        // wird.
+        taskLists = calendars.filter {
+            !$0.href.contains("contact_birthdays")
+                && ($0.supportsTasks || (todoCounts[$0.href] ?? 0) > 0)
+        }
+        // Run 26.11.: Schreibbare Kalender (Picker im Neuanlage-Sheet;
+        // Fallback dort: erster Eintrag) - gleiche Regel + Schreibrecht.
+        writableTaskCalendars = taskLists.filter { $0.canWrite }
         if all.isEmpty {
             SouveraLog.write("Tasks", "load: ALLE \(calendars.count) Kalender lieferten 0 Todos -> Banner")
             errorMessage = NSLocalizedString("_tasks_error_", value: "Tasks could not be updated.", comment: "")
