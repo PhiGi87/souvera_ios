@@ -333,6 +333,42 @@ class NCMainNavigationController: UINavigationController, UINavigationController
             return
         }
 
+        // Run 25.11. (Feedback "'...'-Button ohne Funktion auf der
+        // Aufgaben-Seite"): Hosted-Screens (SwiftUI-Seiten aus dem Mehr-
+        // Menue: Tasks, Kontakte, Shield, Notes, Mail, ...) bekommen
+        // KEINE der Default-Buttons (Bell/Transfers/Assistant/Option).
+        // Der fruehere Early-Return sass erst NACH den awaits
+        // (Capabilities, createOptionMenu) - ein In-Flight-Aufruf, der
+        // beim More-Root startete und nach dem Push resumed, konnte so
+        // seine Groups noch auf den neuen Top schreiben. Da die Buttons
+        // Singleton-Items sind (optionButtonItem, Tag 100), blieb so
+        // ein "..." stehen, dessen Menue-Kontext nicht mehr existiert
+        // (NCMoreNavigationController.createOptionMenu liefert auf
+        // Hosted-Screens nil, weil collectionViewCommon == nil ist -
+        // daher "da passiert nichts und ist nichts drunter").
+        //
+        // Code-Pfad des Fixes: willShow ->
+        // collectionViewCommonTrailingItemGroups -> Check ganz am
+        // Anfang (vor allen awaits) -> keine Stale-Writes mehr moeglich;
+        // zusaetzlich werden tatsaechlich vorhandene, nicht-leere
+        // Groups (Stale-State) mit nil geraeumt.
+        //
+        // WICHTIG: rightBarButtonItems werden NICHT angefasst - die
+        // gepushten Seiten mit eigenen Buttons (Shield: addButton/
+        // mailboxButton, Mail: search/compose, Kontakte: add) setzen
+        // genau dieses Property via pushHosted("trailing:"). Und nur
+        // bei wirklich nicht-leeren Groups raeumen, dann mit nil statt
+        // []: eine leere Group-Zuweisung koennte auf iOS 26 (dort sind
+        // die ItemGroups die fuehrende API) die rightBarButtonItems
+        // ueberschreiben und die Shield-Buttons killen. Frische
+        // NCHostedController haben nil -> unberuehrt.
+        if topViewController is NCHostedScreen {
+            if topViewController.navigationItem.trailingItemGroups?.isEmpty == false {
+                topViewController.navigationItem.trailingItemGroups = nil
+            }
+            return
+        }
+
         guard !(collectionViewCommon?.isEditMode ?? false),
               !(trashViewController?.isEditMode ?? false),
               !(mediaViewController?.isEditMode ?? false),
@@ -374,12 +410,11 @@ class NCMainNavigationController: UINavigationController, UINavigationController
         // Read current items from trailingItemGroups
         // ---------------------------------------------------------
 
-        // SwiftUI screens pushed from the More tab (contacts, shield, ...)
-        // manage their own trailing items - keep the default
-        // bell/assistant/transfers buttons off them.
-        if topViewController is NCHostedScreen {
-            return
-        }
+        // Run 25.11.: Hosted-Screens sind oben am Funktionsanfang schon
+        // komplett uebersprungen (Default-Buttons + Stale-Groups-
+        // Raeumung) - dieser fruehere Check hier nach den awaits
+        // entfiel, damit kein In-Flight-Aufruf mehr auf einen zwischen-
+        // zeitlich gepushten SwiftUI-Screen schreiben kann.
 
         let currentItems: [UIBarButtonItem] = topViewController.navigationItem.trailingItemGroups.flatMap { $0.barButtonItems }
 
