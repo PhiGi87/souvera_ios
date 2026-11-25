@@ -837,13 +837,38 @@ struct SouveraTasksView: View {
     /// der Tasks stammt aus fetchTodos und ist genau das calendar.href
     /// derselben Liste, aber ein abweichender trailing slash haette den
     /// Filter stumm gemacht (wahrgenommen als "Multiselect geht nicht").
+    /// Run 25.11. (Feedback "Gruppierung nach Liste"): Reihenfolge der
+    /// Listen-Sections - Eigene → Geteilte → Deck (wie die Auswahl),
+    /// innerhalb der Kategorien in der PROPFIND/taskLists-Reihenfolge.
+    private var orderedLists: [CalDavCalendar] {
+        ownLists + sharedLists + deckLists
+    }
+
+    /// Run 25.11. (Feedback "Gruppierung nach Liste"): offene Tasks je
+    /// Liste gruppieren. Nur Listen, die (a) im aktuellen Filter liegen
+    /// und (b) mind. einen Task haben (leere Listen nur in der AUSWAHL,
+    /// nicht als leere Sections in der Task-Liste). Die Keys werden
+    /// normalisiert verglichen (Muster normalizedHref, siehe Filter).
+    private var openTaskGroups: [(list: CalDavCalendar, items: [SouveraTasksViewModel.TaskItem])] {
+        var byList: [String: [SouveraTasksViewModel.TaskItem]] = [:]
+        for item in viewModel.openTasks {
+            byList[normalizedHref(item.event.calendarHref), default: []].append(item)
+        }
+        return orderedLists.compactMap { list in
+            guard selectedLists.isEmpty || selectedLists.contains(normalizedHref(list.href)),
+                  let items = byList[normalizedHref(list.href)], !items.isEmpty else { return nil }
+            return (list, items)
+        }
+    }
+
     private var taskListView: some View {
-        let filteredOpen = selectedLists.isEmpty
-            ? viewModel.openTasks
-            : viewModel.openTasks.filter { selectedLists.contains(normalizedHref($0.event.calendarHref)) }
+        // Run 25.11. (Feedback "Gruppierung nach Liste"): offene Tasks
+        // je Liste gruppiert (openTaskGroups); erledigte bleiben ein
+        // eigener Block danach.
         let filteredCompleted = selectedLists.isEmpty
             ? viewModel.completedTasks
             : viewModel.completedTasks.filter { selectedLists.contains(normalizedHref($0.event.calendarHref)) }
+        let groups = openTaskGroups
 
         return List {
             if let message = viewModel.errorMessage {
@@ -859,37 +884,18 @@ struct SouveraTasksView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            Section {
-                if filteredOpen.isEmpty && filteredCompleted.isEmpty {
+            if groups.isEmpty && filteredCompleted.isEmpty {
+                Section {
                     Text(NSLocalizedString("_tasks_empty_", value: "No tasks", comment: ""))
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .fixedSize(horizontal: false, vertical: true)
-                }
-                ForEach(filteredOpen) { item in
-                    taskRow(item)
-                        // Run 25.11.: Swipe-Delete nur in editierbaren
-                        // (schreibbaren, nicht-Deck-) Listen.
-                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
-                            if viewModel.isEditable(href: item.event.calendarHref) {
-                                Button(role: .destructive) {
-                                    pendingDelete = item
-                                } label: {
-                                    Label(NSLocalizedString("_tasks_delete_action_",
-                                                            value: "Delete",
-                                                            comment: ""),
-                                          systemImage: "trash")
-                                }
-                            }
-                        }
-                }
-            } header: {
-                // Run 25.11. (Audit): dezenter Hinweis auf die aktive
-                // Listen-Auswahl - ohne Feedback war nicht sichtbar, dass
-                // der Filter überhaupt greift ("N Listen ausgewählt").
-                VStack(alignment: .leading, spacing: 2) {
+                } header: {
                     if !selectedLists.isEmpty {
+                        // Run 25.11. (Audit): dezenter Hinweis auf die
+                        // aktive Listen-Auswahl - ohne Feedback war nicht
+                        // sichtbar, dass der Filter überhaupt greift.
                         Text(String(format: NSLocalizedString("_tasks_lists_selected_",
                                                               value: "%d lists selected",
                                                               comment: ""),
@@ -897,7 +903,36 @@ struct SouveraTasksView: View {
                             .font(.caption2)
                             .foregroundStyle(.tint)
                     }
-                    Text(NSLocalizedString("_tasks_open_", value: "Open", comment: ""))
+                }
+            }
+            // Run 25.11. (Feedback "Gruppierung nach Liste"): je Liste
+            // eine Section mit Listenname (+ Farbpunkt) im Header.
+            ForEach(groups, id: \.list.href) { group in
+                Section {
+                    ForEach(group.items) { item in
+                        taskRow(item)
+                            // Run 25.11.: Swipe-Delete nur in editierbaren
+                            // (schreibbaren, nicht-Deck-) Listen.
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                if viewModel.isEditable(href: item.event.calendarHref) {
+                                    Button(role: .destructive) {
+                                        pendingDelete = item
+                                    } label: {
+                                        Label(NSLocalizedString("_tasks_delete_action_",
+                                                                value: "Delete",
+                                                                comment: ""),
+                                              systemImage: "trash")
+                                    }
+                                }
+                            }
+                    }
+                } header: {
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Color(hex: group.list.color ?? "") ?? Color(NCBrandColor.shared.customer))
+                            .frame(width: 8, height: 8)
+                        Text(group.list.displayName)
+                    }
                 }
             }
 
