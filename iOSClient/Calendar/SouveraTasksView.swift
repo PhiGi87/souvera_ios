@@ -565,8 +565,32 @@ struct SouveraTasksView: View {
             // oben); Tap toggelt die Liste im Set (Multiselect, wie
             // Kalender). Vorher nur bei schmalem Layout - seit dem
             // Sidebar-Entfernen die einzige Listen-Auswahl.
+            // Run 25.11. (Duo-Fix): "Aktualisieren" (arrow.clockwise) ist
+            // als ERSTER Menu-Eintrag hierher gezogen. Grund: am vertikalen
+            // Außendisplay-Band (iPhone Duo) kollabiert UIKit die Toolbar-
+            // Items in einen "..."-Overflow, der ohne representativeItem
+            // keinen Inhalt zeigt (dokumentierte Regression "Run 10.11.",
+            // SouveraAppearance.swift, UIBarButtonItemGroups OHNE
+            // representativeItem - UIKit kann die Gruppe dann nicht
+            // itemweise handhaben; siehe UIKit-Doku
+            // developer.apple.com/documentation/uikit/uibarbuttonitemgroup
+            // und "Preparing your app for iPhone Duo": am vertikalen Band
+            // stehen nur wenige Item-Slots zur Verfuegung). Mit nur
+            // list.bullet-Menu + plus als trailing Item entfaellt der
+            // Overflow: Band zeigt ‹, ≡ (Menu mit Refresh + Listen), +.
+            // Pull-to-refresh (.refreshable) bleibt zusätzlich erhalten.
             ToolbarItem(placement: .topBarLeading) {
                 Menu {
+                    // Run 25.11. (Duo-Fix): Refresh als oberster Eintrag
+                    // (vor "Alle Listen"); gleiche Aktion wie der frühere
+                    // dedizierte Toolbar-Button (viewModel.load).
+                    Button {
+                        Task { await viewModel.load() }
+                    } label: {
+                        Label(NSLocalizedString("_tasks_refresh_",
+                                                value: "Refresh", comment: ""),
+                              systemImage: "arrow.clockwise")
+                    }
                         Button {
                             selectedLists = []
                         } label: {
@@ -613,6 +637,11 @@ struct SouveraTasksView: View {
                     .accessibilityLabel(Text(NSLocalizedString("_tasks_lists_all_",
                                                                value: "All lists", comment: "")))
             }
+            // Run 25.11. (Duo-Fix): "+" ist jetzt das EINZIGE trailing
+            // Item (primäre Aktion, isPinned-Prinzip) - der frühere
+            // zweite trailing Button (arrow.clockwise) lebt im Listen-
+            // Menu weiter; siehe Kommentar oben (leerer "..."-Overflow
+            // am vertikalen Duo-Außendisplay-Band).
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
                     showNewTaskSheet = true
@@ -620,22 +649,6 @@ struct SouveraTasksView: View {
                     Image(systemName: "plus")
                 }
                 .accessibilityLabel(Text(NSLocalizedString("_tasks_new_", value: "New task", comment: "")))
-            }
-            ToolbarItem(placement: .topBarTrailing) {
-                // Run 26.11. (Layout-Fix): ProgressView und Icon stapeln
-                // sich in einem ZStack mit fester Größe - der Wechsel
-                // isLoading löst keinen Toolbar-Layout-Sprung mehr aus.
-                Button {
-                    Task { await viewModel.load() }
-                } label: {
-                    ZStack {
-                        Image(systemName: "arrow.clockwise")
-                            .opacity(viewModel.isLoading ? 0 : 1)
-                        ProgressView()
-                            .frame(width: 20, height: 20)
-                            .opacity(viewModel.isLoading ? 1 : 0)
-                    }
-                }
             }
         }
         .sheet(item: $selectedItem) { item in

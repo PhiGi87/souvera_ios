@@ -1411,3 +1411,5 @@ _mail_sort_flagged_ = "Flagged first";
 "_tasks_due_" = "Fälligkeit";
 "_settings_default_task_list_" = "Default task list";
 "_tasks_lists_all_" = "All lists";
+/* Run 25.11. (Duo-Fix): Refresh-Eintrag im Aufgaben-Listen-Menu */
+"_tasks_refresh_" = "Aktualisieren";
