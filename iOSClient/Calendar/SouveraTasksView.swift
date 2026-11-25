@@ -672,7 +672,11 @@ struct SouveraTasksView: View {
         Button {
             toggleList(list.href)
         } label: {
-            if selectedLists.contains(list.href) {
+            // Run 25.11. (Feedback): Checkmark-Vergleich über denselben
+            // normalisierten href wie toggleList - roher PROPFIND-href
+            // (mit Slash) matchte das normalisierte Set nie, die
+            // Multiselect-Auswahl war aktiv aber unsichtbar.
+            if selectedLists.contains(normalizedHref(list.href)) {
                 Label(list.displayName, systemImage: "checkmark")
             } else {
                 Text(list.displayName)
@@ -699,7 +703,10 @@ struct SouveraTasksView: View {
                 Text("\(viewModel.todoCounts[list.href] ?? 0)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if selectedLists.contains(list.href) {
+                // Run 25.11. (Feedback): Checkmark-Vergleich über denselben
+                // normalisierten href wie toggleList (siehe menuListRow) -
+                // sonst war die Auswahl aktiv, aber unsichtbar.
+                if selectedLists.contains(normalizedHref(list.href)) {
                     Image(systemName: "checkmark")
                         .font(.caption)
                         .foregroundStyle(Color.Souvera.brandPrimaryDeep)
