@@ -543,64 +543,30 @@ struct SouveraTasksView: View {
     @State private var showCompleted = false
     /// Run 26.11.: Neuanlage-Sheet.
     @State private var showNewTaskSheet = false
-    // Run 25.11.: Listen-Sidebar - Listen-Spalte eingeklappt und aktive
-    // Listen. Beides bewusst NICHT persistiert (wie
-    // roomsCollapsed im Link-Modul); die Spalte existiert nur bei breitem
-    // Layout (Fensterbreite >= 720pt, wie Kalender).
+    // Run 25.11. (Run 25.11. Feedback "keine 2-spaltige Ansicht"): Die
+    // Listen-Sidebar existiert nicht mehr - die Listen-Auswahl läuft
+    // überall über das Toolbar-Menu (Muster Menu, siehe body).
     // Run 25.11. (Multiselect, wie CalendarPickerSheet): Mehrere Listen
     // gleichzeitig sichtbar - leeres Set = alle Listen. Tap toggelt die
     // Liste im Set statt sie zu ersetzen.
-    @State private var listsCollapsed = false
     @State private var selectedLists: Set<String> = []
-    @State private var isWideLayout = false
     /// Run 25.11.: Vor dem Swipe-Delete bestätigen (Muster
     /// confirmationDialog wie die Ignore-Confirmation im Einladungs-Sheet).
     @State private var pendingDelete: SouveraTasksViewModel.TaskItem?
 
     var body: some View {
-        // Run 25.11.: Listen-Sidebar (Muster LinkView/Raumliste) - nur bei
-        // breitem Layout (>= 720pt) gibt es die linke Spalte; der Toggle
-        // im Header blendet sie mit snappy-Animation ein/aus.
-        GeometryReader { bounds in
-            let wide = bounds.size.width >= 720
-            HStack(spacing: 0) {
-                if wide && !listsCollapsed {
-                    taskListSidebar
-                        .frame(width: 260)
-                        .transition(.move(edge: .leading).combined(with: .opacity))
-                    Divider()
-                }
-                taskListView
-            }
-            .onAppear { isWideLayout = wide }
-            .onChange(of: bounds.size.width) { _, width in
-                isWideLayout = width >= 720
-            }
-        }
+        // Run 25.11. (Feedback "Ich möchte nicht eine 2-Spaltige Ansicht"):
+        // immer einspaltig - die Listen-Auswahl läuft über das Toolbar-Menu
+        // (topBarLeading, "list.bullet"), das jetzt unabhängig von der
+        // Fensterbreite sichtbar ist. Pull-to-refresh bleibt zusätzlich.
+        taskListView
         .toolbar {
-            // Run 25.11.: Sidebar-Toggle (Muster LinkView sidebar.left),
-            // nur bei breitem Layout - schmal hat keine Spalte zum Blenden.
+            // Run 25.11.: Listen-Menu über alle Task-Listen ("Alle Listen"
+            // oben); Tap toggelt die Liste im Set (Multiselect, wie
+            // Kalender). Vorher nur bei schmalem Layout - seit dem
+            // Sidebar-Entfernen die einzige Listen-Auswahl.
             ToolbarItem(placement: .topBarLeading) {
-                if isWideLayout {
-                    Button {
-                        withAnimation(.snappy(duration: 0.3)) {
-                            listsCollapsed.toggle()
-                        }
-                    } label: {
-                        Image(systemName: "sidebar.left")
-                    }
-                    .accessibilityLabel(Text(NSLocalizedString("_tasks_lists_toggle_",
-                                                               value: "Show or hide lists",
-                                                               comment: "")))
-                }
-            }
-            // Run 26.11.: Listen-Auswahl im schmalen Layout (iPhone/
-            // Außendisplay) - dort gibt es keine Sidebar. Menu über
-            // alle Task-Listen ("Alle Listen" oben); Tap toggelt die
-            // Liste im Set (Multiselect, wie Kalender).
-            ToolbarItem(placement: .topBarLeading) {
-                if !isWideLayout {
-                    Menu {
+                Menu {
                         Button {
                             selectedLists = []
                         } label: {
@@ -614,7 +580,7 @@ struct SouveraTasksView: View {
                             }
                         }
                         // Run 25.11. (Gruppierung): gleiche Sections wie
-                        // die Sidebar, dieselbe Datenquelle (ownLists/
+                        // früher die Sidebar, dieselbe Datenquelle (ownLists/
                         // sharedLists/deckLists) - nur nicht-leere
                         // Sections zeigen.
                         if !ownLists.isEmpty {
@@ -646,7 +612,6 @@ struct SouveraTasksView: View {
                     }
                     .accessibilityLabel(Text(NSLocalizedString("_tasks_lists_all_",
                                                                value: "All lists", comment: "")))
-                }
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Button {
@@ -682,7 +647,7 @@ struct SouveraTasksView: View {
         }
     }
 
-    // MARK: - Run 25.11.: Listen-Sidebar (Deck/Eigene, wie Kalender)
+    // MARK: - Run 25.11.: Listen-Datenquelle für das Auswahl-Menu (Deck/Eigene)
 
     /// Run 25.11.: Eigene Listen (Run 25.11. (Feedback): alle Kalender
     /// der Kategorie .own, auch Geburtstags-/System-Kalender - die
@@ -702,8 +667,8 @@ struct SouveraTasksView: View {
         viewModel.taskLists.filter { $0.category == .deck }
     }
 
-    /// Run 25.11. (Gruppierung): Zeile im schmalen Toolbar-Menu -
-    /// identische Auswahl-Logik/Datenquelle wie die Sidebar-Zeile.
+    /// Run 25.11. (Gruppierung): Zeile im Toolbar-Menu -
+    /// Auswahl-Logik/Datenquelle wie zuvor die Sidebar-Zeile.
     private func menuListRow(_ list: CalDavCalendar) -> some View {
         Button {
             toggleList(list.href)
@@ -720,41 +685,9 @@ struct SouveraTasksView: View {
         }
     }
 
-    /// Zeile in der Sidebar: Listenname + Todo-Anzahl, aktive Listen
-    /// hervorgehoben. Tap toggelt die Liste im Set (Multiselect).
-    private func listRow(_ list: CalDavCalendar) -> some View {
-        Button {
-            withAnimation(.snappy(duration: 0.2)) {
-                toggleList(list.href)
-            }
-        } label: {
-            HStack(spacing: 10) {
-                Circle()
-                    .fill(Color(hex: list.color ?? "") ?? Color(NCBrandColor.shared.customer))
-                    .frame(width: 10, height: 10)
-                Text(list.displayName)
-                    .font(.body)
-                    .lineLimit(1)
-                Spacer()
-                Text("\(viewModel.todoCounts[list.href] ?? 0)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                // Run 25.11. (Feedback): Checkmark-Vergleich über denselben
-                // normalisierten href wie toggleList (siehe menuListRow) -
-                // sonst war die Auswahl aktiv, aber unsichtbar.
-                if selectedLists.contains(normalizedHref(list.href)) {
-                    Image(systemName: "checkmark")
-                        .font(.caption)
-                        .foregroundStyle(Color.Souvera.brandPrimaryDeep)
-                }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
     /// Run 25.11. (Multiselect): Toggle einer Liste im Auswahl-Set -
-    /// gemeinsam von Sidebar und schmalem Menu genutzt (wie
-    /// viewModel.toggleCalendar im Kalender).
+    /// vom Toolbar-Menu genutzt (wie viewModel.toggleCalendar im
+    /// Kalender).
     /// Run 25.11. (Audit): Diagnose-Logging beim Toggle - ohne dieses Log
     /// war nicht nachvollziehbar, ob ein Tap die Auswahl wirklich aendert
     /// (Nutzer-Feedback "Multiauswahl geht nicht" auf Build 202611242250).
@@ -780,65 +713,6 @@ struct SouveraTasksView: View {
         var trimmed = href.trimmingCharacters(in: .whitespacesAndNewlines)
         while trimmed.hasSuffix("/") { trimmed.removeLast() }
         return trimmed
-    }
-
-    private var taskListSidebar: some View {
-        List {
-            // "Alle" - Auswahl leeren (= alle Listen sichtbar).
-            Section {
-                Button {
-                    withAnimation(.snappy(duration: 0.2)) {
-                        selectedLists = []
-                    }
-                } label: {
-                    HStack(spacing: 10) {
-                        Image(systemName: "tray.full")
-                            .font(.body)
-                            .foregroundStyle(Color.Souvera.brandPrimaryDeep)
-                        Text(NSLocalizedString("_tasks_lists_all_", value: "All", comment: ""))
-                            .font(.body)
-                        Spacer()
-                        if selectedLists.isEmpty {
-                            Image(systemName: "checkmark")
-                                .font(.caption)
-                                .foregroundStyle(Color.Souvera.brandPrimaryDeep)
-                        }
-                    }
-                }
-                .buttonStyle(.plain)
-            }
-
-            if !ownLists.isEmpty {
-                Section(header: Text(NSLocalizedString("_tasks_lists_own_",
-                                                       value: "Own lists",
-                                                       comment: ""))) {
-                    ForEach(ownLists, id: \.href) { list in
-                        listRow(list)
-                    }
-                }
-            }
-
-            if !sharedLists.isEmpty {
-                Section(header: Text(NSLocalizedString("_tasks_lists_shared_",
-                                                       value: "Shared lists",
-                                                       comment: ""))) {
-                    ForEach(sharedLists, id: \.href) { list in
-                        listRow(list)
-                    }
-                }
-            }
-
-            if !deckLists.isEmpty {
-                Section(header: Text(NSLocalizedString("_tasks_lists_deck_",
-                                                       value: "Deck lists",
-                                                       comment: ""))) {
-                    ForEach(deckLists, id: \.href) { list in
-                        listRow(list)
-                    }
-                }
-            }
-        }
-        .listStyle(.insetGrouped)
     }
 
     /// Die Aufgaben-Liste - gefiltert nach den ausgewählten Listen
